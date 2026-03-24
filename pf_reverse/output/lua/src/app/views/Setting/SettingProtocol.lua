@@ -1,0 +1,33 @@
+local P = class("SettingProtocol", UiBase)
+
+function P:onAwake()
+    self.AnimRoot = self:find("AnimRoot")
+    self.Panel = self:find("Center/Panel", self.AnimRoot)
+
+    bee.addClick(self:find("Panel/ProtocolButton", self.Panel), function()
+        CU.Application.OpenURL(G_U_TS)
+        self:hideUI()
+    end)
+    bee.addClick(self:find("Panel/ClauseButton", self.Panel), function()
+        CU.Application.OpenURL(G_U_PP)
+        self:hideUI()
+    end)
+    bee.addClick(self:find("Panel/Legal1Button", self.Panel), function()
+        CU.Application.OpenURL(G_WEBSITE_URL .. "legal1")
+        self:hideUI()
+    end)
+    bee.addClick(self:find("Panel/Legal2Button", self.Panel), function()
+        CU.Application.OpenURL(G_WEBSITE_URL .. "legal2")
+        self:hideUI()
+    end)
+    bee.addClick(self:find("CloseButton", self.Panel), function()
+        self:hideUI()
+    end)
+    bee.addClick2(self:find("AnimRoot/common_panel_mask_70"), function()
+        self:hideUI()
+    end, true)
+
+    self:find("Panel/Legal1Button", self.Panel):SetActive("jp" == LAN:getLanguage())
+    self:find("Panel/Legal2Button", self.Panel):SetActive("jp" == LAN:getLanguage())
+end
+

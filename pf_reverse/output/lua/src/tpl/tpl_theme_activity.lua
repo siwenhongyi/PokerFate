@@ -1,0 +1,31 @@
+-- create by export_excel.py
+
+local P = {}
+local PL = {}
+local function _initData()
+    local keys = {'id','name','time_start','time_end','activity_item','mail','mail_tip','shop_type','storys','task','mod','mod_add','player_add','white_list_start','white_list_end',}
+    local bodys = {
+{10001,"LAB_THEME_ACTIVITY1_NAME_1",1766628000,1769886000,10410001,4001,nil,10001,10001,{1001,1002,1003,1004,1005},{10010101,10020101,10040101},{{10,40,60,70,80}, {10,40,60,70,80}, {20,50,70,100}},{1003,1000,1008,1000,1004,500,1005,500},nil,nil},
+{10002,"LAB_THEME_ACTIVITY2_NAME_1",1770256800,1772910000,10410002,4001,4002,10002,10002,{2001,2002,2003,2004,2005,2006},{10010101,10020101,10050301},{{10,40,80,120,160}, {10,40,80,120,160}, {0}},{1009,1000,1010,1000,1007,500},nil,nil},
+{10003,"LAB_THEME_ACTIVITY3_NAME_1",1773280800,1775934000,10410003,4001,4002,10003,10003,{3001,3002,3003,3004,3005,3006},{10010101,10020101,10050301},{{10,40,100,150,200}, {10,40,100,150,200}, {0}},{1012,1000,1013,1000,1006,500},1772121600,1773280800}
+}
+    for _, v in pairs(bodys) do
+        local m = {}
+        for i, k in pairs(keys) do
+            m[k] = v[i]
+        end
+        P[v[1]] = m
+        PL[#PL+1] = m
+    end
+end
+_initData()
+
+tpl_theme_activity = P
+tpl_theme_activity_list = PL
+function tpl_theme_activity_clone(key)
+    if key and P[key] then
+        return clone(P[key])
+    end
+    return nil
+end
+

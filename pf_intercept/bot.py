@@ -1,0 +1,341 @@
+"""
+Bot bridge: translates proxy events → PokerFateAPI calls → wire actions.
+
+Auto-detection:
+  MY_SEAT_ID  ← pb.SitDownRSP.seatid
+  BIG_BLIND   ← pb.EnterRoomRSP.room_info.bb
+  SMALL_BLIND ← pb.EnterRoomRSP.room_info.sb
+  (fallback to config values if messages aren't decoded yet)
+
+Card encoding (GFunctions.lua / config.lua):
+  code = num + suit * 256
+  num  : 2='2' … 14='A'
+  suit : 0='d'(方块)  1='c'(梅花)  2='h'(红桃)  3='s'(黑桃)
+
+action_type (game wire):
+  1=Fold  2=Check  3=Call  4=Raise/Bet  5=All-in
+
+stage (RoundStartBRC):
+  1=Preflop  2=Flop  3=Turn  4=River
+"""
+
+from __future__ import annotations
+import logging
+
+from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
+from pf_intercept import config
+
+log = logging.getLogger("pf_bot")
+
+# ── Card conversion ────────────────────────────────────────────────────────────
+
+_RANK_TO_STR = {
+    2: '2', 3: '3', 4: '4', 5: '5', 6: '6',
+    7: '7', 8: '8', 9: '9', 10: 'T',
+    11: 'J', 12: 'Q', 13: 'K', 14: 'A',
+}
+_SUIT_TO_STR = {0: 'd', 1: 'c', 2: 'h', 3: 's'}
+
+
+def _card_str(code: int) -> str | None:
+    """Game card code → pokerfate card string (e.g. 'As', 'Td')."""
+    rank = _RANK_TO_STR.get(code % 256)
+    suit = _SUIT_TO_STR.get(code // 256)
+    if rank is None or suit is None:
+        return None
+    return rank + suit
+
+
+# ── Constants ──────────────────────────────────────────────────────────────────
+
+_STAGE_TO_STREET = {1: "preflop", 2: "flop", 3: "turn", 4: "river"}
+_ACTION_STR      = {1: "fold", 2: "check", 3: "call", 4: "raise", 5: "raise"}
+
+
+# ── BotBridge ─────────────────────────────────────────────────────────────────
+
+class BotBridge:
+    """
+    Stateful bridge between the proxy event stream and PokerFateAPI.
+
+    Seat ID and blind sizes are auto-detected from game messages.
+    PokerFateAPI is created lazily once those values are known.
+
+    Call handle(type_name, msg) for every decoded S2C frame.
+    Returns (action_type: int, chips: int) when the bot should act, else None.
+    """
+
+    def __init__(self) -> None:
+        # Detected from game messages (may be pre-seeded by config)
+        self._my_seat: int | None  = None
+        self._bb:      float | None = config.BIG_BLIND
+        self._sb:      float | None = config.SMALL_BLIND
+
+        self._api: PokerFateAPI | None = None   # created once blinds are known
+
+        # Session-level: real player names keyed by seat_id
+        # Populated from EnterRoomRSP.table_status.seat[].player.name
+        # and updated on SitDownBRC
+        self._seat_names: dict[int, str] = {}
+
+        # Per-hand state
+        self._stage:    int       = 0
+        self._pot:      float     = 0.0
+        self._my_bet:   float     = 0.0   # my chips in this street
+        self._max_bet:  float     = 0.0   # highest bet this street
+        self._my_chips: float     = 0.0
+        self._folded:   set[int]  = set()
+        self._all_seats: list[int] = []
+        self._announced_stages: set[int] = set()
+        # Track each seat's remaining chips (for final_stacks on hand_over)
+        # Initialised from DealerInfoRSP.start_info, updated on every ActionBRC
+        self._seat_chips: dict[int, float] = {}
+
+    # ── Public ────────────────────────────────────────────────────────────────
+
+    def handle(self, type_name: str, msg: dict) -> tuple[int, int] | None:
+        """
+        Process one decoded S2C frame.
+        Returns (action_type, chips) if the bot should act now, else None.
+        """
+        try:
+            return self._dispatch(type_name, msg)
+        except Exception:
+            log.exception("[BOT] Error handling %s", type_name)
+            return None
+
+    # ── Dispatch ──────────────────────────────────────────────────────────────
+
+    def _dispatch(self, type_name: str, msg: dict) -> tuple[int, int] | None:
+        if   type_name == "pb.SitDownRSP":      self._on_sit_down(msg)
+        elif type_name == "pb.SitDownBRC":       self._on_sit_down_brc(msg)
+        elif type_name == "pb.EnterRoomRSP":     self._on_enter_room(msg)
+        elif type_name == "pb.DealerInfoRSP":    self._on_dealer_info(msg)
+        elif type_name == "pb.HandCardRSP":      self._on_hand_card(msg)
+        elif type_name == "pb.RoundStartBRC":    self._on_round_start(msg)
+        elif type_name == "pb.ActionBRC":        self._on_action_brc(msg)
+        elif type_name == "pb.RoundOverBRC":     self._on_round_over(msg)
+        elif type_name == "pb.ActionNotifyBRC":  return self._on_action_notify(msg)
+        elif type_name == "pb.WinnerRSP":        self._on_winner(msg)
+        return None
+
+    # ── Session setup ─────────────────────────────────────────────────────────
+
+    def _on_sit_down(self, msg: dict) -> None:
+        seat = msg.get("seatid", -1)
+        if seat >= 0:
+            self._my_seat = seat
+            log.info("[BOT] My seat detected: %d", seat)
+
+    def _on_enter_room(self, msg: dict) -> None:
+        # Blind detection
+        room_info = msg.get("room_info") or {}
+        bb = room_info.get("bb")
+        sb = room_info.get("sb")
+        if bb:
+            self._bb = float(bb)
+            log.info("[BOT] Big blind detected: %.1f", self._bb)
+        if sb:
+            self._sb = float(sb)
+            log.info("[BOT] Small blind detected: %.1f", self._sb)
+
+        # Seed player names from current table snapshot
+        table_status = msg.get("table_status") or {}
+        for seat_status in table_status.get("seat", []):
+            self._extract_seat_name(seat_status)
+
+    def _on_sit_down_brc(self, msg: dict) -> None:
+        """A player sat down — update name map from SitDownBRC.status."""
+        seat_status = msg.get("status") or {}
+        self._extract_seat_name(seat_status)
+
+    def _extract_seat_name(self, seat_status: dict) -> None:
+        """Pull seat_id + player name out of a SeatStatus dict."""
+        seat = seat_status.get("seatid", -1)
+        player = seat_status.get("player") or {}
+        name = player.get("name", "")
+        if seat >= 0 and name:
+            self._seat_names[seat] = name
+
+    def _ensure_api(self) -> bool:
+        """Create PokerFateAPI once seat and blind values are known. Returns True if ready."""
+        if self._api is not None:
+            return True
+        if self._my_seat is None:
+            log.warning("[BOT] Waiting for SitDownRSP to learn seat ID")
+            return False
+        bb = self._bb or 2.0
+        sb = self._sb or 1.0
+        self._api = PokerFateAPI(
+            my_player_id=self._my_seat,
+            big_blind=bb,
+            small_blind=sb,
+            verbose=True,
+        )
+        log.info("[BOT] PokerFateAPI ready — seat=%d  BB=%.1f  SB=%.1f",
+                 self._my_seat, bb, sb)
+        return True
+
+    # ── Hand lifecycle ────────────────────────────────────────────────────────
+
+    def _on_dealer_info(self, msg: dict) -> None:
+        if not self._ensure_api():
+            return
+
+        self._stage   = 1
+        self._pot     = 0.0
+        self._my_bet  = 0.0
+        self._max_bet = 0.0
+        self._folded  = set()
+        self._announced_stages = set()
+
+        start_info      = sorted(msg.get("start_info", []), key=lambda si: si["seatid"])
+        self._all_seats = [si["seatid"] for si in start_info]
+        self._seat_chips = {}
+
+        players = []
+        for si in start_info:
+            seat  = si["seatid"]
+            chips = float(si.get("chips", 0))
+            self._seat_chips[seat] = chips
+            if seat == self._my_seat:
+                self._my_chips = chips
+            name = self._seat_names.get(seat) or f"Player_{seat}"
+            players.append(PlayerInfo(
+                player_id=seat,
+                name=name,
+                stack=chips,
+            ))
+
+        self._api.new_hand(players=players, dealer_id=msg.get("dealer", 0))
+
+    def _on_hand_card(self, msg: dict) -> None:
+        if self._api is None:
+            return
+        cards = [
+            _card_str(msg[k])
+            for k in ("card1", "card2", "card3", "card4")
+            if msg.get(k)
+        ]
+        cards = [c for c in cards if c is not None]
+        if cards:
+            self._api.deal_hole_cards(cards)
+
+    def _on_round_start(self, msg: dict) -> None:
+        stage = msg.get("stage", 1)
+        self._stage   = stage
+        self._my_bet  = 0.0
+        self._max_bet = 0.0
+
+        board_ids = msg.get("board", [])
+        if board_ids and stage not in self._announced_stages and self._api:
+            self._announced_stages.add(stage)
+            cards = [_card_str(c) for c in board_ids if _card_str(c)]
+            if cards:
+                self._api.deal_board(cards, street=_STAGE_TO_STREET.get(stage, "flop"))
+
+    def _on_action_brc(self, msg: dict) -> None:
+        seat        = msg.get("seatid", -1)
+        action_type = msg.get("action_type", 1)
+        chips       = float(msg.get("chips", 0))
+        hand_chips  = msg.get("hand_chips")
+
+        if action_type == 1:
+            self._folded.add(seat)
+
+        self._pot     += chips
+        if chips > self._max_bet:
+            self._max_bet = chips
+
+        # Track remaining chips for every seat (used in final_stacks)
+        if hand_chips is not None:
+            self._seat_chips[seat] = float(hand_chips)
+
+        if seat == self._my_seat:
+            self._my_bet += chips
+            if hand_chips is not None:
+                self._my_chips = float(hand_chips)
+            return   # don't feed our own actions into the opponent model
+
+        if self._api is None:
+            return
+        action_str = _ACTION_STR.get(action_type, "fold")
+        street     = _STAGE_TO_STREET.get(self._stage, "preflop")
+        self._api.notify_action(ActionEvent(
+            player_id=seat,
+            action=action_str,
+            amount=chips,
+            street=street,
+        ))
+
+    def _on_round_over(self, msg: dict) -> None:
+        pool = msg.get("pool", [])
+        if pool:
+            self._pot = float(sum(pool))
+
+    def _on_action_notify(self, msg: dict) -> tuple[int, int] | None:
+        if self._api is None or self._my_seat is None:
+            return None
+        if msg.get("seatid") != self._my_seat:
+            return None
+
+        call_need = float(msg.get("call_need_chips", 0))
+        street    = _STAGE_TO_STREET.get(self._stage, "preflop")
+
+        # current_bet = highest total bet this street
+        current_bet = self._my_bet + call_need
+
+        num_active_opponents = sum(
+            1 for s in self._all_seats
+            if s != self._my_seat and s not in self._folded
+        )
+
+        decision: BotDecision = self._api.request_action(
+            street=street,
+            pot=self._pot,
+            current_bet=current_bet,
+            to_call=call_need,
+            my_stack=self._my_chips,
+            num_active_opponents=max(num_active_opponents, 1),
+            my_current_bet_this_street=self._my_bet,
+        )
+
+        log.info("[BOT] Decision: %s  (street=%s pot=%.0f to_call=%.0f stack=%.0f)",
+                 decision, street, self._pot, call_need, self._my_chips)
+
+        return _decision_to_wire(decision)
+
+    def _on_winner(self, msg: dict) -> None:
+        if self._api is None:
+            return
+
+        winner_list = msg.get("winner", [])
+        winner_ids  = [w["seatid"] for w in winner_list]
+        total_pot   = float(sum(w.get("chips", 0) for w in winner_list))
+
+        # Build final_stacks:
+        # Start from last known remaining chips per seat (after all bets),
+        # then add back what each winner was awarded from the pot.
+        final_stacks: dict[int, float] = dict(self._seat_chips)
+        for w in winner_list:
+            seat    = w.get("seatid", -1)
+            awarded = float(w.get("chips", 0))
+            if seat >= 0:
+                final_stacks[seat] = final_stacks.get(seat, 0.0) + awarded
+
+        self._api.hand_over(
+            winner_ids=winner_ids,
+            pot=total_pot,
+            final_stacks=final_stacks,
+        )
+
+
+# ── Wire action conversion ─────────────────────────────────────────────────────
+
+def _decision_to_wire(decision: BotDecision) -> tuple[int, int]:
+    action = decision.action.lower()
+    if action == "fold":  return 1, 0
+    if action == "check": return 2, 0
+    if action == "call":  return 3, 0
+    if action == "raise": return 4, int(decision.amount)
+    return 2, 0   # safe default

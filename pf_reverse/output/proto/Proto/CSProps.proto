@@ -1,0 +1,225 @@
+syntax = "proto2";
+package pb;
+
+import "CSGameDef.proto";
+
+message ItemUnit
+{
+    optional string item_uniq_id = 1; //物品唯一id
+    optional int32 item_num = 2; //物品数量
+}
+
+message ItemListREQ
+{
+}
+
+message ItemListRSP
+{
+    repeated ItemInfo item_list = 1; //物品列表
+    repeated int32 owned_item_id_list = 2; //拥有的道具id列表(拥有过但数量为0或已过期的道具也会包含在内)
+    optional int32 code = 3;
+}
+
+message ItemChangeRSP
+{
+    repeated ItemInfo item_list = 1; //改变了的物品列表
+}
+
+message RefreshItemREQ
+{
+}
+message RefreshItemRSP
+{
+    optional int32 code = 1;
+}
+
+// 使用物品
+// message UseItemREQ
+// {
+//     optional ItemUnit req_item = 1; // 请求使用的物品
+// }
+// message UseItemRSP
+// {
+//     optional int32 code = 1;
+//     // optional int64 used_num = 2; //实际使用的数量
+//     // optional ItemInfo item = 3; //使用后的物品
+// }
+
+// 回收(分解)物品
+message RecycleItemREQ
+{
+    repeated ItemUnit req_item_list = 1; // 请求回收的物品列表
+}
+message RecycleItemRSP
+{
+    optional int32 code = 1; // 所有物品回收失败时才返回错误码
+    repeated RewardItemInfo reward_list = 2;
+}
+
+message ChangeAvatarREQ
+{
+    optional int32 item_id = 1; // 新头像的配置id
+}
+
+message ChangeAvatarRSP
+{
+    optional int32 code = 1;
+    optional int32 item_id = 2; // 新头像的配置id
+}
+
+message ChangeFrameREQ
+{
+    optional int32 item_id = 1; // 新头像框的配置id, 0表示卸下头像框
+}
+
+message ChangeFrameRSP
+{
+    optional int32 code = 1;
+    optional int32 item_id = 2; // 新头像框的配置id
+}
+
+message ChangeTitleREQ
+{
+    optional int32 item_id = 1; // 新称号的配置id, 0表示卸下称号
+}
+
+message ChangeTitleRSP
+{
+    optional int32 code = 1;
+    optional int32 item_id = 2; // 新称号的配置id
+}
+
+// 修改外显装饰
+message ChangeOutFitsREQ
+{
+    optional int32 item_type = 1; // 装饰类型
+    optional int32 item_id = 2; // 新外部装饰的配置id
+}
+
+message ChangeOutFitsRSP
+{
+    optional int32 code = 1;
+    optional int32 item_type = 2; // 装饰类型
+    optional int32 item_id = 3; // 当前使用中的外部装饰的配置id
+}
+
+// 使用礼包
+message TreasureUnit
+{
+    optional int32 major_type = 1; // 物品大类 1:道具, 2:角色, 3:角色皮肤
+    optional int32 item_id = 2; //物品配置id
+    optional int32 item_num = 3; //物品数量
+}
+message UseTreasureBoxREQ
+{
+    optional ItemUnit req_item = 1; // 请求使用的礼包
+    repeated TreasureUnit req_reward_list = 2; // 请求的奖励列表，目前仅对自选礼包有效
+}
+message UseTreasureBoxRSP
+{
+    optional int32 code = 1;
+    repeated RewardItemInfo reward_prop_list = 2; // 道具奖励列表
+    repeated RewardItemInfo reward_skin_list = 3; // 皮肤奖励列表
+    repeated RewardItemInfo reward_role_list = 4; // 角色奖励列表
+}
+
+// 使用加经验的道具
+message UseExpItemREQ
+{
+    optional ItemUnit req_item = 1; // 请求使用的经验物品
+}
+message UseExpItemRSP
+{
+    optional int32 code = 1;
+    optional int32 exp_inc = 2; // 增加的经验值
+}
+
+////////////////////////////////////////////////////////////////////
+// 自定义装饰方案
+message DCSchemeItem
+{
+    optional string scheme_id = 1; // 装饰方案id, 使用uuid生成
+    optional int32 skin_id = 2;
+    optional int32 lobby_scene_id = 3; // 大厅场景的配置id
+    repeated int32 lobby_bgm_list = 4; // 大厅背景音乐的配置id列表
+    optional int32 create_at = 5; // 方案创建的时间戳
+    repeated int32 property_list = 6; // 属性列表
+}
+
+// 保存装饰方案
+message SaveDCSchemeREQ
+{
+    optional int32 operation_type = 1; // 操作类型 0:新增 1:修改
+    optional string scheme_id = 2[default = ""]; // 装饰方案id, 新增方案时该字段可不填
+    optional int32 skin_id = 3; // 皮肤id, 如果有修改则传入新值,否则传入当前值
+    optional int32 lobby_scene_id = 4; // 大厅背景音乐的配置id列表, 如果有修改则传入新值,否则传入当前值
+    repeated int32 lobby_bgm_list = 5; // 大厅背景音乐的配置id, 如果有修改则传入新值,否则传入当前值
+    repeated int32 property_list = 6; // 属性列表, 如果有修改则传入新值,否则传入当前值
+    optional bool set_as_using = 7; // 是否设置为当前使用的方案
+}
+message SaveDCSchemeRSP
+{
+    optional int32 code = 1;
+    optional DCSchemeItem scheme = 2; // 新增或修改后的装饰方案
+    optional bool set_as_using = 3; // 是否设置为当前使用的方案
+}
+
+// 获取装饰方案列表
+message GetDCSchemeREQ
+{
+}
+message GetDCSchemeRSP
+{
+    optional int32 code = 1;
+    repeated DCSchemeItem scheme_list = 2; // 装饰方案列表
+    optional string using_decoration_scheme = 3; // 当前使用的装饰方案id
+    optional int32 rand_dc_scheme_flag = 4; // 是否随机装饰方案 0:不随机 1:随机
+}
+
+// 删除装饰方案,使用中的方案不能删除
+message DeleteDCSchemeREQ
+{
+    optional string scheme_id = 1;
+}
+message DeleteDCSchemeRSP
+{
+    optional int32 code = 1;
+    optional string scheme_id = 2; // 被删除的装饰方案id
+}
+
+// 切换使用的装饰方案
+message ChangeUsingDCSchemeREQ
+{
+    optional string scheme_id = 1;
+}
+message ChangeUsingDCSchemeRSP
+{
+    optional int32 code = 1;
+    optional string scheme_id = 2; // 当前使用的装饰方案id
+}
+
+// 更新是否随机方案标志
+message UpdateDCSchemeRandFlagREQ
+{
+    optional int32 random_scheme_flag = 1; // 是否随机方案 0:不随机 1:随机
+}
+message UpdateDCSchemeRandFlagRSP
+{
+    optional int32 code = 1;
+    optional int32 random_scheme_flag = 2; // 是否随机方案 0:不随机 1:随机
+}
+
+// 设置房间内动效播放
+//1 All In动效  2 明牌动效 3 牌面
+message ChangeAnimationREQ
+{
+    optional int32 ftype = 1;   //动效类型
+    optional int32 item_id = 2; // 动效id, 0表示卸下
+}
+message ChangeAnimationRSP
+{
+    optional int32 code = 1;
+    optional int32 ftype = 2;   //动效类型
+    optional int32 item_id = 3; //动效id, 0表示卸下
+}
+////////////////////////////////////////////////////////////////////

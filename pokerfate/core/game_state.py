@@ -1,0 +1,143 @@
+"""Game state representation for Texas Hold'em."""
+
+from __future__ import annotations
+from dataclasses import dataclass, field
+from enum import Enum, auto
+from typing import List, Optional
+
+
+class Street(Enum):
+    PREFLOP = auto()
+    FLOP = auto()
+    TURN = auto()
+    RIVER = auto()
+
+    def __str__(self) -> str:
+        return self.name.lower()
+
+
+class ActionType(Enum):
+    FOLD = auto()
+    CHECK = auto()
+    CALL = auto()
+    RAISE = auto()
+
+    def __str__(self) -> str:
+        return self.name.lower()
+
+
+@dataclass
+class Action:
+    action_type: ActionType
+    amount: float = 0.0  # total bet amount (for RAISE), ignored for fold/check/call
+
+    def __repr__(self) -> str:
+        if self.action_type in (ActionType.FOLD, ActionType.CHECK, ActionType.CALL):
+            return str(self.action_type)
+        return f"{self.action_type}({self.amount:.1f})"
+
+
+@dataclass
+class Player:
+    player_id: int
+    name: str
+    stack: float
+    hole_cards: list = field(default_factory=list)
+    current_bet: float = 0.0  # amount bet this street
+    total_invested: float = 0.0  # total chips in pot this hand
+    is_folded: bool = False
+    is_all_in: bool = False
+
+    def can_act(self) -> bool:
+        return not self.is_folded and not self.is_all_in
+
+    def effective_stack(self) -> float:
+        return self.stack
+
+
+@dataclass
+class GameState:
+    players: List[Player]
+    dealer_pos: int = 0
+    street: Street = Street.PREFLOP
+    board: list = field(default_factory=list)
+    pot: float = 0.0
+    current_bet: float = 0.0   # highest bet this street
+    big_blind: float = 1.0
+    small_blind: float = 0.5
+    current_player_idx: int = 0
+    action_history: list = field(default_factory=list)  # list of (player_id, Action)
+    street_action_count: int = 0  # actions taken this street
+
+    @property
+    def active_players(self) -> List[Player]:
+        return [p for p in self.players if not p.is_folded]
+
+    @property
+    def acting_player(self) -> Player:
+        return self.players[self.current_player_idx]
+
+    def to_call(self, player: Player) -> float:
+        """Amount the player needs to add to call."""
+        return max(0.0, self.current_bet - player.current_bet)
+
+    def pot_odds_fraction(self, player: Player) -> float:
+        """Required equity to break even on a call."""
+        call_amt = self.to_call(player)
+        if call_amt <= 0:
+            return 0.0
+        total_pot = self.pot + call_amt
+        return call_amt / total_pot
+
+    def effective_stack_vs_pot(self) -> float:
+        """SPR: effective stack / pot."""
+        acting = self.acting_player
+        if self.pot == 0:
+            return float('inf')
+        return acting.stack / self.pot
+
+    def position_of(self, player: Player) -> str:
+        """Return position label for the player."""
+        n = len(self.players)
+        # Use list index, NOT player_id — player_id may be non-contiguous
+        try:
+            idx = next(i for i, p in enumerate(self.players)
+                       if p.player_id == player.player_id)
+        except StopIteration:
+            return 'MP'
+
+        btn_idx = self.dealer_pos % n
+        sb_idx = (self.dealer_pos + 1) % n
+        bb_idx = (self.dealer_pos + 2) % n
+
+        if n == 2:
+            if idx == btn_idx:
+                return 'BTN'
+            return 'BB'
+
+        if idx == btn_idx:
+            return 'BTN'
+        if idx == sb_idx:
+            return 'SB'
+        if idx == bb_idx:
+            return 'BB'
+
+        dist = (idx - bb_idx - 1) % n
+        labels = ['UTG', 'UTG+1', 'UTG+2', 'LJ', 'HJ', 'CO']
+        if dist < len(labels):
+            return labels[dist]
+        return 'MP'
+
+    def is_ip(self, player: Player) -> bool:
+        """True if player acts last (in position) postflop."""
+        active = [p for p in self.players if not p.is_folded]
+        if len(active) < 2:
+            return False
+        btn = self.dealer_pos % len(self.players)
+        latest_active = None
+        for i in range(len(self.players) - 1, -1, -1):
+            p = self.players[(btn - i) % len(self.players)]
+            if not p.is_folded:
+                latest_active = p
+                break
+        return latest_active is not None and latest_active.player_id == player.player_id
