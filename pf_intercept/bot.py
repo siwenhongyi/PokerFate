@@ -10,7 +10,7 @@ Auto-detection:
 Card encoding (GFunctions.lua / config.lua):
   code = num + suit * 256
   num  : 2='2' … 14='A'
-  suit : 0='d'(方块)  1='c'(梅花)  2='h'(红桃)  3='s'(黑桃)
+  suit : 1='d'(方块)  2='c'(梅花)  3='h'(红桃)  4='s'(黑桃)
 
 action_type (game wire):
   1=Fold  2=Check  3=Call  4=Raise/Bet  5=All-in
@@ -34,7 +34,10 @@ _RANK_TO_STR = {
     7: '7', 8: '8', 9: '9', 10: 'T',
     11: 'J', 12: 'Q', 13: 'K', 14: 'A',
 }
-_SUIT_TO_STR = {0: 'd', 1: 'c', 2: 'h', 3: 's'}
+_SUIT_TO_STR = {
+    1: 'd', 2: 'c', 3: 'h', 4: 's',
+    0: 'd',  # compatibility fallback for old captures
+}
 
 
 def _card_str(code: int) -> str | None:
@@ -50,6 +53,18 @@ def _card_str(code: int) -> str | None:
 
 _STAGE_TO_STREET = {1: "preflop", 2: "flop", 3: "turn", 4: "river"}
 _ACTION_STR      = {1: "fold", 2: "check", 3: "call", 4: "raise", 5: "raise"}
+
+
+def _chip_int(value, default: int = 0) -> int:
+    """
+    Parse protobuf int64-like values that may arrive as int/str.
+    """
+    try:
+        if value is None:
+            return default
+        return int(value)
+    except Exception:
+        return default
 
 
 # ── BotBridge ─────────────────────────────────────────────────────────────────
@@ -68,6 +83,7 @@ class BotBridge:
     def __init__(self) -> None:
         # Detected from game messages (may be pre-seeded by config)
         self._my_seat: int | None  = None
+        self._my_uid:  str | None  = None
         self._bb:      float | None = config.BIG_BLIND
         self._sb:      float | None = config.SMALL_BLIND
 
@@ -80,16 +96,17 @@ class BotBridge:
 
         # Per-hand state
         self._stage:    int       = 0
-        self._pot:      float     = 0.0
-        self._my_bet:   float     = 0.0   # my chips in this street
-        self._max_bet:  float     = 0.0   # highest bet this street
-        self._my_chips: float     = 0.0
+        self._pot:      int       = 0
+        self._my_bet:   int       = 0   # my chips in this street
+        self._max_bet:  int       = 0   # highest bet this street
+        self._my_chips: int       = 0
         self._folded:   set[int]  = set()
         self._all_seats: list[int] = []
         self._announced_stages: set[int] = set()
         # Track each seat's remaining chips (for final_stacks on hand_over)
         # Initialised from DealerInfoRSP.start_info, updated on every ActionBRC
-        self._seat_chips: dict[int, float] = {}
+        self._seat_chips: dict[int, int] = {}
+        self._hole_cards_count: int = 0
 
     # ── Public ────────────────────────────────────────────────────────────────
 
@@ -107,7 +124,8 @@ class BotBridge:
     # ── Dispatch ──────────────────────────────────────────────────────────────
 
     def _dispatch(self, type_name: str, msg: dict) -> tuple[int, int] | None:
-        if   type_name == "pb.SitDownRSP":      self._on_sit_down(msg)
+        if   type_name == "pb.SelfUserInfoRSP": self._on_self_user_info(msg)
+        elif type_name == "pb.SitDownRSP":      self._on_sit_down(msg)
         elif type_name == "pb.SitDownBRC":       self._on_sit_down_brc(msg)
         elif type_name == "pb.EnterRoomRSP":     self._on_enter_room(msg)
         elif type_name == "pb.DealerInfoRSP":    self._on_dealer_info(msg)
@@ -121,11 +139,29 @@ class BotBridge:
 
     # ── Session setup ─────────────────────────────────────────────────────────
 
+    def _set_my_seat(self, seat: int, reason: str) -> None:
+        if seat < 0:
+            return
+        if self._my_seat == seat:
+            return
+        old = self._my_seat
+        self._my_seat = seat
+        log.info("[BOT] My seat detected: %s -> %d (%s)", old, seat, reason)
+        # Recreate API when seat changes (reconnect / table rejoin).
+        self._api = None
+
+    def _on_self_user_info(self, msg: dict) -> None:
+        brief = msg.get("brief") or {}
+        uid = brief.get("uid")
+        if uid:
+            self._my_uid = str(uid)
+            log.info("[BOT] My uid detected: %s", self._my_uid)
+
     def _on_sit_down(self, msg: dict) -> None:
-        seat = msg.get("seatid", -1)
-        if seat >= 0:
-            self._my_seat = seat
-            log.info("[BOT] My seat detected: %d", seat)
+        seat = _chip_int(msg.get("seatid", 0), 0)
+        if "seatid" not in msg:
+            log.debug("[BOT] SitDownRSP missing seatid; assume 0")
+        self._set_my_seat(seat, "SitDownRSP")
 
     def _on_enter_room(self, msg: dict) -> None:
         # Blind detection
@@ -144,6 +180,16 @@ class BotBridge:
         for seat_status in table_status.get("seat", []):
             self._extract_seat_name(seat_status)
 
+        # Re-detect my seat on reconnect by matching uid from SelfUserInfoRSP.
+        if self._my_uid:
+            for seat_status in table_status.get("seat", []):
+                player = seat_status.get("player") or {}
+                uid = player.get("uid")
+                if uid is not None and str(uid) == self._my_uid:
+                    seat = _chip_int(seat_status.get("seatid", 0), 0)
+                    self._set_my_seat(seat, "EnterRoomRSP.uid")
+                    break
+
     def _on_sit_down_brc(self, msg: dict) -> None:
         """A player sat down — update name map from SitDownBRC.status."""
         seat_status = msg.get("status") or {}
@@ -151,7 +197,7 @@ class BotBridge:
 
     def _extract_seat_name(self, seat_status: dict) -> None:
         """Pull seat_id + player name out of a SeatStatus dict."""
-        seat = seat_status.get("seatid", -1)
+        seat = _chip_int(seat_status.get("seatid", 0), 0)
         player = seat_status.get("player") or {}
         name = player.get("name", "")
         if seat >= 0 and name:
@@ -183,20 +229,33 @@ class BotBridge:
             return
 
         self._stage   = 1
-        self._pot     = 0.0
-        self._my_bet  = 0.0
-        self._max_bet = 0.0
+        self._pot     = 0
+        self._my_bet  = 0
+        self._max_bet = 0
         self._folded  = set()
         self._announced_stages = set()
+        self._hole_cards_count = 0
 
-        start_info      = sorted(msg.get("start_info", []), key=lambda si: si["seatid"])
+        raw_start_info = msg.get("start_info", [])
+        start_info = []
+        for si in raw_start_info:
+            # In some decoded payloads, seatid=0 may be omitted from JSON output.
+            # Treat missing seatid as 0 instead of dropping the player.
+            seat = si.get("seatid", 0)
+            normalized = dict(si)
+            normalized["seatid"] = int(seat)
+            if "seatid" not in si:
+                log.debug("[BOT] DealerInfoRSP.start_info missing seatid; assume 0: %s", si)
+            start_info.append(normalized)
+
+        start_info.sort(key=lambda si: si["seatid"])
         self._all_seats = [si["seatid"] for si in start_info]
         self._seat_chips = {}
 
         players = []
         for si in start_info:
             seat  = si["seatid"]
-            chips = float(si.get("chips", 0))
+            chips = _chip_int(si.get("chips", 0))
             self._seat_chips[seat] = chips
             if seat == self._my_seat:
                 self._my_chips = chips
@@ -218,8 +277,11 @@ class BotBridge:
             if msg.get(k)
         ]
         cards = [c for c in cards if c is not None]
-        if cards:
+        self._hole_cards_count = len(cards)
+        if len(cards) >= 2:
             self._api.deal_hole_cards(cards)
+        elif cards:
+            log.warning("[BOT] Incomplete hole cards (%d): %s", len(cards), cards)
 
     def _on_round_start(self, msg: dict) -> None:
         stage = msg.get("stage", 1)
@@ -235,9 +297,9 @@ class BotBridge:
                 self._api.deal_board(cards, street=_STAGE_TO_STREET.get(stage, "flop"))
 
     def _on_action_brc(self, msg: dict) -> None:
-        seat        = msg.get("seatid", -1)
+        seat        = _chip_int(msg.get("seatid", 0), 0)
         action_type = msg.get("action_type", 1)
-        chips       = float(msg.get("chips", 0))
+        chips       = _chip_int(msg.get("chips", 0))
         hand_chips  = msg.get("hand_chips")
 
         if action_type == 1:
@@ -249,12 +311,12 @@ class BotBridge:
 
         # Track remaining chips for every seat (used in final_stacks)
         if hand_chips is not None:
-            self._seat_chips[seat] = float(hand_chips)
+            self._seat_chips[seat] = _chip_int(hand_chips)
 
         if seat == self._my_seat:
             self._my_bet += chips
             if hand_chips is not None:
-                self._my_chips = float(hand_chips)
+                self._my_chips = _chip_int(hand_chips)
             return   # don't feed our own actions into the opponent model
 
         if self._api is None:
@@ -271,15 +333,26 @@ class BotBridge:
     def _on_round_over(self, msg: dict) -> None:
         pool = msg.get("pool", [])
         if pool:
-            self._pot = float(sum(pool))
+            self._pot = sum(_chip_int(p, 0) for p in pool)
 
     def _on_action_notify(self, msg: dict) -> tuple[int, int] | None:
         if self._api is None or self._my_seat is None:
             return None
-        if msg.get("seatid") != self._my_seat:
+        seat = _chip_int(msg.get("seatid", 0), 0)
+        if seat != self._my_seat:
+            log.debug("[BOT] Ignore ActionNotify seat=%d my_seat=%d", seat, self._my_seat)
             return None
 
-        call_need = float(msg.get("call_need_chips", 0))
+        call_need = _chip_int(msg.get("call_need_chips", 0))
+
+        # Sometimes ActionNotify arrives before a full HandCardRSP payload.
+        # Avoid crashing preflop strategy on incomplete hole cards.
+        if self._hole_cards_count < 2:
+            log.warning("[BOT] ActionNotify before full hole cards (%d); fallback action", self._hole_cards_count)
+            if call_need == 0:
+                return 2, 0  # check
+            return 1, 0      # fold
+
         street    = _STAGE_TO_STREET.get(self._stage, "preflop")
 
         # current_bet = highest total bet this street
@@ -310,18 +383,27 @@ class BotBridge:
             return
 
         winner_list = msg.get("winner", [])
-        winner_ids  = [w["seatid"] for w in winner_list]
-        total_pot   = float(sum(w.get("chips", 0) for w in winner_list))
+        normalized_winners = []
+        for w in winner_list:
+            seat = w.get("seatid", 0)
+            nw = dict(w)
+            nw["seatid"] = int(seat)
+            if "seatid" not in w:
+                log.debug("[BOT] WinnerRSP winner missing seatid; assume 0: %s", w)
+            normalized_winners.append(nw)
+
+        winner_ids  = [w["seatid"] for w in normalized_winners]
+        total_pot   = sum(_chip_int(w.get("chips", 0), 0) for w in normalized_winners)
 
         # Build final_stacks:
         # Start from last known remaining chips per seat (after all bets),
         # then add back what each winner was awarded from the pot.
-        final_stacks: dict[int, float] = dict(self._seat_chips)
-        for w in winner_list:
+        final_stacks: dict[int, int] = dict(self._seat_chips)
+        for w in normalized_winners:
             seat    = w.get("seatid", -1)
-            awarded = float(w.get("chips", 0))
+            awarded = _chip_int(w.get("chips", 0), 0)
             if seat >= 0:
-                final_stacks[seat] = final_stacks.get(seat, 0.0) + awarded
+                final_stacks[seat] = final_stacks.get(seat, 0) + awarded
 
         self._api.hand_over(
             winner_ids=winner_ids,

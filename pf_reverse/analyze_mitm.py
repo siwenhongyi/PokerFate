@@ -33,6 +33,17 @@ def _direction(from_client: bool) -> str:
     return "C→S" if from_client else "S→C"
 
 
+def _print_decoded(obj: dict) -> None:
+    """
+    Print JSON safely on Windows terminals that may use non-UTF8 encoding.
+    """
+    try:
+        print(f"         {json.dumps(obj, ensure_ascii=False, indent=2)}")
+    except UnicodeEncodeError:
+        # Fallback when console encoding cannot represent some characters.
+        print(f"         {json.dumps(obj, ensure_ascii=True, indent=2)}")
+
+
 def analyze(mitm_path: str) -> None:
     try:
         from mitmproxy.io import FlowReader
@@ -83,7 +94,7 @@ def analyze(mitm_path: str) -> None:
 
                     if decoded is not None:
                         print(f"[{direction}] {frame.type_name}")
-                        print(f"         {json.dumps(decoded, ensure_ascii=False, indent=2)}")
+                        _print_decoded(decoded)
                     else:
                         print(f"[{direction}] {frame.type_name}  "
                               f"(raw {len(frame.pb_body)}B — pb2 未编译或未知消息)")
