@@ -43,7 +43,7 @@ SERVER_HOST = "zga-entry.poker-fate.net"   # WSS hostname the game connects to
 ```
 
 The proxy auto-detects seat ID and blind sizes from game messages.
-The real server IP is resolved at startup via external DNS (8.8.8.8), bypassing the local hosts file.
+The real server IP is resolved at startup via external DNS (multiple resolvers), bypassing the local hosts file.
 
 ### 5. Redirect game traffic (Windows hosts file)
 
@@ -51,6 +51,7 @@ Add to `C:\Windows\System32\drivers\etc\hosts` (run as Administrator):
 
 ```
 127.0.0.1  zga-entry.poker-fate.net
+127.0.0.1  zga-entry.allinmoe.com
 ```
 
 ### 6. Run the proxy
@@ -88,5 +89,5 @@ Real game server  wss://zga-entry.poker-fate.net:9012
 ```
 code = rank + suit * 256
 rank : 2='2' … 14='A'
-suit : 0='d'  1='c'  2='h'  3='s'
+suit : 1='d'  2='c'  3='h'  4='s'
 ```

@@ -13,6 +13,8 @@ Until the pb2 files are generated this module falls back to returning raw bytes.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 _registry: dict[str, type] = {}   # "pb.ActionREQ" -> pb2 message class
 
 
@@ -33,15 +35,46 @@ def _load_pb2_modules() -> None:
     """Try to import compiled pb2 modules (best-effort)."""
     try:
         from pf_intercept import pb as pb_pkg
-        import importlib, pkgutil
-        for _, modname, _ in pkgutil.iter_modules(pb_pkg.__path__):
-            mod = importlib.import_module(f"pf_intercept.pb.{modname}")
-            _register_pb2_module(mod)
+        import importlib
+        import pkgutil
+        import sys
+
+        # Generated pb2 files may use top-level imports like `import X_pb2`.
+        # Ensure those imports resolve while loading package modules.
+        pb_dir = str(Path(pb_pkg.__path__[0]).resolve())
+        added_pb_dir = False
+        if pb_dir not in sys.path:
+            sys.path.insert(0, pb_dir)
+            added_pb_dir = True
+        try:
+            for _, modname, _ in pkgutil.iter_modules(pb_pkg.__path__):
+                mod = importlib.import_module(f"pf_intercept.pb.{modname}")
+                _register_pb2_module(mod)
+        finally:
+            if added_pb_dir and pb_dir in sys.path:
+                sys.path.remove(pb_dir)
     except Exception:
         pass   # pb2 not compiled yet – codec will work in raw mode
 
 
 _load_pb2_modules()
+
+
+def _message_to_dict_compat(msg) -> dict:
+    """
+    Convert protobuf message to dict across protobuf 4/5/6 runtimes.
+    """
+    from google.protobuf.json_format import MessageToDict
+
+    try:
+        return MessageToDict(
+            msg,
+            preserving_proto_field_name=True,
+            including_default_value_fields=False,
+        )
+    except TypeError:
+        # protobuf>=6 removed `including_default_value_fields`.
+        return MessageToDict(msg, preserving_proto_field_name=True)
 
 
 def decode(type_name: str, pb_body: bytes) -> dict | None:
@@ -55,8 +88,7 @@ def decode(type_name: str, pb_body: bytes) -> dict | None:
     try:
         msg = cls()
         msg.ParseFromString(pb_body)
-        from google.protobuf.json_format import MessageToDict
-        return MessageToDict(msg, preserving_proto_field_name=True, including_default_value_fields=False)
+        return _message_to_dict_compat(msg)
     except Exception:
         return None
 

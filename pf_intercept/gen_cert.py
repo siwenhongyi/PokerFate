@@ -23,7 +23,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
-from pf_intercept.config import SERVER_HOST, CERTS_DIR
+from pf_intercept.config import SERVER_HOST, CERTS_DIR, CERT_ALT_HOSTS
 
 
 def _gen_key() -> rsa.RSAPrivateKey:
@@ -44,7 +44,7 @@ def _save_cert(cert, path: Path) -> None:
     path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
 
 
-def generate(server_host: str, certs_dir: Path) -> None:
+def generate(server_host: str, certs_dir: Path, alt_hosts: list[str] | None = None) -> None:
     certs_dir.mkdir(parents=True, exist_ok=True)
 
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -76,12 +76,20 @@ def generate(server_host: str, certs_dir: Path) -> None:
     # ── Server cert (signed by our CA) ──────────────────────────────────────
     srv_key = _gen_key()
 
-    # SAN: add the hostname; also add 127.0.0.1 as IP SAN just in case
-    san_list: list[x509.GeneralName] = [x509.DNSName(server_host)]
-    try:
-        san_list.append(x509.IPAddress(ipaddress.ip_address(server_host)))
-    except ValueError:
-        pass   # not an IP, fine
+    # SAN: include primary hostname + configured alternatives.
+    san_list: list[x509.GeneralName] = []
+    seen_dns: set[str] = set()
+    hosts = [server_host] + (alt_hosts or [])
+    for h in hosts:
+        if not h:
+            continue
+        if h not in seen_dns:
+            san_list.append(x509.DNSName(h))
+            seen_dns.add(h)
+        try:
+            san_list.append(x509.IPAddress(ipaddress.ip_address(h)))
+        except ValueError:
+            pass   # not an IP, fine
     san_list.append(x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")))
 
     srv_cert = (
@@ -105,8 +113,11 @@ def generate(server_host: str, certs_dir: Path) -> None:
     print(f"  1. Copy {certs_dir / 'ca.crt'} to the Windows machine")
     print(f"  2. Double-click ca.crt → Install Certificate → Local Machine → Trusted Root CAs")
     print(f"  3. Add to hosts:  127.0.0.1  {server_host}")
+    if alt_hosts:
+        for host in alt_hosts:
+            print(f"                    127.0.0.1  {host}")
     print(f"  4. Run proxy:     python -m pf_intercept.proxy")
 
 
 if __name__ == "__main__":
-    generate(SERVER_HOST, Path(CERTS_DIR))
+    generate(SERVER_HOST, Path(CERTS_DIR), CERT_ALT_HOSTS)

@@ -26,7 +26,7 @@ import websockets.exceptions
 
 from pf_intercept.config import (
     PROXY_HOST, WSS_PORT, PASSTHROUGH_PORTS,
-    SERVER_HOST, SERVER_WSS_PORT, REAL_SERVER_URI, EXTERNAL_DNS,
+    SERVER_HOST, SERVER_WSS_PORT, REAL_SERVER_URI, EXTERNAL_DNS_SERVERS,
     SERVER_CERT, SERVER_KEY,
     WATCH_S2C, WATCH_C2S,
 )
@@ -53,12 +53,25 @@ _DISCOVERED_FILE = Path(__file__).parent / "discovered_server.json"
 _real_server_uri: str = REAL_SERVER_URI   # updated in _init_real_server()
 _real_server_sni: str = SERVER_HOST       # TLS SNI hostname
 _real_server_ip:  str = ""               # resolved real IP for passthrough
+_host_ok_ip_cache: dict[str, str] = {}
+_host_dns_cache: dict[str, list[str]] = {}
+_host_connect_locks: dict[str, asyncio.Lock] = {}
+_PREFERRED_WSS_HOSTS = {"zga-entry.poker-fate.net", "zga-entry.allinmoe.com"}
 
 
-def _dns_query_a(hostname: str, nameserver: str = EXTERNAL_DNS) -> str | None:
+def _get_host_lock(hostname: str) -> asyncio.Lock:
+    lock = _host_connect_locks.get(hostname)
+    if lock is None:
+        lock = asyncio.Lock()
+        _host_connect_locks[hostname] = lock
+    return lock
+
+
+def _dns_query_a(hostname: str, nameserver: str) -> list[str]:
     """Direct UDP DNS A-record query bypassing OS resolver / hosts file."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(3.0)
+    ips: list[str] = []
     try:
         qname = b"".join(bytes([len(p)]) + p.encode() for p in hostname.split(".")) + b"\x00"
         query = b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00" + qname + b"\x00\x01\x00\x01"
@@ -75,13 +88,197 @@ def _dns_query_a(hostname: str, nameserver: str = EXTERNAL_DNS) -> str | None:
             rtype, _, _, rdlen = struct.unpack(">HHIH", data[pos:pos+10])
             pos += 10
             if rtype == 1 and rdlen == 4:  # A record
-                return socket.inet_ntoa(data[pos:pos+4])
+                ip = socket.inet_ntoa(data[pos:pos+4])
+                if ip not in ips:
+                    ips.append(ip)
             pos += rdlen
     except Exception as exc:
         log.debug("[DNS] query failed for %s: %s", hostname, exc)
     finally:
         sock.close()
+    return ips
+
+
+def _probe_wss_endpoint(ip: str, port: int, sni_host: str) -> bool:
+    """
+    Probe whether endpoint responds like an HTTPS/WSS server.
+    """
+    req = (
+        "GET / HTTP/1.1\r\n"
+        f"Host: {sni_host}\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Key: SGVsbG9XZWJTb2NrZXQ=\r\n"
+        "Sec-WebSocket-Version: 13\r\n\r\n"
+    ).encode("ascii")
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    try:
+        with socket.create_connection((ip, port), timeout=3.0) as raw_sock:
+            with ctx.wrap_socket(raw_sock, server_hostname=sni_host) as tls_sock:
+                tls_sock.settimeout(3.0)
+                tls_sock.sendall(req)
+                head = tls_sock.recv(32)
+                return head.startswith(b"HTTP/1.")
+    except Exception as exc:
+        log.debug("[PROBE] %s:%d (%s) rejected: %s", ip, port, sni_host, exc)
+        return False
+
+
+def _extract_sni_hostname(data: bytes) -> str | None:
+    """
+    Best-effort parse TLS ClientHello SNI hostname from raw bytes.
+    """
+    try:
+        if len(data) < 5 or data[0] != 0x16:  # TLS handshake record
+            return None
+        rec_len = int.from_bytes(data[3:5], "big")
+        if len(data) < 5 + rec_len:
+            return None
+        if data[5] != 0x01:  # ClientHello
+            return None
+        hs_len = int.from_bytes(data[6:9], "big")
+        body_start = 9
+        body_end = body_start + hs_len
+        if body_end > len(data):
+            return None
+        p = body_start
+
+        p += 2   # version
+        p += 32  # random
+        if p >= body_end:
+            return None
+
+        sid_len = data[p]
+        p += 1 + sid_len
+        if p + 2 > body_end:
+            return None
+
+        cs_len = int.from_bytes(data[p:p+2], "big")
+        p += 2 + cs_len
+        if p >= body_end:
+            return None
+
+        comp_len = data[p]
+        p += 1 + comp_len
+        if p + 2 > body_end:
+            return None
+
+        ext_len = int.from_bytes(data[p:p+2], "big")
+        p += 2
+        ext_end = p + ext_len
+        if ext_end > body_end:
+            return None
+
+        while p + 4 <= ext_end:
+            etype = int.from_bytes(data[p:p+2], "big")
+            elen = int.from_bytes(data[p+2:p+4], "big")
+            p += 4
+            if p + elen > ext_end:
+                return None
+            if etype == 0x0000:  # server_name
+                if elen < 2:
+                    return None
+                q = p + 2
+                list_end = p + elen
+                while q + 3 <= list_end:
+                    ntype = data[q]
+                    nlen = int.from_bytes(data[q+1:q+3], "big")
+                    q += 3
+                    if q + nlen > list_end:
+                        return None
+                    if ntype == 0:
+                        return data[q:q+nlen].decode("ascii", errors="ignore")
+                    q += nlen
+            p += elen
+    except Exception:
+        return None
     return None
+
+
+def _extract_http_host(data: bytes) -> str | None:
+    """
+    Best-effort parse HTTP Host header from raw bytes.
+    """
+    try:
+        text = data.decode("iso-8859-1", errors="ignore")
+        if "\r\n" not in text:
+            return None
+        lines = text.split("\r\n")
+        if not lines or "HTTP/" not in lines[0]:
+            return None
+        for line in lines[1:]:
+            if not line:
+                break
+            if line.lower().startswith("host:"):
+                host = line.split(":", 1)[1].strip()
+                return host
+    except Exception:
+        return None
+    return None
+
+
+def _resolve_host_candidates(hostname: str, force_refresh: bool = False) -> list[str]:
+    """
+    Resolve host from external DNS servers + system resolver fallback.
+    By default, returns cached candidates without refreshing DNS.
+    """
+    cached = _host_dns_cache.get(hostname)
+    if cached and not force_refresh:
+        return list(cached)
+
+    candidates: list[str] = []
+    for dns in EXTERNAL_DNS_SERVERS:
+        for ip in _dns_query_a(hostname, dns):
+            if ip not in candidates:
+                candidates.append(ip)
+
+    try:
+        infos = socket.getaddrinfo(hostname, None, socket.AF_INET, socket.SOCK_STREAM)
+        for info in infos:
+            ip = info[4][0]
+            if ip not in candidates and not ip.startswith("127."):
+                candidates.append(ip)
+    except Exception:
+        pass
+
+    _host_dns_cache[hostname] = list(candidates)
+    return candidates
+
+
+async def _connect_first_success(ips: list[str], port: int, timeout: float) -> tuple[str, asyncio.StreamReader, asyncio.StreamWriter] | None:
+    """
+    Attempt multiple upstream TCP connections concurrently and return first success.
+    """
+    if not ips:
+        return None
+
+    async def _one(ip: str):
+        conn = asyncio.open_connection(ip, port)
+        reader, writer = await asyncio.wait_for(conn, timeout=timeout)
+        return ip, reader, writer
+
+    tasks = [asyncio.create_task(_one(ip)) for ip in ips]
+    try:
+        pending = set(tasks)
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for d in done:
+                exc = d.exception()
+                if exc is None:
+                    ip, reader, writer = d.result()
+                    for p in pending:
+                        p.cancel()
+                    if pending:
+                        await asyncio.gather(*pending, return_exceptions=True)
+                    return ip, reader, writer
+        return None
+    finally:
+        for t in tasks:
+            if not t.done():
+                t.cancel()
 
 
 def _init_real_server() -> None:
@@ -97,24 +294,45 @@ def _init_real_server() -> None:
             server_host_url = info.get("server_host", "")
             url = server_host_url.replace("wss://", "").replace("ws://", "")
             parts = url.split(":")
-            host = parts[0]
-            port = int(parts[1]) if len(parts) > 1 else SERVER_WSS_PORT
-            log.info("[SERVER] Using discovered server: %s:%d", host, port)
+            discovered_host = parts[0]
+            discovered_port = int(parts[1]) if len(parts) > 1 else SERVER_WSS_PORT
+            if discovered_host in _PREFERRED_WSS_HOSTS:
+                host = discovered_host
+                port = discovered_port
+                log.info("[SERVER] Using discovered server: %s:%d", host, port)
+            else:
+                log.warning(
+                    "[SERVER] Ignoring discovered non-preferred host: %s:%d",
+                    discovered_host, discovered_port
+                )
         except Exception as exc:
             log.warning("[SERVER] Could not read discovered_server.json: %s", exc)
 
-    # 2. Resolve host → real IP via external DNS (bypass hosts file)
-    ip = _dns_query_a(host)
+    # 2. Resolve host → real IP via external DNS servers (bypass hosts file)
+    ip = None
+    used_dns = None
+    for dns in EXTERNAL_DNS_SERVERS:
+        candidates = _dns_query_a(host, dns)
+        if not candidates:
+            continue
+        log.info("[DNS] %s -> %s via %s", host, candidates, dns)
+        for candidate_ip in candidates:
+            if _probe_wss_endpoint(candidate_ip, port, host):
+                ip = candidate_ip
+                used_dns = dns
+                break
+        if ip:
+            break
     if ip:
-        log.info("[SERVER] Resolved %s → %s via %s", host, ip, EXTERNAL_DNS)
+        log.info("[SERVER] Resolved %s → %s via %s", host, ip, used_dns)
         _real_server_uri = f"wss://{ip}:{port}"
         _real_server_sni = host
         _real_server_ip  = ip
     else:
-        log.warning("[SERVER] DNS resolution failed, using hostname directly: %s:%d", host, port)
-        _real_server_uri = f"wss://{host}:{port}"
-        _real_server_sni = host
-        _real_server_ip  = host
+        raise RuntimeError(
+            "[SERVER] DNS resolution failed for "
+            f"{host}. Refusing hostname fallback to avoid hosts-loopback."
+        )
 
 
 # ── SSL contexts ──────────────────────────────────────────────────────────────
@@ -231,11 +449,89 @@ async def _handle_passthrough(
     real_port: int,
 ) -> None:
     peer = client_writer.get_extra_info("peername")
-    # Use resolved IP to avoid hosts-file loopback on Windows
-    target = _real_server_ip or SERVER_HOST
-    log.info("[TCP] %s → %s:%d", peer, target, real_port)
+    initial = b""
     try:
-        srv_reader, srv_writer = await asyncio.open_connection(target, real_port)
+        initial = await asyncio.wait_for(client_reader.read(4096), timeout=0.2)
+    except TimeoutError:
+        initial = b""
+    except Exception:
+        initial = b""
+
+    target_host = _extract_sni_hostname(initial) or _extract_http_host(initial) or _real_server_sni or SERVER_HOST
+    if ":" in target_host:
+        target_host = target_host.split(":", 1)[0]
+
+    srv_reader: asyncio.StreamReader | None = None
+    srv_writer: asyncio.StreamWriter | None = None
+    chosen_ip: str | None = None
+
+    # Try cached-good IP first; this avoids DNS + candidate racing for stable hosts.
+    cached = _host_ok_ip_cache.get(target_host)
+    if cached:
+        try:
+            conn = asyncio.open_connection(cached, real_port)
+            srv_reader, srv_writer = await asyncio.wait_for(conn, timeout=2.5)
+            chosen_ip = cached
+        except Exception:
+            pass
+
+    candidates: list[str] = []
+
+    # Fallback: one coroutine per host computes candidates / selects reachable IP,
+    # others wait and then consume the updated cache.
+    if srv_writer is None:
+        lock = _get_host_lock(target_host)
+        async with lock:
+            cached = _host_ok_ip_cache.get(target_host)
+            if cached:
+                try:
+                    conn = asyncio.open_connection(cached, real_port)
+                    srv_reader, srv_writer = await asyncio.wait_for(conn, timeout=2.5)
+                    chosen_ip = cached
+                except Exception:
+                    pass
+
+            if srv_writer is None:
+                if cached:
+                    candidates.append(cached)
+                for ip in _resolve_host_candidates(target_host, force_refresh=False):
+                    if ip not in candidates:
+                        candidates.append(ip)
+                if not candidates and target_host == _real_server_sni and _real_server_ip:
+                    candidates.append(_real_server_ip)
+
+                raced = await _connect_first_success(candidates, real_port, timeout=5.0)
+                if raced is None:
+                    # Only refresh DNS when current recorded candidates fail.
+                    refreshed: list[str] = []
+                    for ip in _resolve_host_candidates(target_host, force_refresh=True):
+                        if ip not in refreshed:
+                            refreshed.append(ip)
+                    if not refreshed and target_host == _real_server_sni and _real_server_ip:
+                        refreshed.append(_real_server_ip)
+                    if refreshed:
+                        candidates = refreshed
+                        raced = await _connect_first_success(candidates, real_port, timeout=5.0)
+
+                if raced is not None:
+                    chosen_ip, srv_reader, srv_writer = raced
+                    _host_ok_ip_cache[target_host] = chosen_ip
+
+    if srv_writer is None or srv_reader is None or chosen_ip is None:
+        log.warning(
+            "[TCP] no reachable upstream for %s:%d; host=%s; candidates=%s",
+            peer, real_port, target_host, candidates
+        )
+        client_writer.close()
+        return
+
+    log.info("[TCP] %s → %s (%s):%d", peer, target_host, chosen_ip, real_port)
+    _host_ok_ip_cache[target_host] = chosen_ip
+
+    try:
+        if initial:
+            srv_writer.write(initial)
+            await srv_writer.drain()
         await asyncio.gather(
             _pipe_raw(client_reader, srv_writer),
             _pipe_raw(srv_reader,    client_writer),
@@ -261,11 +557,14 @@ async def main() -> None:
     log.info("WSS MITM   %s:%d  →  %s", PROXY_HOST, WSS_PORT, _real_server_uri)
 
     for port in PASSTHROUGH_PORTS:
+        if port == WSS_PORT:
+            log.warning("Skipping passthrough on WSS port %d", WSS_PORT)
+            continue
         await asyncio.start_server(
             lambda r, w, p=port: _handle_passthrough(r, w, p),
             PROXY_HOST, port,
         )
-        log.info("TCP tunnel %s:%d  →  %s:%d", PROXY_HOST, port, _real_server_ip or SERVER_HOST, port)
+        log.info("TCP passthrough %s:%d  (target host from SNI/Host)", PROXY_HOST, port)
 
     log.info("hosts entry:  127.0.0.1  %s", _real_server_sni)
     await asyncio.Future()
