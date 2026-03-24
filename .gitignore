@@ -10,9 +10,6 @@ build/
 # Generated certs (sensitive — generate locally with gen_cert.py)
 pf_intercept/certs/
 
-# Compiled protobuf modules (generate locally with gen_pb2.sh)
-pf_intercept/pb/
-
 # Dynamic server discovery (written at runtime by force_domain.py)
 pf_intercept/discovered_server.json
 
