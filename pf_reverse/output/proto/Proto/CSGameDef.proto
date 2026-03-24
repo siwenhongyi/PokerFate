@@ -295,3 +295,4 @@ message OverBondSettleInfo
     optional int32 start_over_bond_inc =3;//进入房间前的溢出好感度累计
     optional int32 tpl_over_bond_inc = 4; //满了所需好感度 常量表配置的
     optional int32 role_id = 5; // 角色id
+}

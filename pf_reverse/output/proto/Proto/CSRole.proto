@@ -131,3 +131,4 @@ message GetSkinGameDetailRSP
 {
     optional int32 code = 1;
     repeated SkinGameDetailItem skin_game_details = 2;
+}

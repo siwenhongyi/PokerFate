@@ -109,3 +109,4 @@ message PinballActionRSP
 {
     optional int32 code = 1;
     optional PinballActionResult action_result = 2;
+}
