@@ -69,6 +69,10 @@ class PokerBot:
         to_call = gs.to_call(player)
         stack = player.stack
 
+        # Calculate equity so last_equity is always meaningful
+        num_opponents = len(gs.active_players) - 1
+        self._last_equity = self._get_equity(player.hole_cards, gs.board, max(num_opponents, 1))
+
         # Determine what action we're facing
         facing_action, open_raise = self._classify_preflop_action(gs, player)
 
