@@ -33,6 +33,7 @@ from enum import Enum
 from .core.card import Card
 from .core.game_state import GameState, Player, Street, Action, ActionType
 from .bot.poker_bot import PokerBot
+from .logger import PokerLogger, get_logger
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +143,7 @@ class PokerFateAPI:
         equity_iterations: int = 800,
         aggression: float = 1.0,
         autosave_path: Optional[str] = "opponents.json",
+        log_file: Optional[str] = "pokerfate.log",
         verbose: bool = False,
     ):
         """
@@ -162,14 +164,18 @@ class PokerFateAPI:
             After every hand_over() call, the model is automatically saved here.
             On startup, existing data is automatically loaded from this file.
             Set to None to disable autosave.
+        log_file : str or None
+            Path to JSONL log file. None disables file logging.
         verbose : bool
-            Print debug info if True.
+            If True, also print debug-level internal details to console.
+            Key events (decisions, results) are always printed regardless.
         """
         self.my_player_id = my_player_id
         self.big_blind = big_blind
         self.small_blind = small_blind
         self.verbose = verbose
         self.autosave_path = autosave_path
+        self._log = PokerLogger(log_file=log_file, console=True)
         self._default_stack = 100.0 * big_blind  # fallback when stack is unknown
 
         self._bot = PokerBot(
@@ -181,12 +187,14 @@ class PokerFateAPI:
         # Auto-load opponent data from disk on startup
         if autosave_path:
             self._bot.opponent_model = self._bot.opponent_model.__class__.load(autosave_path)
-            if self.verbose and self._bot.opponent_model._stats:
-                print(f"[PokerFate] Loaded opponent data from {autosave_path}")
+            if self._bot.opponent_model._stats:
+                self._log.raw({"event": "model_loaded", "path": autosave_path,
+                               "known_opponents": len(self._bot.opponent_model._stats)})
 
         # Session-level state: persists across hands
         self._session_stacks: Dict[int, float] = {}   # player_id -> last known stack
         self._session_names: Dict[int, str] = {}      # player_id -> name
+        self._session_delta: float = 0.0              # cumulative P&L this session
 
         # Hand state: rebuilt each hand
         self._players: List[Player] = []
@@ -229,7 +237,9 @@ class PokerFateAPI:
         self._hole_cards = []
         self._board = []
         self._action_history = []
+        self._my_stack_start: float = 0.0  # set after resolving stacks below
 
+        self._last_known_pot: float = 0.0
         self._players = []
         for p in players:
             # Resolve stack: explicit > session history > default
@@ -251,14 +261,22 @@ class PokerFateAPI:
                 stack=stack,
             ))
 
+        # Record my stack at the start of this hand for delta calculation
+        my_p = self._get_my_player()
+        self._my_stack_start = my_p.stack if my_p else 0.0
+
         all_ids = [p.player_id for p in players]
         self._bot.new_hand(all_ids)
 
-        if self.verbose:
-            entries = ", ".join(
-                f"{p.name}({p.stack:.0f})" for p in self._players
-            )
-            print(f"[PokerFate] New hand #{self._hand_number} | Dealer: {dealer_id} | {entries}")
+        self._log.hand_start(
+            hand_number=self._hand_number,
+            players=[
+                {"id": p.player_id, "name": p.name,
+                 "stack": p.stack, "pos": pi.position}
+                for p, pi in zip(self._players, players)
+            ],
+            dealer_id=dealer_id,
+        )
 
     def deal_hole_cards(self, cards: List[str]) -> None:
         """Tell the bot its hole cards.
@@ -273,10 +291,9 @@ class PokerFateAPI:
         if my_player:
             my_player.hole_cards = self._hole_cards
 
-        if self.verbose:
-            print(f"[PokerFate] Hole cards: {self._hole_cards}")
+        self._log.hole_cards(cards)
 
-    def deal_board(self, cards: List[str], street: str) -> None:
+    def deal_board(self, cards: List[str], street: str, pot: Optional[float] = None) -> None:
         """Notify the bot of new community cards.
 
         Parameters
@@ -286,12 +303,17 @@ class PokerFateAPI:
             Pass only the NEW cards, not all board cards.
         street : str
             "flop" | "turn" | "river"
+        pot : float, optional
+            Actual pot size at the start of this street. Recommended for
+            accurate display; falls back to last known pot if omitted.
         """
         new_cards = [Card.from_str(c) for c in cards]
         self._board.extend(new_cards)
 
-        if self.verbose:
-            print(f"[PokerFate] Board [{street}]: {self._board}")
+        display_pot = pot if pot is not None else self._last_known_pot
+        if pot is not None:
+            self._last_known_pot = pot
+        self._log.board(street, cards, pot=display_pot)
 
     # ------------------------------------------------------------------
     # Action notification
@@ -332,10 +354,12 @@ class PokerFateAPI:
             is_3bet_spot=is_3bet_spot,
         )
 
-        if self.verbose:
-            pname = self._get_player(event.player_id)
-            name = pname.name if pname else str(event.player_id)
-            print(f"[PokerFate] Observed: {name} {event.action} {event.amount or ''}")
+        pobj = self._get_player(event.player_id)
+        name = pobj.name if pobj else str(event.player_id)
+        self._log.opponent_action(name, event.action, event.amount, event.street)
+
+        # Check for newly significant opponent patterns and surface them
+        self._maybe_log_opponent_pattern(event.player_id, name)
 
     def notify_stack_update(self, player_id: int, new_stack: float) -> None:
         """Update a player's stack at any point (e.g. after side-pot resolution).
@@ -375,7 +399,8 @@ class PokerFateAPI:
         # historical stats are automatically migrated to the new ID.
         self._bot.opponent_model.register_name(player_id, name)
         if self.verbose:
-            print(f"[PokerFate] Player joined: {name} (id={player_id}, stack={resolved_stack:.0f})")
+            self._log.raw({"event": "player_joined", "player_id": player_id,
+                           "name": name, "stack": resolved_stack})
 
     # ------------------------------------------------------------------
     # Decision request
@@ -417,6 +442,7 @@ class PokerFateAPI:
         BotDecision
             The bot's chosen action and amount.
         """
+        self._last_known_pot = pot
         # Build a minimal GameState for the bot
         gs = self._build_game_state(
             street=street,
@@ -429,8 +455,16 @@ class PokerFateAPI:
         action = self._bot.decide(gs, self.my_player_id)
         decision = self._to_decision(action)
 
-        if self.verbose:
-            print(f"[PokerFate] Decision [{street}]: {decision}  (equity~{self._bot.last_equity:.1%})")
+        my_name = self._session_names.get(self.my_player_id, "PokerFate")
+        self._log.decision(
+            action=decision.action,
+            amount=decision.amount,
+            street=street,
+            equity=self._bot.last_equity,
+            pot=pot,
+            to_call=to_call,
+            bot_name=my_name,
+        )
 
         return decision
 
@@ -468,17 +502,19 @@ class PokerFateAPI:
                 if player:
                     player.stack = stack
 
-        if self.verbose:
-            winners = [
-                self._session_names.get(wid, str(wid)) for wid in winner_ids
-            ]
-            stack_info = ""
-            if final_stacks:
-                stack_info = " | Stacks: " + ", ".join(
-                    f"{self._session_names.get(pid, pid)}={s:.0f}"
-                    for pid, s in final_stacks.items()
-                )
-            print(f"[PokerFate] Hand over. Winners: {winners}, pot: {pot:.1f}{stack_info}")
+        winner_names = [self._session_names.get(wid, str(wid)) for wid in winner_ids]
+        my_final = (final_stacks or {}).get(self.my_player_id)
+        my_delta = (my_final - self._my_stack_start) if my_final is not None else 0.0
+        self._session_delta += my_delta
+        self._log.hand_result(
+            winner_names=winner_names,
+            pot=pot,
+            my_delta=my_delta,
+            final_stacks={
+                self._session_names.get(pid, str(pid)): s
+                for pid, s in (final_stacks or {}).items()
+            },
+        )
 
         # Auto-save opponent model after every hand — safe against any kind of crash/kill
         if self.autosave_path:
@@ -493,28 +529,15 @@ class PokerFateAPI:
     # ------------------------------------------------------------------
 
     def save_opponent_data(self, filepath: str) -> None:
-        """Persist opponent model to disk.
-
-        Call this at the end of a session to preserve all accumulated
-        statistics. Data is stored in JSON format.
-        """
+        """Persist opponent model to disk."""
         self._bot.opponent_model.save(filepath)
-        if self.verbose:
-            print(f"[PokerFate] Opponent data saved → {filepath}")
+        self._log.raw({"event": "model_saved", "path": filepath})
 
     def load_opponent_data(self, filepath: str) -> None:
-        """Load previously saved opponent data from disk.
-
-        Call this at startup before the first hand. If the file does not
-        exist, this is a no-op (safe to call unconditionally).
-
-        When an opponent is encountered whose name matches a record in
-        the file, their historical stats are automatically used — even
-        if their player_id has changed since the last session.
-        """
+        """Load previously saved opponent data from disk (no-op if file missing)."""
         self._bot.opponent_model = self._bot.opponent_model.__class__.load(filepath)
-        if self.verbose:
-            print(f"[PokerFate] Opponent data loaded ← {filepath}")
+        self._log.raw({"event": "model_loaded", "path": filepath,
+                       "known_opponents": len(self._bot.opponent_model._stats)})
 
     def opponent_summary(self) -> str:
         """Return a readable summary of all known opponents."""
@@ -532,6 +555,40 @@ class PokerFateAPI:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    # threshold tracking: avoid logging the same pattern repeatedly
+    _PATTERN_LOG_INTERVAL = 20   # log a pattern at most once per N hands
+
+    def _maybe_log_opponent_pattern(self, player_id: int, name: str):
+        """Surface significant opponent patterns to the log (throttled)."""
+        s = self._bot.opponent_model.get(player_id)
+        if s.hands_seen < 15:
+            return
+        adj = self._bot.opponent_model.exploit_adjustments(player_id)
+        if not adj:
+            return
+        # Only log once per interval to avoid spam
+        key = f"_pattern_logged_{player_id}"
+        last = getattr(self, key, 0)
+        if self._hand_number - last < self._PATTERN_LOG_INTERVAL:
+            return
+        setattr(self, key, self._hand_number)
+
+        if "cbet_freq" in adj and s.fold_to_cbet_opps >= 5:
+            self._log.opponent_pattern(name, "fold_to_cbet",
+                                       s.fold_to_cbet, adj["cbet_freq"])
+        elif "bluff_freq" in adj:
+            self._log.opponent_pattern(name, "player_type",
+                                       s.vpip, adj.get("bluff_freq", ""))
+
+    def session_summary(self):
+        """Print and log a session-end summary."""
+        self._log.session_summary(self._hand_number, self._session_delta, self.big_blind)
+
+    @property
+    def logger(self) -> PokerLogger:
+        """Direct access to the underlying PokerLogger."""
+        return self._log
 
     def _detect_3bet_spot(self, event: ActionEvent) -> bool:
         """True if this action is a response to exactly one preflop open raise.
