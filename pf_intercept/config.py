@@ -7,9 +7,9 @@ SERVER_HOST      = "zga-entry.poker-fate.net"
 SERVER_WSS_PORT  = 9012
 REAL_SERVER_URI  = f"wss://{SERVER_HOST}:{SERVER_WSS_PORT}"  # overridden at runtime via DNS
 EXTERNAL_DNS_SERVERS = [
-    "1.1.1.1",     # Cloudflare
-    "4.2.2.1",     # Level 3 / Lumen
     "223.5.5.5",   # AliDNS (CN)
+    "1.1.1.1",  # Cloudflare
+    "4.2.2.1",  # Level 3 / Lumen
     "119.29.29.29",# DNSPod (CN)
     "8.8.8.8",     # Google
 ]

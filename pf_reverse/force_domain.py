@@ -17,16 +17,25 @@ from mitmproxy import http
 _REPO_ROOT = Path(__file__).parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
-from pf_intercept.config import PREFERRED_WSS_HOSTS  # single source of truth
+from pf_intercept.config import PREFERRED_WSS_HOSTS, SERVER_WSS_PORT  # single source of truth
 
 _DISCOVERED_FILE = _REPO_ROOT / "pf_intercept" / "discovered_server.json"
 _IP_PATTERN = re.compile(r"wss?://\d+\.\d+\.\d+\.\d+")
-_PREFERRED_HOSTS = PREFERRED_WSS_HOSTS
+_PREFERRED_HOSTS = set(PREFERRED_WSS_HOSTS)
 
 
 def _extract_ws_host(server_host: str) -> str:
     url = server_host.replace("wss://", "").replace("ws://", "")
     return url.split(":", 1)[0]
+
+
+def _extract_port(server_host: str) -> int:
+    url = server_host.replace("wss://", "").replace("ws://", "")
+    parts = url.split(":", 1)
+    try:
+        return int(parts[1]) if len(parts) > 1 else 443
+    except ValueError:
+        return 443
 
 
 class ForceDomain:
@@ -55,17 +64,18 @@ class ForceDomain:
             print("[force_domain] 响应中无域名服务器，不修改")
             return
 
-        # 只保留高优先级入口域名，避免客户端自动降级到低优先级池（ga/awss 等）
-        preferred_servers = []
-        for host in _PREFERRED_HOSTS:
-            matched = [
-                s for s in domain_servers
-                if _extract_ws_host(s.get("server_host", "")) == host
-            ]
-            preferred_servers.extend(matched)
+        # 只保留：域名在证书范围内 且 端口为 SERVER_WSS_PORT (9012)
+        preferred_servers = [
+            s for s in domain_servers
+            if _extract_ws_host(s.get("server_host", "")) in _PREFERRED_HOSTS
+            and _extract_port(s.get("server_host", "")) == SERVER_WSS_PORT
+        ]
 
         if preferred_servers:
             domain_servers = preferred_servers
+        else:
+            print(f"[force_domain] 无满足条件的服务器（需在证书范围内且端口={SERVER_WSS_PORT}），不修改")
+            return
 
         # Keep preferred domain servers in response (domain hijack mode).
         data["server"]["server"] = domain_servers
