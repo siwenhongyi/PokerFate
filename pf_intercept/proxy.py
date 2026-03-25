@@ -29,6 +29,7 @@ from pf_intercept.config import (
     SERVER_HOST, SERVER_WSS_PORT, REAL_SERVER_URI, EXTERNAL_DNS_SERVERS,
     SERVER_CERT, SERVER_KEY,
     WATCH_S2C, WATCH_C2S,
+    PREFERRED_WSS_HOSTS,
 )
 from pf_intercept.framing import FrameBuffer, encode_frame
 from pf_intercept import codec
@@ -56,7 +57,7 @@ _real_server_ip:  str = ""               # resolved real IP for passthrough
 _host_ok_ip_cache: dict[str, str] = {}
 _host_dns_cache: dict[str, list[str]] = {}
 _host_connect_locks: dict[str, asyncio.Lock] = {}
-_PREFERRED_WSS_HOSTS = {"zga-entry.poker-fate.net", "zga-entry.allinmoe.com"}
+_PREFERRED_WSS_HOSTS = set(PREFERRED_WSS_HOSTS)
 
 
 def _get_host_lock(hostname: str) -> asyncio.Lock:
@@ -413,14 +414,15 @@ async def _handle_wss(client_ws) -> None:
     log.info("[WSS] client connected → %s (sni=%s)", _real_server_uri, _real_server_sni)
     try:
         async with websockets.connect(
-            _real_server_uri, ssl=client_ssl, server_hostname=_real_server_sni
+            _real_server_uri, ssl=client_ssl, server_hostname=_real_server_sni,
+            ping_interval=20, ping_timeout=10, open_timeout=15,
         ) as server_ws:
             await asyncio.gather(
                 _pipe_c2s(client_ws, server_ws, FrameBuffer()),
                 _pipe_s2c(client_ws, server_ws, FrameBuffer()),
             )
-    except websockets.exceptions.ConnectionClosed:
-        pass
+    except websockets.exceptions.ConnectionClosed as cc:
+        log.info("[WSS] session closed: code=%s reason=%s", cc.code, cc.reason)
     except Exception:
         log.exception("[WSS] session error")
     finally:

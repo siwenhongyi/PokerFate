@@ -93,6 +93,9 @@ class BotBridge:
         # Populated from EnterRoomRSP.table_status.seat[].player.name
         # and updated on SitDownBRC
         self._seat_names: dict[int, str] = {}
+        # uid (str) → seat_id; built from EnterRoomRSP/SitDownBRC; used to
+        # resolve WinnerRSP entries that carry uid but no seatid.
+        self._uid_to_seat: dict[str, int] = {}
 
         # Per-hand state
         self._stage:    int       = 0
@@ -196,12 +199,15 @@ class BotBridge:
         self._extract_seat_name(seat_status)
 
     def _extract_seat_name(self, seat_status: dict) -> None:
-        """Pull seat_id + player name out of a SeatStatus dict."""
+        """Pull seat_id + player name/uid out of a SeatStatus dict."""
         seat = _chip_int(seat_status.get("seatid", 0), 0)
         player = seat_status.get("player") or {}
         name = player.get("name", "")
+        uid  = player.get("uid")
         if seat >= 0 and name:
             self._seat_names[seat] = name
+        if seat >= 0 and uid is not None:
+            self._uid_to_seat[str(uid)] = seat
 
     def _ensure_api(self) -> bool:
         """Create PokerFateAPI once seat and blind values are known. Returns True if ready."""
@@ -286,8 +292,8 @@ class BotBridge:
     def _on_round_start(self, msg: dict) -> None:
         stage = msg.get("stage", 1)
         self._stage   = stage
-        self._my_bet  = 0.0
-        self._max_bet = 0.0
+        self._my_bet  = 0
+        self._max_bet = 0
 
         board_ids = msg.get("board", [])
         if board_ids and stage not in self._announced_stages and self._api:
@@ -301,6 +307,10 @@ class BotBridge:
         action_type = msg.get("action_type", 1)
         chips       = _chip_int(msg.get("chips", 0))
         hand_chips  = msg.get("hand_chips")
+
+        # seatid=-1 is used by the game for system broadcasts (no specific player).
+        if seat < 0:
+            return
 
         if action_type == 1:
             self._folded.add(seat)
@@ -383,27 +393,29 @@ class BotBridge:
             return
 
         winner_list = msg.get("winner", [])
-        normalized_winners = []
-        for w in winner_list:
-            seat = w.get("seatid", 0)
-            nw = dict(w)
-            nw["seatid"] = int(seat)
-            if "seatid" not in w:
-                log.debug("[BOT] WinnerRSP winner missing seatid; assume 0: %s", w)
-            normalized_winners.append(nw)
+        winner_ids: list[int] = []
+        total_pot = 0
 
-        winner_ids  = [w["seatid"] for w in normalized_winners]
-        total_pot   = sum(_chip_int(w.get("chips", 0), 0) for w in normalized_winners)
-
-        # Build final_stacks:
-        # Start from last known remaining chips per seat (after all bets),
-        # then add back what each winner was awarded from the pot.
+        # Build final_stacks starting from last-known per-seat chips.
         final_stacks: dict[int, int] = dict(self._seat_chips)
-        for w in normalized_winners:
-            seat    = w.get("seatid", -1)
-            awarded = _chip_int(w.get("chips", 0), 0)
-            if seat >= 0:
-                final_stacks[seat] = final_stacks.get(seat, 0) + awarded
+
+        for w in winner_list:
+            chips = _chip_int(w.get("chips", 0), 0)
+            total_pot += chips
+
+            # Prefer explicit seatid; fall back to uid→seat lookup.
+            if "seatid" in w:
+                seat = int(w["seatid"])
+            else:
+                uid = str(w.get("uid", ""))
+                seat = self._uid_to_seat.get(uid, -1)
+                if seat < 0:
+                    log.warning("[BOT] WinnerRSP: uid=%s has no seat mapping — skipping", uid)
+                    continue
+
+            winner_ids.append(seat)
+            if chips > 0:
+                final_stacks[seat] = final_stacks.get(seat, 0) + chips
 
         self._api.hand_over(
             winner_ids=winner_ids,

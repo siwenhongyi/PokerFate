@@ -27,13 +27,15 @@ CA_CERT     = CERTS_DIR / "ca.crt"
 SERVER_CERT = CERTS_DIR / "server.crt"
 SERVER_KEY  = CERTS_DIR / "server.key"
 
-# Extra DNS names to include in the local MITM server certificate SAN.
-# Keep this list aligned with login response candidate endpoints.
-CERT_ALT_HOSTS: list[str] = [
+# Preferred WSS entry hosts — single source of truth for:
+#   gen_cert.py (SAN), proxy.py (preferred host filter), force_domain.py.
+# Keep aligned with the login response server list.
+PREFERRED_WSS_HOSTS: list[str] = [
     "zga-entry.poker-fate.net",
     "zga-entry.allinmoe.com",
     "ga-foreign.poker-fate.com",
 ]
+CERT_ALT_HOSTS = PREFERRED_WSS_HOSTS  # alias used by gen_cert.py
 
 # ── Bot / game logic ─────────────────────────────────────────────────────────
 # MY_SEAT_ID: auto-detected from SitDownRSP — no need to set manually.
