@@ -105,6 +105,7 @@ class BotBridge:
         self._my_bet:   int       = 0   # my chips in this street
         self._max_bet:  int       = 0   # highest bet this street
         self._my_chips: int       = 0
+        self._my_forced_post_this_street: bool = False
         self._folded:   set[int]  = set()
         self._all_seats: list[int] = []
         self._announced_stages: set[int] = set()
@@ -240,6 +241,7 @@ class BotBridge:
         self._pot     = 0
         self._my_bet  = 0
         self._max_bet = 0
+        self._my_forced_post_this_street = False
         self._folded  = set()
         self._announced_stages = set()
         self._hole_cards_count = 0
@@ -296,13 +298,19 @@ class BotBridge:
         self._stage   = stage
         self._my_bet  = 0
         self._max_bet = 0
+        self._my_forced_post_this_street = False
 
         board_ids = msg.get("board", [])
         if board_ids and stage not in self._announced_stages and self._api:
             self._announced_stages.add(stage)
             cards = [_card_str(c) for c in board_ids if _card_str(c)]
             if cards:
-                self._api.deal_board(cards, street=_STAGE_TO_STREET.get(stage, "flop"))
+                # Keep display/log pot aligned with bridge-side real-time pot tracking.
+                self._api.deal_board(
+                    cards,
+                    street=_STAGE_TO_STREET.get(stage, "flop"),
+                    pot=self._pot,
+                )
 
     def _on_action_brc(self, msg: dict) -> None:
         seat        = _chip_int(msg.get("seatid", 0), 0)
@@ -327,6 +335,8 @@ class BotBridge:
 
         if seat == self._my_seat:
             self._my_bet += chips
+            if action_type in (8, 9, 10, 11, 14) and chips > 0:
+                self._my_forced_post_this_street = True
             if hand_chips is not None:
                 self._my_chips = _chip_int(hand_chips)
             return   # don't feed our own actions into the opponent model
@@ -389,6 +399,15 @@ class BotBridge:
             my_current_bet_this_street=self._my_bet,
         )
 
+        log.info(
+            "[BOT] Spot: street=%s pot=%d call_need=%d my_bet=%d current_bet=%d forced_post=%s",
+            street,
+            self._pot,
+            call_need,
+            self._my_bet,
+            current_bet,
+            self._my_forced_post_this_street,
+        )
         log.info("[BOT] Decision: %s  (street=%s pot=%.0f to_call=%.0f stack=%.0f)",
                  decision, street, self._pot, call_need, self._my_chips)
 
