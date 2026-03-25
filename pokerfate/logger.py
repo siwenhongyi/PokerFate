@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[A-Za-z]")
+_DEFAULT_LOG_FILE = str(pathlib.Path(__file__).resolve().parent / "logs" / "pokerfate.log")
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +120,7 @@ class PokerLogger:
 
     def __init__(
         self,
-        log_file: Optional[str] = "pokerfate.log",
+        log_file: Optional[str] = _DEFAULT_LOG_FILE,
         console: bool = True,
         hand_number_ref: Optional[list] = None,
     ):
@@ -424,7 +425,7 @@ _default_logger: Optional[PokerLogger] = None
 
 
 def get_logger(
-    log_file: Optional[str] = "pokerfate.log",
+    log_file: Optional[str] = _DEFAULT_LOG_FILE,
     console: bool = True,
 ) -> PokerLogger:
     global _default_logger

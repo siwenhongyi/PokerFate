@@ -29,11 +29,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 from enum import Enum
+from pathlib import Path
 
 from .core.card import Card
 from .core.game_state import GameState, Player, Street, Action, ActionType
 from .bot.poker_bot import PokerBot
 from .logger import PokerLogger, get_logger
+
+_DEFAULT_LOG_FILE = str(Path(__file__).resolve().parent / "logs" / "pokerfate.log")
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +146,7 @@ class PokerFateAPI:
         equity_iterations: int = 800,
         aggression: float = 1.0,
         autosave_path: Optional[str] = "opponents.json",
-        log_file: Optional[str] = "logs/pokerfate.log",
+        log_file: Optional[str] = _DEFAULT_LOG_FILE,
         verbose: bool = False,
     ):
         """

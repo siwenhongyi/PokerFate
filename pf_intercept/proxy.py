@@ -58,13 +58,10 @@ _root_console.setFormatter(_LOG_FMT)
 _root_logger.addHandler(_root_console)
 _root_logger.addHandler(_fh("proxy.log"))
 
-# Dedicated TCP passthrough logger → console + tcp.log only (not mixed into proxy.log)
-_tcp_console = logging.StreamHandler()
-_tcp_console.setFormatter(_LOG_FMT)
+# Dedicated TCP passthrough logger → tcp.log only (not mixed into proxy.log)
 tcp_log = logging.getLogger("pf_tcp")
 tcp_log.setLevel(logging.INFO)
 tcp_log.propagate = False          # don't bubble up to root → proxy.log stays clean
-tcp_log.addHandler(_tcp_console)
 tcp_log.addHandler(_fh("tcp.log"))
 
 log = logging.getLogger("pf_proxy")
@@ -397,82 +394,117 @@ def _make_client_ssl() -> ssl.SSLContext:
 
 async def _pipe_c2s(client_ws, server_ws, buf: FrameBuffer) -> None:
     """Game client → real server."""
-    async for raw in client_ws:
-        if isinstance(raw, str):
-            raw = raw.encode()
-        for frame in buf.feed(raw):
-            if frame.type_name in WATCH_C2S:
-                msg = codec.decode(frame.type_name, frame.pb_body)
-                log.debug("[C→S] %s  %s", frame.type_name, msg)
-        await server_ws.send(raw)
+    msg_count = 0
+    try:
+        async for raw in client_ws:
+            msg_count += 1
+            if isinstance(raw, str):
+                raw = raw.encode()
+            for frame in buf.feed(raw):
+                if frame.type_name in WATCH_C2S:
+                    msg = codec.decode(frame.type_name, frame.pb_body)
+                    log.debug("[C→S] %s  %s", frame.type_name, msg)
+            await server_ws.send(raw)
+    finally:
+        log.info("[WSS] pipe c2s ended; messages=%d", msg_count)
 
 
 async def _pipe_s2c(client_ws, server_ws, buf: FrameBuffer) -> None:
     """Real server → game client, with bot action injection."""
-    async for raw in server_ws:
-        if isinstance(raw, str):
-            raw = raw.encode()
+    msg_count = 0
+    try:
+        async for raw in server_ws:
+            msg_count += 1
+            if isinstance(raw, str):
+                raw = raw.encode()
 
-        inject: tuple[int, int] | None = None
-        inject_room_id: int = 0
+            inject: tuple[int, int] | None = None
+            inject_room_id: int = 0
 
-        for frame in buf.feed(raw):
-            if frame.type_name not in WATCH_S2C:
-                continue
+            for frame in buf.feed(raw):
+                if frame.type_name not in WATCH_S2C:
+                    continue
 
-            msg = codec.decode(frame.type_name, frame.pb_body)
-            if msg is None:
-                log.warning("[S→C] %s  (decode failed — run gen_pb2.sh first)", frame.type_name)
-                continue
+                msg = codec.decode(frame.type_name, frame.pb_body)
+                if msg is None:
+                    log.warning("[S→C] %s  (decode failed — run gen_pb2.sh first)", frame.type_name)
+                    continue
 
-            log.info("[S→C] %s  %s", frame.type_name, msg)
+                log.info("[S→C] %s  %s", frame.type_name, msg)
 
-            result = _bot.handle(frame.type_name, msg)
-            if result is not None:
-                inject = result
-                inject_room_id = frame.room_id
+                result = _bot.handle(frame.type_name, msg)
+                if result is not None:
+                    inject = result
+                    inject_room_id = frame.room_id
 
-        # Forward original server message to the game client
-        await client_ws.send(raw)
+            # Forward original server message to the game client
+            await client_ws.send(raw)
 
-        # Inject bot action to the real server (after client got the notify)
-        if inject is not None:
-            action_type, chips = inject
-            pb_body = codec.encode("pb.ActionREQ", {
-                "action_type": action_type,
-                "chips": chips,
-            })
-            if not pb_body:
-                log.warning("[BOT→S] ActionREQ encode failed (pb2 not compiled?) — skipping injection")
-            else:
-                wire = encode_frame("pb.ActionREQ", inject_room_id, pb_body)
-                log.info("[BOT→S] ActionREQ  action_type=%d  chips=%d", action_type, chips)
-                await server_ws.send(wire)
+            # Inject bot action to the real server (after client got the notify)
+            if inject is not None:
+                action_type, chips = inject
+                pb_body = codec.encode("pb.ActionREQ", {
+                    "action_type": action_type,
+                    "chips": chips,
+                })
+                if not pb_body:
+                    log.warning("[BOT→S] ActionREQ encode failed (pb2 not compiled?) — skipping injection")
+                else:
+                    wire = encode_frame("pb.ActionREQ", inject_room_id, pb_body)
+                    log.info("[BOT→S] ActionREQ  action_type=%d  chips=%d", action_type, chips)
+                    await server_ws.send(wire)
+    finally:
+        log.info("[WSS] pipe s2c ended; messages=%d", msg_count)
 
 
 async def _handle_wss(client_ws) -> None:
     """Handle one WSS MITM session."""
     client_ssl = _make_client_ssl()
+    server_ws = None
 
     req = getattr(client_ws, "request", None)
     path = (req.path if req else None) or "/"
-    upstream_uri = _real_server_uri.rstrip("/") + path
-    log.info("[WSS] client connected, path=%s → %s (sni=%s)", path, upstream_uri, _real_server_sni)
+    # Keep URI host as domain so websockets sends the correct HTTP Host header.
+    # Override TCP destination with resolved IP to avoid local hosts-loopback.
+    upstream_uri = f"wss://{_real_server_sni}:{SERVER_WSS_PORT}{path}"
+    tcp_target = _real_server_ip or _real_server_sni
+    log.info(
+        "[WSS] client connected, path=%s → %s (tcp=%s:%d, sni=%s)",
+        path, upstream_uri, tcp_target, SERVER_WSS_PORT, _real_server_sni
+    )
     try:
         async with websockets.connect(
-            upstream_uri, ssl=client_ssl, server_hostname=_real_server_sni,
+            upstream_uri,
+            host=tcp_target,
+            port=SERVER_WSS_PORT,
+            ssl=client_ssl,
+            server_hostname=_real_server_sni,
             ping_interval=20, ping_timeout=10, open_timeout=15,
-        ) as server_ws:
+        ) as upstream_ws:
+            server_ws = upstream_ws
             await asyncio.gather(
                 _pipe_c2s(client_ws, server_ws, FrameBuffer()),
                 _pipe_s2c(client_ws, server_ws, FrameBuffer()),
             )
-    except websockets.exceptions.ConnectionClosed:
-        pass
+    except websockets.exceptions.ConnectionClosed as exc:
+        log.info(
+            "[WSS] connection closed: type=%s code=%s reason=%r",
+            type(exc).__name__,
+            getattr(exc, "code", None),
+            getattr(exc, "reason", None),
+        )
     except Exception:
         log.exception("[WSS] session error")
     finally:
-        log.info("[WSS] session ended")
+        log.info(
+            "[WSS] session ended; client(code=%s reason=%r state=%s) upstream(code=%s reason=%r state=%s)",
+            getattr(client_ws, "close_code", None),
+            getattr(client_ws, "close_reason", None),
+            getattr(client_ws, "state", None),
+            getattr(server_ws, "close_code", None) if server_ws is not None else None,
+            getattr(server_ws, "close_reason", None) if server_ws is not None else None,
+            getattr(server_ws, "state", None) if server_ws is not None else None,
+        )
 
 
 # ── TCP pass-through (non-WSS ports) ─────────────────────────────────────────
