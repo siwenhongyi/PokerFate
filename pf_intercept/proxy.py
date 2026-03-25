@@ -454,10 +454,13 @@ async def _handle_wss(client_ws) -> None:
     """Handle one WSS MITM session."""
     client_ssl = _make_client_ssl()
 
-    log.info("[WSS] client connected → %s (sni=%s)", _real_server_uri, _real_server_sni)
+    req = getattr(client_ws, "request", None)
+    path = (req.path if req else None) or "/"
+    upstream_uri = _real_server_uri.rstrip("/") + path
+    log.info("[WSS] client connected, path=%s → %s (sni=%s)", path, upstream_uri, _real_server_sni)
     try:
         async with websockets.connect(
-            _real_server_uri, ssl=client_ssl, server_hostname=_real_server_sni,
+            upstream_uri, ssl=client_ssl, server_hostname=_real_server_sni,
             ping_interval=20, ping_timeout=10, open_timeout=15,
         ) as server_ws:
             await asyncio.gather(
