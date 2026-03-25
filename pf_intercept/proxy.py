@@ -458,7 +458,6 @@ async def _handle_wss(client_ws) -> None:
     try:
         async with websockets.connect(
             _real_server_uri, ssl=client_ssl, server_hostname=_real_server_sni,
-            additional_headers={"Host": _real_server_sni},
             ping_interval=20, ping_timeout=10, open_timeout=15,
         ) as server_ws:
             await asyncio.gather(
