@@ -454,19 +454,11 @@ async def _handle_wss(client_ws) -> None:
     """Handle one WSS MITM session."""
     client_ssl = _make_client_ssl()
 
-    req = getattr(client_ws, "request", None)
-    # 全量转发客户端 headers，Host 强制覆盖为真实域名（连接到 IP 时 CDN 路由需要）
-    forward_headers: dict[str, str] = {"Host": _real_server_sni}
-    if req:
-        for name, value in req.headers.raw_items():
-            if name.lower() != "host":
-                forward_headers[name] = value
-
     log.info("[WSS] client connected → %s (sni=%s)", _real_server_uri, _real_server_sni)
     try:
         async with websockets.connect(
             _real_server_uri, ssl=client_ssl, server_hostname=_real_server_sni,
-            additional_headers=forward_headers,
+            additional_headers={"Host": _real_server_sni},
             ping_interval=20, ping_timeout=10, open_timeout=15,
         ) as server_ws:
             await asyncio.gather(
