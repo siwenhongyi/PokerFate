@@ -464,8 +464,8 @@ async def _handle_wss(client_ws) -> None:
                 _pipe_c2s(client_ws, server_ws, FrameBuffer()),
                 _pipe_s2c(client_ws, server_ws, FrameBuffer()),
             )
-    except websockets.exceptions.ConnectionClosed as cc:
-        log.info("[WSS] session closed: code=%s reason=%s", cc.code, cc.reason)
+    except websockets.exceptions.ConnectionClosed:
+        pass
     except Exception:
         log.exception("[WSS] session error")
     finally:
