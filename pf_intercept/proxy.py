@@ -477,16 +477,27 @@ async def _handle_wss(client_ws) -> None:
             pass
         return None
 
-    # Forward client handshake hints to upstream to reduce fingerprint mismatch.
-    # Skip protocol-managed headers (Host/Upgrade/Connection/Sec-WebSocket-* framing keys).
-    additional_headers: dict[str, str] = {}
-    for name in ("Origin", "Cookie", "Authorization", "Accept-Language", "Pragma", "Cache-Control"):
-        v = _hdr(name)
-        if v:
-            additional_headers[name] = v
-
-    # user_agent_header has a dedicated parameter; avoid duplicate UA headers.
-    user_agent_header = _hdr("User-Agent")
+    # Mirror client headers to upstream as much as possible.
+    # Keep protocol-managed handshake headers under websockets' control.
+    skip_headers = {
+        "host",
+        "connection",
+        "upgrade",
+        "sec-websocket-key",
+        "sec-websocket-version",
+        "sec-websocket-extensions",
+        "sec-websocket-protocol",
+    }
+    additional_headers: list[tuple[str, str]] = []
+    if req_headers is not None:
+        try:
+            for name, value in req_headers.raw_items():
+                if str(name).lower() in skip_headers:
+                    continue
+                additional_headers.append((str(name), str(value)))
+        except Exception:
+            # Best effort only; if request headers are unavailable, continue safely.
+            additional_headers = []
 
     # Pass through requested subprotocols via dedicated argument.
     subprotocols: list[str] | None = None
@@ -500,11 +511,11 @@ async def _handle_wss(client_ws) -> None:
     upstream_uri = f"wss://{_real_server_sni}:{SERVER_WSS_PORT}{path}"
     tcp_target = _real_server_ip or _real_server_sni
     log.info(
-        "[WSS] client connected, path=%s → %s (tcp=%s:%d, sni=%s, fwd_headers=%s, subprotocols=%s, ua=%s)",
+        "[WSS] client connected, path=%s → %s (tcp=%s:%d, sni=%s, fwd_header_count=%d, fwd_headers=%s, subprotocols=%s)",
         path, upstream_uri, tcp_target, SERVER_WSS_PORT, _real_server_sni,
-        sorted(additional_headers.keys()),
+        len(additional_headers),
+        sorted({name for name, _ in additional_headers}),
         subprotocols,
-        bool(user_agent_header),
     )
     try:
         async with websockets.connect(
@@ -515,8 +526,9 @@ async def _handle_wss(client_ws) -> None:
             server_hostname=_real_server_sni,
             additional_headers=additional_headers or None,
             subprotocols=subprotocols,
-            user_agent_header=user_agent_header,
-            ping_interval=20, ping_timeout=10, open_timeout=15,
+            # Disable proxy-initiated keepalive; keep this layer forwarding-only.
+            user_agent_header=None,
+            ping_interval=None, ping_timeout=None, open_timeout=15,
         ) as upstream_ws:
             server_ws = upstream_ws
             await asyncio.gather(
@@ -681,7 +693,15 @@ async def main() -> None:
 
     server_ssl = _make_server_ssl()
 
-    await websockets.serve(_handle_wss, PROXY_HOST, WSS_PORT, ssl=server_ssl)
+    await websockets.serve(
+        _handle_wss,
+        PROXY_HOST,
+        WSS_PORT,
+        ssl=server_ssl,
+        # Disable proxy-side pings toward the game client as well.
+        ping_interval=None,
+        ping_timeout=None,
+    )
     log.info("WSS MITM   %s:%d  →  %s", PROXY_HOST, WSS_PORT, _real_server_uri)
 
     for port in PASSTHROUGH_PORTS:
