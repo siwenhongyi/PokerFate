@@ -464,6 +464,7 @@ class PokerFateAPI:
             pot=pot,
             to_call=to_call,
             bot_name=my_name,
+            reasoning=self._bot.last_reasoning,
         )
 
         return decision
