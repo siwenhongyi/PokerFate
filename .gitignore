@@ -13,8 +13,13 @@ pf_intercept/certs/
 # Dynamic server discovery (written at runtime by force_domain.py)
 pf_intercept/discovered_server.json
 
-# Packet captures (may contain credentials)
-pf_reverse/packet/
+# Runtime logs and captures (may contain credentials / game data)
+*.log
+*.mitm
+pf_reverse/packets/
+
+# Runtime opponent model (accumulated during play, generate locally)
+opponents.json
 
 # IDE
 .idea/

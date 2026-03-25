@@ -9,16 +9,19 @@ mitmproxy addon: 过滤登录响应中的 IP 直连服务器，保留所有域�
 
 import json
 import re
+import sys
 from pathlib import Path
 from mitmproxy import http
 
-_DISCOVERED_FILE = Path(__file__).parent.parent / "pf_intercept" / "discovered_server.json"
+# Allow importing config from the repo root regardless of cwd.
+_REPO_ROOT = Path(__file__).parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from pf_intercept.config import PREFERRED_WSS_HOSTS  # single source of truth
+
+_DISCOVERED_FILE = _REPO_ROOT / "pf_intercept" / "discovered_server.json"
 _IP_PATTERN = re.compile(r"wss?://\d+\.\d+\.\d+\.\d+")
-_PREFERRED_HOSTS = [
-    "zga-entry.poker-fate.net",
-    "zga-entry.allinmoe.com",
-    "ga-foreign.poker-fate.com",
-]
+_PREFERRED_HOSTS = PREFERRED_WSS_HOSTS
 
 
 def _extract_ws_host(server_host: str) -> str:
@@ -28,10 +31,11 @@ def _extract_ws_host(server_host: str) -> str:
 
 class ForceDomain:
     def response(self, flow: http.HTTPFlow) -> None:
-        ct = flow.response.headers.get("content-type", "")
-        if "json" not in ct:
-            return
+        # Log every response so we can see if this addon is running at all.
+        print(f"[force_domain] {flow.response.status_code} {flow.request.url[:120]}")
 
+        # Try JSON parsing regardless of content-type; some servers omit or
+        # mislabel it (e.g. "text/plain" for a JSON body).
         try:
             data = json.loads(flow.response.content)
         except Exception:
