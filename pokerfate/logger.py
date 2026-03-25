@@ -14,9 +14,13 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
+import re
 import sys
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
+
+_ANSI_RE = re.compile(r"\033\[[0-9;]*[A-Za-z]")
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +128,14 @@ class PokerLogger:
         self._hand_num = hand_number_ref if hand_number_ref is not None else [0]
         self._color = not _no_color()
         self._bot_name = "PokerFate"
+
+        # Plain-text mirror of console output (no ANSI codes)
+        self._text_log = None
+        if log_file:
+            p = pathlib.Path(log_file)
+            text_path = p.with_name(p.stem + "_console" + p.suffix)
+            text_path.parent.mkdir(parents=True, exist_ok=True)
+            self._text_log = open(text_path, "a", encoding="utf-8", buffering=1)
 
     # ------------------------------------------------------------------
     # Public event methods
@@ -338,6 +350,14 @@ class PokerLogger:
     def close(self):
         if self._writer:
             self._writer.close()
+        if self._text_log:
+            self._text_log.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -365,6 +385,10 @@ class PokerLogger:
         bold: bool = False,
         dim: bool = False,
     ):
+        # Write plain text to file (always, regardless of console setting)
+        if self._text_log:
+            self._text_log.write(_strip_ansi(msg) + "\n")
+
         if not self._console:
             return
         if self._color and (bold or dim or color):
@@ -386,9 +410,8 @@ class PokerLogger:
 
 
 def _strip_ansi(s: str) -> str:
-    """Remove ANSI escape codes for length calculation."""
-    import re
-    return re.sub(r"\033\[[0-9;]*m", "", s)
+    """Remove ANSI escape codes for length calculation and plain-text output."""
+    return _ANSI_RE.sub("", s)
 
 
 # ---------------------------------------------------------------------------

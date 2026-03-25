@@ -16,8 +16,7 @@ pf_intercept/discovered_server.json
 # Runtime logs and captures (may contain credentials / game data)
 *.log
 *.mitm
-pf_reverse/packets/
-
+pf_intercept/logs/
 # Runtime opponent model (accumulated during play, generate locally)
 opponents.json
 
@@ -26,3 +25,6 @@ opponents.json
 .vscode/
 *.swp
 win/
+logs/
+.tmp/
+docs/

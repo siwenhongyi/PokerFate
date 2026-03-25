@@ -143,7 +143,7 @@ class PokerFateAPI:
         equity_iterations: int = 800,
         aggression: float = 1.0,
         autosave_path: Optional[str] = "opponents.json",
-        log_file: Optional[str] = "pokerfate.log",
+        log_file: Optional[str] = "logs/pokerfate.log",
         verbose: bool = False,
     ):
         """
