@@ -16,6 +16,7 @@ Traffic flow:
 import asyncio
 import json
 import logging
+import logging.handlers
 import socket
 import ssl
 import struct
@@ -35,10 +36,37 @@ from pf_intercept.framing import FrameBuffer, encode_frame
 from pf_intercept import codec
 from pf_intercept.bot import BotBridge
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
+_LOGS_DIR = Path(__file__).parent / "logs"
+_LOGS_DIR.mkdir(exist_ok=True)
+
+_LOG_FMT = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+
+def _fh(filename: str) -> logging.Handler:
+    h = logging.handlers.RotatingFileHandler(
+        _LOGS_DIR / filename, maxBytes=10 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    )
+    h.setFormatter(_LOG_FMT)
+    return h
+
+# Console + proxy.log for all non-TCP logs.
+# Use explicit setup instead of basicConfig() to avoid silent no-op when
+# third-party libraries (websockets, asyncio) pre-register handlers before import.
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.INFO)
+_root_console = logging.StreamHandler()
+_root_console.setFormatter(_LOG_FMT)
+_root_logger.addHandler(_root_console)
+_root_logger.addHandler(_fh("proxy.log"))
+
+# Dedicated TCP passthrough logger → console + tcp.log only (not mixed into proxy.log)
+_tcp_console = logging.StreamHandler()
+_tcp_console.setFormatter(_LOG_FMT)
+tcp_log = logging.getLogger("pf_tcp")
+tcp_log.setLevel(logging.INFO)
+tcp_log.propagate = False          # don't bubble up to root → proxy.log stays clean
+tcp_log.addHandler(_tcp_console)
+tcp_log.addHandler(_fh("tcp.log"))
+
 log = logging.getLogger("pf_proxy")
 
 # ── Bot singleton ─────────────────────────────────────────────────────────────
@@ -218,6 +246,20 @@ def _extract_http_host(data: bytes) -> str | None:
                 return host
     except Exception:
         return None
+    return None
+
+
+def _extract_http_path(data: bytes) -> str | None:
+    """Extract request path from plain HTTP request line (e.g. GET /api/login HTTP/1.1)."""
+    try:
+        line = data.split(b"\r\n", 1)[0].decode("iso-8859-1")
+        parts = line.split(" ")
+        if len(parts) >= 2 and parts[0] in (
+            "GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH", "CONNECT"
+        ):
+            return parts[1]
+    except Exception:
+        pass
     return None
 
 
@@ -520,16 +562,24 @@ async def _handle_passthrough(
                     _host_ok_ip_cache[target_host] = chosen_ip
 
     if srv_writer is None or srv_reader is None or chosen_ip is None:
-        log.warning(
+        tcp_log.warning(
             "[TCP] no reachable upstream for %s:%d; host=%s; candidates=%s",
             peer, real_port, target_host, candidates
         )
         client_writer.close()
         return
 
-    log.info("[TCP] %s → %s (%s):%d", peer, target_host, chosen_ip, real_port)
+    path = _extract_http_path(initial) if initial and not initial[0:1] == b"\x16" else None
+    protocol = "TLS" if initial and initial[0:1] == b"\x16" else "HTTP"
+    if path:
+        tcp_log.info("[TCP] %s → %s:%d (%s)  %s %s",
+                     peer, target_host, real_port, chosen_ip, protocol, path)
+    else:
+        tcp_log.info("[TCP] %s → %s:%d (%s)  [%s]",
+                     peer, target_host, real_port, chosen_ip, protocol)
     _host_ok_ip_cache[target_host] = chosen_ip
 
+    t0 = asyncio.get_event_loop().time()
     try:
         if initial:
             srv_writer.write(initial)
@@ -541,6 +591,9 @@ async def _handle_passthrough(
     except Exception as exc:
         log.debug("[TCP] pass-through error: %s", exc)
     finally:
+        elapsed = asyncio.get_event_loop().time() - t0
+        tcp_log.info("[TCP] closed %s → %s:%d  (%.1fs)",
+                     peer, target_host, real_port, elapsed)
         client_writer.close()
 
 
