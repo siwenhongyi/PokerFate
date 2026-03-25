@@ -40,6 +40,7 @@ class PokerBot:
         self.opponent_model = OpponentModel()
         self.equity_iterations = equity_iterations
         self._last_equity: float = 0.5
+        self._last_reasoning: str = ""
 
     # ------------------------------------------------------------------
     # Public API
@@ -87,6 +88,9 @@ class PokerBot:
             pot=gs.pot,
         )
 
+        self._last_reasoning = self._preflop_reasoning(
+            player.hole_cards, position, facing_action, action_str
+        )
         return self._to_action(action_str, amount, to_call, stack)
 
     def _classify_preflop_action(self, gs: GameState, player: Player):
@@ -132,9 +136,9 @@ class PokerBot:
         adj = self.opponent_model.exploit_adjustments(primary_opp_id) if primary_opp_id >= 0 else {}
         opp_fold_rate = self._adjusted_fold_rate(primary_opp_id, adj)
 
-        # Apply exploitative aggression adjustment
-        aggression = self._compute_aggression(adj)
-        self.postflop.aggression = aggression
+        # Apply exploitative adjustments to postflop sizing
+        self.postflop.aggression = self._compute_aggression(adj)
+        self.postflop.value_mult = self._compute_value_mult(adj)
 
         spr = self.gto.spr(stack, max(pot, 0.01))
 
@@ -153,6 +157,10 @@ class PokerBot:
             spr=spr,
         )
 
+        self._last_reasoning = self._postflop_reasoning(
+            equity, is_ip, facing_bet, to_call, pot, opp_fold_rate,
+            board, action_str
+        )
         return self._to_action(action_str, amount, to_call, stack)
 
     # ------------------------------------------------------------------
@@ -182,6 +190,81 @@ class PokerBot:
             return 1.3
         if adj.get('bluff_freq') == 'low':
             return 0.7
+        return 1.0
+
+    def _preflop_reasoning(
+        self,
+        hole_cards: List[Card],
+        position: str,
+        facing_action: str,
+        action_str: str,
+    ) -> str:
+        from ..strategy.preflop import _hand_category, _3BET_VALUE, _3BET_BLUFF
+        cat = _hand_category(hole_cards)
+        eq = f"胜率{self._last_equity:.0%}"
+        facing_cn = {"none": "无开牌", "open": "面对开加", "3bet": "面对3bet", "4bet": "面对4bet"}
+        facing = facing_cn.get(facing_action, facing_action)
+
+        if action_str == "raise":
+            if facing_action == "none":
+                return f"{cat}  {position}  {facing} → 在范围内，标准开加  {eq}"
+            elif facing_action == "open":
+                kind = "3bet价值" if cat in _3BET_VALUE else "3bet诈唬（阻挡强牌）"
+                return f"{cat}  {facing} → {kind}  {eq}"
+            elif facing_action == "3bet":
+                return f"{cat}  {facing} → 4bet价值  {eq}"
+            else:
+                return f"{cat}  {facing} → 5bet全押  {eq}"
+        elif action_str == "call":
+            return f"{cat}  {position}  {facing} → 跟注（范围内或防守）  {eq}"
+        else:
+            return f"{cat}  {position}  {facing} → 不在范围，弃牌  {eq}"
+
+    def _postflop_reasoning(
+        self,
+        equity: float,
+        is_ip: bool,
+        facing_bet: bool,
+        to_call: float,
+        pot: float,
+        opp_fold_rate: float,
+        board: List[Card],
+        action_str: str,
+    ) -> str:
+        from ..strategy.postflop import BoardTexture
+        texture = BoardTexture(board)
+        tex = "干燥" if texture.is_dry else ("湿润" if texture.is_wet else "中性")
+        pos = "有位置" if is_ip else "无位置"
+        eq = f"胜率{equity:.0%}"
+        pot_odds = to_call / (pot + to_call) if to_call > 0 else 0.0
+
+        if action_str == "raise":
+            if facing_bet:
+                role = "IP价值加注，建底池" if is_ip else "check-raise价值/诈唬"
+                return f"{eq}  {tex}牌面  {pos}  面对下注 → {role}"
+            else:
+                if equity >= 0.90:
+                    return f"{eq}  {tex}牌面  {pos}  面对过牌 → 强牌价值下注"
+                elif equity >= 0.70:
+                    return f"{eq}  {tex}牌面  {pos}  面对过牌 → 价值持续下注"
+                elif equity >= 0.30:
+                    return f"{eq}  {tex}牌面  {pos}  面对过牌 → 半诈唬（有摸牌出路）"
+                else:
+                    return f"{eq}  折叠率{opp_fold_rate:.0%}  面对过牌 → 纯诈唬"
+        elif action_str == "call":
+            return f"{eq} > 底池赔率{pot_odds:.0%}  {pos} → 跟注（有利赔率）"
+        elif action_str == "check":
+            if equity >= 0.85:
+                return f"{eq}  强牌  面对过牌 → 慢打，保护过牌范围"
+            else:
+                return f"{eq}  {tex}牌面  {pos}  面对过牌 → 无注理由，过牌"
+        else:  # fold
+            return f"{eq} < 底池赔率{pot_odds:.0%}  {pos}  面对下注 → 无足够赔率，弃牌"
+
+    def _compute_value_mult(self, adj: dict) -> float:
+        """Bet-size multiplier: larger vs calling stations, normal otherwise."""
+        if adj.get('value_sizing') == 'large':
+            return 1.30   # 30% larger value bets vs calling stations / fish
         return 1.0
 
     def _to_action(self, action_str: str, amount: float, to_call: float, stack: float) -> Action:
@@ -246,3 +329,7 @@ class PokerBot:
     @property
     def last_equity(self) -> float:
         return self._last_equity
+
+    @property
+    def last_reasoning(self) -> str:
+        return self._last_reasoning

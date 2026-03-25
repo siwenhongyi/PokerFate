@@ -231,6 +231,7 @@ class PokerLogger:
         pot: float,
         to_call: float,
         bot_name: str = "PokerFate",
+        reasoning: str = "",
     ):
         """Log the bot's own decision."""
         self._file({
@@ -265,6 +266,8 @@ class PokerLogger:
 
         line = f"  ► {bot_name:<12}  {action_col:<14}  {eq_str}   {pot_str}"
         self._raw(line, color=color, bold=True)
+        if reasoning:
+            self._raw(f"      💭 {reasoning}", dim=True)
 
     def hand_result(
         self,

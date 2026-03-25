@@ -72,6 +72,7 @@ class PostflopStrategy:
     def __init__(self, aggression: float = 1.0):
         """aggression: multiplier on betting frequencies. 1.0 = balanced GTO."""
         self.aggression = aggression
+        self.value_mult = 1.0   # bet-size multiplier for exploitative value sizing
         self.gto = GTOMath()
 
     def should_cbet(
@@ -79,11 +80,16 @@ class PostflopStrategy:
         equity: float,
         board: BoardTexture,
         is_ip: bool,
-        street: str,  # 'flop', 'turn', 'river'
+        street: str,
         num_opponents: int = 1,
         opponent_fold_rate: float = 0.45,
     ) -> bool:
         """Decide whether to make a continuation bet."""
+        # Monster hand: mostly bet, but check 20% to protect checking range
+        # (prevents opponent from always knowing we're weak when we check)
+        if equity >= 0.90:
+            return random.random() < (0.80 * self.aggression)
+
         # Strong hand: almost always bet
         if equity >= 0.70:
             return True
@@ -94,13 +100,10 @@ class PostflopStrategy:
 
         # Semi-bluff zone: bet with fold equity
         if 0.30 <= equity <= 0.65:
-            # Reduce frequency on wetter boards (more likely opponent has equity)
             freq = 0.65 if board.is_dry else 0.45
             freq *= self.aggression
-            # Positional adjustment
             if not is_ip:
                 freq *= 0.85
-            # Multi-way: significantly reduce bluffing
             if num_opponents > 1:
                 freq *= (0.6 ** (num_opponents - 1))
             return random.random() < freq
@@ -127,25 +130,25 @@ class PostflopStrategy:
         min_bet = big_blind
 
         if street == 'river':
-            # River: polarize — either bet big or small
             if equity >= 0.80:
                 frac = 0.75
             elif equity >= 0.60:
                 frac = 0.5
             else:
-                # Bluff: use board-appropriate size
                 frac = 0.66 if board.is_wet else 0.5
         elif street == 'turn':
-            # Turn: usually bet bigger than flop
             if equity >= 0.75:
                 frac = 0.75
             else:
                 frac = 0.6
         else:
-            # Flop: use board texture recommendation
+            # Flop
             frac = board.recommended_cbet_size_fraction()
             if equity >= 0.85:
-                frac = min(frac * 1.3, 1.0)  # Slightly larger with monster
+                frac = min(frac * 1.3, 1.0)
+
+        # Apply value sizing multiplier (from exploit adjustments)
+        frac = min(frac * self.value_mult, 1.5)  # cap at 150% pot (overbet territory)
 
         return GTOMath.pot_fraction_bet(frac, pot, min_bet, stack)
 
@@ -159,9 +162,9 @@ class PostflopStrategy:
         if is_ip:
             return False  # Check-raise is an OOP move
         if equity >= 0.80:
-            return random.random() < 0.5  # Slowplay vs fast-play mix
+            return random.random() < 0.5
         if equity >= 0.60 and board.is_wet:
-            return random.random() < 0.35  # Semi-bluff check-raise
+            return random.random() < 0.35
         return False
 
     def should_call(
@@ -171,12 +174,15 @@ class PostflopStrategy:
         implied_odds_bonus: float = 0.05,
         spr: float = 5.0,
     ) -> bool:
-        """Decide whether to call given equity and pot odds.
-
-        implied_odds_bonus: extra equity credit for draws with good implied odds.
-        """
         effective_equity = equity + (implied_odds_bonus if spr > 3 else 0)
         return effective_equity >= pot_odds
+
+    def _raise_size(self, to_call: float, pot: float, stack: float) -> float:
+        """Standard raise size when facing a bet: roughly 2.5-3x opponent's bet,
+        but at least proportional to the pot."""
+        # Raise to: call amount + ~75% of pot (total raise is well-sized vs pot)
+        size = max(to_call * 2.5, to_call + pot * 0.75)
+        return min(size, stack)
 
     def decide(
         self,
@@ -208,9 +214,18 @@ class PostflopStrategy:
                     return ('call', to_call)
                 return ('fold', 0.0)
 
-            # Check-raise?
+            # IP value raise: strong hands raise for value instead of just calling
+            # This was the key missing piece — IP had no raise option facing a bet
+            if is_ip and equity >= 0.75 and to_call < stack * 0.8:
+                raise_prob = 0.40 if equity >= 0.85 else 0.22
+                raise_prob *= self.aggression
+                if random.random() < raise_prob:
+                    raise_size = self._raise_size(to_call, pot, stack)
+                    return ('raise', raise_size)
+
+            # OOP check-raise (pot-based sizing, not to_call*3)
             if not is_ip and self.should_check_raise(equity, texture, is_ip):
-                raise_size = min(to_call * 3.0, stack)
+                raise_size = self._raise_size(to_call, pot, stack)
                 return ('raise', raise_size)
 
             # Call or fold

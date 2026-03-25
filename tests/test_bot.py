@@ -100,6 +100,79 @@ class TestBotDecisions:
         # 72o on AKQJs9 board with large bet should fold
         assert action.action_type == ActionType.FOLD
 
+    def test_ip_raise_facing_bet_with_strong_hand(self):
+        """IP bot with strong hand facing a bet should sometimes raise (not only call)."""
+        bot = PokerBot(equity_iterations=400)
+        actions = set()
+        for _ in range(60):
+            p0 = Player(0, 'Hero', 200.0, cards('Ac', 'Ad'))
+            p0.current_bet = 0.0
+            p1 = Player(1, 'Villain', 200.0, cards('7c', '2d'))
+            p1.current_bet = 10.0
+            gs = GameState(
+                players=[p0, p1],
+                dealer_pos=0,          # p0 is dealer = IP
+                street=Street.FLOP,
+                board=cards('As', 'Kd', '2c'),
+                pot=30.0,
+                current_bet=10.0,
+                big_blind=2.0,
+                current_player_idx=0,
+            )
+            action = bot.decide(gs, player_id=0)
+            actions.add(action.action_type)
+        # Over 60 trials with strong hand IP, should see both CALL and RAISE
+        assert ActionType.RAISE in actions, "IP strong hand should raise sometimes"
+        assert ActionType.FOLD not in actions, "IP strong hand should never fold"
+
+    def test_raise_size_ip_is_larger_than_call(self):
+        """When IP raises facing a bet, raise amount must exceed to_call."""
+        bot = PokerBot(equity_iterations=400)
+        for _ in range(30):
+            p0 = Player(0, 'Hero', 200.0, cards('Ac', 'Ad'))
+            p0.current_bet = 0.0
+            p1 = Player(1, 'Villain', 200.0, cards('7c', '2d'))
+            p1.current_bet = 10.0
+            gs = GameState(
+                players=[p0, p1],
+                dealer_pos=0,
+                street=Street.FLOP,
+                board=cards('As', 'Kd', '2c'),
+                pot=30.0,
+                current_bet=10.0,
+                big_blind=2.0,
+                current_player_idx=0,
+            )
+            action = bot.decide(gs, player_id=0)
+            if action.action_type == ActionType.RAISE:
+                assert action.amount > 10.0, "Raise amount must exceed to_call"
+                assert action.amount <= 200.0, "Cannot raise more than stack"
+
+    def test_monster_check_frequency(self):
+        """Strong hand (equity ~98%) should occasionally check (slowplay) when not facing a bet."""
+        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+        from pokerfate.core.card import Card
+        strategy = PostflopStrategy(aggression=1.0)
+        board = [Card.from_str(c) for c in ['2d', '7h', 'Jc']]
+        checks = sum(
+            1 for _ in range(200)
+            if not strategy.should_cbet(0.98, BoardTexture(board), True, 'flop')
+        )
+        # ~20% of the time should check; expect between 5% and 40%
+        assert 10 <= checks <= 80, f"Monster check frequency out of range: {checks}/200"
+
+    def test_value_mult_increases_bet_size(self):
+        """value_mult > 1.0 should produce larger bets."""
+        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+        from pokerfate.core.card import Card
+        board = [Card.from_str(c) for c in ['2d', '7h', 'Jc']]
+        texture = BoardTexture(board)
+        s1 = PostflopStrategy(); s1.value_mult = 1.0
+        s2 = PostflopStrategy(); s2.value_mult = 1.3
+        size1 = s1.bet_size(0.85, 100.0, texture, 200.0, 'flop', 2.0)
+        size2 = s2.bet_size(0.85, 100.0, texture, 200.0, 'flop', 2.0)
+        assert size2 > size1
+
     def test_bot_does_not_crash_any_street(self):
         bot = PokerBot(equity_iterations=200)
         for street, board in [
