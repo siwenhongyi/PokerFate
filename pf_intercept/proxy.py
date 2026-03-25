@@ -464,13 +464,47 @@ async def _handle_wss(client_ws) -> None:
 
     req = getattr(client_ws, "request", None)
     path = (req.path if req else None) or "/"
+    req_headers = getattr(req, "headers", None)
+
+    def _hdr(name: str) -> str | None:
+        if req_headers is None:
+            return None
+        try:
+            v = req_headers.get(name)
+            if v is not None:
+                return str(v)
+        except Exception:
+            pass
+        return None
+
+    # Forward client handshake hints to upstream to reduce fingerprint mismatch.
+    # Skip protocol-managed headers (Host/Upgrade/Connection/Sec-WebSocket-* framing keys).
+    additional_headers: dict[str, str] = {}
+    for name in ("Origin", "Cookie", "Authorization", "Accept-Language", "Pragma", "Cache-Control"):
+        v = _hdr(name)
+        if v:
+            additional_headers[name] = v
+
+    # user_agent_header has a dedicated parameter; avoid duplicate UA headers.
+    user_agent_header = _hdr("User-Agent")
+
+    # Pass through requested subprotocols via dedicated argument.
+    subprotocols: list[str] | None = None
+    proto_hdr = _hdr("Sec-WebSocket-Protocol")
+    if proto_hdr:
+        parsed = [p.strip() for p in proto_hdr.split(",") if p.strip()]
+        if parsed:
+            subprotocols = parsed
     # Keep URI host as domain so websockets sends the correct HTTP Host header.
     # Override TCP destination with resolved IP to avoid local hosts-loopback.
     upstream_uri = f"wss://{_real_server_sni}:{SERVER_WSS_PORT}{path}"
     tcp_target = _real_server_ip or _real_server_sni
     log.info(
-        "[WSS] client connected, path=%s → %s (tcp=%s:%d, sni=%s)",
-        path, upstream_uri, tcp_target, SERVER_WSS_PORT, _real_server_sni
+        "[WSS] client connected, path=%s → %s (tcp=%s:%d, sni=%s, fwd_headers=%s, subprotocols=%s, ua=%s)",
+        path, upstream_uri, tcp_target, SERVER_WSS_PORT, _real_server_sni,
+        sorted(additional_headers.keys()),
+        subprotocols,
+        bool(user_agent_header),
     )
     try:
         async with websockets.connect(
@@ -479,6 +513,9 @@ async def _handle_wss(client_ws) -> None:
             port=SERVER_WSS_PORT,
             ssl=client_ssl,
             server_hostname=_real_server_sni,
+            additional_headers=additional_headers or None,
+            subprotocols=subprotocols,
+            user_agent_header=user_agent_header,
             ping_interval=20, ping_timeout=10, open_timeout=15,
         ) as upstream_ws:
             server_ws = upstream_ws
