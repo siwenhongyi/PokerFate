@@ -12,8 +12,10 @@ Card encoding (GFunctions.lua / config.lua):
   num  : 2='2' … 14='A'
   suit : 1='d'(方块)  2='c'(梅花)  3='h'(红桃)  4='s'(黑桃)
 
-action_type (game wire):
-  1=Fold  2=Check  3=Call  4=Raise/Bet  5=All-in
+action_type (game wire; from client EnumConfig.POKER_ACTION):
+  0=NONE  1=FOLD  2=CHECK  3=CALL  4=RAISE
+  5=WAIT  6=SITED  7=BET  8=SB  9=BB  10=ANTE  11=FORCE_BB
+  12=SYS_FOLD  13=SYS_CHECK  14=STRADDLE  15=(reserved)  16=LEAVE_FOLD  17=ALLIN
 
 stage (RoundStartBRC):
   1=Preflop  2=Flop  3=Turn  4=River
@@ -24,6 +26,7 @@ import logging
 
 from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
 from pf_intercept import config
+from pf_intercept.action_types import ACTION_TYPE_TO_EVENT_ACTION, FOLD_ACTION_TYPES
 
 log = logging.getLogger("pf_bot")
 
@@ -52,7 +55,6 @@ def _card_str(code: int) -> str | None:
 # ── Constants ──────────────────────────────────────────────────────────────────
 
 _STAGE_TO_STREET = {1: "preflop", 2: "flop", 3: "turn", 4: "river"}
-_ACTION_STR      = {1: "fold", 2: "check", 3: "call", 4: "raise", 5: "raise"}
 
 
 def _chip_int(value, default: int = 0) -> int:
@@ -312,7 +314,7 @@ class BotBridge:
         if seat < 0:
             return
 
-        if action_type == 1:
+        if action_type in FOLD_ACTION_TYPES:
             self._folded.add(seat)
 
         self._pot     += chips
@@ -331,7 +333,11 @@ class BotBridge:
 
         if self._api is None:
             return
-        action_str = _ACTION_STR.get(action_type, "fold")
+        action_str = ACTION_TYPE_TO_EVENT_ACTION.get(action_type)
+        if action_str is None:
+            if action_type not in ACTION_TYPE_TO_EVENT_ACTION:
+                log.warning("[BOT] Unknown action_type=%s in ActionBRC; skipped", action_type)
+            return
         street     = _STAGE_TO_STREET.get(self._stage, "preflop")
         self._api.notify_action(ActionEvent(
             player_id=seat,
