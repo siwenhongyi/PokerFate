@@ -84,18 +84,39 @@ class PostflopStrategy:
         num_opponents: int = 1,
         opponent_fold_rate: float = 0.45,
     ) -> bool:
-        """Decide whether to make a continuation bet."""
+        """Decide whether to make a continuation bet.
+
+        Improvements based on Pluribus/Libratus research:
+        - River: delegate to _should_river_bet (no semi-bluffs — no draws to realize)
+        - Value threshold lowered 0.70 → 0.65 (capture thin value hands like AQ/top-pair)
+        - Multiway (3+ opponents): semi-bluff requires equity >= 0.45 floor
+          (Pluribus: fold equity drops sharply in multi-way pots)
+        """
+        # ── River: separate logic (no semi-bluffs, pure value or fold-equity bluff) ──
+        if street == 'river':
+            return self._should_river_bet(equity, is_ip, num_opponents, opponent_fold_rate)
+
         # Monster hand: mostly bet, but check 20% to protect checking range
-        # (prevents opponent from always knowing we're weak when we check)
         if equity >= 0.90:
             return random.random() < (0.80 * self.aggression)
 
-        # Strong hand: almost always bet
-        if equity >= 0.70:
-            return True
+        # Strong / thin-value hand: lower threshold from 0.70 → 0.65
+        # Fixes: AQ top-pair (62-65% equity) was treated as semi-bluff and checked too often
+        if equity >= 0.65:
+            if num_opponents <= 1:
+                return True
+            # Multiway: still bet value, but reduce frequency (harder to isolate)
+            # 3-way: 85%, 4-way: 75%, 5-way: 65%
+            freq = max(0.55, 0.95 - 0.10 * (num_opponents - 1))
+            return random.random() < (freq * self.aggression)
 
         # Very weak hand (no equity, no fold equity): give up
         if equity < 0.20 and opponent_fold_rate < 0.40:
+            return False
+
+        # Multiway semi-bluff floor: need meaningful equity to barrel into multiple opponents
+        # (Pluribus insight: EV of bluffing drops sharply as player count increases)
+        if num_opponents >= 2 and equity < 0.45:
             return False
 
         # Semi-bluff zone: bet with fold equity
@@ -117,6 +138,49 @@ class PostflopStrategy:
             freq_base *= (0.5 ** (num_opponents - 1))
         return random.random() < freq_base
 
+    def _should_river_bet(
+        self,
+        equity: float,
+        is_ip: bool,
+        num_opponents: int,
+        opponent_fold_rate: float,
+    ) -> bool:
+        """River betting: value or pure fold-equity bluff only.
+
+        On the river there are no draws left to realize — 'semi-bluff' is
+        a contradiction in terms. This mirrors the GTO river betting principle
+        from The Mathematics of Poker (Chen & Ankenman): optimal river strategy
+        is polarized (strong value hands + pure bluffs), not merged.
+
+        Value threshold:
+          equity >= 0.70 → always bet
+          equity >= 0.60 → bet most of the time (thin value)
+          equity >= 0.50 → occasional merge bet in HU, skip multiway
+
+        Bluff threshold:
+          Only when equity < 0.35 (no showdown value), HU, and fold equity
+          exceeds the GTO break-even fold rate for a ~66% pot bluff (~40%).
+        """
+        # Strong value
+        if equity >= 0.70:
+            return True
+        if equity >= 0.60:
+            return random.random() < (0.80 * self.aggression)
+        # Thin value / merge — only heads-up
+        if equity >= 0.50:
+            if num_opponents > 1:
+                return False
+            return random.random() < (0.45 * self.aggression)
+
+        # Pure bluff: need genuine fold equity
+        # GTO break-even for 66% pot bluff ≈ 0.40 fold rate
+        if equity < 0.35 and num_opponents == 1:
+            if opponent_fold_rate > 0.40:
+                bluff_freq = min(self.aggression * 0.28, 0.35)
+                return random.random() < bluff_freq
+
+        return False
+
     def bet_size(
         self,
         equity: float,
@@ -126,29 +190,68 @@ class PostflopStrategy:
         street: str,
         big_blind: float,
     ) -> float:
-        """Determine bet size given equity and board texture."""
+        """Determine bet size using action abstraction.
+
+        Inspired by OpenSpiel (DeepMind) and Libratus/Pluribus:
+        - Use a discrete menu of pot fractions per street instead of a
+          single deterministic size.
+        - Mix between sizes within each hand-strength tier — this prevents
+          opponents from reverse-engineering hand strength from bet size alone.
+        - Bluffs use the same size distribution as thin value bets
+          (size-based tells are a major exploitable leak in rule-based bots).
+        - River adds a polarized overbet option for near-nut hands.
+
+        Typical action abstractions used in academic poker AI:
+          Flop:  [1/3, 1/2, 3/4] pot
+          Turn:  [1/2, 2/3, 3/4] pot
+          River: [1/2, 3/4, 1x, 5/4] pot (more polarized)
+        """
         min_bet = big_blind
 
         if street == 'river':
-            if equity >= 0.80:
-                frac = 0.75
-            elif equity >= 0.60:
-                frac = 0.5
+            if equity >= 0.85:
+                # Near-nut: polarized — mix pot-size and overbet
+                frac = random.choices([0.75, 1.0, 1.25], weights=[0.35, 0.45, 0.20])[0]
+            elif equity >= 0.65:
+                # Strong value: 3/4 or full pot
+                frac = random.choices([0.66, 0.75, 1.0], weights=[0.30, 0.45, 0.25])[0]
+            elif equity >= 0.50:
+                # Thin value: 1/2 pot (low commitment, still extracting)
+                frac = 0.50
             else:
-                frac = 0.66 if board.is_wet else 0.5
+                # Bluff: same size distribution as thin value (no sizing tell)
+                frac = random.choices([0.50, 0.66], weights=[0.60, 0.40])[0]
+
         elif street == 'turn':
             if equity >= 0.75:
-                frac = 0.75
+                # Strong: mix 2/3 and 3/4 — build pot without committing all
+                frac = random.choices([0.66, 0.75], weights=[0.45, 0.55])[0]
+            elif equity >= 0.50:
+                # Protection / semi-bluff: 1/2 to 2/3
+                frac = random.choices([0.50, 0.66], weights=[0.55, 0.45])[0]
             else:
-                frac = 0.6
-        else:
-            # Flop
-            frac = board.recommended_cbet_size_fraction()
-            if equity >= 0.85:
-                frac = min(frac * 1.3, 1.0)
+                # Thin semi-bluff: smaller to risk less
+                frac = 0.50
 
-        # Apply value sizing multiplier (from exploit adjustments)
-        frac = min(frac * self.value_mult, 1.5)  # cap at 150% pot (overbet territory)
+        else:
+            # Flop — board texture drives sizing more than equity
+            if equity >= 0.80:
+                # Strong flop hand: larger to build pot fast
+                frac = random.choices([0.66, 0.75], weights=[0.50, 0.50])[0]
+            elif equity >= 0.55:
+                # Standard value / semi-bluff: board-texture driven
+                base = board.recommended_cbet_size_fraction()
+                # Mix a size above and below the recommended to obscure range
+                frac = random.choices(
+                    [max(0.25, base - 0.15), base, min(1.0, base + 0.20)],
+                    weights=[0.25, 0.50, 0.25]
+                )[0]
+            else:
+                # Weak semi-bluff: small size (cheap to barrel, low commitment)
+                frac = random.choices([0.33, 0.50], weights=[0.55, 0.45])[0]
+
+        # Apply value sizing multiplier (exploit adjustment vs calling stations)
+        frac = min(frac * self.value_mult, 1.5)
 
         return GTOMath.pot_fraction_bet(frac, pot, min_bet, stack)
 

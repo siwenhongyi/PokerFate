@@ -238,3 +238,159 @@ class TestGameEngine:
     def test_many_hands_no_error(self):
         engine = self._build_engine()
         engine.play_session(100)  # Should not raise
+
+
+# ---------------------------------------------------------------------------
+# Range Estimator Tests (Libratus-inspired range compression)
+# ---------------------------------------------------------------------------
+
+class TestRangeEstimator:
+    """Unit tests for HandRangeEstimator — core innovation from Libratus."""
+
+    def setup_method(self):
+        from pokerfate.strategy.range_estimator import HandRangeEstimator
+        self.est = HandRangeEstimator()
+
+    def test_reset_sets_prior(self):
+        self.est.reset_hand(1, prior_range=0.30)
+        assert abs(self.est.get_range_fraction(1) - 0.30) < 0.01
+
+    def test_bet_compresses_range(self):
+        self.est.reset_hand(1, prior_range=0.40)
+        self.est.observe_action(1, 'raise', 'flop')
+        # After one bet, range should be meaningfully smaller
+        assert self.est.get_range_fraction(1) < 0.30
+
+    def test_three_streets_aggression_heavy_compression(self):
+        """3 streets of betting: range drops well below 0.10."""
+        self.est.reset_hand(1, prior_range=0.40)
+        for street in ('flop', 'turn', 'river'):
+            self.est.observe_action(1, 'raise', street)
+        # 0.40 * 0.45^3 ≈ 0.036
+        assert self.est.get_range_fraction(1) < 0.10
+
+    def test_discount_decreases_with_compression(self):
+        """More streets bet → smaller discount factor → lower effective equity."""
+        self.est.reset_hand(1, prior_range=0.40)
+        d0 = self.est.get_discount(1)
+        self.est.observe_action(1, 'raise', 'flop')
+        d1 = self.est.get_discount(1)
+        self.est.observe_action(1, 'raise', 'turn')
+        d2 = self.est.get_discount(1)
+        assert d0 > d1 > d2
+
+    def test_effective_equity_lower_after_pressure(self):
+        """After 3 streets of pressure, effective equity < raw equity."""
+        raw = 0.41
+        self.est.reset_hand(1, prior_range=0.40)
+        for s in ('flop', 'turn', 'river'):
+            self.est.observe_action(1, 'raise', s)
+        eff = self.est.effective_equity(1, raw)
+        assert eff < raw
+        # After 3 streets pressure, discount is significant (< 0.65)
+        assert eff < raw * 0.70
+
+    def test_streets_bet_counter(self):
+        """streets_bet counts streets with aggression, not total actions."""
+        self.est.reset_hand(1, prior_range=0.35)
+        assert self.est.streets_bet(1) == 0
+        self.est.observe_action(1, 'raise', 'flop')
+        self.est.observe_action(1, 'raise', 'flop')  # same street, shouldn't double-count
+        assert self.est.streets_bet(1) == 1
+        self.est.observe_action(1, 'raise', 'turn')
+        assert self.est.streets_bet(1) == 2
+
+    def test_reset_clears_compression(self):
+        """new_hand resets all state; discount returns to prior level."""
+        self.est.reset_hand(1, prior_range=0.35)
+        d_prior = self.est.get_discount(1)  # ~0.81 for prior=0.35
+        for s in ('flop', 'turn', 'river'):
+            self.est.observe_action(1, 'raise', s)
+        # Should be significantly compressed
+        assert self.est.get_discount(1) < 0.70
+        # New hand: should return to prior level
+        self.est.reset_hand(1, prior_range=0.35)
+        assert self.est.get_discount(1) >= d_prior - 0.01
+
+    def test_worst_discount_picks_most_aggressive_opponent(self):
+        """worst_discount picks min discount (most compressed opponent)."""
+        self.est.reset_hand(1, prior_range=0.35)
+        self.est.reset_hand(2, prior_range=0.35)
+        # Opponent 1 bets 2 streets, opponent 2 only checks
+        self.est.observe_action(1, 'raise', 'flop')
+        self.est.observe_action(1, 'raise', 'turn')
+        self.est.observe_action(2, 'check', 'flop')
+        d = self.est.worst_discount([1, 2])
+        assert d == self.est.get_discount(1)  # should pick the more compressed one
+        assert d < self.est.get_discount(2)
+
+
+class TestRiverBetLogic:
+    """Verify river betting uses pure value/bluff logic, no semi-bluffs."""
+
+    def test_river_strong_hand_bets(self):
+        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+        strategy = PostflopStrategy()
+        board = [card(c) for c in ['As', 'Kd', '2c', '7h', 'Jc']]
+        # Strong hand on river: should bet
+        results = [strategy.should_cbet(0.80, BoardTexture(board), True, 'river')
+                   for _ in range(50)]
+        assert sum(results) >= 45  # almost always bet
+
+    def test_river_medium_equity_semi_bluff_suppressed(self):
+        """0.40 equity on river: should NOT bet frequently (no draws, just a bluff)."""
+        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+        strategy = PostflopStrategy()
+        board = [card(c) for c in ['As', 'Kd', '2c', '7h', 'Jc']]
+        # 40% equity on river = no draws, no semi-bluff justification
+        results = [strategy.should_cbet(0.40, BoardTexture(board), True, 'river',
+                                        opponent_fold_rate=0.35)
+                   for _ in range(100)]
+        # Should almost never bet (opponent fold rate too low for pure bluff)
+        assert sum(results) <= 20
+
+    def test_river_pure_bluff_with_fold_equity(self):
+        """Low equity + high fold rate on river: allow some pure bluffs."""
+        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+        strategy = PostflopStrategy()
+        board = [card(c) for c in ['As', 'Kd', '2c', '7h', 'Jc']]
+        results = [strategy.should_cbet(0.15, BoardTexture(board), True, 'river',
+                                        opponent_fold_rate=0.60)
+                   for _ in range(200)]
+        # Should bluff sometimes (fold equity is profitable), but not always
+        assert 5 <= sum(results) <= 90
+
+
+class TestMultiwayBetting:
+    """Verify multiway pot c-bet tightening (Pluribus: fold equity drops in multiway)."""
+
+    def test_weak_hand_not_bet_3way(self):
+        """35% equity hand: should never c-bet into 3 opponents."""
+        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+        strategy = PostflopStrategy()
+        board = [card(c) for c in ['As', 'Kd', '2c']]
+        results = [strategy.should_cbet(0.35, BoardTexture(board), True, 'flop',
+                                        num_opponents=3)
+                   for _ in range(100)]
+        assert sum(results) == 0  # equity < 0.45 multiway floor → never bet
+
+    def test_value_hand_still_bets_multiway(self):
+        """70%+ equity: should still bet even multiway (just with lower frequency)."""
+        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+        strategy = PostflopStrategy()
+        board = [card(c) for c in ['As', 'Kd', '2c']]
+        results = [strategy.should_cbet(0.75, BoardTexture(board), True, 'flop',
+                                        num_opponents=3)
+                   for _ in range(100)]
+        assert sum(results) >= 40  # still bets majority of time with strong hand
+
+    def test_thin_value_bets_more_hu_than_multiway(self):
+        """65% equity: bets more heads-up than 4-way."""
+        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+        strategy = PostflopStrategy()
+        board = [card(c) for c in ['As', 'Kd', '2c']]
+        hu = sum(strategy.should_cbet(0.65, BoardTexture(board), True, 'flop',
+                                      num_opponents=1) for _ in range(200))
+        mw = sum(strategy.should_cbet(0.65, BoardTexture(board), True, 'flop',
+                                      num_opponents=3) for _ in range(200))
+        assert hu > mw

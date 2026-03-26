@@ -14,7 +14,6 @@ Traffic flow:
 """
 
 import asyncio
-import json
 import logging
 import logging.handlers
 import socket
@@ -27,7 +26,7 @@ import websockets.exceptions
 
 from pf_intercept.config import (
     PROXY_HOST, WSS_PORT, PASSTHROUGH_PORTS,
-    SERVER_HOST, SERVER_WSS_PORT, REAL_SERVER_URI, EXTERNAL_DNS_SERVERS,
+    SERVER_HOST, SERVER_WSS_PORT, EXTERNAL_DNS_SERVERS,
     SERVER_CERT, SERVER_KEY,
     WATCH_S2C, WATCH_C2S,
     PREFERRED_WSS_HOSTS,
@@ -70,19 +69,11 @@ log = logging.getLogger("pf_proxy")
 _bot = BotBridge()
 log.info("[BOT] Waiting for SitDownRSP and EnterRoomRSP to detect seat / blinds")
 
-# ── Dynamic server discovery ──────────────────────────────────────────────────
-# Written by force_domain.py (mitmweb addon) when it intercepts the login response.
-# Proxy reads this to learn the actual WSS server, then resolves via external DNS
-# to bypass the local hosts-file redirect.
-_DISCOVERED_FILE = Path(__file__).parent / "discovered_server.json"
-
-_real_server_uri: str = REAL_SERVER_URI   # updated in _init_real_server()
-_real_server_sni: str = SERVER_HOST       # TLS SNI hostname
-_real_server_ip:  str = ""               # resolved real IP for passthrough
+# ── Server state ──────────────────────────────────────────────────────────────
+_real_server_sni: str = SERVER_HOST       # fallback SNI when Host header is absent
 _host_ok_ip_cache: dict[str, str] = {}
 _host_dns_cache: dict[str, list[str]] = {}
 _host_connect_locks: dict[str, asyncio.Lock] = {}
-_PREFERRED_WSS_HOSTS = set(PREFERRED_WSS_HOSTS)
 
 
 def _get_host_lock(hostname: str) -> asyncio.Lock:
@@ -124,33 +115,6 @@ def _dns_query_a(hostname: str, nameserver: str) -> list[str]:
         sock.close()
     return ips
 
-
-def _probe_wss_endpoint(ip: str, port: int, sni_host: str) -> bool:
-    """
-    Probe whether endpoint responds like an HTTPS/WSS server.
-    """
-    req = (
-        "GET / HTTP/1.1\r\n"
-        f"Host: {sni_host}\r\n"
-        "Upgrade: websocket\r\n"
-        "Connection: Upgrade\r\n"
-        "Sec-WebSocket-Key: SGVsbG9XZWJTb2NrZXQ=\r\n"
-        "Sec-WebSocket-Version: 13\r\n\r\n"
-    ).encode("ascii")
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
-    try:
-        with socket.create_connection((ip, port), timeout=3.0) as raw_sock:
-            with ctx.wrap_socket(raw_sock, server_hostname=sni_host) as tls_sock:
-                tls_sock.settimeout(3.0)
-                tls_sock.sendall(req)
-                head = tls_sock.recv(32)
-                return head.startswith(b"HTTP/1.")
-    except Exception as exc:
-        log.debug("[PROBE] %s:%d (%s) rejected: %s", ip, port, sni_host, exc)
-        return False
 
 
 def _extract_sni_hostname(data: bytes) -> str | None:
@@ -321,59 +285,6 @@ async def _connect_first_success(ips: list[str], port: int, timeout: float) -> t
                 t.cancel()
 
 
-def _init_real_server() -> None:
-    """Resolve the real server URI, bypassing local hosts/dnsmasq."""
-    global _real_server_uri, _real_server_sni, _real_server_ip
-
-    host, port = SERVER_HOST, SERVER_WSS_PORT
-
-    # 1. Check if force_domain.py wrote a discovered server
-    if _DISCOVERED_FILE.exists():
-        try:
-            info = json.loads(_DISCOVERED_FILE.read_text())
-            server_host_url = info.get("server_host", "")
-            url = server_host_url.replace("wss://", "").replace("ws://", "")
-            parts = url.split(":")
-            discovered_host = parts[0]
-            discovered_port = int(parts[1]) if len(parts) > 1 else SERVER_WSS_PORT
-            if discovered_host in _PREFERRED_WSS_HOSTS:
-                host = discovered_host
-                port = discovered_port
-                log.info("[SERVER] Using discovered server: %s:%d", host, port)
-            else:
-                log.warning(
-                    "[SERVER] Ignoring discovered non-preferred host: %s:%d",
-                    discovered_host, discovered_port
-                )
-        except Exception as exc:
-            log.warning("[SERVER] Could not read discovered_server.json: %s", exc)
-
-    # 2. Resolve host → real IP via external DNS servers (bypass hosts file)
-    ip = None
-    used_dns = None
-    for dns in EXTERNAL_DNS_SERVERS:
-        candidates = _dns_query_a(host, dns)
-        if not candidates:
-            continue
-        log.info("[DNS] %s -> %s via %s", host, candidates, dns)
-        for candidate_ip in candidates:
-            if _probe_wss_endpoint(candidate_ip, port, host):
-                ip = candidate_ip
-                used_dns = dns
-                break
-        if ip:
-            break
-    if ip:
-        log.info("[SERVER] Resolved %s → %s via %s", host, ip, used_dns)
-        _real_server_uri = f"wss://{ip}:{port}"
-        _real_server_sni = host
-        _real_server_ip  = ip
-    else:
-        raise RuntimeError(
-            "[SERVER] DNS resolution failed for "
-            f"{host}. Refusing hostname fallback to avoid hosts-loopback."
-        )
-
 
 # ── SSL contexts ──────────────────────────────────────────────────────────────
 
@@ -496,45 +407,78 @@ async def _handle_wss(client_ws) -> None:
                     continue
                 additional_headers.append((str(name), str(value)))
         except Exception:
-            # Best effort only; if request headers are unavailable, continue safely.
             additional_headers = []
 
-    # Pass through requested subprotocols via dedicated argument.
     subprotocols: list[str] | None = None
     proto_hdr = _hdr("Sec-WebSocket-Protocol")
     if proto_hdr:
         parsed = [p.strip() for p in proto_hdr.split(",") if p.strip()]
         if parsed:
             subprotocols = parsed
-    # Keep URI host as domain so websockets sends the correct HTTP Host header.
-    # Override TCP destination with resolved IP to avoid local hosts-loopback.
-    upstream_uri = f"wss://{_real_server_sni}:{SERVER_WSS_PORT}{path}"
-    tcp_target = _real_server_ip or _real_server_sni
+
+    # Upstream domain: read from client Host header (supports all PREFERRED_WSS_HOSTS),
+    # fall back to global default.
+    upstream_host = _hdr("host") or _real_server_sni
+    if ":" in upstream_host:
+        upstream_host = upstream_host.split(":")[0]
+    upstream_uri = f"wss://{upstream_host}:{SERVER_WSS_PORT}{path}"
+
+    # IP resolution: cached good IP first, then DNS candidates, DNS refresh only on failure.
+    def _pick_ip(force_refresh: bool = False) -> str | None:
+        if not force_refresh:
+            cached = _host_ok_ip_cache.get(upstream_host)
+            if cached:
+                return cached
+        candidates = _resolve_host_candidates(upstream_host, force_refresh=force_refresh)
+        return candidates[0] if candidates else None
+
+    upstream_ip = _pick_ip() or upstream_host
+
     log.info(
-        "[WSS] client connected, path=%s → %s (tcp=%s:%d, sni=%s, fwd_header_count=%d, fwd_headers=%s, subprotocols=%s)",
-        path, upstream_uri, tcp_target, SERVER_WSS_PORT, _real_server_sni,
-        len(additional_headers),
-        sorted({name for name, _ in additional_headers}),
-        subprotocols,
+        "[WSS] client connected, path=%s → %s (tcp=%s:%d, fwd_headers=%d, subprotocols=%s)",
+        path, upstream_uri, upstream_ip, SERVER_WSS_PORT,
+        len(additional_headers), subprotocols,
     )
-    try:
-        async with websockets.connect(
-            upstream_uri,
-            host=tcp_target,
+
+    def _connect_kwargs(ip: str):
+        return dict(
+            host=ip,
             port=SERVER_WSS_PORT,
             ssl=client_ssl,
-            server_hostname=_real_server_sni,
+            server_hostname=upstream_host,
             additional_headers=additional_headers or None,
             subprotocols=subprotocols,
-            # Disable proxy-initiated keepalive; keep this layer forwarding-only.
             user_agent_header=None,
             ping_interval=None, ping_timeout=None, open_timeout=15,
-        ) as upstream_ws:
-            server_ws = upstream_ws
-            await asyncio.gather(
-                _pipe_c2s(client_ws, server_ws, FrameBuffer()),
-                _pipe_s2c(client_ws, server_ws, FrameBuffer()),
+        )
+
+    try:
+        try:
+            async with websockets.connect(upstream_uri, **_connect_kwargs(upstream_ip)) as upstream_ws:
+                _host_ok_ip_cache[upstream_host] = upstream_ip
+                server_ws = upstream_ws
+                await asyncio.gather(
+                    _pipe_c2s(client_ws, server_ws, FrameBuffer()),
+                    _pipe_s2c(client_ws, server_ws, FrameBuffer()),
+                )
+        except (OSError, asyncio.TimeoutError) as net_err:
+            # Network-level failure (TCP connect / TLS timeout): refresh DNS and retry once.
+            log.warning(
+                "[WSS] connect to %s (%s) failed: %s; refreshing DNS and retrying",
+                upstream_host, upstream_ip, net_err,
             )
+            fresh_ip = _pick_ip(force_refresh=True)
+            if fresh_ip and fresh_ip != upstream_ip:
+                log.info("[WSS] retry with fresh IP: %s → %s", upstream_host, fresh_ip)
+                async with websockets.connect(upstream_uri, **_connect_kwargs(fresh_ip)) as upstream_ws:
+                    _host_ok_ip_cache[upstream_host] = fresh_ip
+                    server_ws = upstream_ws
+                    await asyncio.gather(
+                        _pipe_c2s(client_ws, server_ws, FrameBuffer()),
+                        _pipe_s2c(client_ws, server_ws, FrameBuffer()),
+                    )
+            else:
+                raise
     except websockets.exceptions.ConnectionClosed as exc:
         log.info(
             "[WSS] connection closed: type=%s code=%s reason=%r",
@@ -626,9 +570,6 @@ async def _handle_passthrough(
                 for ip in _resolve_host_candidates(target_host, force_refresh=False):
                     if ip not in candidates:
                         candidates.append(ip)
-                if not candidates and target_host == _real_server_sni and _real_server_ip:
-                    candidates.append(_real_server_ip)
-
                 raced = await _connect_first_success(candidates, real_port, timeout=5.0)
                 if raced is None:
                     # Only refresh DNS when current recorded candidates fail.
@@ -636,8 +577,6 @@ async def _handle_passthrough(
                     for ip in _resolve_host_candidates(target_host, force_refresh=True):
                         if ip not in refreshed:
                             refreshed.append(ip)
-                    if not refreshed and target_host == _real_server_sni and _real_server_ip:
-                        refreshed.append(_real_server_ip)
                     if refreshed:
                         candidates = refreshed
                         raced = await _connect_first_success(candidates, real_port, timeout=5.0)
@@ -689,8 +628,6 @@ async def main() -> None:
         print("ERROR: certs not found. Run:  python -m pf_intercept.gen_cert")
         return
 
-    _init_real_server()
-
     server_ssl = _make_server_ssl()
 
     await websockets.serve(
@@ -702,7 +639,7 @@ async def main() -> None:
         ping_interval=None,
         ping_timeout=None,
     )
-    log.info("WSS MITM   %s:%d  →  %s", PROXY_HOST, WSS_PORT, _real_server_uri)
+    log.info("WSS MITM   %s:%d  →  wss://<domain>:%d  (dynamic per-connection)", PROXY_HOST, WSS_PORT, SERVER_WSS_PORT)
 
     for port in PASSTHROUGH_PORTS:
         if port == WSS_PORT:
@@ -714,7 +651,8 @@ async def main() -> None:
         )
         log.info("TCP passthrough %s:%d  (target host from SNI/Host)", PROXY_HOST, port)
 
-    log.info("hosts entry:  127.0.0.1  %s", _real_server_sni)
+    for _h in PREFERRED_WSS_HOSTS:
+        log.info("hosts entry:  127.0.0.1  %s", _h)
     await asyncio.Future()
 
 

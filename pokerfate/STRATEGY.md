@@ -273,6 +273,18 @@ JTs, T9s（连牌，被跟注后有胜率）
    跟注率高：只用价值牌 c-bet，减少诈唬
 ```
 
+#### 实现中的具体阈值（基于 Pluribus 多路研究）
+
+| 场景 | 胜率阈值 | 说明 |
+|------|---------|------|
+| 强价值手（单挑） | equity ≥ 0.65 | 始终下注（顶对以上均属此类） |
+| 强价值手（多路） | equity ≥ 0.65 | 频率略降（3路 ~85%，4路 ~75%） |
+| 半诈唬（多路底池） | equity ≥ 0.45 | 多路底池最低要求，低于此直接放弃 |
+| 半诈唬（单挑） | 0.30 ≤ equity ≤ 0.65 | 正常频率，结合牌面湿润度 |
+| 纯空气 | equity < 0.20 | 需对手弃牌率 > 40% 才考虑下注 |
+
+注：价值门槛从原先 0.70 降低至 **0.65**，捕捉顶对/一对中踢脚等薄价值手的价值提取机会。
+
 ### 4.5 转牌（Turn）策略
 
 - 翻牌 check-check 后，转牌出牌频率提高（"延迟 c-bet"）
@@ -285,10 +297,27 @@ JTs, T9s（连牌，被跟注后有胜率）
 - **价值注**：下注期望被更差牌跟注
 - **诈唬注**：未完成摸牌，没有摊牌价值时考虑诈唬
 
+**核心原则：河牌没有半诈唬（Semi-bluff）**
+
+翻牌/转牌的半诈唬成立，是因为"即使被跟注，还有出路（outs）"。
+河牌无牌可来，出路归零，因此"半诈唬"在河牌街是逻辑矛盾。
+
+河牌行动只有三类：
+1. **价值下注**：equity ≥ 0.60，期望更差牌跟注
+2. **纯诈唬**：equity < 0.35（无摊牌价值），且对手弃牌率 > GTO 盈亏平衡线（约 40%）
+3. **过牌/弃牌**：上述两种条件均不满足
+
+```
+GTO 河牌诈唬盈亏平衡弃牌率：
+下注 50% 底池 → 对手需弃牌 > 33% 才盈利
+下注 66% 底池 → 对手需弃牌 > 40%
+下注 100% 底池 → 对手需弃牌 > 50%
+```
+
 河牌诈唬候选手牌：
-- 未完成的同花摸牌（完全没有价值）
+- 未完成的同花摸牌（完全没有摊牌价值）
 - 错过的顺子摸牌
-- 高牌（A高或K高，无对子）在部分场景
+- 高牌（A高或K高，无对子）且持有阻挡效应（blockers）
 
 ---
 
@@ -636,22 +665,47 @@ PokerFate Bot 架构：
    - 只在关键节点触发（大底池、河牌等）
 ```
 
-### 11.3 胜率计算
+### 11.3 胜率计算与范围压缩折扣
 
+实际计算分两步：
+
+**步骤一：蒙特卡洛原始胜率（对随机手）**
 ```python
-# 蒙特卡洛胜率估算（伪代码）
-def calculate_equity(hole_cards, board, opponent_range, iterations=10000):
+# 蒙特卡洛胜率估算（当前实现）
+def calculate_equity(hole_cards, board, num_opponents, iterations=1000):
     wins = 0
     for _ in range(iterations):
-        # 从对手范围随机抽取手牌
-        opponent_cards = sample_from_range(opponent_range)
-        # 随机完成公共牌
-        remaining_board = complete_board(board, hole_cards, opponent_cards)
-        # 评估最终牌型
-        if evaluate_hand(hole_cards, remaining_board) > evaluate_hand(opponent_cards, remaining_board):
+        # 从剩余牌堆随机抽取对手手牌（随机手假设）
+        opponent_cards = sample_from_deck(hole_cards, board, num_opponents)
+        remaining_board = complete_board(board)
+        if evaluate_hand(hole_cards, remaining_board) > best_opp(opponent_cards, remaining_board):
             wins += 1
-    return wins / iterations
+    return wins / iterations  # raw_equity
 ```
+
+**步骤二：Libratus式范围压缩折扣**
+
+原始胜率高估了我们的实际胜率——对手不是随机手，其行动提供了范围信息：
+- 每次加注/下注后，对手的实际范围收缩至当前的约 45%
+- 对手三街连续下注后，其范围约为全部手牌的 5-10%（只有强牌）
+
+```python
+# HandRangeEstimator 范围折扣（range_estimator.py）
+range_fraction = initial_vpip
+for each_opponent_action:
+    if action == 'raise': range_fraction *= 0.45
+    if action == 'call':  range_fraction *= 0.75
+    if action == 'check': range_fraction *= 0.92
+
+# 分段线性插值折扣曲线（校准自 PioSolver 研究数据）：
+# range=1.00 → discount=1.00（随机手，无折扣）
+# range=0.30 → discount=0.79（对手范围收缩，实际胜率降低约21%）
+# range=0.08 → discount=0.57（三街施压后，胜率大幅折扣）
+
+effective_equity = raw_equity * discount_factor
+```
+
+此机制直接解决了"对手连续多街施压后仍用随机手胜率做决策"的核心缺陷。
 
 ### 11.4 手牌抽象（Hand Abstraction）
 
@@ -787,5 +841,6 @@ PokerFate 的优势：
 
 ---
 
-*文档版本：v1.0 | 创建于 2026-03-23*
-*策略核心：GTO 基础 + 动态可剥削调整 + CFR 蓝图 + 实时子博弈求解*
+*文档版本：v1.1 | 创建于 2026-03-23 | 更新于 2026-03-26*
+*v1.1 变更：§4.4 价值下注门槛调整 + 多路底池阈值；§4.6 明确河牌无半诈唬原则；§11.3 新增范围压缩折扣机制（Libratus式）*
+*策略核心：GTO 基础 + 动态可剥削调整 + CFR 蓝图 + 实时子博弈求解 + Bayesian范围压缩*
