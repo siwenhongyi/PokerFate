@@ -129,7 +129,13 @@ class GameState:
         return 'MP'
 
     def is_ip(self, player: Player) -> bool:
-        """True if player acts last (in position) postflop."""
+        """True if player acts last (in position) postflop.
+
+        Iterates positions from SB → BTN without breaking early, so that
+        latest_active ends up as the last active player in the order
+        (i.e. BTN/dealer = IP).  The previous implementation broke on the
+        first match which wrongly returned the first-to-act (SB) as IP.
+        """
         active = [p for p in self.players if not p.is_folded]
         if len(active) < 2:
             return False
@@ -138,6 +144,5 @@ class GameState:
         for i in range(len(self.players) - 1, -1, -1):
             p = self.players[(btn - i) % len(self.players)]
             if not p.is_folded:
-                latest_active = p
-                break
+                latest_active = p   # keep overwriting; last non-folded = IP
         return latest_active is not None and latest_active.player_id == player.player_id

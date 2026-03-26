@@ -20,6 +20,9 @@ pf_intercept/logs/
 # Runtime opponent model (accumulated during play, generate locally)
 opponents.json
 
+# Slumbot credentials (sensitive — create locally)
+pokerfate/slum/auth.json
+
 # IDE
 .idea/
 .vscode/
