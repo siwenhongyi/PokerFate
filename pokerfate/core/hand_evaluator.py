@@ -34,6 +34,15 @@ class HandRank(IntEnum):
         }
         return names[self.value]
 
+    def cn_name(self) -> str:
+        names = {
+            0: '高牌', 1: '一对', 2: '两对',
+            3: '三条', 4: '顺子', 5: '同花',
+            6: '葫芦', 7: '四条',
+            8: '同花顺', 9: '皇家同花顺',
+        }
+        return names[self.value]
+
 
 HandScore = Tuple  # (HandRank, int, ...)
 
@@ -122,6 +131,23 @@ class HandEvaluator:
             if best is None or score > best:
                 best = score
         return best
+
+    @staticmethod
+    def best_five(cards: List[Card]) -> Tuple[HandScore, List[Card]]:
+        """Return (best_score, best_5_cards) from 5-7 cards."""
+        n = len(cards)
+        if n < 5:
+            raise ValueError(f"Need at least 5 cards, got {n}")
+        if n == 5:
+            return _evaluate_5(cards), list(cards)
+        best_score = None
+        best_combo: List[Card] = []
+        for combo in combinations(cards, 5):
+            score = _evaluate_5(list(combo))
+            if best_score is None or score > best_score:
+                best_score = score
+                best_combo = list(combo)
+        return best_score, best_combo
 
     @staticmethod
     def hand_rank_name(score: HandScore) -> str:

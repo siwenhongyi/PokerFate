@@ -167,7 +167,9 @@ class PostflopStrategy:
         if equity >= 0.70:
             return True
         if equity >= 0.60:
-            return random.random() < (0.80 * self.aggression)
+            # OOP river: no second chance after check — bet more aggressively for thin value
+            bet_freq = 0.92 if not is_ip else 0.80
+            return random.random() < (bet_freq * self.aggression)
         # Thin value / merge — only heads-up
         if equity >= 0.50:
             if num_opponents > 1:

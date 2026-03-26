@@ -276,6 +276,10 @@ class PokerLogger:
         pot: float,
         my_delta: float,
         final_stacks: Optional[Dict[str, float]] = None,
+        showdown_hands: Optional[Dict[str, List[str]]] = None,
+        hand_combos: Optional[Dict[str, str]] = None,
+        my_combo: Optional[str] = None,
+        my_cards: Optional[List[str]] = None,
     ):
         self._file({
             "event": "hand_result",
@@ -284,14 +288,31 @@ class PokerLogger:
             "pot": pot,
             "my_delta": my_delta,
             "final_stacks": final_stacks or {},
+            "showdown_hands": showdown_hands or {},
+            "hand_combos": hand_combos or {},
+            "my_combo": my_combo or "",
         })
         if not self._console:
             return
 
         sign  = "+" if my_delta >= 0 else ""
         color = _C.GREEN if my_delta > 0 else (_C.RED if my_delta < 0 else _C.WHITE)
-        winners_str = " & ".join(winner_names)
+
+        # 赢家展示：优先用成品牌型，fallback 到原始底牌
+        combos = hand_combos or {}
+        sd = showdown_hands or {}
+        def _fmt_winner(name: str) -> str:
+            combo = combos.get(name)
+            if combo:
+                return f"{name}[{combo}]"
+            raw = sd.get(name)
+            return f"{name}[{' '.join(raw)}]" if raw else name
+
+        winners_str = " & ".join(_fmt_winner(n) for n in winner_names)
         delta_str   = f"本手 {sign}{my_delta:.0f}"
+
+        # 自己的成品牌型
+        my_combo_str = f"  [我: {my_combo}]" if my_combo else ""
 
         stacks_str = ""
         if final_stacks:
@@ -300,7 +321,7 @@ class PokerLogger:
             )
 
         self._raw("")
-        self._raw(f"  ✔ {winners_str} 赢得 {pot:.0f}    {delta_str}{stacks_str}",
+        self._raw(f"  ✔ {winners_str} 赢得 {pot:.0f}    {delta_str}{my_combo_str}{stacks_str}",
                   color=color, bold=True)
 
     def opponent_pattern(
