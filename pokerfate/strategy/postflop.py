@@ -305,12 +305,21 @@ class PostflopStrategy:
         big_blind: float,
         opponent_fold_rate: float = 0.45,
         spr: float = 5.0,
+        raw_equity: float = None,
     ) -> Tuple[str, float]:
         """Main postflop decision function.
 
         Returns (action, amount): action in 'fold', 'check', 'call', 'raise'
         amount is the total bet for raises (0 otherwise).
+
+        raw_equity: uncompressed MC equity, used for proactive bet decisions.
+                    Falls back to equity if not provided.
+        equity:     range-compressed equity, used for call/fold decisions.
         """
+        # Proactive betting uses raw equity (our hand strength, not opponent's range)
+        # Call/fold uses compressed equity (opponent's range is stronger when they bet)
+        bet_equity = raw_equity if raw_equity is not None else equity
+
         texture = BoardTexture(board)
         pot_odds = to_call / (pot + to_call) if to_call > 0 else 0.0
 
@@ -322,28 +331,27 @@ class PostflopStrategy:
                 return ('fold', 0.0)
 
             # IP value raise: strong hands raise for value instead of just calling
-            # This was the key missing piece — IP had no raise option facing a bet
-            if is_ip and equity >= 0.75 and to_call < stack * 0.8:
-                raise_prob = 0.40 if equity >= 0.85 else 0.22
+            if is_ip and bet_equity >= 0.75 and to_call < stack * 0.8:
+                raise_prob = 0.40 if bet_equity >= 0.85 else 0.22
                 raise_prob *= self.aggression
                 if random.random() < raise_prob:
                     raise_size = self._raise_size(to_call, pot, stack)
                     return ('raise', raise_size)
 
-            # OOP check-raise (pot-based sizing, not to_call*3)
-            if not is_ip and self.should_check_raise(equity, texture, is_ip):
+            # OOP check-raise
+            if not is_ip and self.should_check_raise(bet_equity, texture, is_ip):
                 raise_size = self._raise_size(to_call, pot, stack)
                 return ('raise', raise_size)
 
-            # Call or fold
+            # Call or fold: use compressed equity (opponent's range is stronger)
             implied_bonus = 0.06 if (equity >= 0.25 and spr > 4) else 0.0
             if self.should_call(equity, pot_odds, implied_bonus, spr):
                 return ('call', to_call)
             return ('fold', 0.0)
 
         else:
-            # No bet facing: check or bet
-            if self.should_cbet(equity, texture, is_ip, street, num_opponents, opponent_fold_rate):
-                amount = self.bet_size(equity, pot, texture, stack, street, big_blind)
+            # No bet facing: check or bet based on raw hand strength
+            if self.should_cbet(bet_equity, texture, is_ip, street, num_opponents, opponent_fold_rate):
+                amount = self.bet_size(bet_equity, pot, texture, stack, street, big_blind)
                 return ('raise', amount)
             return ('check', 0.0)

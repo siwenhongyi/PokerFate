@@ -393,6 +393,8 @@ class BotBridge:
             if s != self._my_seat and s not in self._folded
         )
 
+        is_bb_option = self._my_forced_post_this_street and call_need == 0
+
         decision: BotDecision = self._api.request_action(
             street=street,
             pot=self._pot,
@@ -401,6 +403,7 @@ class BotBridge:
             my_stack=self._my_chips,
             num_active_opponents=max(num_active_opponents, 1),
             my_current_bet_this_street=self._my_bet,
+            is_bb_option=is_bb_option,
         )
 
         log.info(

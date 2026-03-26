@@ -51,7 +51,7 @@ class PokerBot:
     # Public API
     # ------------------------------------------------------------------
 
-    def decide(self, game_state: GameState, my_player_id: int = 0, *, player_id: int = None) -> Action:
+    def decide(self, game_state: GameState, my_player_id: int = 0, *, player_id: int = None, is_bb_option: bool = False) -> Action:
         if player_id is not None:
             my_player_id = player_id
         """Main entry point: return the chosen Action given the game state."""
@@ -60,7 +60,7 @@ class PokerBot:
             return Action(ActionType.FOLD)
 
         if game_state.street == Street.PREFLOP:
-            return self._decide_preflop(game_state, player)
+            return self._decide_preflop(game_state, player, is_bb_option=is_bb_option)
         else:
             return self._decide_postflop(game_state, player)
 
@@ -68,7 +68,7 @@ class PokerBot:
     # Preflop logic
     # ------------------------------------------------------------------
 
-    def _decide_preflop(self, gs: GameState, player: Player) -> Action:
+    def _decide_preflop(self, gs: GameState, player: Player, is_bb_option: bool = False) -> Action:
         position = gs.position_of(player)
         is_ip = gs.is_ip(player)
         bb = gs.big_blind
@@ -82,8 +82,8 @@ class PokerBot:
         # Determine what action we're facing
         facing_action, open_raise = self._classify_preflop_action(gs, player)
 
-        # BB awareness: know we have the big blind posted and can check for free
-        is_big_blind = (position == 'BB')
+        # is_bb_option: server signal (forced_post + call_need==0), covers both regular BB and forced blind
+        is_big_blind = is_bb_option
         num_limpers = self._count_limpers(gs, player) if facing_action == 'none' else 0
 
         action_str, amount = self.preflop.decide(
@@ -174,6 +174,7 @@ class PokerBot:
 
         action_str, amount = self.postflop.decide(
             equity=equity,
+            raw_equity=raw_equity,
             pot=pot,
             to_call=to_call,
             stack=stack,

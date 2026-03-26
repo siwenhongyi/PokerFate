@@ -449,6 +449,7 @@ class PokerFateAPI:
         my_stack: float,
         num_active_opponents: int = 1,
         my_current_bet_this_street: float = 0.0,
+        is_bb_option: bool = False,
     ) -> BotDecision:
         """Ask the bot for its action.
 
@@ -486,7 +487,7 @@ class PokerFateAPI:
             my_current_bet_this_street=my_current_bet_this_street,
         )
 
-        action = self._bot.decide(gs, self.my_player_id)
+        action = self._bot.decide(gs, self.my_player_id, is_bb_option=is_bb_option)
         decision = self._to_decision(action)
 
         my_name = self._session_names.get(self.my_player_id, "PokerFate")
