@@ -374,6 +374,27 @@ class PokerFateAPI:
             player.stack = new_stack
         self._session_stacks[player_id] = new_stack
 
+    def notify_player_left(self, player_id: int) -> None:
+        """Notify that a player has vacated their seat mid-session.
+
+        Call this when a StandUpBRC / OtherLeaveRoomBRC arrives and
+        a player is confirmed gone. This ensures the next player to
+        occupy the same seat (player_id / seatid) does NOT inherit
+        the departed player's opponent-model data.
+
+        Parameters
+        ----------
+        player_id : int
+            The departing player's ID (same value used in new_hand / notify_action).
+        """
+        self._session_stacks.pop(player_id, None)
+        self._session_names.pop(player_id, None)
+        self._bot.opponent_model.unregister_seat(player_id)
+        # Remove from current hand's active player list if mid-hand
+        self._players = [p for p in self._players if p.player_id != player_id]
+        if self.verbose:
+            self._log.raw({"event": "player_left", "player_id": player_id})
+
     def notify_player_joined(
         self,
         player_id: int,

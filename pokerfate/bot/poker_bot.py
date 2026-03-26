@@ -79,6 +79,10 @@ class PokerBot:
         # Determine what action we're facing
         facing_action, open_raise = self._classify_preflop_action(gs, player)
 
+        # BB awareness: know we have the big blind posted and can check for free
+        is_big_blind = (position == 'BB')
+        num_limpers = self._count_limpers(gs, player) if facing_action == 'none' else 0
+
         action_str, amount = self.preflop.decide(
             hole_cards=player.hole_cards,
             position=position,
@@ -88,10 +92,12 @@ class PokerBot:
             big_blind=bb,
             stack=stack,
             pot=gs.pot,
+            is_big_blind=is_big_blind,
+            num_limpers=num_limpers,
         )
 
         self._last_reasoning = self._preflop_reasoning(
-            player.hole_cards, position, facing_action, action_str
+            player.hole_cards, position, facing_action, action_str, num_limpers
         )
         return self._to_action(action_str, amount, to_call, stack)
 
@@ -110,6 +116,13 @@ class PokerBot:
         if len(raises) == 2:
             return '3bet', raises[-1][1].amount
         return '4bet', raises[-1][1].amount
+
+    def _count_limpers(self, gs: GameState, player: Player) -> int:
+        """Count opponents who called (limped) preflop without raising."""
+        return sum(
+            1 for pid, act in gs.action_history
+            if act.action_type == ActionType.CALL and pid != player.player_id
+        )
 
     # ------------------------------------------------------------------
     # Postflop logic
@@ -210,15 +223,23 @@ class PokerBot:
         position: str,
         facing_action: str,
         action_str: str,
+        num_limpers: int = 0,
     ) -> str:
-        from ..strategy.preflop import _hand_category, _3BET_VALUE, _3BET_BLUFF
+        from pokerfate.strategy.preflop import _hand_category, _3BET_VALUE, _3BET_BLUFF
         cat = _hand_category(hole_cards)
         eq = f"胜率{self._last_equity:.0%}"
         facing_cn = {"none": "无开牌", "open": "面对开加", "3bet": "面对3bet", "4bet": "面对4bet"}
         facing = facing_cn.get(facing_action, facing_action)
 
+        if action_str == "check":
+            # BB checking for free when no one raised
+            limper_str = f"{num_limpers}人跟注" if num_limpers > 0 else "无人入局"
+            return f"{cat}  BB大盲免费看牌（{limper_str}）  不在iso加注范围，过牌  {eq}"
+
         if action_str == "raise":
             if facing_action == "none":
+                if position == "BB":
+                    return f"{cat}  BB  {num_limpers}人跟注 → iso加注，缩减底池人数  {eq}"
                 return f"{cat}  {position}  {facing} → 在范围内，标准开加  {eq}"
             elif facing_action == "open":
                 kind = "3bet价值" if cat in _3BET_VALUE else "3bet诈唬（阻挡强牌）"
@@ -265,7 +286,7 @@ class PokerBot:
             else:
                 if equity >= 0.90:
                     return f"{eq}  {tex}牌面  {pos}  面对过牌 → 强牌价值下注"
-                elif equity >= 0.65:
+                elif equity >= 0.60:
                     return f"{eq}  {tex}牌面  {pos}  面对过牌 → 价值持续下注"
                 elif equity >= 0.30:
                     return f"{eq}  {tex}牌面  {pos}  面对过牌 → 半诈唬（有摸牌出路）"

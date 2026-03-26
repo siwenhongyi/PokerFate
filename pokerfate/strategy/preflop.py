@@ -116,6 +116,16 @@ _BB_VS_SB_DEFENSE = _BTN_RANGE | _expand_range(
     'K4o, K3o, K2o, Q7o, Q6o, Q5o, J7o, T7o, 96o, 85o, 74o, 63o, 52o, 42o, 32o'
 )
 
+# BB iso-raise range when facing limpers (no one raised, BB has option to raise).
+# Strong enough to thin the field and play for value OOP.
+# With more limpers, only tighten slightly — pot odds improve for everyone.
+_BB_ISO_RAISE = _expand_range(
+    'AA, KK, QQ, JJ, TT, 99, 88, '
+    'AKs, AQs, AJs, ATs, '
+    'AKo, AQo, AJo, '
+    'KQs, KJs'
+)
+
 _POSITION_RANGES = {
     'UTG':  _UTG_RANGE,
     'UTG+1': _UTG1_RANGE,
@@ -201,12 +211,24 @@ class PreflopStrategy:
         big_blind: float,
         stack: float,
         pot: float,
+        is_big_blind: bool = False,
+        num_limpers: int = 0,
     ) -> Tuple[str, float]:
-        """Return (action, amount). action in: fold, call, raise."""
+        """Return (action, amount). action in: fold, call, raise, check."""
         cat = _hand_category(hole_cards)
 
         if facing_action == 'none':
-            # We are first to act (or limped to us)
+            if is_big_blind:
+                # BB option: everyone limped (or no action), BB can check for free.
+                # Never fold — that would surrender the forced blind for nothing.
+                # Iso-raise strong hands to thin the field and play OOP with equity advantage.
+                # Iso size scales with limper count: 1 limper→3BB, 2→4BB, 3→5BB...
+                if cat in _BB_ISO_RAISE:
+                    iso_size = big_blind * (2 + max(num_limpers, 1))
+                    return ('raise', min(iso_size, stack))
+                return ('check', 0.0)
+
+            # Normal positions: open or fold
             if self.in_open_range(hole_cards, position):
                 size = self.open_raise_size(position, big_blind)
                 return ('raise', min(size, stack))

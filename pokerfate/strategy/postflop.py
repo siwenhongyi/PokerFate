@@ -100,14 +100,16 @@ class PostflopStrategy:
         if equity >= 0.90:
             return random.random() < (0.80 * self.aggression)
 
-        # Strong / thin-value hand: lower threshold from 0.70 → 0.65
-        # Fixes: AQ top-pair (62-65% equity) was treated as semi-bluff and checked too often
-        if equity >= 0.65:
+        # Strong value hand: lowered threshold 0.65 → 0.60 to capture top-pair type hands.
+        # At 60%+ equity we almost certainly have the best hand or a strong draw.
+        if equity >= 0.60:
             if num_opponents <= 1:
                 return True
-            # Multiway: still bet value, but reduce frequency (harder to isolate)
-            # 3-way: 85%, 4-way: 75%, 5-way: 65%
-            freq = max(0.55, 0.95 - 0.10 * (num_opponents - 1))
+            # Multiway: bet frequency scales with board texture.
+            # Dry board → higher protection urgency (no draws to give free cards to).
+            # Wet board → slightly lower but still aggressive.
+            base = 0.90 if board.is_dry else 0.80
+            freq = max(0.50, base - 0.10 * (num_opponents - 1))
             return random.random() < (freq * self.aggression)
 
         # Very weak hand (no equity, no fold equity): give up
@@ -120,7 +122,7 @@ class PostflopStrategy:
             return False
 
         # Semi-bluff zone: bet with fold equity
-        if 0.30 <= equity <= 0.65:
+        if 0.30 <= equity <= 0.60:
             freq = 0.65 if board.is_dry else 0.45
             freq *= self.aggression
             if not is_ip:

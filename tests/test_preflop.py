@@ -88,3 +88,124 @@ class TestOpenRange:
 
         size = self.strat.open_raise_size('UTG', 2.0)
         assert size == 6.0  # 3 BB
+
+
+class TestBBBigBlindOption:
+    """BB-specific decision logic: free check or iso-raise when no one raised."""
+
+    strat = PreflopStrategy()
+
+    def test_bb_facing_no_raise_checks_junk(self):
+        """BB with off-range junk checks (never folds) when no raise."""
+        action, amount = self.strat.decide(
+            hole_cards=cards('7c', '2d'),
+            position='BB',
+            facing_action='none',
+            open_raise=0,
+            is_ip=False,
+            big_blind=2.0,
+            stack=200.0,
+            pot=3.0,
+            is_big_blind=True,
+            num_limpers=0,
+        )
+        assert action == 'check'
+        assert amount == 0.0
+
+    def test_bb_facing_no_raise_never_folds(self):
+        """BB must never fold when facing_action='none' (no raise to face)."""
+        junk_hands = [
+            cards('7c', '2d'), cards('8h', '3s'), cards('6d', '4c'), cards('5s', '2h'),
+        ]
+        for hand in junk_hands:
+            action, _ = self.strat.decide(
+                hole_cards=hand,
+                position='BB',
+                facing_action='none',
+                open_raise=0,
+                is_ip=False,
+                big_blind=2.0,
+                stack=200.0,
+                pot=3.0,
+                is_big_blind=True,
+                num_limpers=1,
+            )
+            assert action != 'fold', f"BB must not fold with {hand} vs limpers"
+
+    def test_bb_iso_raises_premium_hand(self):
+        """BB iso-raises a premium hand when facing limpers."""
+        action, amount = self.strat.decide(
+            hole_cards=cards('Ac', 'Ad'),
+            position='BB',
+            facing_action='none',
+            open_raise=0,
+            is_ip=False,
+            big_blind=2.0,
+            stack=200.0,
+            pot=5.0,
+            is_big_blind=True,
+            num_limpers=1,
+        )
+        assert action == 'raise'
+        assert amount > 0
+
+    def test_bb_iso_sizing_scales_with_limpers(self):
+        """Iso-raise size = (2 + limpers) * BB."""
+        # 1 limper → 3 BB
+        _, size1 = self.strat.decide(
+            hole_cards=cards('Ac', 'Ad'),
+            position='BB',
+            facing_action='none',
+            open_raise=0,
+            is_ip=False,
+            big_blind=2.0,
+            stack=200.0,
+            pot=5.0,
+            is_big_blind=True,
+            num_limpers=1,
+        )
+        assert size1 == 2.0 * 3  # (2+1)*2
+
+        # 2 limpers → 4 BB
+        _, size2 = self.strat.decide(
+            hole_cards=cards('Kc', 'Kd'),
+            position='BB',
+            facing_action='none',
+            open_raise=0,
+            is_ip=False,
+            big_blind=2.0,
+            stack=200.0,
+            pot=7.0,
+            is_big_blind=True,
+            num_limpers=2,
+        )
+        assert size2 == 2.0 * 4  # (2+2)*2
+
+    def test_bb_iso_range_includes_pairs_and_broadway(self):
+        """BB iso-raise range should include key pocket pairs and broadway hands."""
+        from pokerfate.strategy.preflop import _BB_ISO_RAISE
+        # Pocket pairs
+        assert 'AA' in _BB_ISO_RAISE
+        assert 'KK' in _BB_ISO_RAISE
+        assert 'QQ' in _BB_ISO_RAISE
+        # Suited broadway
+        assert 'AKs' in _BB_ISO_RAISE
+        assert 'AQs' in _BB_ISO_RAISE
+        # Offsuit big hands
+        assert 'AKo' in _BB_ISO_RAISE
+
+    def test_bb_no_iso_with_speculative_hand(self):
+        """BB with speculative hand (e.g. 54s) just checks — not in iso range."""
+        action, _ = self.strat.decide(
+            hole_cards=cards('5c', '4c'),
+            position='BB',
+            facing_action='none',
+            open_raise=0,
+            is_ip=False,
+            big_blind=2.0,
+            stack=200.0,
+            pot=5.0,
+            is_big_blind=True,
+            num_limpers=1,
+        )
+        assert action == 'check'

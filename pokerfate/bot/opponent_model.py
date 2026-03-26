@@ -119,21 +119,64 @@ class OpponentModel:
         self._stats: Dict[int, OpponentStats] = {}
         self._id_to_name: Dict[int, str] = {}    # player_id -> name
         self._name_to_id: Dict[str, int] = {}    # name -> canonical player_id
+        # Archive: stats keyed by name for players who vacated a seat.
+        # Allows stats to survive seat changes without leaking to new occupants.
+        self._name_archive: Dict[str, OpponentStats] = {}
 
     def register_name(self, player_id: int, name: str) -> None:
         """Associate a player_id with a display name.
 
-        If this name was previously seen with a different player_id,
-        the historical stats are migrated to the new ID so cross-session
-        data is preserved even if the ID changes.
+        Handles three scenarios correctly:
+
+        1. Same player, same ID (re-registration): no-op, stable.
+
+        2. Same player, new ID (e.g. changed seat between sessions):
+           stats are migrated from old active ID to new ID.
+           Also restores from name_archive if they previously vacated a seat.
+
+        3. Different player, same ID (seat reuse within a session):
+           old player's stats are archived under their name and cleared
+           from this ID so the new player starts with a clean slate.
+           Old player's data is recoverable if they rejoin later.
         """
+        existing_name = self._id_to_name.get(player_id)
+        if existing_name is not None and existing_name != name:
+            # Scenario 3: different player now at this seat/ID.
+            # Archive old player's stats by name (not lost, just detached).
+            if self._name_to_id.get(existing_name) == player_id:
+                del self._name_to_id[existing_name]
+            if player_id in self._stats:
+                self._name_archive[existing_name] = self._stats.pop(player_id)
+
+        # Restore from archive if this player was previously seen (unregistered).
+        if name in self._name_archive and player_id not in self._stats:
+            self._stats[player_id] = self._name_archive.pop(name)
+
+        # Migrate from a different active ID (same player, seat change).
         self._id_to_name[player_id] = name
         if name in self._name_to_id:
             old_id = self._name_to_id[name]
             if old_id != player_id and old_id in self._stats:
-                # Migrate stats from old ID to new ID
                 self._stats[player_id] = self._stats.pop(old_id)
         self._name_to_id[name] = player_id
+
+    def unregister_seat(self, player_id: int) -> None:
+        """Dissociate a player_id / seat from its current occupant.
+
+        Call this when a player leaves their seat (StandUpBRC / LeaveRoom)
+        so the next player to sit here does not inherit their stats.
+
+        Stats are moved to the name_archive — if the player rejoins at any
+        seat/ID later, register_name() will restore their history.
+        """
+        name = self._id_to_name.pop(player_id, None)
+        if name is None:
+            return
+        if self._name_to_id.get(name) == player_id:
+            del self._name_to_id[name]
+        # Move stats to name-keyed archive so they survive ID recycling.
+        if player_id in self._stats:
+            self._name_archive[name] = self._stats.pop(player_id)
 
     def get(self, player_id: int) -> OpponentStats:
         if player_id not in self._stats:
@@ -263,6 +306,10 @@ class OpponentModel:
             },
             "id_to_name": {str(k): v for k, v in self._id_to_name.items()},
             "name_to_id": self._name_to_id,
+            "name_archive": {
+                name: asdict(stats)
+                for name, stats in self._name_archive.items()
+            },
         }
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
@@ -289,6 +336,8 @@ class OpponentModel:
             model._stats[int(pid_str)] = OpponentStats(**stats_dict)
         model._id_to_name = {int(k): v for k, v in data.get("id_to_name", {}).items()}
         model._name_to_id = data.get("name_to_id", {})
+        for name, stats_dict in data.get("name_archive", {}).items():
+            model._name_archive[name] = OpponentStats(**stats_dict)
         return model
 
     def merge(self, other: "OpponentModel") -> None:

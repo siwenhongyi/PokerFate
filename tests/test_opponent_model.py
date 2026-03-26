@@ -126,3 +126,92 @@ class TestSummary:
         summary = model.summary()
         assert "GPT" in summary
         assert "hands=100" in summary
+
+
+class TestSeatReuse:
+    """Tests for seat-reuse detection and name_archive pattern."""
+
+    def test_unregister_seat_archives_stats(self):
+        """unregister_seat moves stats to name_archive, clears active mappings."""
+        model = OpponentModel()
+        model.register_name(1, "Alice")
+        model.get(1).hands_seen = 42
+        model.unregister_seat(1)
+
+        # Active mappings cleared
+        assert 1 not in model._id_to_name
+        assert "Alice" not in model._name_to_id
+        assert 1 not in model._stats
+        # Stats preserved in archive
+        assert "Alice" in model._name_archive
+        assert model._name_archive["Alice"].hands_seen == 42
+
+    def test_new_player_at_vacated_seat_starts_fresh(self):
+        """After unregister_seat, a different player at same ID gets clean stats."""
+        model = OpponentModel()
+        model.register_name(1, "OldPlayer")
+        model.get(1).hands_seen = 99
+        model.unregister_seat(1)
+
+        # New player sits in the same seat/ID
+        model.register_name(1, "NewPlayer")
+        assert model.get(1).hands_seen == 0  # fresh start
+
+    def test_returning_player_after_unregister_restores_stats(self):
+        """Player who left and rejoins (same or different ID) gets their stats back."""
+        model = OpponentModel()
+        model.register_name(1, "Alice")
+        model.get(1).hands_seen = 50
+        model.get(1).fold_count = 20
+        model.unregister_seat(1)
+
+        # Alice rejoins at a different seat ID
+        model.register_name(3, "Alice")
+        assert model.get(3).hands_seen == 50
+        assert model.get(3).fold_count == 20
+        # Archive should be cleared (stats restored to active)
+        assert "Alice" not in model._name_archive
+
+    def test_seat_reuse_without_explicit_unregister(self):
+        """register_name with a new name at existing ID detects seat reuse inline."""
+        model = OpponentModel()
+        model.register_name(2, "OldPlayer")
+        model.get(2).hands_seen = 77
+
+        # Same seat (ID=2) now has a different player — no explicit unregister called
+        model.register_name(2, "NewPlayer")
+        assert model.get(2).hands_seen == 0  # NewPlayer starts fresh
+
+        # OldPlayer's stats should be archived, not lost
+        assert "OldPlayer" in model._name_archive
+        assert model._name_archive["OldPlayer"].hands_seen == 77
+
+    def test_archive_persisted_in_save_load(self):
+        """name_archive survives save/load roundtrip."""
+        model = OpponentModel()
+        model.register_name(1, "ArchiveMe")
+        model.get(1).hands_seen = 35
+        model.unregister_seat(1)
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            path = f.name
+        try:
+            model.save(path)
+            loaded = OpponentModel.load(path)
+            assert "ArchiveMe" in loaded._name_archive
+            assert loaded._name_archive["ArchiveMe"].hands_seen == 35
+        finally:
+            os.unlink(path)
+
+    def test_unregister_unknown_id_is_noop(self):
+        """unregister_seat on an unknown player_id must not raise."""
+        model = OpponentModel()
+        model.unregister_seat(999)  # Should not raise
+
+    def test_same_player_same_id_reregistration_is_stable(self):
+        """register_name called twice with same id+name is idempotent."""
+        model = OpponentModel()
+        model.register_name(5, "Stable")
+        model.get(5).hands_seen = 10
+        model.register_name(5, "Stable")  # same id, same name
+        assert model.get(5).hands_seen == 10  # stats intact

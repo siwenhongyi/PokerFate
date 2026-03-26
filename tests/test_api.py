@@ -506,3 +506,88 @@ class TestBugFixes:
         # 对手第一个动作（open raise），没有前置加注，不是 3-bet spot
         api.notify_action(ActionEvent(1, "raise", 6.0, "preflop"))
         assert api._bot.opponent_model.get(1).three_bet_opportunities == before
+
+
+class TestSeatManagement:
+    """Tests for notify_player_left and seat-change opponent model isolation."""
+
+    def test_notify_player_left_clears_session_data(self):
+        """notify_player_left removes player from session stacks and players list."""
+        api = make_api()
+        api.new_hand(
+            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "Opp", 200.0)],
+            dealer_id=0,
+        )
+        api.hand_over(winner_ids=[0], pot=3.0, final_stacks={0: 202.0, 1: 198.0})
+
+        api.notify_player_left(player_id=1)
+
+        assert 1 not in api._session_stacks
+
+    def test_new_player_after_left_gets_fresh_opponent_model(self):
+        """After notify_player_left, a new player at same physical seat gets clean stats."""
+        api = make_api()
+        api.new_hand(
+            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "OldPlayer", 200.0)],
+            dealer_id=0,
+        )
+        # Accumulate stats for OldPlayer
+        api.deal_hole_cards(["Ac", "Kd"])
+        for _ in range(5):
+            api.notify_action(ActionEvent(1, "fold", 0.0, "preflop"))
+        api.hand_over(winner_ids=[0], pot=3.0)
+
+        old_fold_count = api._bot.opponent_model.get(1).fold_count
+        assert old_fold_count > 0
+
+        # OldPlayer leaves; NewPlayer sits in same seat (but different id)
+        api.notify_player_left(player_id=1)
+        api.notify_player_joined(player_id=2, name="NewPlayer", stack=200.0)
+
+        # NewPlayer's stats should be fresh
+        new_stats = api._bot.opponent_model.get(2)
+        assert new_stats.hands_seen == 0
+        assert new_stats.fold_count == 0
+
+    def test_returning_player_with_different_id_restores_stats(self):
+        """Player who left and rejoins under a different player_id gets their history back."""
+        api = make_api()
+        api.new_hand(
+            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "Veteran", 200.0)],
+            dealer_id=0,
+        )
+        api.deal_hole_cards(["Ac", "Kd"])
+        for _ in range(10):
+            api.notify_action(ActionEvent(1, "fold", 0.0, "preflop"))
+        api.hand_over(winner_ids=[0], pot=3.0)
+
+        saved_folds = api._bot.opponent_model.get(1).fold_count
+        assert saved_folds > 0
+
+        # Veteran leaves, then rejoins with a new player_id
+        api.notify_player_left(player_id=1)
+        api.notify_player_joined(player_id=9, name="Veteran", stack=200.0)
+
+        # Stats should be restored on new id
+        restored = api._bot.opponent_model.get(9)
+        assert restored.fold_count == saved_folds
+
+    def test_notify_player_left_then_rejoin_same_id(self):
+        """Player leaves and rejoins at same id — stats are preserved via archive restore."""
+        api = make_api()
+        api.new_hand(
+            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(3, "Player3", 200.0)],
+            dealer_id=0,
+        )
+        api.deal_hole_cards(["7c", "2d"])
+        api.notify_action(ActionEvent(3, "raise", 6.0, "preflop"))
+        api.hand_over(winner_ids=[3], pot=5.0)
+
+        raise_count_before = api._bot.opponent_model.get(3).raise_count
+
+        api.notify_player_left(player_id=3)
+        # Same player rejoins at same id and name
+        api.notify_player_joined(player_id=3, name="Player3", stack=200.0)
+
+        # Stats should be restored (not zero)
+        assert api._bot.opponent_model.get(3).raise_count == raise_count_before
