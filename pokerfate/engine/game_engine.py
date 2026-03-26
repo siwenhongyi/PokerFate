@@ -8,9 +8,9 @@ import random
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Callable
 
-from ..core.card import Card, Deck
-from ..core.game_state import GameState, Player, Street, Action, ActionType
-from ..core.hand_evaluator import HandEvaluator
+from pokerfate.core.card import Card, Deck
+from pokerfate.core.game_state import GameState, Player, Street, Action, ActionType
+from pokerfate.core.hand_evaluator import HandEvaluator
 
 
 @dataclass

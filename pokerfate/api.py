@@ -31,10 +31,10 @@ from typing import List, Optional, Dict, Any
 from enum import Enum
 from pathlib import Path
 
-from .core.card import Card
-from .core.game_state import GameState, Player, Street, Action, ActionType
-from .bot.poker_bot import PokerBot
-from .logger import PokerLogger, get_logger
+from pokerfate.core.card import Card
+from pokerfate.core.game_state import GameState, Player, Street, Action, ActionType
+from pokerfate.bot.poker_bot import PokerBot
+from pokerfate.logger import PokerLogger, get_logger
 
 _DEFAULT_LOG_FILE = str(Path(__file__).resolve().parent / "logs" / "pokerfate.log")
 

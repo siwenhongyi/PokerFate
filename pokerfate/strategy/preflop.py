@@ -9,7 +9,7 @@ Ranges are defined as sets of hand categories (strings):
 from __future__ import annotations
 import random
 from typing import List, Set, Tuple
-from ..core.card import Card, Rank
+from pokerfate.core.card import Card, Rank
 
 
 def _hand_category(hole_cards: List[Card]) -> str:
