@@ -361,6 +361,86 @@ class TestRiverBetLogic:
         assert 5 <= sum(results) <= 90
 
 
+class TestBBDecisions:
+    """BB-specific bot decisions: free check, iso-raise, never fold vs limpers."""
+
+    def _make_bb_state(self, hole_cards_str, num_players=3, limper_count=1):
+        """Create a state where the bot is in BB with limpers and no raise."""
+        from pokerfate.core.game_state import GameState, Player, Street, Action, ActionType
+        # Build players: p0 = BTN (dealer), p1 = SB, p2 = BB (bot)
+        # For this test bot is player_id=2 in BB
+        players = [
+            Player(0, 'BTN', 200.0, []),
+            Player(1, 'SB',  200.0, []),
+            Player(2, 'BB',  200.0, cards(*hole_cards_str)),
+        ]
+        # Simulate limpers: each limper put in a CALL action in history
+        history = []
+        for i in range(limper_count):
+            history.append((i, Action(ActionType.CALL, 2.0)))  # limp
+        gs = GameState(
+            players=players,
+            dealer_pos=0,       # index 0 = BTN, index 1 = SB, index 2 = BB
+            street=Street.PREFLOP,
+            board=[],
+            pot=2.0 + 1.0 + 2.0 * limper_count,
+            current_bet=2.0,
+            big_blind=2.0,
+            small_blind=1.0,
+            current_player_idx=2,
+            action_history=history,
+        )
+        return gs
+
+    def test_bb_with_junk_checks_vs_limpers(self):
+        """BB holding junk checks (does not fold) when facing only limpers."""
+        bot = PokerBot(equity_iterations=100)
+        gs = self._make_bb_state(['7c', '2d'], limper_count=1)
+        action = bot.decide(gs, player_id=2)
+        # Must check or raise — never fold with free check option
+        assert action.action_type != ActionType.FOLD
+
+    def test_bb_with_junk_never_folds_multiple_limpers(self):
+        """BB holding junk never folds even with 2 limpers."""
+        bot = PokerBot(equity_iterations=100)
+        gs = self._make_bb_state(['8h', '3s'], limper_count=2)
+        action = bot.decide(gs, player_id=2)
+        assert action.action_type != ActionType.FOLD
+
+    def test_bb_with_premium_iso_raises(self):
+        """BB with a premium hand iso-raises vs limpers."""
+        bot = PokerBot(equity_iterations=100)
+        gs = self._make_bb_state(['Ac', 'Ad'], limper_count=1)
+        action = bot.decide(gs, player_id=2)
+        assert action.action_type == ActionType.RAISE
+
+    def test_postflop_value_threshold_60pct(self):
+        """60-65% equity hand should c-bet as value (not semi-bluff) on dry board."""
+        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+        strategy = PostflopStrategy(aggression=1.0)
+        board = [Card.from_str(c) for c in ['2d', '7h', 'Jc']]  # dry board
+        # Run many trials: at 62% equity on dry HU board, should almost always bet
+        bets = sum(
+            1 for _ in range(200)
+            if strategy.should_cbet(0.62, BoardTexture(board), True, 'flop', num_opponents=1)
+        )
+        # With threshold lowered to 0.60, 62% equity → always bet HU
+        assert bets == 200, f"Expected always bet at 62% equity HU dry board, got {bets}/200"
+
+    def test_postflop_dry_board_multiway_60pct_bets_most(self):
+        """60%+ equity on dry board even multiway should bet most of the time."""
+        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+        strategy = PostflopStrategy(aggression=1.0)
+        board = [Card.from_str(c) for c in ['2d', '7h', 'Jc']]  # dry
+        bets = sum(
+            1 for _ in range(200)
+            if strategy.should_cbet(0.65, BoardTexture(board), True, 'flop', num_opponents=2)
+        )
+        # dry board base=0.90, 2 opponents → freq = max(0.50, 0.90 - 0.10) = 0.80
+        # Expect ~80% bet rate: roughly 140-170 out of 200
+        assert bets >= 100, f"Expected frequent betting 3-way dry board at 65% equity, got {bets}/200"
+
+
 class TestMultiwayBetting:
     """Verify multiway pot c-bet tightening (Pluribus: fold equity drops in multiway)."""
 
