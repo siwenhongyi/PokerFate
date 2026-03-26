@@ -26,17 +26,22 @@
 """
 
 from __future__ import annotations
+import os
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 from enum import Enum
 from pathlib import Path
 
+_UNSET = object()  # sentinel for log_file default
+
 from pokerfate.core.card import Card
 from pokerfate.core.game_state import GameState, Player, Street, Action, ActionType
+from pokerfate.core.hand_evaluator import HandEvaluator, HandRank
 from pokerfate.bot.poker_bot import PokerBot
 from pokerfate.logger import PokerLogger, get_logger
 
-_DEFAULT_LOG_FILE = str(Path(__file__).resolve().parent / "logs" / "pokerfate.log")
+_DEFAULT_LOG_FILE    = str(Path(__file__).resolve().parent / "logs" / "pokerfate.log")
+_DEFAULT_OPPONENTS   = str(Path(__file__).resolve().parent / "opponents.json")
 
 
 # ---------------------------------------------------------------------------
@@ -145,8 +150,8 @@ class PokerFateAPI:
         small_blind: float = 1.0,
         equity_iterations: int = 800,
         aggression: float = 1.0,
-        autosave_path: Optional[str] = "opponents.json",
-        log_file: Optional[str] = _DEFAULT_LOG_FILE,
+        autosave_path: Optional[str] = _UNSET,
+        log_file: Optional[str] = _UNSET,
         verbose: bool = False,
     ):
         """
@@ -177,7 +182,12 @@ class PokerFateAPI:
         self.big_blind = big_blind
         self.small_blind = small_blind
         self.verbose = verbose
+        _in_test = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+        if autosave_path is _UNSET:
+            autosave_path = None if _in_test else _DEFAULT_OPPONENTS
         self.autosave_path = autosave_path
+        if log_file is _UNSET:
+            log_file = None if _in_test else _DEFAULT_LOG_FILE
         self._log = PokerLogger(log_file=log_file, console=True)
         self._default_stack = 100.0 * big_blind  # fallback when stack is unknown
 
@@ -268,7 +278,7 @@ class PokerFateAPI:
         my_p = self._get_my_player()
         self._my_stack_start = my_p.stack if my_p else 0.0
 
-        all_ids = [p.player_id for p in players]
+        all_ids = [p.player_id for p in players if p.player_id != self.my_player_id]
         self._bot.new_hand(all_ids)
 
         self._log.hand_start(
@@ -480,13 +490,15 @@ class PokerFateAPI:
         decision = self._to_decision(action)
 
         my_name = self._session_names.get(self.my_player_id, "PokerFate")
+        # 用实际需补差额，避免 BB 已 post 时 to_call 被误传为盲注金额
+        effective_to_call = max(0.0, current_bet - my_current_bet_this_street)
         self._log.decision(
             action=decision.action,
             amount=decision.amount,
             street=street,
             equity=self._bot.last_equity,
             pot=pot,
-            to_call=to_call,
+            to_call=effective_to_call,
             bot_name=my_name,
             reasoning=self._bot.last_reasoning,
         )
@@ -497,12 +509,19 @@ class PokerFateAPI:
     # Hand result (optional, for tracking)
     # ------------------------------------------------------------------
 
+    # Server hand type int → Chinese name (from PKHelper.lua)
+    _SERVER_HAND_TYPE_CN = {
+        2: '一对', 3: '两对', 4: '三条', 5: '顺子',
+        6: '同花', 7: '葫芦', 8: '四条', 9: '同花顺', 10: '皇家同花顺',
+    }
+
     def hand_over(
         self,
         winner_ids: List[int],
         pot: float,
         final_stacks: Optional[Dict[int, float]] = None,
         showdown_hands: Optional[Dict[int, List[str]]] = None,
+        winner_hand_types: Optional[Dict[int, int]] = None,
     ) -> None:
         """Notify the bot that the hand is over.
 
@@ -519,6 +538,9 @@ class PokerFateAPI:
             If omitted, stacks are estimated from observed actions.
         showdown_hands : dict, optional
             {player_id: ["Ac", "Kd"]} — revealed hands at showdown.
+        winner_hand_types : dict, optional
+            {player_id: server_type_int} — server-provided hand type for winners
+            (from WinnerRSP.winner.type). Takes priority over local evaluation.
         """
         if final_stacks:
             for pid, stack in final_stacks.items():
@@ -527,10 +549,59 @@ class PokerFateAPI:
                 if player:
                     player.stack = stack
 
-        winner_names = [self._session_names.get(wid, str(wid)) for wid in winner_ids]
+        winner_names = list(dict.fromkeys(
+            self._session_names.get(wid, str(wid)) for wid in winner_ids
+        ))
         my_final = (final_stacks or {}).get(self.my_player_id)
         my_delta = (my_final - self._my_stack_start) if my_final is not None else 0.0
         self._session_delta += my_delta
+
+        # showdown_hands: pid→cards 转成 name→cards（用于 JSON 日志）
+        sd_by_name: dict = {}
+        if showdown_hands:
+            for pid, cards in showdown_hands.items():
+                name = self._session_names.get(pid, str(pid))
+                sd_by_name[name] = [str(c) for c in cards]
+
+        # 构建每个 showdown 玩家的成品展示：
+        #   - 牌型名：优先用服务端 winner_hand_types，否则本地评估
+        #   - 最佳5张：始终本地计算（服务端不下发）
+        wht = winner_hand_types or {}
+        hand_combos: dict = {}
+        if showdown_hands and self._board:
+            for pid, cards in showdown_hands.items():
+                name = self._session_names.get(pid, str(pid))
+                try:
+                    hole = [Card.from_str(c) if isinstance(c, str) else c for c in cards]
+                    _, best5 = HandEvaluator.best_five(hole + self._board)
+                    # 牌型名：服务端优先
+                    server_type = wht.get(pid)
+                    rank_cn = (self._SERVER_HAND_TYPE_CN.get(server_type)
+                               if server_type else None)
+                    if rank_cn is None:
+                        score, _ = HandEvaluator.best_five(hole + self._board)
+                        rank_cn = HandRank(score[0]).cn_name()
+                    hand_combos[name] = f"{rank_cn} {' '.join(str(c) for c in best5)}"
+                except Exception:
+                    pass
+        elif winner_hand_types and not self._board:
+            # 无公共牌（preflop 结束）：只能展示牌型名，无最佳5张
+            for pid, type_int in wht.items():
+                name = self._session_names.get(pid, str(pid))
+                rank_cn = self._SERVER_HAND_TYPE_CN.get(type_int)
+                if rank_cn:
+                    hand_combos[name] = rank_cn
+
+        # 自己的成品：本地计算（服务端不单独下发我的牌型）
+        my_combo: str | None = None
+        if self._hole_cards and self._board:
+            try:
+                score, best5 = HandEvaluator.best_five(self._hole_cards + self._board)
+                rank_cn = HandRank(score[0]).cn_name()
+                my_combo = f"{rank_cn} {' '.join(str(c) for c in best5)}"
+            except Exception:
+                my_combo = " ".join(str(c) for c in self._hole_cards)
+
         self._log.hand_result(
             winner_names=winner_names,
             pot=pot,
@@ -539,6 +610,9 @@ class PokerFateAPI:
                 self._session_names.get(pid, str(pid)): s
                 for pid, s in (final_stacks or {}).items()
             },
+            showdown_hands=sd_by_name or None,
+            hand_combos=hand_combos or None,
+            my_combo=my_combo,
         )
 
         # Auto-save opponent model after every hand — safe against any kind of crash/kill

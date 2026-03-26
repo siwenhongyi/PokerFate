@@ -113,6 +113,9 @@ class BotBridge:
         # Initialised from DealerInfoRSP.start_info, updated on every ActionBRC
         self._seat_chips: dict[int, int] = {}
         self._hole_cards_count: int = 0
+        # Showdown data accumulated between ShowHandRSP and WinnerRSP
+        self._pending_showdown: dict[int, list[str]] = {}   # seat → [card_str, ...]
+        self._pending_winner_types: dict[int, int] = {}     # seat → server hand type int
 
     # ── Public ────────────────────────────────────────────────────────────────
 
@@ -140,6 +143,7 @@ class BotBridge:
         elif type_name == "pb.ActionBRC":        self._on_action_brc(msg)
         elif type_name == "pb.RoundOverBRC":     self._on_round_over(msg)
         elif type_name == "pb.ActionNotifyBRC":  return self._on_action_notify(msg)
+        elif type_name == "pb.ShowHandRSP":      self._on_show_hand(msg)
         elif type_name == "pb.WinnerRSP":        self._on_winner(msg)
         return None
 
@@ -413,6 +417,22 @@ class BotBridge:
 
         return _decision_to_wire(decision)
 
+    def _on_show_hand(self, msg: dict) -> None:
+        """Capture ShowHandRSP — hole cards revealed at showdown."""
+        for info in msg.get("info", []):
+            seat = info.get("seatid")
+            if seat is None:
+                continue
+            cards = []
+            for key in ("card1", "card2", "card3", "card4"):
+                code = info.get(key)
+                if code:
+                    s = _card_str(int(code))
+                    if s:
+                        cards.append(s)
+            if cards:
+                self._pending_showdown[int(seat)] = cards
+
     def _on_winner(self, msg: dict) -> None:
         if self._api is None:
             return
@@ -442,11 +462,20 @@ class BotBridge:
             if chips > 0:
                 final_stacks[seat] = final_stacks.get(seat, 0) + chips
 
+            # Capture server-provided hand type (authoritative)
+            hand_type = w.get("type")
+            if hand_type:
+                self._pending_winner_types[seat] = int(hand_type)
+
         self._api.hand_over(
             winner_ids=winner_ids,
             pot=total_pot,
             final_stacks=final_stacks,
+            showdown_hands=self._pending_showdown or None,
+            winner_hand_types=self._pending_winner_types or None,
         )
+        self._pending_showdown = {}
+        self._pending_winner_types = {}
 
 
 # ── Wire action conversion ─────────────────────────────────────────────────────

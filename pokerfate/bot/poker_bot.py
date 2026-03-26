@@ -43,6 +43,9 @@ class PokerBot:
         self.equity_iterations = equity_iterations
         self._last_equity: float = 0.5
         self._last_reasoning: str = ""
+        # Per-hand dedup guards: prevent counting VPIP/PFR more than once per player per hand
+        self._vpip_recorded: set = set()
+        self._pfr_recorded: set = set()
 
     # ------------------------------------------------------------------
     # Public API
@@ -94,6 +97,10 @@ class PokerBot:
             pot=gs.pot,
             is_big_blind=is_big_blind,
             num_limpers=num_limpers,
+            equity=self._last_equity,
+            to_call=to_call,
+            num_players=len(gs.players),
+            num_active_opponents=num_opponents,
         )
 
         self._last_reasoning = self._preflop_reasoning(
@@ -348,11 +355,17 @@ class PokerBot:
 
         if action.action_type == ActionType.RAISE:
             if street == 'preflop':
-                self.opponent_model.record_vpip(player_id)
-                self.opponent_model.record_pfr(player_id)
+                if player_id not in self._vpip_recorded:
+                    self.opponent_model.record_vpip(player_id)
+                    self._vpip_recorded.add(player_id)
+                if player_id not in self._pfr_recorded:
+                    self.opponent_model.record_pfr(player_id)
+                    self._pfr_recorded.add(player_id)
         elif action.action_type == ActionType.CALL:
             if street == 'preflop':
-                self.opponent_model.record_vpip(player_id)
+                if player_id not in self._vpip_recorded:
+                    self.opponent_model.record_vpip(player_id)
+                    self._vpip_recorded.add(player_id)
 
         if is_3bet_spot:
             did_3bet = action.action_type == ActionType.RAISE
@@ -367,6 +380,8 @@ class PokerBot:
 
     def new_hand(self, player_ids: List[int]):
         """Call at the start of each new hand."""
+        self._vpip_recorded.clear()
+        self._pfr_recorded.clear()
         for pid in player_ids:
             self.opponent_model.record_hand_start(pid)
             # Reset range estimator: prior = historical VPIP (or 0.35 if unknown)

@@ -51,10 +51,21 @@ from typing import Dict
 
 
 # ---------------------------------------------------------------------------
-# 行动压缩系数（基于GTO下注频率研究）
+# 行动压缩系数（按街道区分，基于GTO下注频率研究）
 # ---------------------------------------------------------------------------
+# raise 系数按街道区分：
+#   preflop：3-bet/4-bet代表极化强范围，压缩最猛（~0.30）
+#   flop：c-bet频率约60-70%，范围较宽，压缩最轻（~0.62）
+#   turn：第二街下注代表更强范围（~0.50）
+#   river：河牌下注高度极化（~0.42）
+_ACTION_COMPRESSION_RAISE: Dict[str, float] = {
+    "preflop": 0.30,
+    "flop":    0.62,
+    "turn":    0.50,
+    "river":   0.42,
+}
+
 _ACTION_COMPRESSION: Dict[str, float] = {
-    "raise": 0.45,   # 加注/下注：范围收缩至当前的45%（价值+诈唬极化）
     "call":  0.75,   # 跟注：范围收缩至75%（跟注更宽，含摸牌手）
     "check": 0.92,   # 过牌：范围几乎不变（含慢打和弱手混合）
     "fold":  0.0,    # 弃牌：不再追踪（对手已出局）
@@ -148,7 +159,11 @@ class HandRangeEstimator:
         if player_id not in self._range:
             self.reset_hand(player_id)
 
-        factor = _ACTION_COMPRESSION.get(action, 1.0)
+        if action == "raise":
+            factor = _ACTION_COMPRESSION_RAISE.get(street, 0.50)
+        else:
+            factor = _ACTION_COMPRESSION.get(action, 1.0)
+
         if factor == 0.0:
             return  # 弃牌，不更新（对手已出局，无需追踪）
 

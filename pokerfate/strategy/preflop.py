@@ -111,6 +111,26 @@ _SB_RANGE = _CO_RANGE | _expand_range(
     'A2o, A3o, A4o, A5o, A6o, A7o, A8o'
 )
 
+# SB heads-up steal vs BB only: ~55% of hands
+# SB仅剩BB时的偷盲范围，远比普通SB开加范围宽
+_SB_STEAL_VS_BB = _BTN_RANGE | _expand_range(
+    'K2o, K3o, K4o, K5o, K6o, '
+    'Q5o, Q6o, Q7o, '
+    'J6o, J7o, '
+    'T6o, T7o, '
+    '96o, '
+    'Q2s, Q3s, Q4s, J2s, J3s, J4s, J5s, T2s, T3s, T4s, T5s'
+)
+
+# 短手位置映射：n人桌时，早位按等效位置放宽范围
+# 5人桌 UTG ≈ 6人桌 HJ；5人桌 UTG+1 ≈ 6人桌 CO
+# 4人桌 UTG ≈ 6人桌 CO
+_SHORT_HAND_POSITION: dict = {
+    5: {'UTG': 'HJ',  'UTG+1': 'CO'},
+    4: {'UTG': 'CO',  'UTG+1': 'BTN'},
+    3: {'UTG': 'BTN', 'UTG+1': 'BTN'},
+}
+
 # BB defends vs SB open — wide defense range
 _BB_VS_SB_DEFENSE = _BTN_RANGE | _expand_range(
     'K4o, K3o, K2o, Q7o, Q6o, Q5o, J7o, T7o, 96o, 85o, 74o, 63o, 52o, 42o, 32o'
@@ -166,9 +186,11 @@ class PreflopStrategy:
     def hand_category(self, hole_cards: List[Card]) -> str:
         return _hand_category(hole_cards)
 
-    def in_open_range(self, hole_cards: List[Card], position: str) -> bool:
+    def in_open_range(self, hole_cards: List[Card], position: str,
+                      num_players: int = 6) -> bool:
         cat = _hand_category(hole_cards)
-        rng = _POSITION_RANGES.get(position, _UTG_RANGE)
+        eff_pos = _SHORT_HAND_POSITION.get(num_players, {}).get(position, position)
+        rng = _POSITION_RANGES.get(eff_pos, _UTG_RANGE)
         return cat in rng
 
     def should_3bet(self, hole_cards: List[Card], position: str, vs_position: str) -> bool:
@@ -213,6 +235,10 @@ class PreflopStrategy:
         pot: float,
         is_big_blind: bool = False,
         num_limpers: int = 0,
+        equity: float = 0.5,
+        to_call: float = 0.0,
+        num_players: int = 6,
+        num_active_opponents: int = 5,
     ) -> Tuple[str, float]:
         """Return (action, amount). action in: fold, call, raise, check."""
         cat = _hand_category(hole_cards)
@@ -228,8 +254,15 @@ class PreflopStrategy:
                     return ('raise', min(iso_size, stack))
                 return ('check', 0.0)
 
-            # Normal positions: open or fold
-            if self.in_open_range(hole_cards, position):
+            # SB heads-up steal: only BB left, use wide steal range
+            if position == 'SB' and num_active_opponents == 1:
+                if cat in _SB_STEAL_VS_BB:
+                    size = self.open_raise_size(position, big_blind)
+                    return ('raise', min(size, stack))
+                return ('fold', 0.0)
+
+            # Normal positions: open or fold (range adjusted for player count)
+            if self.in_open_range(hole_cards, position, num_players):
                 size = self.open_raise_size(position, big_blind)
                 return ('raise', min(size, stack))
             return ('fold', 0.0)
@@ -238,7 +271,19 @@ class PreflopStrategy:
             if self.should_3bet(hole_cards, position, 'any'):
                 size = self.three_bet_size(open_raise, is_ip, big_blind)
                 return ('raise', min(size, stack))
-            if self.in_open_range(hole_cards, position) or cat in _BB_VS_SB_DEFENSE:
+            # Pot-odds gate: if calling costs more equity than we have, fold.
+            # Catches large/all-in raises where range heuristics should not override math.
+            call_amt = min(to_call or open_raise, stack)
+            pot_odds = call_amt / (pot + call_amt) if (pot + call_amt) > 0 else 0.0
+            # OOP penalty: SB calling OOP requires extra equity vs IP callers
+            oop_penalty = 0.04 if (position == 'SB') else 0.0
+            if equity < pot_odds + oop_penalty:
+                return ('fold', 0.0)
+            # BB defense range only applies when we are actually in the big blind.
+            in_range = self.in_open_range(hole_cards, position, num_players) or (
+                position == 'BB' and cat in _BB_VS_SB_DEFENSE
+            )
+            if in_range:
                 return ('call', min(open_raise, stack))
             return ('fold', 0.0)
 
