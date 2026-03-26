@@ -10,7 +10,7 @@ from itertools import combinations
 from typing import List, Tuple
 from collections import Counter
 
-from .card import Card, Rank
+from pokerfate.core.card import Card, Rank
 
 
 class HandRank(IntEnum):

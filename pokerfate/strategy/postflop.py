@@ -3,8 +3,8 @@
 from __future__ import annotations
 import random
 from typing import List, Tuple
-from ..core.card import Card, Rank, Suit
-from .gto import GTOMath
+from pokerfate.core.card import Card, Rank, Suit
+from pokerfate.strategy.gto import GTOMath
 
 
 class BoardTexture:

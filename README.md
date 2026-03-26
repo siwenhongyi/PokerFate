@@ -34,54 +34,43 @@ python -m pf_intercept.gen_cert
 
 Install `pf_intercept/certs/ca.crt` into the **Windows Trusted Root Certificate Authorities**.
 
-### 4. Configure
+### 4. Redirect game traffic (Windows hosts file, one-time)
 
-Edit `pf_intercept/config.py`:
-
-```python
-SERVER_HOST = "zga-entry.poker-fate.net"   # WSS hostname the game connects to
-```
-
-The proxy auto-detects seat ID and blind sizes from game messages.
-The real server IP is resolved at startup via external DNS (multiple resolvers), bypassing the local hosts file.
-
-### 5. Redirect game traffic (Windows hosts file)
-
-Add to `C:\Windows\System32\drivers\etc\hosts` (run as Administrator):
+Add to `C:\Windows\System32\drivers\etc\hosts` (run Notepad as Administrator):
 
 ```
 127.0.0.1  zga-entry.poker-fate.net
 127.0.0.1  zga-entry.allinmoe.com
+127.0.0.1  ga-foreign.poker-fate.com
 ```
 
-### 6. Run the proxy
+All three entries are required — the game may connect to any of these domains.
+
+### 5. Run the proxy
 
 ```bash
 python -m pf_intercept.proxy
 ```
 
-## Optional: capture HTTP login response for dynamic server discovery
+Then open the game. The proxy intercepts whichever domain the game connects to,
+resolves the real server IP via external DNS (bypassing the hosts redirect),
+and relays traffic transparently.
 
-Run mitmweb alongside the proxy to intercept the HTTP login response and auto-discover the actual WSS server:
-
-```bash
-mitmweb --listen-port 8080 --ignore-hosts "aliyuncs.com|miui.com" -s pf_reverse/force_domain.py
-```
-
-Set the system HTTP proxy to `127.0.0.1:8080`. When the login response is captured, `pf_intercept/discovered_server.json` is written and the proxy uses it on next startup.
+The proxy auto-detects seat ID and blind sizes from game messages.
 
 ## Architecture
 
 ```
 Game (Windows)
-  │  hosts file → 127.0.0.1
+  │  hosts file → 127.0.0.1:<domain>
   │
 pf_intercept/proxy.py  :9012  (TLS — our cert)
+  │  reads SNI from incoming connection → resolves real IP via external DNS
   │  decode protobuf frames
   │  drive bot via pokerfate/api.py
   │  inject ActionREQ when it's our turn
   │
-Real game server  wss://zga-entry.poker-fate.net:9012
+Real game server  wss://<domain>:9012  (IP from DNS cache)
 ```
 
 ## Card encoding

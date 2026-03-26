@@ -3,8 +3,8 @@
 from __future__ import annotations
 import random
 from typing import List, Optional
-from .card import Card, Deck
-from .hand_evaluator import HandEvaluator
+from pokerfate.core.card import Card, Deck
+from pokerfate.core.hand_evaluator import HandEvaluator
 
 
 class EquityCalculator:

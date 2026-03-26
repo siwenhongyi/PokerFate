@@ -4,14 +4,14 @@ from __future__ import annotations
 import random
 from typing import List, Optional, Tuple
 
-from ..core.card import Card
-from ..core.game_state import GameState, Player, Street, Action, ActionType
-from ..core.equity import EquityCalculator
-from ..strategy.preflop import PreflopStrategy
-from ..strategy.postflop import PostflopStrategy
-from ..strategy.gto import GTOMath
-from ..strategy.range_estimator import HandRangeEstimator
-from .opponent_model import OpponentModel
+from pokerfate.core.card import Card
+from pokerfate.core.game_state import GameState, Player, Street, Action, ActionType
+from pokerfate.core.equity import EquityCalculator
+from pokerfate.strategy.preflop import PreflopStrategy
+from pokerfate.strategy.postflop import PostflopStrategy
+from pokerfate.strategy.gto import GTOMath
+from pokerfate.strategy.range_estimator import HandRangeEstimator
+from pokerfate.bot.opponent_model import OpponentModel
 
 
 class PokerBot:
