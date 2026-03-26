@@ -18,6 +18,7 @@ pf_intercept/discovered_server.json
 *.mitm
 pf_intercept/logs/
 # Runtime opponent model (accumulated during play, generate locally)
+# opponents.json is excluded; opponents.enc (encrypted) is tracked and safe to push
 opponents.json
 
 # Slumbot credentials (sensitive — create locally)
