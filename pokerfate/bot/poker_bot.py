@@ -10,6 +10,7 @@ from ..core.equity import EquityCalculator
 from ..strategy.preflop import PreflopStrategy
 from ..strategy.postflop import PostflopStrategy
 from ..strategy.gto import GTOMath
+from ..strategy.range_estimator import HandRangeEstimator
 from .opponent_model import OpponentModel
 
 
@@ -38,6 +39,7 @@ class PokerBot:
         self.postflop = PostflopStrategy(aggression=aggression)
         self.gto = GTOMath()
         self.opponent_model = OpponentModel()
+        self.range_estimator = HandRangeEstimator()
         self.equity_iterations = equity_iterations
         self._last_equity: float = 0.5
         self._last_reasoning: str = ""
@@ -128,8 +130,16 @@ class PokerBot:
         opp_ids = [p.player_id for p in gs.active_players if p.player_id != player.player_id]
         primary_opp_id = opp_ids[0] if opp_ids else -1
 
-        # Calculate equity
-        equity = self._get_equity(player.hole_cards, board, num_opponents)
+        # Calculate raw MC equity (vs random hands)
+        raw_equity = self._get_equity(player.hole_cards, board, num_opponents)
+
+        # ── Libratus-inspired range compression ─────────────────────────────
+        # Apply equity discount based on how aggressively opponents have acted.
+        # When opponent bets multiple streets, their range compresses to strong
+        # hands, making our raw MC equity (vs random) an over-estimate.
+        # discount = f(range_fraction), see range_estimator.py for calibration.
+        discount = self.range_estimator.worst_discount(opp_ids)
+        equity = raw_equity * discount
         self._last_equity = equity
 
         # Get exploit adjustments
@@ -159,7 +169,9 @@ class PokerBot:
 
         self._last_reasoning = self._postflop_reasoning(
             equity, is_ip, facing_bet, to_call, pot, opp_fold_rate,
-            board, action_str
+            board, action_str,
+            raw_equity=raw_equity, discount=discount,
+            streets_bet=self.range_estimator.streets_bet(primary_opp_id) if primary_opp_id >= 0 else 0,
         )
         return self._to_action(action_str, amount, to_call, stack)
 
@@ -230,13 +242,21 @@ class PokerBot:
         opp_fold_rate: float,
         board: List[Card],
         action_str: str,
+        raw_equity: float = None,
+        discount: float = 1.0,
+        streets_bet: int = 0,
     ) -> str:
         from ..strategy.postflop import BoardTexture
         texture = BoardTexture(board)
         tex = "干燥" if texture.is_dry else ("湿润" if texture.is_wet else "中性")
         pos = "有位置" if is_ip else "无位置"
-        eq = f"胜率{equity:.0%}"
         pot_odds = to_call / (pot + to_call) if to_call > 0 else 0.0
+
+        # Show range compression context when significant
+        if raw_equity is not None and discount < 0.92 and streets_bet > 0:
+            eq = f"胜率{equity:.0%}(原{raw_equity:.0%}→{streets_bet}街压缩)"
+        else:
+            eq = f"胜率{equity:.0%}"
 
         if action_str == "raise":
             if facing_bet:
@@ -245,7 +265,7 @@ class PokerBot:
             else:
                 if equity >= 0.90:
                     return f"{eq}  {tex}牌面  {pos}  面对过牌 → 强牌价值下注"
-                elif equity >= 0.70:
+                elif equity >= 0.65:
                     return f"{eq}  {tex}牌面  {pos}  面对过牌 → 价值持续下注"
                 elif equity >= 0.30:
                     return f"{eq}  {tex}牌面  {pos}  面对过牌 → 半诈唬（有摸牌出路）"
@@ -321,10 +341,17 @@ class PokerBot:
             folded = action.action_type == ActionType.FOLD
             self.opponent_model.record_fold_to_cbet(player_id, folded)
 
+        # Update range estimator for every opponent action
+        self.range_estimator.observe_action(player_id, act, street)
+
     def new_hand(self, player_ids: List[int]):
         """Call at the start of each new hand."""
         for pid in player_ids:
             self.opponent_model.record_hand_start(pid)
+            # Reset range estimator: prior = historical VPIP (or 0.35 if unknown)
+            stats = self.opponent_model.get(pid)
+            prior = stats.vpip if stats.hands_seen >= 10 else 0.35
+            self.range_estimator.reset_hand(pid, prior_range=prior)
 
     @property
     def last_equity(self) -> float:
