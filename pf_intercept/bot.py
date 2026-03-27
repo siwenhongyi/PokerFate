@@ -112,6 +112,9 @@ class BotBridge:
         # Track each seat's remaining chips (for final_stacks on hand_over)
         # Initialised from DealerInfoRSP.start_info, updated on every ActionBRC
         self._seat_chips: dict[int, int] = {}
+        # Snapshot of chips at hand start (from DealerInfoRSP.start_info)
+        # Used with WinnerRSP.profit to compute authoritative final_stacks
+        self._hand_start_chips: dict[int, int] = {}
         self._hole_cards_count: int = 0
         # Showdown data accumulated between ShowHandRSP and WinnerRSP
         self._pending_showdown: dict[int, list[str]] = {}   # seat → [card_str, ...]
@@ -265,12 +268,14 @@ class BotBridge:
         start_info.sort(key=lambda si: si["seatid"])
         self._all_seats = [si["seatid"] for si in start_info]
         self._seat_chips = {}
+        self._hand_start_chips = {}
 
         players = []
         for si in start_info:
             seat  = si["seatid"]
             chips = _chip_int(si.get("chips", 0))
             self._seat_chips[seat] = chips
+            self._hand_start_chips[seat] = chips
             if seat == self._my_seat:
                 self._my_chips = chips
             name = self._seat_names.get(seat) or f"Player_{seat}"
@@ -444,9 +449,7 @@ class BotBridge:
         winner_ids: list[int] = []
         total_pot = 0
 
-        # Build final_stacks starting from last-known per-seat chips.
-        final_stacks: dict[int, int] = dict(self._seat_chips)
-
+        # Build winner_ids and total_pot from winner list.
         for w in winner_list:
             chips = _chip_int(w.get("chips", 0), 0)
             total_pot += chips
@@ -462,13 +465,29 @@ class BotBridge:
                     continue
 
             winner_ids.append(seat)
-            if chips > 0:
-                final_stacks[seat] = final_stacks.get(seat, 0) + chips
 
             # Capture server-provided hand type (authoritative)
             hand_type = w.get("type")
             if hand_type:
                 self._pending_winner_types[seat] = int(hand_type)
+
+        # Build final_stacks from hand-start chips + server profit delta.
+        # WinnerRSP.profit gives each player's net gain/loss for the hand,
+        # already accounting for uncalled bet returns and rake.
+        # This is more accurate than seat_chips + winner.chips.
+        final_stacks: dict[int, int] = dict(self._hand_start_chips)
+        for p in msg.get("profit", []):
+            uid = str(p.get("uid", ""))
+            seat = self._uid_to_seat.get(uid, -1)
+            if seat < 0:
+                continue
+            profit_chips = _chip_int(p.get("chips", 0), 0)
+            if seat in final_stacks:
+                final_stacks[seat] = final_stacks[seat] + profit_chips
+        # Fall back to seat_chips for any seat missing from profit.
+        for seat, chips in self._seat_chips.items():
+            if seat not in final_stacks:
+                final_stacks[seat] = chips
 
         self._api.hand_over(
             winner_ids=winner_ids,

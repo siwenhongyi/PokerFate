@@ -289,6 +289,7 @@ class PokerFateAPI:
                 for p, pi in zip(self._players, players)
             ],
             dealer_id=dealer_id,
+            big_blind=self.big_blind,
         )
 
     def deal_hole_cards(self, cards: List[str]) -> None:
