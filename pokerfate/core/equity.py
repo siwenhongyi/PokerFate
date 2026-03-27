@@ -96,9 +96,3 @@ class EquityCalculator:
         if total == 0:
             return 0.5
         return (wins + ties * 0.5) / iterations
-
-    @staticmethod
-    def outs_to_equity(outs: int, cards_to_come: int) -> float:
-        """Rule of 2 and 4 approximation."""
-        multiplier = 4 if cards_to_come == 2 else 2
-        return min(outs * multiplier / 100.0, 0.99)
