@@ -7,6 +7,9 @@ dist/
 build/
 .pytest_cache/
 
+# mac
+.DS_Store
+
 # Generated certs (sensitive — generate locally with gen_cert.py)
 pf_intercept/certs/
 
