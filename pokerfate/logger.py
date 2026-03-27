@@ -100,7 +100,8 @@ def _pos(p: str) -> str:
 class _JsonlWriter:
     def __init__(self, filepath: str):
         os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
-        self._f = open(filepath, "a", encoding="utf-8", buffering=1)
+        _rotate_log(filepath)
+        self._f = open(filepath, "w", encoding="utf-8", buffering=1)
 
     def write(self, event: dict):
         event.setdefault("ts", datetime.now(timezone.utc).isoformat())
@@ -136,7 +137,8 @@ class PokerLogger:
             p = pathlib.Path(log_file)
             text_path = p.with_name(p.stem + "_console" + p.suffix)
             text_path.parent.mkdir(parents=True, exist_ok=True)
-            self._text_log = open(text_path, "a", encoding="utf-8", buffering=1)
+            _rotate_log(str(text_path))
+            self._text_log = open(text_path, "w", encoding="utf-8", buffering=1)
 
     # ------------------------------------------------------------------
     # Public event methods
@@ -175,10 +177,11 @@ class PokerLogger:
         self._raw("━" * _W, bold=True)
 
         bb = max(big_blind, 1.0)
-        seats = "   ".join(
-            f"{p['name']} {p['stack'] / bb:.0f}bb [{_pos(p.get('pos', ''))}]"
-            for p in players
-        )
+        def _seat_str(p: dict) -> str:
+            ptype = p.get("player_type", "")
+            tag = f"({ptype})" if ptype else ""
+            return f"{p['name']}{tag} {p['stack'] / bb:.0f}bb [{_pos(p.get('pos', ''))}]"
+        seats = "   ".join(_seat_str(p) for p in players)
         hand_tag = f"  第 {hand_number} 手"
         self._raw(f"{hand_tag:<12}{seats}", bold=True)
         self._raw("━" * _W, bold=True)
@@ -414,7 +417,8 @@ class PokerLogger:
     ):
         # Write plain text to file (always, regardless of console setting)
         if self._text_log:
-            self._text_log.write(_strip_ansi(msg) + "\n")
+            ts = datetime.now().strftime("%H:%M:%S")
+            self._text_log.write(f"[{ts}] {_strip_ansi(msg)}\n")
 
         if not self._console:
             return
@@ -439,6 +443,18 @@ class PokerLogger:
 def _strip_ansi(s: str) -> str:
     """Remove ANSI escape codes for length calculation and plain-text output."""
     return _ANSI_RE.sub("", s)
+
+
+def _rotate_log(filepath: str) -> None:
+    """如果文件已存在，将其内容追加到 *.bak.log，然后清空原文件。"""
+    p = pathlib.Path(filepath)
+    if not p.exists():
+        return
+    bak = p.with_name(p.stem + ".bak" + p.suffix)
+    bak.parent.mkdir(parents=True, exist_ok=True)
+    with open(bak, "a", encoding="utf-8") as dst, \
+         open(p, "r", encoding="utf-8") as src:
+        dst.write(src.read())
 
 
 # ---------------------------------------------------------------------------

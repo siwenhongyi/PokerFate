@@ -172,6 +172,8 @@ class PokerBot:
 
         spr = self.gto.spr(stack, max(pot, 0.01))
 
+        value_only = adj.get('cbet_freq') == 'value_only'
+
         action_str, amount = self.postflop.decide(
             equity=equity,
             raw_equity=raw_equity,
@@ -186,6 +188,7 @@ class PokerBot:
             big_blind=bb,
             opponent_fold_rate=opp_fold_rate,
             spr=spr,
+            value_only=value_only,
         )
 
         self._last_reasoning = self._postflop_reasoning(
@@ -193,6 +196,7 @@ class PokerBot:
             board, action_str,
             raw_equity=raw_equity, discount=discount,
             streets_bet=self.range_estimator.streets_bet(primary_opp_id) if primary_opp_id >= 0 else 0,
+            street=street,
         )
         return self._to_action(action_str, amount, to_call, stack)
 
@@ -274,6 +278,7 @@ class PokerBot:
         raw_equity: float = None,
         discount: float = 1.0,
         streets_bet: int = 0,
+        street: str = "",
     ) -> str:
         from ..strategy.postflop import BoardTexture
         texture = BoardTexture(board)
@@ -292,6 +297,13 @@ class PokerBot:
                 role = "IP价值加注，建底池" if is_ip else "check-raise价值/诈唬"
                 return f"{eq}  {tex}牌面  {pos}  面对下注 → {role}"
             else:
+                if street == "river":
+                    if equity >= 0.60:
+                        return f"{eq}  {tex}牌面  {pos}  面对过牌 → 河牌价值下注"
+                    elif equity >= 0.50:
+                        return f"{eq}  {tex}牌面  {pos}  面对过牌 → 河牌薄价值/混合下注"
+                    else:
+                        return f"{eq}  折叠率{opp_fold_rate:.0%}  面对过牌 → 河牌纯诈唬"
                 if equity >= 0.90:
                     return f"{eq}  {tex}牌面  {pos}  面对过牌 → 强牌价值下注"
                 elif equity >= 0.60:

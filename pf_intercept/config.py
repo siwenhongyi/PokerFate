@@ -61,6 +61,8 @@ WATCH_S2C = {
     "pb.RoundOverBRC",
     "pb.WinnerRSP",
     "pb.ShowHandRSP",
+    # Bust-out / rebuy
+    "pb.NoticeRebyRSP",  # server notifies us when our chips hit 0 (rebuy window)
 }
 
 WATCH_C2S = {

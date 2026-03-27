@@ -83,6 +83,7 @@ class PostflopStrategy:
         street: str,
         num_opponents: int = 1,
         opponent_fold_rate: float = 0.45,
+        value_only: bool = False,
     ) -> bool:
         """Decide whether to make a continuation bet.
 
@@ -92,6 +93,12 @@ class PostflopStrategy:
         - Multiway (3+ opponents): semi-bluff requires equity >= 0.45 floor
           (Pluribus: fold equity drops sharply in multi-way pots)
         """
+        # ── 纯价值模式（对跟注站）：只在有明显优势时下注，禁止所有诈唬 ──
+        if value_only:
+            if street == 'river':
+                return equity >= 0.60
+            return equity >= 0.55
+
         # ── River: separate logic (no semi-bluffs, pure value or fold-equity bluff) ──
         if street == 'river':
             return self._should_river_bet(equity, is_ip, num_opponents, opponent_fold_rate)
@@ -306,6 +313,7 @@ class PostflopStrategy:
         opponent_fold_rate: float = 0.45,
         spr: float = 5.0,
         raw_equity: float = None,
+        value_only: bool = False,
     ) -> Tuple[str, float]:
         """Main postflop decision function.
 
@@ -351,7 +359,7 @@ class PostflopStrategy:
 
         else:
             # No bet facing: check or bet based on raw hand strength
-            if self.should_cbet(bet_equity, texture, is_ip, street, num_opponents, opponent_fold_rate):
+            if self.should_cbet(bet_equity, texture, is_ip, street, num_opponents, opponent_fold_rate, value_only=value_only):
                 amount = self.bet_size(bet_equity, pot, texture, stack, street, big_blind)
                 return ('raise', amount)
             return ('check', 0.0)
