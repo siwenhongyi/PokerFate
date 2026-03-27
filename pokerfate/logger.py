@@ -147,6 +147,7 @@ class PokerLogger:
         hand_number: int,
         players: List[Dict],
         dealer_id: int,
+        big_blind: float = 1.0,
     ):
         self._hand_num[0] = hand_number
         self._file({
@@ -173,8 +174,9 @@ class PokerLogger:
         self._raw("")
         self._raw("━" * _W, bold=True)
 
+        bb = max(big_blind, 1.0)
         seats = "   ".join(
-            f"{p['name']} {p['stack']:.0f}bb [{_pos(p.get('pos', ''))}]"
+            f"{p['name']} {p['stack'] / bb:.0f}bb [{_pos(p.get('pos', ''))}]"
             for p in players
         )
         hand_tag = f"  第 {hand_number} 手"
