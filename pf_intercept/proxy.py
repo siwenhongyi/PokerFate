@@ -13,6 +13,7 @@ Traffic flow:
     Game  ->  127.0.0.1:9012  (TLS, WSS MITM)  ->  Real Server :9012
 """
 
+import argparse
 import asyncio
 import logging
 import logging.handlers
@@ -65,9 +66,8 @@ tcp_log.addHandler(_fh("tcp.log"))
 
 log = logging.getLogger("pf_proxy")
 
-# ── Bot singleton ─────────────────────────────────────────────────────────────
-_bot = BotBridge()
-log.info("[BOT] Waiting for SitDownRSP and EnterRoomRSP to detect seat / blinds")
+# ── Bot singleton (constructed in main() with CLI options) ────────────────────
+_bot: BotBridge | None = None
 
 # ── Server state ──────────────────────────────────────────────────────────────
 _real_server_sni: str = SERVER_HOST       # fallback SNI when Host header is absent
@@ -322,6 +322,9 @@ async def _pipe_c2s(client_ws, server_ws, buf: FrameBuffer) -> None:
 
 async def _pipe_s2c(client_ws, server_ws, buf: FrameBuffer) -> None:
     """Real server → game client, with bot action injection."""
+    bridge = _bot
+    if bridge is None:
+        raise RuntimeError("BotBridge not initialised (main() must run first)")
     msg_count = 0
     try:
         async for raw in server_ws:
@@ -343,7 +346,7 @@ async def _pipe_s2c(client_ws, server_ws, buf: FrameBuffer) -> None:
 
                 log.info("[S→C] %s  %s", frame.type_name, msg)
 
-                result = _bot.handle(frame.type_name, msg)
+                result = bridge.handle(frame.type_name, msg)
                 if result is not None:
                     inject = result
                     inject_room_id = frame.room_id
@@ -620,10 +623,18 @@ async def _handle_passthrough(
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-async def main() -> None:
+async def main(max_auto_rebuy: int = 1) -> None:
+    global _bot
     if not Path(SERVER_CERT).exists():
         print("ERROR: certs not found. Run:  python -m pf_intercept.gen_cert")
         return
+
+    _bot = BotBridge(max_auto_rebuy=max_auto_rebuy)
+    log.info(
+        "[BOT] Waiting for SitDownRSP and EnterRoomRSP to detect seat / blinds "
+        "(max_auto_rebuy=%d)",
+        max_auto_rebuy,
+    )
 
     server_ssl = _make_server_ssl()
 
@@ -653,5 +664,21 @@ async def main() -> None:
     await asyncio.Future()
 
 
+def _parse_proxy_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="PokerFate WSS MITM proxy (auto seat/blinds; optional auto-rebuy cap)",
+    )
+    p.add_argument(
+        "--max-auto-rebuy",
+        type=int,
+        default=1,
+        metavar="N",
+        choices=range(1, 21),
+        help="本房间筹码清零时最多自动续入次数（1–20，默认 1）",
+    )
+    return p.parse_args()
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    _args = _parse_proxy_args()
+    asyncio.run(main(max_auto_rebuy=_args.max_auto_rebuy))

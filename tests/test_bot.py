@@ -372,7 +372,7 @@ class TestBBDecisions:
         players = [
             Player(0, 'BTN', 200.0, []),
             Player(1, 'SB',  200.0, []),
-            Player(2, 'BB',  200.0, cards(*hole_cards_str)),
+            Player(2, 'BB',  200.0, cards(*hole_cards_str), current_bet=2.0),
         ]
         # Simulate limpers: each limper put in a CALL action in history
         history = []

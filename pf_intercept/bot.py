@@ -82,7 +82,7 @@ class BotBridge:
     Returns (action_type: int, chips: int) when the bot should act, else None.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_auto_rebuy: int = 1) -> None:
         # Detected from game messages (may be pre-seeded by config)
         self._my_seat: int | None  = None
         self._my_uid:  str | None  = None
@@ -91,8 +91,9 @@ class BotBridge:
 
         self._api: PokerFateAPI | None = None   # created once blinds are known
 
-        # Rebuy: allow at most one auto-rebuy per room entry
-        self._reby_used: bool = False
+        # Auto-rebuy when chips hit 0 (NoticeRebyRSP); capped per room entry
+        self._max_auto_rebuy: int = max(1, min(20, int(max_auto_rebuy)))
+        self._auto_rebuy_done: int = 0
 
         # Session-level: real player names keyed by seat_id
         # Populated from EnterRoomRSP.table_status.seat[].player.name
@@ -181,7 +182,7 @@ class BotBridge:
         self._set_my_seat(seat, "SitDownRSP")
 
     def _on_enter_room(self, msg: dict) -> None:
-        self._reby_used = False   # reset per room entry
+        self._auto_rebuy_done = 0   # reset per room entry
 
         # Blind detection
         room_info = msg.get("room_info") or {}
@@ -516,17 +517,21 @@ class BotBridge:
         reby_left_time = msg.get("reby_left_time", 0)
         rebuy_chips = int(100 * (self._bb or 1000))
 
-        if self._reby_used:
+        if self._auto_rebuy_done >= self._max_auto_rebuy:
             log.warning(
-                "[BOT] ⚠️  筹码清零！（本局已自动续入过一次，不再续入）rebuy 窗口 %d 秒。",
+                "[BOT] ⚠️  筹码清零！已达本房间最大自动续入次数 %d/%d，不再续入。rebuy 窗口 %d 秒。",
+                self._auto_rebuy_done,
+                self._max_auto_rebuy,
                 reby_left_time,
             )
             return None
 
-        self._reby_used = True
+        self._auto_rebuy_done += 1
         log.warning(
-            "[BOT] ⚠️  筹码清零！自动续入 %d（100BB），rebuy 窗口 %d 秒。",
+            "[BOT] ⚠️  筹码清零！自动续入 %d（100BB） 第 %d/%d 次，rebuy 窗口 %d 秒。",
             rebuy_chips,
+            self._auto_rebuy_done,
+            self._max_auto_rebuy,
             reby_left_time,
         )
         return "pb.RebyREQ", {"is_reby": True, "chips": rebuy_chips}

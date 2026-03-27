@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 
 from pokerfate.core.card import Card
 from pokerfate.core.game_state import GameState, Player, Street, Action, ActionType
+from pokerfate.core.hand_evaluator import HandEvaluator, HandRank
 from pokerfate.core.equity import EquityCalculator
 from pokerfate.strategy.preflop import PreflopStrategy
 from pokerfate.strategy.postflop import PostflopStrategy
@@ -82,8 +83,10 @@ class PokerBot:
         # Determine what action we're facing
         facing_action, open_raise = self._classify_preflop_action(gs, player)
 
-        # is_bb_option: server signal (forced_post + call_need==0), covers both regular BB and forced blind
-        is_big_blind = is_bb_option
+        # is_bb_option: explicit server signal (forced_post + call_need==0)
+        # Auto-detect fallback: BB position + no raises + nothing to call = free check option
+        auto_detect_bb = (position == 'BB' and facing_action == 'none' and to_call == 0)
+        is_big_blind = is_bb_option or auto_detect_bb
         num_limpers = self._count_limpers(gs, player) if facing_action == 'none' else 0
 
         action_str, amount = self.preflop.decide(
@@ -192,6 +195,7 @@ class PokerBot:
         )
 
         self._last_reasoning = self._postflop_reasoning(
+            player.hole_cards,
             equity, is_ip, facing_bet, to_call, pot, opp_fold_rate,
             board, action_str,
             raw_equity=raw_equity, discount=discount,
@@ -203,6 +207,20 @@ class PokerBot:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _made_hand_label_cn(hole_cards: List[Card], board: List[Card]) -> str:
+        """翻牌前：手牌范畴（如 AKs）；翻牌后：手牌+公牌组成的最优五张牌型中文（如 一对）。"""
+        if len(hole_cards) < 2:
+            return "未知"
+        if not board:
+            from pokerfate.strategy.preflop import _hand_category
+            return _hand_category(hole_cards)
+        combined = hole_cards + board
+        if len(combined) < 5:
+            return "未成牌"
+        score = HandEvaluator.evaluate(combined)
+        return HandRank(score[0]).cn_name()
 
     def _get_equity(self, hole_cards: List[Card], board: List[Card], num_opponents: int) -> float:
         if not hole_cards:
@@ -267,6 +285,7 @@ class PokerBot:
 
     def _postflop_reasoning(
         self,
+        hole_cards: List[Card],
         equity: float,
         is_ip: bool,
         facing_bet: bool,
@@ -281,6 +300,8 @@ class PokerBot:
         street: str = "",
     ) -> str:
         from ..strategy.postflop import BoardTexture
+        made = self._made_hand_label_cn(hole_cards, board)
+        prefix = f"【{made}】"
         texture = BoardTexture(board)
         tex = "干燥" if texture.is_dry else ("湿润" if texture.is_wet else "中性")
         pos = "有位置" if is_ip else "无位置"
@@ -295,32 +316,32 @@ class PokerBot:
         if action_str == "raise":
             if facing_bet:
                 role = "IP价值加注，建底池" if is_ip else "check-raise价值/诈唬"
-                return f"{eq}  {tex}牌面  {pos}  面对下注 → {role}"
+                return f"{prefix}{eq}  {tex}牌面  {pos}  面对下注 → {role}"
             else:
                 if street == "river":
                     if equity >= 0.60:
-                        return f"{eq}  {tex}牌面  {pos}  面对过牌 → 河牌价值下注"
+                        return f"{prefix}{eq}  {tex}牌面  {pos}  面对过牌 → 河牌价值下注"
                     elif equity >= 0.50:
-                        return f"{eq}  {tex}牌面  {pos}  面对过牌 → 河牌薄价值/混合下注"
+                        return f"{prefix}{eq}  {tex}牌面  {pos}  面对过牌 → 河牌薄价值/混合下注"
                     else:
-                        return f"{eq}  折叠率{opp_fold_rate:.0%}  面对过牌 → 河牌纯诈唬"
+                        return f"{prefix}{eq}  折叠率{opp_fold_rate:.0%}  面对过牌 → 河牌纯诈唬"
                 if equity >= 0.90:
-                    return f"{eq}  {tex}牌面  {pos}  面对过牌 → 强牌价值下注"
+                    return f"{prefix}{eq}  {tex}牌面  {pos}  面对过牌 → 强牌价值下注"
                 elif equity >= 0.60:
-                    return f"{eq}  {tex}牌面  {pos}  面对过牌 → 价值持续下注"
+                    return f"{prefix}{eq}  {tex}牌面  {pos}  面对过牌 → 价值持续下注"
                 elif equity >= 0.30:
-                    return f"{eq}  {tex}牌面  {pos}  面对过牌 → 半诈唬（有摸牌出路）"
+                    return f"{prefix}{eq}  {tex}牌面  {pos}  面对过牌 → 半诈唬（有摸牌出路）"
                 else:
-                    return f"{eq}  折叠率{opp_fold_rate:.0%}  面对过牌 → 纯诈唬"
+                    return f"{prefix}{eq}  折叠率{opp_fold_rate:.0%}  面对过牌 → 纯诈唬"
         elif action_str == "call":
-            return f"{eq} > 底池赔率{pot_odds:.0%}  {pos} → 跟注（有利赔率）"
+            return f"{prefix}{eq} > 底池赔率{pot_odds:.0%}  {pos} → 跟注（有利赔率）"
         elif action_str == "check":
             if equity >= 0.85:
-                return f"{eq}  强牌  面对过牌 → 慢打，保护过牌范围"
+                return f"{prefix}{eq}  强牌  面对过牌 → 慢打，保护过牌范围"
             else:
-                return f"{eq}  {tex}牌面  {pos}  面对过牌 → 无注理由，过牌"
+                return f"{prefix}{eq}  {tex}牌面  {pos}  面对过牌 → 无注理由，过牌"
         else:  # fold
-            return f"{eq} < 底池赔率{pot_odds:.0%}  {pos}  面对下注 → 无足够赔率，弃牌"
+            return f"{prefix}{eq} < 底池赔率{pot_odds:.0%}  {pos}  面对下注 → 无足够赔率，弃牌"
 
     def _compute_value_mult(self, adj: dict) -> float:
         """Bet-size multiplier: larger vs calling stations, normal otherwise."""

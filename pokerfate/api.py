@@ -290,11 +290,14 @@ class PokerFateAPI:
             "unknown":         "未知",
         }
 
+        # 与 OpponentStats.player_type() 一致：hands_seen < 20 时统计不可靠，只标「数据不足N手」
+        _MIN_HANDS_FOR_TYPE = 20
+
         def _player_type_tag(player_id: int) -> str:
             if player_id == self.my_player_id:
                 return ""
             s = self._bot.opponent_model.get(player_id)
-            if s.hands_seen < 20:
+            if s.hands_seen < _MIN_HANDS_FOR_TYPE:
                 return f"数据不足{s.hands_seen}手"
             return _TYPE_CN.get(s.player_type(), s.player_type())
 
@@ -604,13 +607,15 @@ class PokerFateAPI:
                     hand_combos[name] = f"{rank_cn} {' '.join(str(c) for c in best5)}"
                 except Exception:
                     pass
-        elif winner_hand_types and not self._board:
-            # 无公共牌（preflop 结束）：只能展示牌型名，无最佳5张
+        # 兜底：有 winner_hand_types 但没有底牌数据时，至少展示牌型名
+        # （包括：preflop 结束 / 对手没有亮牌但服务端下发了牌型）
+        if wht:
             for pid, type_int in wht.items():
                 name = self._session_names.get(pid, str(pid))
-                rank_cn = self._SERVER_HAND_TYPE_CN.get(type_int)
-                if rank_cn:
-                    hand_combos[name] = rank_cn
+                if name not in hand_combos:
+                    rank_cn = self._SERVER_HAND_TYPE_CN.get(type_int)
+                    if rank_cn:
+                        hand_combos[name] = rank_cn
 
         # 自己的成品：本地计算（服务端不单独下发我的牌型）
         my_combo: str | None = None
