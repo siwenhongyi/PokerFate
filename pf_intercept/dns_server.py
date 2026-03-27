@@ -1,17 +1,21 @@
 """
 Fake DNS server for Android MITM mode.
 
-PREFERRED_WSS_HOSTS → proxy_ip (本机 IP)
-其他所有域名 → 转发给上游 DNS
+PREFERRED_WSS_HOSTS:
+  - A 记录 → proxy_ip（本机 IPv4）
+  - AAAA 记录 → NODATA（避免客户端拿到真实 IPv6 后直连，绕过仅监听 IPv4 的代理）
+
+其他域名 → 转发给上游 DNS。
 
 Usage:
-    sudo python -m pf_intercept.dns_server            # 自动探测本机 IP
-    sudo python -m pf_intercept.dns_server 100.100.184.133
+    sudo python -m pf_intercept.dns_server
+    sudo python -m pf_intercept.dns_server 192.168.1.100
 """
 
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import socket
 import struct
@@ -54,13 +58,39 @@ def _upstream_dns_list() -> list[str]:
 
 # ── 本机 IP 自动探测 ──────────────────────────────────────────────────────────
 
+def _ipv4_probe_candidates() -> list[str]:
+    """用于 UDP connect 探测的本机出口地址：仅 IPv4 字面量。
+
+    /etc/resolv.conf 里的 nameserver 可能是主机名（未解析则 gaierror）、IPv6 等，
+    不能交给 AF_INET 的 connect；依次尝试系统 IPv4 + 配置的公共 DNS。
+    """
+    out: list[str] = []
+    sys_dns = _system_dns()
+    if sys_dns:
+        try:
+            ipaddress.IPv4Address(sys_dns)
+            out.append(sys_dns)
+        except ValueError:
+            pass
+    for s in EXTERNAL_DNS_SERVERS:
+        if s not in out:
+            out.append(s)
+    return out
+
+
 def _local_ip() -> str:
     """探测本机对外 IP（不发包，仅用于获取路由出口地址）。"""
-    # 用第一个外部 DNS 的 IP 做路由探测，避免依赖 8.8.8.8
-    probe = _system_dns() or EXTERNAL_DNS_SERVERS[0]
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.connect((probe, 53))
-        return s.getsockname()[0]
+    for probe in _ipv4_probe_candidates():
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect((probe, 53))
+                return s.getsockname()[0]
+        except OSError:
+            continue
+    raise RuntimeError(
+        "无法自动探测本机 IPv4，请显式传入局域网 IP："
+        "sudo python -m pf_intercept.dns_server <你的本机IP>"
+    )
 
 
 # ── 最小化 DNS wire-format 解析 ───────────────────────────────────────────────
@@ -108,21 +138,47 @@ def _is_a_query(data: bytes) -> bool:
         return False
 
 
-def _build_a_reply(request: bytes, ip: str) -> bytes:
-    """构造只含一条 A 记录的 DNS 响应包。"""
-    txid   = request[:2]
-    flags  = b'\x81\x80'   # QR=1 AA=0 TC=0 RD=1 RA=1 RCODE=0
-    counts = b'\x00\x01\x00\x01\x00\x00\x00\x00'  # QD=1 AN=1 NS=0 AR=0
+def _question_qtype(data: bytes) -> int | None:
+    try:
+        offset = 12
+        while data[offset] != 0:
+            if (data[offset] & 0xC0) == 0xC0:
+                offset += 2
+                break
+            offset += 1 + data[offset]
+        offset += 1
+        return struct.unpack_from(">H", data, offset)[0]
+    except Exception:
+        return None
 
-    # 复制 question 段
+
+def _question_section(request: bytes) -> bytes:
+    """Question 段（含 qtype/qclass）。"""
     offset = 12
     while request[offset] != 0:
         if (request[offset] & 0xC0) == 0xC0:
             offset += 2
             break
         offset += 1 + request[offset]
-    offset += 1 + 4   # null label + qtype + qclass
-    question = request[12:offset]
+    offset += 1 + 4
+    return request[12:offset]
+
+
+def _build_nodata_reply(request: bytes) -> bytes:
+    """NOERROR、Answer=0：用于 AAAA，避免客户端拿到真实 IPv6 绕过 IPv4 代理。"""
+    txid = request[:2]
+    flags = b"\x81\x80"
+    counts = b"\x00\x01\x00\x00\x00\x00\x00\x00"
+    return txid + flags + counts + _question_section(request)
+
+
+def _build_a_reply(request: bytes, ip: str) -> bytes:
+    """构造只含一条 A 记录的 DNS 响应包。"""
+    txid   = request[:2]
+    flags  = b'\x81\x80'   # QR=1 AA=0 TC=0 RD=1 RA=1 RCODE=0
+    counts = b'\x00\x01\x00\x01\x00\x00\x00\x00'  # QD=1 AN=1 NS=0 AR=0
+
+    question = _question_section(request)
 
     ip_bytes = bytes(int(x) for x in ip.split("."))
     answer = (
@@ -173,8 +229,19 @@ class _FakeDNS(asyncio.DatagramProtocol):
         if name and name in PREFERRED_WSS_HOSTS and _is_a_query(data):
             log.info("DNS hijack  %-40s → %s", name, self._proxy_ip)
             self._transport.sendto(_build_a_reply(data, self._proxy_ip), addr)
+        elif name and name in PREFERRED_WSS_HOSTS:
+            qt = _question_qtype(data)
+            if qt == 28:  # AAAA — 若转发会得到真 v6，客户端常优先连 v6，绕过仅 IPv4 的 proxy
+                log.info("DNS hijack  %-40s  AAAA → NODATA (force IPv4)", name)
+                self._transport.sendto(_build_nodata_reply(data), addr)
+            else:
+                log.debug(
+                    "DNS hijack skipped  %-40s  qtype=%s (forwarding)",
+                    name, qt,
+                )
+                asyncio.create_task(_forward(data, addr, self._transport, self._upstreams))
         else:
-            log.debug("DNS forward %s", name)
+            log.debug("DNS forward  %s", name)
             asyncio.create_task(_forward(data, addr, self._transport, self._upstreams))
 
     def error_received(self, exc: Exception) -> None:

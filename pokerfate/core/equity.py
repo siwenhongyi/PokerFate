@@ -67,22 +67,26 @@ class EquityCalculator:
         known_base = set(hole_cards) | set(board)
         board_needed = 5 - len(board)
 
+        base_remaining = [
+            Card(r, s)
+            for r in range(2, 15)
+            for s in range(4)
+            if Card(r, s) not in known_base
+        ]
+
+        valid = 0
         for _ in range(iterations):
             opp_hand = random.choice(opponent_range)
             if set(opp_hand) & known_base:
                 continue
 
-            known = known_base | set(opp_hand)
-            remaining = [
-                Card(r, s)
-                for r in range(2, 15)
-                for s in range(4)
-                if Card(r, s) not in known
-            ]
+            opp_set = set(opp_hand)
+            remaining = [c for c in base_remaining if c not in opp_set]
 
             if len(remaining) < board_needed:
                 continue
 
+            valid += 1
             run_board = board + random.sample(remaining, board_needed)
             my_score = HandEvaluator.evaluate(hole_cards + run_board)
             opp_score = HandEvaluator.evaluate(opp_hand + run_board)
@@ -92,7 +96,6 @@ class EquityCalculator:
             elif my_score == opp_score:
                 ties += 1
 
-        total = wins + ties
-        if total == 0:
+        if valid == 0:
             return 0.5
-        return (wins + ties * 0.5) / iterations
+        return (wins + ties * 0.5) / valid
