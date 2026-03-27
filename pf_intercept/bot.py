@@ -91,6 +91,9 @@ class BotBridge:
 
         self._api: PokerFateAPI | None = None   # created once blinds are known
 
+        # Rebuy: allow at most one auto-rebuy per room entry
+        self._reby_used: bool = False
+
         # Session-level: real player names keyed by seat_id
         # Populated from EnterRoomRSP.table_status.seat[].player.name
         # and updated on SitDownBRC
@@ -122,10 +125,10 @@ class BotBridge:
 
     # ── Public ────────────────────────────────────────────────────────────────
 
-    def handle(self, type_name: str, msg: dict) -> tuple[int, int] | None:
+    def handle(self, type_name: str, msg: dict) -> tuple[str, dict] | None:
         """
         Process one decoded S2C frame.
-        Returns (action_type, chips) if the bot should act now, else None.
+        Returns (proto_type_name, fields_dict) to inject a C2S message, else None.
         """
         try:
             return self._dispatch(type_name, msg)
@@ -148,6 +151,7 @@ class BotBridge:
         elif type_name == "pb.ActionNotifyBRC":  return self._on_action_notify(msg)
         elif type_name == "pb.ShowHandRSP":      self._on_show_hand(msg)
         elif type_name == "pb.WinnerRSP":        self._on_winner(msg)
+        elif type_name == "pb.NoticeRebyRSP":    return self._on_notice_reby(msg)
         return None
 
     # ── Session setup ─────────────────────────────────────────────────────────
@@ -177,6 +181,8 @@ class BotBridge:
         self._set_my_seat(seat, "SitDownRSP")
 
     def _on_enter_room(self, msg: dict) -> None:
+        self._reby_used = False   # reset per room entry
+
         # Blind detection
         room_info = msg.get("room_info") or {}
         bb = room_info.get("bb")
@@ -423,7 +429,8 @@ class BotBridge:
         log.info("[BOT] Decision: %s  (street=%s pot=%.0f to_call=%.0f stack=%.0f)",
                  decision, street, self._pot, call_need, self._my_chips)
 
-        return _decision_to_wire(decision)
+        action_type, chips = _decision_to_wire(decision)
+        return "pb.ActionREQ", {"action_type": action_type, "chips": chips}
 
     def _on_show_hand(self, msg: dict) -> None:
         """Capture ShowHandRSP — hole cards revealed at showdown."""
@@ -498,6 +505,26 @@ class BotBridge:
         )
         self._pending_showdown = {}
         self._pending_winner_types = {}
+
+    def _on_notice_reby(self, msg: dict) -> tuple[str, dict] | None:
+        """Server notifies us that our chips hit 0 — rebuy window opened."""
+        reby_left_time = msg.get("reby_left_time", 0)
+        rebuy_chips = int(100 * (self._bb or 1000))
+
+        if self._reby_used:
+            log.warning(
+                "[BOT] ⚠️  筹码清零！（本局已自动续入过一次，不再续入）rebuy 窗口 %d 秒。",
+                reby_left_time,
+            )
+            return None
+
+        self._reby_used = True
+        log.warning(
+            "[BOT] ⚠️  筹码清零！自动续入 %d（100BB），rebuy 窗口 %d 秒。",
+            rebuy_chips,
+            reby_left_time,
+        )
+        return "pb.RebyREQ", {"is_reby": True, "chips": rebuy_chips}
 
 
 # ── Wire action conversion ─────────────────────────────────────────────────────

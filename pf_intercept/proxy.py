@@ -329,7 +329,7 @@ async def _pipe_s2c(client_ws, server_ws, buf: FrameBuffer) -> None:
             if isinstance(raw, str):
                 raw = raw.encode()
 
-            inject: tuple[int, int] | None = None
+            inject: tuple[str, dict] | None = None
             inject_room_id: int = 0
 
             for frame in buf.feed(raw):
@@ -351,18 +351,15 @@ async def _pipe_s2c(client_ws, server_ws, buf: FrameBuffer) -> None:
             # Forward original server message to the game client
             await client_ws.send(raw)
 
-            # Inject bot action to the real server (after client got the notify)
+            # Inject bot message to the real server (after client got the notify)
             if inject is not None:
-                action_type, chips = inject
-                pb_body = codec.encode("pb.ActionREQ", {
-                    "action_type": action_type,
-                    "chips": chips,
-                })
+                inject_type, inject_fields = inject
+                pb_body = codec.encode(inject_type, inject_fields)
                 if not pb_body:
-                    log.warning("[BOT→S] ActionREQ encode failed (pb2 not compiled?) — skipping injection")
+                    log.warning("[BOT→S] %s encode failed (pb2 not compiled?) — skipping injection", inject_type)
                 else:
-                    wire = encode_frame("pb.ActionREQ", inject_room_id, pb_body)
-                    log.info("[BOT→S] ActionREQ  action_type=%d  chips=%d", action_type, chips)
+                    wire = encode_frame(inject_type, inject_room_id, pb_body)
+                    log.info("[BOT→S] %s  %s", inject_type, inject_fields)
                     await server_ws.send(wire)
     finally:
         log.info("[WSS] pipe s2c ended; messages=%d", msg_count)
@@ -635,9 +632,9 @@ async def main() -> None:
         PROXY_HOST,
         WSS_PORT,
         ssl=server_ssl,
-        # Disable proxy-side pings toward the game client as well.
-        ping_interval=None,
-        ping_timeout=None,
+        # Send WebSocket PING to phone every 20s to prevent NAT idle timeout.
+        ping_interval=20,
+        ping_timeout=10,
     )
     log.info("WSS MITM   %s:%d  →  wss://<domain>:%d  (dynamic per-connection)", PROXY_HOST, WSS_PORT, SERVER_WSS_PORT)
 

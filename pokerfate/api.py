@@ -281,11 +281,29 @@ class PokerFateAPI:
         all_ids = [p.player_id for p in players if p.player_id != self.my_player_id]
         self._bot.new_hand(all_ids)
 
+        _TYPE_CN = {
+            "nit":             "紧手",
+            "calling_station": "跟注站",
+            "maniac":          "疯狂激进",
+            "reg":             "常规玩家",
+            "fish":            "鱼",
+            "unknown":         "未知",
+        }
+
+        def _player_type_tag(player_id: int) -> str:
+            if player_id == self.my_player_id:
+                return ""
+            s = self._bot.opponent_model.get(player_id)
+            if s.hands_seen < 20:
+                return f"数据不足{s.hands_seen}手"
+            return _TYPE_CN.get(s.player_type(), s.player_type())
+
         self._log.hand_start(
             hand_number=self._hand_number,
             players=[
                 {"id": p.player_id, "name": p.name,
-                 "stack": p.stack, "pos": pi.position}
+                 "stack": p.stack, "pos": pi.position,
+                 "player_type": _player_type_tag(p.player_id)}
                 for p, pi in zip(self._players, players)
             ],
             dealer_id=dealer_id,
