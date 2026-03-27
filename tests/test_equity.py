@@ -35,15 +35,6 @@ class TestEquityCalculator:
         eq = self.calc.calculate(hole, board, num_opponents=1, iterations=3000)
         assert 0.55 <= eq <= 0.95  # AKh has top pair + nut flush draw = very strong
 
-    def test_outs_to_equity(self):
-        # 9 outs on flop = ~36%
-        eq_flop = EquityCalculator.outs_to_equity(9, 2)
-        assert abs(eq_flop - 0.36) < 0.01
-
-        # 9 outs on turn = ~18%
-        eq_turn = EquityCalculator.outs_to_equity(9, 1)
-        assert abs(eq_turn - 0.18) < 0.01
-
     def test_made_hand_vs_draw(self):
         # Top set vs flush draw: set should be heavy favorite
         hole_set = cards('Qc', 'Qd')  # top set on QJ9

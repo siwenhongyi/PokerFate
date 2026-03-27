@@ -508,6 +508,11 @@ class BotBridge:
 
     def _on_notice_reby(self, msg: dict) -> tuple[str, dict] | None:
         """Server notifies us that our chips hit 0 — rebuy window opened."""
+        seat = msg.get("seatid", 0)  # pb omits field when value is 0
+        if seat != self._my_seat:
+            log.debug("[BOT] NoticeRebyRSP for seat=%d (not us, my_seat=%s), ignored", seat, self._my_seat)
+            return None
+
         reby_left_time = msg.get("reby_left_time", 0)
         rebuy_chips = int(100 * (self._bb or 1000))
 

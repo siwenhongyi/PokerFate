@@ -352,7 +352,7 @@ class PostflopStrategy:
                 return ('raise', raise_size)
 
             # Call or fold: use compressed equity (opponent's range is stronger)
-            implied_bonus = 0.06 if (equity >= 0.25 and spr > 4) else 0.0
+            implied_bonus = 0.06 if (equity >= 0.25 and spr > 4 and street != 'river') else 0.0
             if self.should_call(equity, pot_odds, implied_bonus, spr):
                 return ('call', to_call)
             return ('fold', 0.0)
