@@ -114,11 +114,11 @@ class PokerBot:
     def _classify_preflop_action(self, gs: GameState, player: Player):
         """Returns (facing_action_str, open_raise_amount)."""
         history = gs.action_history
-        raises = [
-            (pid, act) for pid, act in history
-            if act.action_type == ActionType.RAISE
-            and pid != player.player_id
-        ]
+        raises = []
+        for item in history:
+            pid, act = item[0], item[1]
+            if act.action_type == ActionType.RAISE and pid != player.player_id:
+                raises.append((pid, act))
         if not raises:
             return 'none', 0.0
         if len(raises) == 1:
@@ -129,10 +129,12 @@ class PokerBot:
 
     def _count_limpers(self, gs: GameState, player: Player) -> int:
         """Count opponents who called (limped) preflop without raising."""
-        return sum(
-            1 for pid, act in gs.action_history
-            if act.action_type == ActionType.CALL and pid != player.player_id
-        )
+        n = 0
+        for item in gs.action_history:
+            pid, act = item[0], item[1]
+            if act.action_type == ActionType.CALL and pid != player.player_id:
+                n += 1
+        return n
 
     # ------------------------------------------------------------------
     # Postflop logic
@@ -149,9 +151,11 @@ class PokerBot:
         num_opponents = len(gs.active_players) - 1
         facing_bet = to_call > 0
 
-        # Get opponent IDs for modeling
+        # Opponents still in the hand + exploit target: last aggressor, else best profile among limpers
         opp_ids = [p.player_id for p in gs.active_players if p.player_id != player.player_id]
-        primary_opp_id = opp_ids[0] if opp_ids else -1
+        primary_opp_id = gs.aggressor_opponent_id(player)
+        if primary_opp_id is None:
+            primary_opp_id = self.opponent_model.preferred_exploit_target(opp_ids)
 
         # Calculate raw MC equity (vs random hands)
         raw_equity = self._get_equity(player.hole_cards, board, num_opponents)

@@ -257,7 +257,7 @@ class GameEngine:
             action = self._validate_action(action, player, gs)
             self._apply_action(action, player, gs)
 
-            gs.action_history.append((player.player_id, action))
+            gs.action_history.append((player.player_id, action, str(gs.street)))
             gs.street_action_count += 1
 
             if self.verbose:

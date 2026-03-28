@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field, asdict
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -247,6 +247,30 @@ class OpponentModel:
         if s.river_action_count < 5:
             return 0.40
         return s.river_fold_rate
+
+    def preferred_exploit_target(self, player_ids: List[int]) -> int:
+        """Pick one opponent when history has no RAISE (limp / check-down).
+
+        Prefer player types we can exploit (calling stations, fish), then more
+        hands on file (better reads), then stable tie-break by ``player_id``.
+        """
+        if not player_ids:
+            return -1
+        type_rank = {
+            "calling_station": 40,
+            "fish": 30,
+            "maniac": 25,
+            "unknown": 10,
+            "reg": 8,
+            "nit": 0,
+        }
+
+        def score(pid: int) -> tuple:
+            s = self.get(pid)
+            tr = type_rank.get(s.player_type(), 0)
+            return (tr, s.hands_seen, -pid)
+
+        return max(player_ids, key=score)
 
     def exploit_adjustments(self, player_id: int) -> dict:
         """Return suggested exploitative adjustments vs this opponent."""

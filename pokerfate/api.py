@@ -370,7 +370,8 @@ class PokerFateAPI:
         is_cbet_spot = self._detect_cbet_spot(event)
 
         action = self._parse_action(event)
-        self._action_history.append((event.player_id, action))
+        # Include street so GameState can find last aggressor on this street (full-hand history).
+        self._action_history.append((event.player_id, action, event.street.lower()))
 
         # Update player state
         player = self._get_player(event.player_id)
@@ -722,8 +723,8 @@ class PokerFateAPI:
         if event.street.lower() != "preflop":
             return False
         raises_by_others = [
-            pid for pid, act in self._action_history
-            if act.action_type == ActionType.RAISE and pid != event.player_id
+            item[0] for item in self._action_history
+            if item[1].action_type == ActionType.RAISE and item[0] != event.player_id
         ]
         return len(raises_by_others) == 1
 
@@ -734,7 +735,8 @@ class PokerFateAPI:
         """
         if event.street.lower() == "preflop":
             return False
-        for pid, act in reversed(self._action_history):
+        for item in reversed(self._action_history):
+            pid, act = item[0], item[1]
             if act.action_type == ActionType.RAISE:
                 return pid == self.my_player_id
         return False

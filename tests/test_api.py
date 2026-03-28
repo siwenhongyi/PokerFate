@@ -445,7 +445,7 @@ class TestBugFixes:
 
         # Bot 开牌加注（记录到 action_history）
         from pokerfate.core.game_state import Action, ActionType
-        api._action_history.append((0, Action(ActionType.RAISE, 6.0)))
+        api._action_history.append((0, Action(ActionType.RAISE, 6.0), "preflop"))
 
         before = api._bot.opponent_model.get(1).three_bet_opportunities
 
@@ -467,7 +467,7 @@ class TestBugFixes:
 
         # Bot 在翻牌下注（模拟已记录到 history）
         from pokerfate.core.game_state import Action, ActionType
-        api._action_history.append((0, Action(ActionType.RAISE, 5.0)))
+        api._action_history.append((0, Action(ActionType.RAISE, 5.0), "flop"))
 
         before_opps = api._bot.opponent_model.get(1).fold_to_cbet_opps
         before_folds = api._bot.opponent_model.get(1).fold_to_cbet_count

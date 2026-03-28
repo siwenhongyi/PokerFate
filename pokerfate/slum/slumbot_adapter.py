@@ -215,16 +215,16 @@ def _build_preflop_history(
             while i < len(st_str) and st_str[i].isdigit():
                 i += 1
             amount = float(st_str[j:i])
-            history.append((pid, Action(ActionType.RAISE, amount)))
+            history.append((pid, Action(ActionType.RAISE, amount), "preflop"))
             acting = 1 - acting
         elif c == 'c':
-            history.append((pid, Action(ActionType.CALL, 0.0)))
+            history.append((pid, Action(ActionType.CALL, 0.0), "preflop"))
             acting = 1 - acting
         elif c == 'k':
-            history.append((pid, Action(ActionType.CHECK, 0.0)))
+            history.append((pid, Action(ActionType.CHECK, 0.0), "preflop"))
             acting = 1 - acting
         elif c == 'f':
-            history.append((pid, Action(ActionType.FOLD, 0.0)))
+            history.append((pid, Action(ActionType.FOLD, 0.0), "preflop"))
             break
     return history
 

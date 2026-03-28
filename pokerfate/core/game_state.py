@@ -66,8 +66,50 @@ class GameState:
     big_blind: float = 1.0
     small_blind: float = 0.5
     current_player_idx: int = 0
-    action_history: list = field(default_factory=list)  # list of (player_id, Action)
+    # Uniform shape: (player_id, Action, street) with street in {"preflop","flop","turn","river"}.
+    action_history: list = field(default_factory=list)
     street_action_count: int = 0  # actions taken this street
+
+    def last_aggressor_id(self, my_player_id: int, street: Optional[str] = None) -> Optional[int]:
+        """Last opponent to bet or raise (RAISE includes first bet), optionally on one street."""
+        sk = street.lower() if street else None
+        for item in reversed(self.action_history):
+            if len(item) < 3:
+                continue
+            pid, act, st = item[0], item[1], item[2]
+            if sk is not None and st != sk:
+                continue
+            if pid == my_player_id:
+                continue
+            if act.action_type == ActionType.RAISE:
+                return pid
+        return None
+
+    def aggressor_opponent_id(self, my_player: Player) -> Optional[int]:
+        """Last aggressor among active opponents, if any (limp / check-down → None).
+
+        Callers should combine with :meth:`OpponentModel.preferred_exploit_target`
+        when this returns ``None``.
+        """
+        opp_ids = [p.player_id for p in self.active_players if p.player_id != my_player.player_id]
+        if not opp_ids:
+            return None
+        my_id = my_player.player_id
+        street_s = str(self.street)
+        tc = self.to_call(my_player)
+
+        if tc > 0:
+            pid = self.last_aggressor_id(my_id, street=street_s)
+            if pid is not None and pid in opp_ids:
+                return pid
+            pid = self.last_aggressor_id(my_id, street=None)
+            if pid is not None and pid in opp_ids:
+                return pid
+        else:
+            pid = self.last_aggressor_id(my_id, street=None)
+            if pid is not None and pid in opp_ids:
+                return pid
+        return None
 
     @property
     def active_players(self) -> List[Player]:
