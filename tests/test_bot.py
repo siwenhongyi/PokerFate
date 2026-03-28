@@ -267,7 +267,7 @@ class TestRangeEstimator:
         self.est.reset_hand(1, prior_range=0.40)
         for street in ('flop', 'turn', 'river'):
             self.est.observe_action(1, 'raise', street)
-        # 0.40 * 0.45^3 ≈ 0.036
+        # 0.40 * flop * turn * river ≈ 0.40 * 0.58 * 0.50 * 0.42
         assert self.est.get_range_fraction(1) < 0.10
 
     def test_discount_decreases_with_compression(self):
@@ -304,7 +304,7 @@ class TestRangeEstimator:
     def test_reset_clears_compression(self):
         """new_hand resets all state; discount returns to prior level."""
         self.est.reset_hand(1, prior_range=0.35)
-        d_prior = self.est.get_discount(1)  # ~0.81 for prior=0.35
+        d_prior = self.est.get_discount(1)  # ~0.83 for prior=0.35
         for s in ('flop', 'turn', 'river'):
             self.est.observe_action(1, 'raise', s)
         # Should be significantly compressed
