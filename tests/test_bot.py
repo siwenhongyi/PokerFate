@@ -4,6 +4,7 @@ import pytest
 from pokerfate.core.card import Card
 from pokerfate.core.game_state import GameState, Player, Street, Action, ActionType
 from pokerfate.bot.poker_bot import PokerBot
+from pokerfate.bot.opponent_model import OpponentModel
 from pokerfate.engine.game_engine import GameEngine
 
 
@@ -377,7 +378,7 @@ class TestBBDecisions:
         # Simulate limpers: each limper put in a CALL action in history
         history = []
         for i in range(limper_count):
-            history.append((i, Action(ActionType.CALL, 2.0)))  # limp
+            history.append((i, Action(ActionType.CALL, 2.0), "preflop"))  # limp
         gs = GameState(
             players=players,
             dealer_pos=0,       # index 0 = BTN, index 1 = SB, index 2 = BB
@@ -474,3 +475,81 @@ class TestMultiwayBetting:
         mw = sum(strategy.should_cbet(0.65, BoardTexture(board), True, 'flop',
                                       num_opponents=3) for _ in range(200))
         assert hu > mw
+
+
+class TestAggressorOpponent:
+    """aggressor_opponent_id / preferred_exploit_target (exploit target selection)."""
+
+    def test_facing_bet_last_aggressor_on_street(self):
+        p0 = Player(0, "A", 100.0, [], current_bet=5.0)
+        p1 = Player(1, "B", 100.0, [], current_bet=0.0)
+        gs = GameState(
+            players=[p0, p1],
+            dealer_pos=0,
+            street=Street.FLOP,
+            pot=10.0,
+            current_bet=5.0,
+            action_history=[(0, Action(ActionType.RAISE, 5.0), "flop")],
+        )
+        assert gs.aggressor_opponent_id(p1) == 0
+
+    def test_multiway_aggressor_not_first_seat(self):
+        players = [
+            Player(0, "b", 100.0, [], current_bet=0.0),
+            Player(1, "x", 100.0, [], current_bet=0.0),
+            Player(2, "y", 100.0, [], current_bet=10.0),
+        ]
+        gs = GameState(
+            players=players,
+            dealer_pos=0,
+            street=Street.TURN,
+            pot=30.0,
+            current_bet=10.0,
+            action_history=[
+                (1, Action(ActionType.CALL, 0.0), "flop"),
+                (2, Action(ActionType.RAISE, 10.0), "turn"),
+            ],
+        )
+        assert gs.aggressor_opponent_id(players[0]) == 2
+
+    def test_checked_to_uses_last_aggressor_in_hand(self):
+        players = [
+            Player(0, "b", 100.0, [], current_bet=0.0),
+            Player(1, "raiser", 100.0, [], current_bet=0.0),
+        ]
+        gs = GameState(
+            players=players,
+            dealer_pos=0,
+            street=Street.FLOP,
+            pot=12.0,
+            current_bet=0.0,
+            action_history=[(1, Action(ActionType.RAISE, 6.0), "preflop")],
+        )
+        assert gs.aggressor_opponent_id(players[0]) == 1
+
+    def test_no_raise_preferred_exploit_target_tiebreak(self):
+        """Limp pot: no aggressor; preferred_exploit_target uses type + hands + stable id."""
+        players = [
+            Player(0, "hero", 100.0, [], current_bet=2.0),
+            Player(1, "a", 100.0, [], current_bet=2.0),
+            Player(2, "b", 100.0, [], current_bet=2.0),
+        ]
+        gs = GameState(
+            players=players,
+            dealer_pos=0,
+            street=Street.PREFLOP,
+            pot=6.0,
+            current_bet=2.0,
+            action_history=[
+                (1, Action(ActionType.CALL, 2.0), "preflop"),
+                (2, Action(ActionType.CALL, 2.0), "preflop"),
+            ],
+        )
+        assert gs.aggressor_opponent_id(players[0]) is None
+        m = OpponentModel()
+        for pid in (1, 2):
+            s = m.get(pid)
+            s.hands_seen = 25
+            s.vpip_count = 20
+            s.pfr_count = 2
+        assert m.preferred_exploit_target([1, 2]) == 1
