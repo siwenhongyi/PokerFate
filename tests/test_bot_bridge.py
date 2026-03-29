@@ -1,0 +1,171 @@
+"""pf_intercept BotBridge: profit-lock leave / re-enter and auto-rebuy cap."""
+
+from pf_intercept import config
+from pf_intercept.bot import BotBridge
+
+
+class TestBotBridgeProfitLock:
+    def _bootstrap_table(self, bridge: BotBridge, room_id: int = 20242379) -> None:
+        bridge.handle(
+            "pb.EnterRoomRSP",
+            {
+                "code": 0,
+                "roomid": room_id,
+                "game_type": 10010101,
+                "room_info": {
+                    "bb": 2.0,
+                    "sb": 1.0,
+                    "lobby_coin": 10100001,
+                },
+                "table_status": {"seat": []},
+            },
+        )
+        bridge.handle("pb.SitDownRSP", {"seatid": 0})
+        bridge.handle(
+            "pb.DealerInfoRSP",
+            {
+                "dealer": 0,
+                "small_blind": 1,
+                "big_blind": 0,
+                "start_info": [
+                    {"seatid": 0, "chips": 200},
+                    {"seatid": 1, "chips": 200},
+                ],
+                "gameid": "t1",
+            },
+        )
+
+    def test_winner_below_threshold_no_leave(self) -> None:
+        b = BotBridge(max_auto_rebuy=3)
+        b._my_uid = "99"
+        self._bootstrap_table(b)
+        b._uid_to_seat["99"] = 0
+        bb = 2.0
+        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)
+        start = 200
+        profit = thr_chips - start - 1
+        out = b.handle(
+            "pb.WinnerRSP",
+            {
+                "winner": [],
+                "profit": [{"uid": "99", "chips": profit}],
+            },
+        )
+        assert out is None
+        assert b._profit_lock_reenter is None
+        assert not b._profit_lock_award_rebuy_after_enter
+
+    def test_winner_triggers_leave_then_enter_then_award(self) -> None:
+        b = BotBridge(max_auto_rebuy=3)
+        b._my_uid = "99"
+        rid = 20242379
+        self._bootstrap_table(b, room_id=rid)
+        b._uid_to_seat["99"] = 0
+        bb = 2.0
+        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)
+        start = 200
+        profit = thr_chips - start
+        out = b.handle(
+            "pb.WinnerRSP",
+            {
+                "winner": [],
+                "profit": [{"uid": "99", "chips": profit}],
+            },
+        )
+        assert out[0] == "pb.LeaveRoomREQ"
+        assert out[1] == {"seat_reserve": bool(getattr(config, "PROFIT_LOCK_LEAVE_SEAT_RESERVE", True))}
+        assert out[2] == 0.0
+        assert b._profit_lock_reenter is not None
+        assert b._profit_lock_reenter["roomid"] == rid
+        assert b._profit_lock_reenter["byin_chips"] == int(100 * bb)
+        assert b._profit_lock_award_rebuy_after_enter
+
+        out2 = b.handle("pb.LeaveRoomRSP", {"code": 0})
+        assert out2[0] == "pb.EnterRoomREQ"
+        assert out2[1]["roomid"] == rid
+        assert out2[1]["byin_chips"] == 200
+        assert out2[1]["uid"] == 99
+        exp_delay = max(0.0, min(60.0, float(getattr(config, "PROFIT_LOCK_REENTER_DELAY_SEC", 2.0))))
+        assert out2[2] == exp_delay
+        assert b._profit_lock_reenter is None
+        assert b._profit_lock_award_rebuy_after_enter
+
+        enter_out = b.handle(
+            "pb.EnterRoomRSP",
+            {
+                "code": 0,
+                "roomid": rid,
+                "game_type": 10010101,
+                "room_info": {"bb": 2.0, "sb": 1.0, "lobby_coin": 10100001},
+                "table_status": {"seat": []},
+            },
+        )
+        assert enter_out is None
+        assert b._max_auto_rebuy == 4
+        assert not b._profit_lock_award_rebuy_after_enter
+
+    def test_leave_room_rsp_omitted_code_means_success(self) -> None:
+        """MessageToDict 常省略 code=0，须仍能重进房。"""
+        b = BotBridge(max_auto_rebuy=3)
+        b._my_uid = "99"
+        rid = 111
+        self._bootstrap_table(b, room_id=rid)
+        b._uid_to_seat["99"] = 0
+        thr = int(config.PROFIT_LOCK_BB_THRESHOLD * 2.0)
+        b.handle(
+            "pb.WinnerRSP",
+            {"winner": [], "profit": [{"uid": "99", "chips": thr - 200}]},
+        )
+        out = b.handle(
+            "pb.LeaveRoomRSP",
+            {"roomid": rid, "game_type": 1},
+        )
+        assert out is not None and out[0] == "pb.EnterRoomREQ"
+        assert out[1]["roomid"] == rid
+        assert out[1]["byin_chips"] == 200
+        assert len(out) == 3
+
+    def test_leave_room_fail_cancels(self) -> None:
+        b = BotBridge(max_auto_rebuy=3)
+        b._my_uid = "99"
+        self._bootstrap_table(b)
+        b._uid_to_seat["99"] = 0
+        bb = 2.0
+        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)
+        b.handle(
+            "pb.WinnerRSP",
+            {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
+        )
+        out = b.handle("pb.LeaveRoomRSP", {"code": -1})
+        assert out is None
+        assert b._profit_lock_reenter is None
+        assert not b._profit_lock_award_rebuy_after_enter
+        assert b._max_auto_rebuy == 3
+
+    def test_enter_room_fail_no_award(self) -> None:
+        b = BotBridge(max_auto_rebuy=3)
+        b._my_uid = "99"
+        self._bootstrap_table(b)
+        b._uid_to_seat["99"] = 0
+        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * 2.0)
+        b.handle(
+            "pb.WinnerRSP",
+            {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
+        )
+        b.handle("pb.LeaveRoomRSP", {"code": 0})
+        qs = b.handle(
+            "pb.EnterRoomRSP",
+            {"code": -1, "roomid": 20242379, "room_info": {"bb": 2.0}, "table_status": {"seat": []}},
+        )
+        assert qs is not None
+        assert qs[0] == "pb.QuickStartREQ"
+        assert qs[1]["game_type"] == 10010101
+        assert qs[1]["lobby_coin"] == 10100001
+        assert qs[1]["byin_chips"] == 200
+        assert b._max_auto_rebuy == 3
+        assert not b._profit_lock_award_rebuy_after_enter
+
+
+def test_profit_lock_threshold_in_config() -> None:
+    assert isinstance(config.PROFIT_LOCK_BB_THRESHOLD, int)
+    assert config.PROFIT_LOCK_BB_THRESHOLD >= 1
