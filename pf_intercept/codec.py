@@ -8,7 +8,7 @@ Requires compiled _pb2 modules.  Run once:
 
 Then `from pf_intercept.pb import CSHoldem_pb2, CSGame_pb2, ...`
 
-Until the pb2 files are generated this module falls back to returning raw bytes.
+encode() returns None if the type is unknown or parsing fails; otherwise bytes (possibly empty for messages with no fields, e.g. StandUpREQ).
 """
 
 from __future__ import annotations
@@ -93,17 +93,20 @@ def decode(type_name: str, pb_body: bytes) -> dict | None:
         return None
 
 
-def encode(type_name: str, fields: dict) -> bytes:
+def encode(type_name: str, fields: dict) -> bytes | None:
     """
     Encode a dict into a protobuf body.
-    Returns empty bytes if the message class is not registered or encoding fails.
+
+    Returns:
+        bytes — success (may be b"" for messages with no fields, e.g. StandUpREQ)
+        None — unknown type or ParseDict / serialize error
     """
     cls = _registry.get(type_name)
     if cls is None:
-        return b""
+        return None
     try:
         from google.protobuf.json_format import ParseDict
         msg = ParseDict(fields, cls())
         return msg.SerializeToString()
     except Exception:
-        return b""
+        return None

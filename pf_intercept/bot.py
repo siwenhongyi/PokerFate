@@ -23,12 +23,58 @@ stage (RoundStartBRC):
 
 from __future__ import annotations
 import logging
+import random
 
 from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
 from pf_intercept import config
 from pf_intercept.action_types import ACTION_TYPE_TO_EVENT_ACTION, FOLD_ACTION_TYPES
 
 log = logging.getLogger("pf_bot")
+
+_MAX_INJECT_DELAY = getattr(config, "ACTION_INJECT_DELAY_MAX_SEC", 3.0)
+
+
+def _inject_delay_before_action(
+    street: str,
+    decision: BotDecision,
+    pot_chips: int,
+    big_blind: float,
+) -> float:
+    """Seconds to wait after the client sees ActionNotify, before sending ActionREQ.
+
+    Human-like spread: trivial decisions shorter, raises / big pots / later streets longer.
+    Always capped at _MAX_INJECT_DELAY (default 3s).
+    """
+    action = (decision.action or "").lower()
+    bb = float(big_blind) if big_blind and big_blind > 0 else 100.0
+    pot_bb = pot_chips / bb
+
+    if action == "fold":
+        lo, hi = 0.35, 1.15
+    elif action == "check":
+        lo, hi = 0.5, 1.45
+    elif action == "call":
+        lo, hi = 0.7, 2.05
+    elif action == "raise":
+        lo, hi = 1.05, 2.75
+    else:
+        lo, hi = 0.5, 1.4
+
+    if street != "preflop":
+        lo += 0.08
+        hi += 0.12
+    if pot_bb >= 25:
+        lo += 0.1
+        hi += 0.18
+    if pot_bb >= 60:
+        lo += 0.08
+        hi += 0.12
+
+    hi = min(hi, _MAX_INJECT_DELAY)
+    lo = min(lo, hi - 0.05)
+    lo = max(0.0, lo)
+    sec = random.uniform(lo, hi)
+    return min(_MAX_INJECT_DELAY, max(0.0, sec))
 
 # ── Card conversion ────────────────────────────────────────────────────────────
 
@@ -69,6 +115,16 @@ def _chip_int(value, default: int = 0) -> int:
         return default
 
 
+def _s2c_rsp_code(msg: dict, default_if_omitted: int = 0) -> int:
+    """
+    int32 `code` on *RSP messages: json_format often omits the field when it equals
+    the proto default (0 = success). Treat missing key as default_if_omitted.
+    """
+    if "code" not in msg:
+        return default_if_omitted
+    return _chip_int(msg.get("code"), default_if_omitted)
+
+
 # ── BotBridge ─────────────────────────────────────────────────────────────────
 
 class BotBridge:
@@ -79,7 +135,7 @@ class BotBridge:
     PokerFateAPI is created lazily once those values are known.
 
     Call handle(type_name, msg) for every decoded S2C frame.
-    Returns (action_type: int, chips: int) when the bot should act, else None.
+    Returns (proto_name, fields) or (proto_name, fields, delay_sec) to inject C2S, else None.
     """
 
     def __init__(self, max_auto_rebuy: int = 1) -> None:
@@ -94,6 +150,19 @@ class BotBridge:
         # Auto-rebuy when chips hit 0 (NoticeRebyRSP); capped per room entry
         self._max_auto_rebuy: int = max(1, min(20, int(max_auto_rebuy)))
         self._auto_rebuy_done: int = 0
+
+        # 盈利锁仓：WinnerRSP 后发 LeaveRoom；LeaveRoomRSP 成功后发 EnterRoom（100BB）
+        self._profit_lock_reenter: dict[str, int | str | None] | None = None
+        self._profit_lock_award_rebuy_after_enter: bool = False
+        # 最近一次注入的 EnterRoomREQ 字段（失败时打日志 / 人工对照）
+        self._profit_lock_last_enter_fields: dict | None = None
+        # 从最近一次成功进房 RSP 缓存，供 QuickStart 兜底（与客户端大厅一致）
+        self._session_game_type: int = 0
+        self._session_lobby_coin: int = 0
+
+        # C2S 帧里的 room_id 须与客户端 Net.packNetData 一致（GameModel:getRoomId）。
+        # 部分 S2C（如 WinnerRSP）wire 上 room_id 可能为 0，要用进房时或任意非 0 帧补全。
+        self._table_room_id: int = 0
 
         # Session-level: real player names keyed by seat_id
         # Populated from EnterRoomRSP.table_status.seat[].player.name
@@ -126,10 +195,41 @@ class BotBridge:
 
     # ── Public ────────────────────────────────────────────────────────────────
 
-    def handle(self, type_name: str, msg: dict) -> tuple[str, dict] | None:
+    def note_seen_room_id(self, room_id: int) -> None:
+        """Update cached table room id from any S2C frame header (non-zero only)."""
+        rid = _chip_int(room_id, 0)
+        if rid != 0:
+            self._table_room_id = rid
+
+    def room_id_for_c2s(self, frame_room_id: int) -> int:
+        """room_id to attach to injected C2S (match client Net.packNetData)."""
+        fr = _chip_int(frame_room_id, 0)
+        if fr != 0:
+            return fr
+        return _chip_int(self._table_room_id, 0)
+
+    def notify_inject_failed(self, inject_type: str) -> None:
+        """Proxy could not serialize/send a C2S frame — drop dependent bot state."""
+        if inject_type == "pb.LeaveRoomREQ" and self._profit_lock_reenter is not None:
+            log.warning("[BOT] 盈利锁仓：LeaveRoom 未发出，已取消离桌重进。")
+            self._profit_lock_cancel_reenter()
+        elif inject_type == "pb.EnterRoomREQ" and self._profit_lock_award_rebuy_after_enter:
+            log.warning("[BOT] 盈利锁仓：EnterRoom 未发出，已取消续入次数奖励。")
+            self._profit_lock_award_rebuy_after_enter = False
+            self._profit_lock_last_enter_fields = None
+        elif inject_type == "pb.QuickStartREQ":
+            log.warning("[BOT] 盈利锁仓：QuickStartREQ 编码/发送失败，请手动从大厅进桌。")
+
+    def _profit_lock_cancel_reenter(self) -> None:
+        self._profit_lock_reenter = None
+        self._profit_lock_award_rebuy_after_enter = False
+        self._profit_lock_last_enter_fields = None
+
+    def handle(self, type_name: str, msg: dict) -> tuple[str, dict] | tuple[str, dict, float] | None:
         """
         Process one decoded S2C frame.
-        Returns (proto_type_name, fields_dict) to inject a C2S message, else None.
+        Returns (proto_type_name, fields_dict) or (proto_type_name, fields_dict, delay_sec)
+        to inject a C2S message after optional delay (seconds), else None.
         """
         try:
             return self._dispatch(type_name, msg)
@@ -139,11 +239,11 @@ class BotBridge:
 
     # ── Dispatch ──────────────────────────────────────────────────────────────
 
-    def _dispatch(self, type_name: str, msg: dict) -> tuple[int, int] | None:
+    def _dispatch(self, type_name: str, msg: dict) -> tuple[str, dict] | tuple[str, dict, float] | None:
         if   type_name == "pb.SelfUserInfoRSP": self._on_self_user_info(msg)
         elif type_name == "pb.SitDownRSP":      self._on_sit_down(msg)
         elif type_name == "pb.SitDownBRC":       self._on_sit_down_brc(msg)
-        elif type_name == "pb.EnterRoomRSP":     self._on_enter_room(msg)
+        elif type_name == "pb.EnterRoomRSP":     return self._on_enter_room(msg)
         elif type_name == "pb.DealerInfoRSP":    self._on_dealer_info(msg)
         elif type_name == "pb.HandCardRSP":      self._on_hand_card(msg)
         elif type_name == "pb.RoundStartBRC":    self._on_round_start(msg)
@@ -151,7 +251,8 @@ class BotBridge:
         elif type_name == "pb.RoundOverBRC":     self._on_round_over(msg)
         elif type_name == "pb.ActionNotifyBRC":  return self._on_action_notify(msg)
         elif type_name == "pb.ShowHandRSP":      self._on_show_hand(msg)
-        elif type_name == "pb.WinnerRSP":        self._on_winner(msg)
+        elif type_name == "pb.WinnerRSP":        return self._on_winner(msg)
+        elif type_name == "pb.LeaveRoomRSP":     return self._on_leave_room_rsp(msg)
         elif type_name == "pb.NoticeRebyRSP":    return self._on_notice_reby(msg)
         return None
 
@@ -181,8 +282,45 @@ class BotBridge:
             log.debug("[BOT] SitDownRSP missing seatid; assume 0")
         self._set_my_seat(seat, "SitDownRSP")
 
-    def _on_enter_room(self, msg: dict) -> None:
+    def _on_enter_room(self, msg: dict) -> tuple[str, dict, float] | None:
         self._auto_rebuy_done = 0   # reset per room entry
+        self._profit_lock_reenter = None
+
+        if "game_type" in msg:
+            self._session_game_type = _chip_int(msg.get("game_type"), 0)
+        room_info_early = msg.get("room_info") or {}
+        if "lobby_coin" in room_info_early:
+            self._session_lobby_coin = _chip_int(room_info_early.get("lobby_coin"), 0)
+
+        code = _s2c_rsp_code(msg, 0)
+        fallback_inject: tuple[str, dict, float] | None = None
+        if self._profit_lock_award_rebuy_after_enter:
+            if code == 0:
+                self._max_auto_rebuy += 1
+                self._profit_lock_last_enter_fields = None
+                log.warning(
+                    "[BOT] 盈利锁仓：已重新进房，自动续入次数上限 +1 → %d",
+                    self._max_auto_rebuy,
+                )
+                self._profit_lock_award_rebuy_after_enter = False
+            else:
+                log.warning(
+                    "[BOT] 盈利锁仓：重新进房失败 code=%s，未增加续入次数。",
+                    code,
+                )
+                if self._profit_lock_last_enter_fields is not None:
+                    log.warning(
+                        "[BOT] 盈利锁仓 [EnterRoomREQ 备份，可对客户端抓包对照] %s",
+                        self._profit_lock_last_enter_fields,
+                    )
+                self._profit_lock_award_rebuy_after_enter = False
+                fallback_inject = self._profit_lock_quick_start_fallback()
+
+        rid = msg.get("roomid")
+        if rid is not None:
+            self._table_room_id = _chip_int(rid, 0)
+            if self._table_room_id:
+                log.info("[BOT] Table room_id=%d (EnterRoomRSP)", self._table_room_id)
 
         # Blind detection
         room_info = msg.get("room_info") or {}
@@ -209,6 +347,35 @@ class BotBridge:
                     seat = _chip_int(seat_status.get("seatid", 0), 0)
                     self._set_my_seat(seat, "EnterRoomRSP.uid")
                     break
+
+        return fallback_inject
+
+    def _profit_lock_quick_start_fallback(self) -> tuple[str, dict, float] | None:
+        """EnterRoom 失败时按大厅 QuickStart 随机配桌（LobbyByinDialog 同款字段）。"""
+        bb = float(self._bb or 0.0)
+        if bb <= 0:
+            log.warning("[BOT] 盈利锁仓：无法 QuickStart 兜底（BB 未知）。")
+            return None
+        gt = self._session_game_type or int(getattr(config, "PROFIT_LOCK_FALLBACK_GAME_TYPE", 10010101))
+        lc = self._session_lobby_coin or int(getattr(config, "PROFIT_LOCK_FALLBACK_LOBBY_COIN", 10100001))
+        byin = int(100 * bb)
+        delay = float(getattr(config, "PROFIT_LOCK_QUICKSTART_DELAY_SEC", 0.5))
+        delay = max(0.0, min(30.0, delay))
+        # wait_blind=False：与 LobbyByinDialog 勾选「支付大盲立刻加入」时一致（LocalStore poker_pay_bb_byin）
+        fields = {
+            "boot": int(bb),
+            "game_type": gt,
+            "lobby_coin": lc,
+            "byin_chips": byin,
+            "wait_blind": False,
+            "ip": "",
+        }
+        log.warning(
+            "[BOT] 盈利锁仓：%.1fs 后发送 QuickStartREQ 兜底（随机桌，同盲注/100BB）: %s",
+            delay,
+            fields,
+        )
+        return "pb.QuickStartREQ", fields, delay
 
     def _on_sit_down_brc(self, msg: dict) -> None:
         """A player sat down — update name map from SitDownBRC.status."""
@@ -377,7 +544,7 @@ class BotBridge:
         if pool:
             self._pot = sum(_chip_int(p, 0) for p in pool)
 
-    def _on_action_notify(self, msg: dict) -> tuple[int, int] | None:
+    def _on_action_notify(self, msg: dict) -> tuple[str, dict, float] | None:
         if self._api is None or self._my_seat is None:
             return None
         seat = _chip_int(msg.get("seatid", 0), 0)
@@ -391,11 +558,16 @@ class BotBridge:
         # Avoid crashing preflop strategy on incomplete hole cards.
         if self._hole_cards_count < 2:
             log.warning("[BOT] ActionNotify before full hole cards (%d); fallback action", self._hole_cards_count)
+            street_fb = _STAGE_TO_STREET.get(self._stage, "preflop")
             if call_need == 0:
-                return 2, 0  # check
-            return 1, 0      # fold
+                fb = BotDecision(action="check", amount=0.0)
+                delay_sec = _inject_delay_before_action(street_fb, fb, self._pot, self._bb or 0.0)
+                return "pb.ActionREQ", {"action_type": 2, "chips": 0}, delay_sec
+            fb = BotDecision(action="fold", amount=0.0)
+            delay_sec = _inject_delay_before_action(street_fb, fb, self._pot, self._bb or 0.0)
+            return "pb.ActionREQ", {"action_type": 1, "chips": 0}, delay_sec
 
-        street    = _STAGE_TO_STREET.get(self._stage, "preflop")
+        street = _STAGE_TO_STREET.get(self._stage, "preflop")
 
         # current_bet = highest total bet this street
         current_bet = self._my_bet + call_need
@@ -431,7 +603,11 @@ class BotBridge:
                  decision, street, self._pot, call_need, self._my_chips)
 
         action_type, chips = _decision_to_wire(decision)
-        return "pb.ActionREQ", {"action_type": action_type, "chips": chips}
+        delay_sec = _inject_delay_before_action(
+            street, decision, self._pot, self._bb or 0.0,
+        )
+        log.debug("[BOT] ActionREQ inject delay: %.2fs", delay_sec)
+        return "pb.ActionREQ", {"action_type": action_type, "chips": chips}, delay_sec
 
     def _on_show_hand(self, msg: dict) -> None:
         """Capture ShowHandRSP — hole cards revealed at showdown."""
@@ -449,9 +625,9 @@ class BotBridge:
             if cards:
                 self._pending_showdown[int(seat)] = cards
 
-    def _on_winner(self, msg: dict) -> None:
+    def _on_winner(self, msg: dict) -> tuple[str, dict, float] | None:
         if self._api is None:
-            return
+            return None
 
         winner_list = msg.get("winner", [])
         winner_ids: list[int] = []
@@ -507,7 +683,86 @@ class BotBridge:
         self._pending_showdown = {}
         self._pending_winner_types = {}
 
-    def _on_notice_reby(self, msg: dict) -> tuple[str, dict] | None:
+        return self._maybe_profit_lock_leave_reenter(final_stacks)
+
+    def _maybe_profit_lock_leave_reenter(
+        self, final_stacks: dict[int, int]
+    ) -> tuple[str, dict, float] | None:
+        """筹码 >= 阈值则离桌再以 100BB 进同一房间（与客户端 Leave / 再进桌一致）。"""
+        if self._my_seat is None or self._profit_lock_reenter is not None:
+            return None
+        bb = float(self._bb or 0.0)
+        if bb <= 0:
+            return None
+        room_id = _chip_int(self._table_room_id, 0)
+        if room_id <= 0:
+            log.warning(
+                "[BOT] 盈利锁仓：尚无 table room_id，跳过（需 EnterRoomRSP.roomid 或 S2C 帧头 room_id）。",
+            )
+            return None
+        lock_bb = int(config.PROFIT_LOCK_BB_THRESHOLD)
+        threshold = int(lock_bb * bb)
+        my_final = int(final_stacks.get(self._my_seat, 0))
+        if my_final < threshold:
+            return None
+
+        buyin = int(100 * bb)
+        seat_reserve = bool(getattr(config, "PROFIT_LOCK_LEAVE_SEAT_RESERVE", True))
+        self._profit_lock_reenter = {
+            "roomid": room_id,
+            "byin_chips": buyin,
+            "uid": self._my_uid,
+            "seat_reserve": seat_reserve,
+        }
+        self._profit_lock_award_rebuy_after_enter = True
+        log.warning(
+            "[BOT] 盈利锁仓：本手结束后筹码 %d >= %d（%dBB），将离桌（留座=%s）再以 %d（100BB）重进房间 %d。",
+            my_final,
+            threshold,
+            lock_bb,
+            seat_reserve,
+            buyin,
+            room_id,
+        )
+        return "pb.LeaveRoomREQ", {"seat_reserve": seat_reserve}, 0.0
+
+    def _on_leave_room_rsp(self, msg: dict) -> tuple[str, dict, float] | None:
+        """盈利锁仓：离桌成功后带买入重新进房。"""
+        pending = self._profit_lock_reenter
+        if pending is None:
+            return None
+        code = _s2c_rsp_code(msg, 0)
+        # 与客户端 net:LeaveRoomRSP 一致：0/2/3 视为离桌成功路径（code 常省略=成功）
+        if code not in (0, 2, 3):
+            log.warning("[BOT] 盈利锁仓：LeaveRoomRSP code=%s，取消重进。", code)
+            self._profit_lock_cancel_reenter()
+            return None
+
+        room_id = _chip_int(pending.get("roomid", 0), 0)
+        byin = _chip_int(pending.get("byin_chips", 0), 0)
+        uid = pending.get("uid")
+        self._profit_lock_reenter = None
+
+        fields: dict = {"roomid": room_id, "byin_chips": byin}
+        if uid:
+            fields["uid"] = int(uid)
+        self._profit_lock_last_enter_fields = dict(fields)
+        delay = float(getattr(config, "PROFIT_LOCK_REENTER_DELAY_SEC", 2.0))
+        delay = max(0.0, min(60.0, delay))
+        log.info(
+            "[BOT] 盈利锁仓 [LeaveRoomREQ 已发] %s",
+            {"seat_reserve": bool(pending.get("seat_reserve", False))},
+        )
+        log.info("[BOT] 盈利锁仓 [EnterRoomREQ 将发送] %s（%.1fs 后）", fields, delay)
+        log.warning(
+            "[BOT] 盈利锁仓：已离桌，%.1fs 后发 EnterRoomREQ roomid=%d byin_chips=%d",
+            delay,
+            room_id,
+            byin,
+        )
+        return "pb.EnterRoomREQ", fields, delay
+
+    def _on_notice_reby(self, msg: dict) -> tuple[str, dict, float] | None:
         """Server notifies us that our chips hit 0 — rebuy window opened."""
         seat = msg.get("seatid", 0)  # pb omits field when value is 0
         if seat != self._my_seat:
@@ -534,7 +789,7 @@ class BotBridge:
             self._max_auto_rebuy,
             reby_left_time,
         )
-        return "pb.RebyREQ", {"is_reby": True, "chips": rebuy_chips}
+        return "pb.RebyREQ", {"is_reby": True, "chips": rebuy_chips}, 0.0
 
 
 # ── Wire action conversion ─────────────────────────────────────────────────────

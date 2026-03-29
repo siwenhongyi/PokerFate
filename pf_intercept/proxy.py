@@ -332,10 +332,12 @@ async def _pipe_s2c(client_ws, server_ws, buf: FrameBuffer) -> None:
             if isinstance(raw, str):
                 raw = raw.encode()
 
-            inject: tuple[str, dict] | None = None
+            inject: tuple[str, dict] | tuple[str, dict, float] | None = None
             inject_room_id: int = 0
 
             for frame in buf.feed(raw):
+                bridge.note_seen_room_id(frame.room_id)
+
                 if frame.type_name not in WATCH_S2C:
                     continue
 
@@ -349,20 +351,46 @@ async def _pipe_s2c(client_ws, server_ws, buf: FrameBuffer) -> None:
                 result = bridge.handle(frame.type_name, msg)
                 if result is not None:
                     inject = result
-                    inject_room_id = frame.room_id
+                    inject_room_id = bridge.room_id_for_c2s(frame.room_id)
 
             # Forward original server message to the game client
             await client_ws.send(raw)
 
             # Inject bot message to the real server (after client got the notify)
             if inject is not None:
-                inject_type, inject_fields = inject
-                pb_body = codec.encode(inject_type, inject_fields)
-                if not pb_body:
-                    log.warning("[BOT→S] %s encode failed (pb2 not compiled?) — skipping injection", inject_type)
+                if len(inject) == 3:
+                    inject_type, inject_fields, delay_sec = inject
                 else:
+                    inject_type, inject_fields = inject
+                    delay_sec = 0.0
+                if delay_sec and delay_sec > 0:
+                    await asyncio.sleep(float(delay_sec))
+                pb_body = codec.encode(inject_type, inject_fields)
+                if pb_body is None:
+                    log.warning(
+                        "[BOT→S] %s encode failed (pb2 missing / ParseDict error) — skipping injection",
+                        inject_type,
+                    )
+                    bridge.notify_inject_failed(inject_type)
+                else:
+                    if inject_room_id == 0 and inject_type in (
+                        "pb.LeaveRoomREQ",
+                        "pb.EnterRoomREQ",
+                        "pb.QuickStartREQ",
+                        "pb.RebyREQ",
+                    ):
+                        log.warning(
+                            "[BOT→S] %s 使用 room_id=0，服务器通常会忽略；"
+                            "请确认日志里出现过 EnterRoomRSP 且含 roomid，或 S2C 帧头曾出现非 0 room_id。",
+                            inject_type,
+                        )
                     wire = encode_frame(inject_type, inject_room_id, pb_body)
-                    log.info("[BOT→S] %s  %s", inject_type, inject_fields)
+                    log.info(
+                        "[BOT→S] %s room_id=%s %s",
+                        inject_type,
+                        inject_room_id,
+                        inject_fields,
+                    )
                     await server_ws.send(wire)
     finally:
         log.info("[WSS] pipe s2c ended; messages=%d", msg_count)

@@ -45,6 +45,29 @@ CERT_ALT_HOSTS = PREFERRED_WSS_HOSTS  # alias used by gen_cert.py
 BIG_BLIND:   float | None = None   # None = auto-detect
 SMALL_BLIND: float | None = None   # None = auto-detect
 
+# 注入 ActionREQ 前在「客户端已收到轮到自己」之后的等待（秒），上限 3。
+# 由 pf_intercept.bot 按 street / 动作 / 底池 随机取值，模拟真人思考时间。
+ACTION_INJECT_DELAY_MAX_SEC = 3.0
+
+# 盈利锁仓：一手结束后若桌上筹码 >= 该值（大盲倍数），则 LeaveRoomREQ 离桌再以 100BB 进房（EnterRoomREQ）。
+# （与客户端菜单一致；StandUpREQ 在客户端里基本未使用，服务端常不处理。）
+PROFIT_LOCK_BB_THRESHOLD = 400
+
+# 离桌后等待多久再发 EnterRoomREQ（秒），给客户端切场景/结算一点时间。
+PROFIT_LOCK_REENTER_DELAY_SEC = 2.0
+
+# LeaveRoomREQ.seat_reserve：True=留座（降低离桌瞬间座位被他人占走的概率）；若进房异常可改为 False。
+PROFIT_LOCK_LEAVE_SEAT_RESERVE = True
+
+# EnterRoom 失败后必发 QuickStartREQ 随机配桌（逻辑在 bot 内固定，与 LobbyByinDialog 一致）。
+# 仅当本局从未缓存到 EnterRoomRSP.game_type / EnterRoomRSP.room_info.lobby_coin 时用下列默认：
+#   game_type  ← EnumConfig.lua GAME_GAME_TYPE.LOBBY_HOLDEM_GAME (=10010101)，与 pb.EnterRoomRSP.game_type 同源；
+#   lobby_coin ← EnumConfig.lua GPropId.Gold (=10100001)，与 pb.RoomInfo.lobby_coin（CSGameDef.proto field 18）及 QuickStartREQ.lobby_coin 一致。
+PROFIT_LOCK_FALLBACK_GAME_TYPE = 10010101
+PROFIT_LOCK_FALLBACK_LOBBY_COIN = 10100001
+# 发 QuickStart 前短暂延迟（秒），给客户端落到大厅状态。
+PROFIT_LOCK_QUICKSTART_DELAY_SEC = 0.5
+
 # ── Watched messages ─────────────────────────────────────────────────────────
 WATCH_S2C = {
     # Session setup (auto-detect seat & blinds, track player names)
@@ -63,6 +86,7 @@ WATCH_S2C = {
     "pb.ShowHandRSP",
     # Bust-out / rebuy
     "pb.NoticeRebyRSP",  # server notifies us when our chips hit 0 (rebuy window)
+    "pb.LeaveRoomRSP",  # profit-lock: after LeaveRoom, inject EnterRoomREQ
 }
 
 WATCH_C2S = {
