@@ -406,6 +406,7 @@ class BotBridge:
             my_player_id=self._my_seat,
             big_blind=bb,
             small_blind=sb,
+            equity_iterations=3000,
             verbose=True,
         )
         log.info("[BOT] PokerFateAPI ready — seat=%d  BB=%.1f  SB=%.1f",
