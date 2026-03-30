@@ -110,3 +110,13 @@ def update(type_name: str, msg: dict, my_seat_id: int | None = None) -> None:
             cards = [info[k] for k in ("card1", "card2", "card3", "card4") if k in info and info[k]]
             if seat in state.players:
                 state.players[seat].cards = cards
+
+    elif type_name == "pb.ShowMyCardBRC":
+        for info in msg.get("info", []):
+            seat = info.get("seatid", -1)
+            # hand_cards is repeated int32; 0 = slot not shown
+            cards = [c for c in info.get("hand_cards", []) if c]
+            if seat in state.players and cards:
+                existing = state.players[seat].cards
+                if len(cards) > len(existing):
+                    state.players[seat].cards = cards

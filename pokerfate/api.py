@@ -42,6 +42,7 @@ from pokerfate.logger import PokerLogger, get_logger
 
 _DEFAULT_LOG_FILE    = str(Path(__file__).resolve().parent / "logs" / "pokerfate.log")
 _DEFAULT_OPPONENTS   = str(Path(__file__).resolve().parent / "opponents.json")
+_DEFAULT_SHOWDOWN_CAL = str(Path(__file__).resolve().parent / "opponents_showdown.json")
 
 
 # ---------------------------------------------------------------------------
@@ -197,12 +198,17 @@ class PokerFateAPI:
             aggression=aggression,
         )
 
-        # Auto-load opponent data from disk on startup
+        # Auto-load opponent data (+ embedded showdown calibration) from disk on startup
         if autosave_path:
             self._bot.opponent_model = self._bot.opponent_model.__class__.load(autosave_path)
             if self._bot.opponent_model._stats:
                 self._log.raw({"event": "model_loaded", "path": autosave_path,
                                "known_opponents": len(self._bot.opponent_model._stats)})
+            # Restore showdown calibration from the same file
+            showdown_raw = self._bot.opponent_model._showdown_data
+            if showdown_raw:
+                from pokerfate.strategy.range_estimator import ShowdownCalibrator
+                self._bot.range_estimator.showdown_calibrator = ShowdownCalibrator.from_dict(showdown_raw)
 
         # Session-level state: persists across hands
         self._session_stacks: Dict[int, float] = {}   # player_id -> last known stack
@@ -279,7 +285,8 @@ class PokerFateAPI:
         self._my_stack_start = my_p.stack if my_p else 0.0
 
         all_ids = [p.player_id for p in players if p.player_id != self.my_player_id]
-        self._bot.new_hand(all_ids)
+        player_names = {p.player_id: p.name for p in players if p.player_id != self.my_player_id}
+        self._bot.new_hand(all_ids, player_names=player_names)
 
         _TYPE_CN = {
             "nit":             "紧手",
@@ -290,8 +297,8 @@ class PokerFateAPI:
             "unknown":         "未知",
         }
 
-        # 与 OpponentStats.player_type() 一致：hands_seen < 20 时统计不可靠，只标「数据不足N手」
-        _MIN_HANDS_FOR_TYPE = 20
+        # 与 OpponentStats.player_type() 一致：hands_seen < 5 时统计不可靠，只标「数据不足N手」
+        _MIN_HANDS_FOR_TYPE = 5
 
         def _player_type_tag(player_id: int) -> str:
             if player_id == self.my_player_id:
@@ -533,6 +540,24 @@ class PokerFateAPI:
     # Hand result (optional, for tracking)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _fmt_best5(score: tuple, cards: list) -> str:
+        """将 best5 按牌型排序并格式化为带花色符号的字符串。
+
+        排序规则：按出现频率降序（多张在前），同频率内按点数降序。
+        示例：葫芦 → 三张在前+两张在后；两对 → 大对+小对+踢脚；四条 → 四张+踢脚
+        """
+        from collections import Counter
+        _SUIT_SYM = {'s': '♠', 'h': '♥', 'd': '♦', 'c': '♣'}
+
+        def _fmt_card(c) -> str:
+            s = str(c)          # e.g. "As", "Td"
+            return s[:-1] + _SUIT_SYM.get(s[-1], s[-1])
+
+        counts = Counter(c.rank.value for c in cards)
+        sorted_cards = sorted(cards, key=lambda c: (counts[c.rank.value], c.rank.value), reverse=True)
+        return ' '.join(_fmt_card(c) for c in sorted_cards)
+
     # Server hand type int → Chinese name (from PKHelper.lua)
     _SERVER_HAND_TYPE_CN = {
         2: '一对', 3: '两对', 4: '三条', 5: '顺子',
@@ -597,15 +622,14 @@ class PokerFateAPI:
                 name = self._session_names.get(pid, str(pid))
                 try:
                     hole = [Card.from_str(c) if isinstance(c, str) else c for c in cards]
-                    _, best5 = HandEvaluator.best_five(hole + self._board)
+                    score, best5 = HandEvaluator.best_five(hole + self._board)
                     # 牌型名：服务端优先
                     server_type = wht.get(pid)
                     rank_cn = (self._SERVER_HAND_TYPE_CN.get(server_type)
                                if server_type else None)
                     if rank_cn is None:
-                        score, _ = HandEvaluator.best_five(hole + self._board)
                         rank_cn = HandRank(score[0]).cn_name()
-                    hand_combos[name] = f"{rank_cn} {' '.join(str(c) for c in best5)}"
+                    hand_combos[name] = f"{rank_cn} {self._fmt_best5(score, best5)}"
                 except Exception:
                     pass
         # 兜底：有 winner_hand_types 但没有底牌数据时，至少展示牌型名
@@ -624,7 +648,7 @@ class PokerFateAPI:
             try:
                 score, best5 = HandEvaluator.best_five(self._hole_cards + self._board)
                 rank_cn = HandRank(score[0]).cn_name()
-                my_combo = f"{rank_cn} {' '.join(str(c) for c in best5)}"
+                my_combo = f"{rank_cn} {self._fmt_best5(score, best5)}"
             except Exception:
                 my_combo = " ".join(str(c) for c in self._hole_cards)
 
@@ -641,9 +665,44 @@ class PokerFateAPI:
             my_combo=my_combo,
         )
 
-        # Auto-save opponent model after every hand — safe against any kind of crash/kill
+        # Showdown calibration: update range estimator with revealed hands + log
+        if showdown_hands:
+            from pokerfate.strategy.range_estimator import _hand_strength_pct, _ACTION_COMPRESSION_RAISE
+            for pid, cards in showdown_hands.items():
+                if pid == self.my_player_id:
+                    continue
+                name = self._session_names.get(pid, str(pid))
+                self._bot.observe_showdown(pid, cards, name=name)
+                # Log calibration detail — one line per player, all streets combined
+                cal = self._bot.range_estimator.showdown_calibrator
+                hand_pct = _hand_strength_pct(cards)
+                card_strs = [str(c) for c in cards]
+                street_entries = []
+                for street_key, gto_factor in _ACTION_COMPRESSION_RAISE.items():
+                    n = cal.sample_count(name, "raise", street_key)
+                    if n == 0:
+                        continue
+                    street_entries.append({
+                        "street": street_key,
+                        "action": "raise",
+                        "calibrated_factor": cal.calibrated_factor(name, "raise", street_key, gto_factor),
+                        "gto_factor": gto_factor,
+                        "sample_count": n,
+                    })
+                if street_entries:
+                    self._log.showdown_calibration(
+                        player_name=name,
+                        cards=card_strs,
+                        hand_strength_pct=hand_pct,
+                        streets=street_entries,
+                    )
+
+        # Auto-save opponent model + showdown calibration into one file
         if self.autosave_path:
-            self._bot.opponent_model.save(self.autosave_path)
+            self._bot.opponent_model.save(
+                self.autosave_path,
+                showdown_data=self._bot.range_estimator.showdown_calibrator.to_dict(),
+            )
 
     # ------------------------------------------------------------------
     # Convenience: parse card strings
@@ -687,7 +746,7 @@ class PokerFateAPI:
     def _maybe_log_opponent_pattern(self, player_id: int, name: str):
         """Surface significant opponent patterns to the log (throttled)."""
         s = self._bot.opponent_model.get(player_id)
-        if s.hands_seen < 15:
+        if s.hands_seen < 5:
             return
         adj = self._bot.opponent_model.exploit_adjustments(player_id)
         if not adj:

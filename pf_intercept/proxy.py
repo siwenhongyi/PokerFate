@@ -501,56 +501,104 @@ async def _handle_wss(client_ws) -> None:
             subprotocols=subprotocols,
             user_agent_header=None,
             ping_interval=None, ping_timeout=None, open_timeout=15,
+            close_timeout=2,  # don't block 10s waiting for server close-frame
         )
 
-    try:
-        try:
-            async with websockets.connect(upstream_uri, **_connect_kwargs(upstream_ip)) as upstream_ws:
-                _host_ok_ip_cache[upstream_host] = upstream_ip
-                _persist_ip_cache()
-                server_ws = upstream_ws
-                await asyncio.gather(
-                    _pipe_c2s(client_ws, server_ws, FrameBuffer()),
-                    _pipe_s2c(client_ws, server_ws, FrameBuffer()),
-                )
-        except (OSError, asyncio.TimeoutError) as net_err:
-            # Network-level failure (TCP connect / TLS timeout): refresh DNS and retry once.
-            log.warning(
-                "[WSS] connect to %s (%s) failed: %s; refreshing DNS and retrying",
-                upstream_host, upstream_ip, net_err,
+    _MAX_RECONNECTS = 5
+    _reconnect_n = 0
+    _upstream_1006 = False
+
+    while True:
+        cur_ip = _pick_ip(force_refresh=(_reconnect_n > 0)) or upstream_ip
+        if _reconnect_n > 0:
+            log.info(
+                "[WSS] upstream 异常断连，第 %d 次重连 → %s (%s)",
+                _reconnect_n, upstream_uri, cur_ip,
             )
-            fresh_ip = _pick_ip(force_refresh=True)
-            if fresh_ip and fresh_ip != upstream_ip:
-                log.info("[WSS] retry with fresh IP: %s → %s", upstream_host, fresh_ip)
-                async with websockets.connect(upstream_uri, **_connect_kwargs(fresh_ip)) as upstream_ws:
-                    _host_ok_ip_cache[upstream_host] = fresh_ip
+            await asyncio.sleep(1.0)
+
+        _upstream_1006 = False
+        try:
+            try:
+                async with websockets.connect(upstream_uri, **_connect_kwargs(cur_ip)) as upstream_ws:
+                    _host_ok_ip_cache[upstream_host] = cur_ip
                     _persist_ip_cache()
                     server_ws = upstream_ws
-                    await asyncio.gather(
-                        _pipe_c2s(client_ws, server_ws, FrameBuffer()),
-                        _pipe_s2c(client_ws, server_ws, FrameBuffer()),
-                    )
-            else:
-                raise
-    except websockets.exceptions.ConnectionClosed as exc:
-        log.info(
-            "[WSS] connection closed: type=%s code=%s reason=%r",
-            type(exc).__name__,
-            getattr(exc, "code", None),
-            getattr(exc, "reason", None),
-        )
+                    await _run_pipes(client_ws, server_ws)
+                    # Pipes ended without exception — check close codes here,
+                    # before the context manager's close handshake eats the state.
+                    if (getattr(upstream_ws, "close_code", None) == 1006
+                            and getattr(client_ws, "close_code", None) is None):
+                        _upstream_1006 = True
+            except (OSError, asyncio.TimeoutError) as net_err:
+                # Network-level failure (TCP connect / TLS timeout): refresh DNS and retry once.
+                log.warning(
+                    "[WSS] connect to %s (%s) failed: %s; refreshing DNS and retrying",
+                    upstream_host, cur_ip, net_err,
+                )
+                fresh_ip = _pick_ip(force_refresh=True)
+                if fresh_ip and fresh_ip != cur_ip:
+                    log.info("[WSS] retry with fresh IP: %s → %s", upstream_host, fresh_ip)
+                    async with websockets.connect(upstream_uri, **_connect_kwargs(fresh_ip)) as upstream_ws:
+                        _host_ok_ip_cache[upstream_host] = fresh_ip
+                        _persist_ip_cache()
+                        server_ws = upstream_ws
+                        await _run_pipes(client_ws, server_ws)
+                        if (getattr(upstream_ws, "close_code", None) == 1006
+                                and getattr(client_ws, "close_code", None) is None):
+                            _upstream_1006 = True
+                else:
+                    raise
+        except websockets.exceptions.ConnectionClosed as exc:
+            code = getattr(exc, "code", None)
+            if code == 1006:
+                _upstream_1006 = True
+            log.info(
+                "[WSS] connection closed: type=%s code=%s reason=%r",
+                type(exc).__name__, code, getattr(exc, "reason", None),
+            )
+        except Exception:
+            log.exception("[WSS] session error")
+            break
+
+        if _upstream_1006 and _ws_open(client_ws) and _reconnect_n < _MAX_RECONNECTS:
+            _reconnect_n += 1
+            continue
+
+        break
+
+    log.info(
+        "[WSS] session ended; client(code=%s reason=%r state=%s) upstream(code=%s reason=%r state=%s)",
+        getattr(client_ws, "close_code", None),
+        getattr(client_ws, "close_reason", None),
+        getattr(client_ws, "state", None),
+        getattr(server_ws, "close_code", None) if server_ws is not None else None,
+        getattr(server_ws, "close_reason", None) if server_ws is not None else None,
+        getattr(server_ws, "state", None) if server_ws is not None else None,
+    )
+
+
+# ── WSS helpers ───────────────────────────────────────────────────────────────
+
+def _ws_open(ws) -> bool:
+    """Return True if the WebSocket connection is still in OPEN state."""
+    try:
+        return getattr(ws, "close_code", None) is None
     except Exception:
-        log.exception("[WSS] session error")
-    finally:
-        log.info(
-            "[WSS] session ended; client(code=%s reason=%r state=%s) upstream(code=%s reason=%r state=%s)",
-            getattr(client_ws, "close_code", None),
-            getattr(client_ws, "close_reason", None),
-            getattr(client_ws, "state", None),
-            getattr(server_ws, "close_code", None) if server_ws is not None else None,
-            getattr(server_ws, "close_reason", None) if server_ws is not None else None,
-            getattr(server_ws, "state", None) if server_ws is not None else None,
-        )
+        return False
+
+
+async def _run_pipes(client_ws, server_ws) -> None:
+    """Run c2s / s2c concurrently; cancel the survivor when one side ends."""
+    c2s = asyncio.create_task(_pipe_c2s(client_ws, server_ws, FrameBuffer()))
+    s2c = asyncio.create_task(_pipe_s2c(client_ws, server_ws, FrameBuffer()))
+    done, pending = await asyncio.wait([c2s, s2c], return_when=asyncio.FIRST_COMPLETED)
+    for t in pending:
+        t.cancel()
+    await asyncio.gather(*pending, return_exceptions=True)
+    for t in done:
+        if not t.cancelled() and t.exception():
+            raise t.exception()
 
 
 # ── TCP pass-through (non-WSS ports) ─────────────────────────────────────────

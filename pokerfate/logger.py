@@ -329,6 +329,48 @@ class PokerLogger:
         self._raw(f"  ✔ {winners_str} 赢得 {pot:.0f}    {delta_str}{my_combo_str}{stacks_str}",
                   color=color, bold=True)
 
+    def showdown_calibration(
+        self,
+        player_name: str,
+        cards: List[str],
+        hand_strength_pct: float,
+        streets: List[Dict],
+    ):
+        """Log a showdown calibration update (one line per player per hand).
+
+        Parameters
+        ----------
+        streets : list of dict
+            Each dict: {"street": str, "action": str, "calibrated_factor": float,
+                        "gto_factor": float, "sample_count": int}
+        """
+        self._file({
+            "event": "showdown_calibration",
+            "hand": self._hand_num[0],
+            "player": player_name,
+            "cards": cards,
+            "hand_strength_pct": round(hand_strength_pct, 3),
+            "streets": streets,
+        })
+        if not self._console or not streets:
+            return
+        cards_str = _fmt_cards(cards, self._color)
+        strength_str = f"{hand_strength_pct:.0%}"
+
+        def _street_tag(s: Dict) -> str:
+            n = s["sample_count"]
+            if n >= 5:
+                direction = "↑宽" if s["calibrated_factor"] > s["gto_factor"] else "↓紧"
+                return f"{s['street']}:{s['calibrated_factor']:.2f}{direction}({n}手)"
+            return f"{s['street']}:积累{n}/5"
+
+        streets_str = "  ".join(_street_tag(s) for s in streets)
+        self._raw(
+            f"  ◈ 校准  {player_name}  {cards_str} 强度{strength_str}  {streets_str}",
+            color=_C.MAGENTA,
+            dim=True,
+        )
+
     def opponent_pattern(
         self,
         player_name: str,

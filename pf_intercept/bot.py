@@ -251,6 +251,7 @@ class BotBridge:
         elif type_name == "pb.RoundOverBRC":     self._on_round_over(msg)
         elif type_name == "pb.ActionNotifyBRC":  return self._on_action_notify(msg)
         elif type_name == "pb.ShowHandRSP":      self._on_show_hand(msg)
+        elif type_name == "pb.ShowMyCardBRC":    self._on_show_my_card_brc(msg)
         elif type_name == "pb.WinnerRSP":        return self._on_winner(msg)
         elif type_name == "pb.LeaveRoomRSP":     return self._on_leave_room_rsp(msg)
         elif type_name == "pb.NoticeRebyRSP":    return self._on_notice_reby(msg)
@@ -625,6 +626,28 @@ class BotBridge:
                         cards.append(s)
             if cards:
                 self._pending_showdown[int(seat)] = cards
+
+    def _on_show_my_card_brc(self, msg: dict) -> None:
+        """Capture ShowMyCardBRC — cards revealed by players (active or folded showing voluntarily).
+
+        hand_cards is a repeated int32 list; 0 means that card slot is not shown.
+        Card encoding is identical to other messages: code = suit * 256 + rank_num.
+        """
+        for info in msg.get("info", []):
+            seat = info.get("seatid")
+            if seat is None:
+                continue
+            cards = []
+            for code in info.get("hand_cards", []):
+                if code:
+                    s = _card_str(int(code))
+                    if s:
+                        cards.append(s)
+            if len(cards) >= 2:
+                seat_int = int(seat)
+                existing = self._pending_showdown.get(seat_int, [])
+                if len(cards) > len(existing):
+                    self._pending_showdown[seat_int] = cards
 
     def _on_winner(self, msg: dict) -> tuple[str, dict, float] | None:
         if self._api is None:
