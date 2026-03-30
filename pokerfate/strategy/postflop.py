@@ -275,10 +275,10 @@ class PostflopStrategy:
         """Decide whether to check-raise when checked to and opponent bets."""
         if is_ip:
             return False  # Check-raise is an OOP move
-        if equity >= 0.80:
+        if equity >= 0.75:
             return random.random() < 0.5
         if equity >= 0.60 and board.is_wet:
-            return random.random() < 0.35
+            return random.random() < 0.40
         return False
 
     def should_call(
@@ -337,6 +337,13 @@ class PostflopStrategy:
                 if equity >= pot_odds or equity >= 0.35:
                     return ('call', to_call)
                 return ('fold', 0.0)
+
+            # 极小注（如 1k 进 5w 池）：用 raw/MC 强度造池拿价值，避免强牌仅跟注
+            if pot_odds <= 0.08 and bet_equity >= 0.68:
+                freq = min(0.90, 0.82 * self.aggression)
+                if random.random() < freq:
+                    raise_size = self._raise_size(to_call, pot, stack)
+                    return ('raise', raise_size)
 
             # IP value raise: strong hands raise for value instead of just calling
             if is_ip and bet_equity >= 0.75 and to_call < stack * 0.8:

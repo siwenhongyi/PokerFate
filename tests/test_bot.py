@@ -326,6 +326,38 @@ class TestRangeEstimator:
         assert d < self.est.get_discount(2)
 
 
+class TestTinyBetValueRaise:
+    """OOP/IP facing abnormally small bets should raise strong hands for value."""
+
+    def test_decide_raises_min_bet_with_high_raw_equity(self):
+        import random
+        from pokerfate.strategy.postflop import PostflopStrategy
+        from pokerfate.core.card import Card
+
+        strat = PostflopStrategy(aggression=1.0)
+        board = [Card.from_str(c) for c in ['7s', '9d', 'Qc', '8c']]
+        raises = 0
+        for i in range(100):
+            random.seed(i)
+            action, amt = strat.decide(
+                equity=0.43,
+                raw_equity=0.78,
+                pot=55000.0,
+                to_call=1000.0,
+                stack=127711.0,
+                board=board,
+                is_ip=False,
+                street='turn',
+                facing_bet=True,
+                num_opponents=2,
+                big_blind=3.0,
+            )
+            if action == 'raise':
+                raises += 1
+                assert amt > 1000.0
+        assert raises >= 70, f"expected frequent value-raise vs tiny bet, got {raises}/100"
+
+
 class TestRiverBetLogic:
     """Verify river betting uses pure value/bluff logic, no semi-bluffs."""
 
