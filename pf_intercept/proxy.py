@@ -15,6 +15,7 @@ Traffic flow:
 
 import argparse
 import asyncio
+import json
 import logging
 import logging.handlers
 import socket
@@ -38,6 +39,28 @@ from pf_intercept.bot import BotBridge
 
 _LOGS_DIR = Path(__file__).parent / "logs"
 _LOGS_DIR.mkdir(exist_ok=True)
+
+_DATA_DIR = Path(__file__).parent.parent / "data"
+_DATA_DIR.mkdir(exist_ok=True)
+_IP_CACHE_FILE = _DATA_DIR / "ip_cache.json"
+
+
+def _load_ip_cache() -> dict[str, str]:
+    try:
+        return json.loads(_IP_CACHE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _persist_ip_cache() -> None:
+    try:
+        _IP_CACHE_FILE.write_text(
+            json.dumps(_host_ok_ip_cache, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        log.debug("[IP cache] persist failed: %s", exc)
+
 
 _LOG_FMT = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
 
@@ -71,7 +94,7 @@ _bot: BotBridge | None = None
 
 # ── Server state ──────────────────────────────────────────────────────────────
 _real_server_sni: str = SERVER_HOST       # fallback SNI when Host header is absent
-_host_ok_ip_cache: dict[str, str] = {}
+_host_ok_ip_cache: dict[str, str] = _load_ip_cache()
 _host_dns_cache: dict[str, list[str]] = {}
 _host_connect_locks: dict[str, asyncio.Lock] = {}
 
@@ -484,6 +507,7 @@ async def _handle_wss(client_ws) -> None:
         try:
             async with websockets.connect(upstream_uri, **_connect_kwargs(upstream_ip)) as upstream_ws:
                 _host_ok_ip_cache[upstream_host] = upstream_ip
+                _persist_ip_cache()
                 server_ws = upstream_ws
                 await asyncio.gather(
                     _pipe_c2s(client_ws, server_ws, FrameBuffer()),
@@ -500,6 +524,7 @@ async def _handle_wss(client_ws) -> None:
                 log.info("[WSS] retry with fresh IP: %s → %s", upstream_host, fresh_ip)
                 async with websockets.connect(upstream_uri, **_connect_kwargs(fresh_ip)) as upstream_ws:
                     _host_ok_ip_cache[upstream_host] = fresh_ip
+                    _persist_ip_cache()
                     server_ws = upstream_ws
                     await asyncio.gather(
                         _pipe_c2s(client_ws, server_ws, FrameBuffer()),
@@ -612,6 +637,7 @@ async def _handle_passthrough(
                 if raced is not None:
                     chosen_ip, srv_reader, srv_writer = raced
                     _host_ok_ip_cache[target_host] = chosen_ip
+                    _persist_ip_cache()
 
     if srv_writer is None or srv_reader is None or chosen_ip is None:
         tcp_log.warning(
@@ -630,6 +656,7 @@ async def _handle_passthrough(
         tcp_log.info("[TCP] %s → %s:%d (%s)  [%s]",
                      peer, target_host, real_port, chosen_ip, protocol)
     _host_ok_ip_cache[target_host] = chosen_ip
+    _persist_ip_cache()
 
     t0 = asyncio.get_event_loop().time()
     try:
