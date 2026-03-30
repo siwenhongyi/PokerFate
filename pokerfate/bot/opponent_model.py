@@ -84,7 +84,7 @@ class OpponentStats:
 
     def player_type(self) -> str:
         """Classify opponent into a rough player type."""
-        if self.hands_seen < 20:
+        if self.hands_seen < 5:
             return 'unknown'
         if self.vpip < 0.18 and self.pfr < 0.14:
             return 'nit'
@@ -122,6 +122,8 @@ class OpponentModel:
         # Archive: stats keyed by name for players who vacated a seat.
         # Allows stats to survive seat changes without leaking to new occupants.
         self._name_archive: Dict[str, OpponentStats] = {}
+        # Showdown calibrator data loaded from file (passed back to caller).
+        self._showdown_data: dict = {}
 
     def register_name(self, player_id: int, name: str) -> None:
         """Associate a player_id with a display name.
@@ -277,7 +279,7 @@ class OpponentModel:
         s = self.get(player_id)
         adj = {}
 
-        if s.hands_seen < 15:
+        if s.hands_seen < 5:
             return adj
 
         ptype = s.player_type()
@@ -317,11 +319,18 @@ class OpponentModel:
     # Persistence: save / load
     # ------------------------------------------------------------------
 
-    def save(self, filepath: str) -> None:
+    def save(self, filepath: str, showdown_data: Optional[dict] = None) -> None:
         """Persist all opponent data to a JSON file.
 
         The file is human-readable and can be inspected/edited manually.
         Call this after each session (or periodically) to preserve data.
+
+        Parameters
+        ----------
+        showdown_data : dict, optional
+            Showdown calibrator data to embed in the same file under the
+            ``"showdown"`` key. Pass ``calibrator.to_dict()`` here so both
+            datasets stay in one file and share the same encryption path.
         """
         data = {
             "stats": {
@@ -335,6 +344,8 @@ class OpponentModel:
                 for name, stats in self._name_archive.items()
             },
         }
+        if showdown_data is not None:
+            data["showdown"] = showdown_data
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
@@ -362,6 +373,7 @@ class OpponentModel:
         model._name_to_id = data.get("name_to_id", {})
         for name, stats_dict in data.get("name_archive", {}).items():
             model._name_archive[name] = OpponentStats(**stats_dict)
+        model._showdown_data = data.get("showdown", {})
         return model
 
     def merge(self, other: "OpponentModel") -> None:

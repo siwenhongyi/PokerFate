@@ -198,6 +198,10 @@ class PokerBot:
             value_only=value_only,
         )
 
+        use_calibration = (
+            primary_opp_id >= 0
+            and self.range_estimator.has_calibration(primary_opp_id)
+        )
         self._last_reasoning = self._postflop_reasoning(
             player.hole_cards,
             equity, is_ip, facing_bet, to_call, pot, opp_fold_rate,
@@ -205,6 +209,7 @@ class PokerBot:
             raw_equity=raw_equity, discount=discount,
             streets_bet=self.range_estimator.streets_bet(primary_opp_id) if primary_opp_id >= 0 else 0,
             street=street,
+            use_calibration=use_calibration,
         )
         return self._to_action(action_str, amount, to_call, stack)
 
@@ -302,6 +307,7 @@ class PokerBot:
         discount: float = 1.0,
         streets_bet: int = 0,
         street: str = "",
+        use_calibration: bool = False,
     ) -> str:
         from ..strategy.postflop import BoardTexture
         made = self._made_hand_label_cn(hole_cards, board)
@@ -313,7 +319,8 @@ class PokerBot:
 
         # Show range compression context when significant
         if raw_equity is not None and discount < 0.92 and streets_bet > 0:
-            eq = f"胜率{equity:.0%}(原{raw_equity:.0%}→{streets_bet}街压缩)"
+            cal_tag = "(校准)" if use_calibration else ""
+            eq = f"胜率{equity:.0%}(原{raw_equity:.0%}→{streets_bet}街压缩{cal_tag})"
         else:
             eq = f"胜率{equity:.0%}"
 
@@ -416,16 +423,40 @@ class PokerBot:
         # Update range estimator for every opponent action
         self.range_estimator.observe_action(player_id, act, street)
 
-    def new_hand(self, player_ids: List[int]):
-        """Call at the start of each new hand."""
+    def observe_showdown(self, player_id: int, cards, name: str = "") -> None:
+        """在 showdown 时记录对手底牌，校准其 raise 范围压缩系数。
+
+        Parameters
+        ----------
+        player_id : int
+        cards : list of Card or str
+            对手亮出的底牌。
+        name : str
+            玩家名字，用于 showdown 校准器的 name key。
+        """
+        self.range_estimator.observe_showdown(player_id, cards, name=name)
+
+    def new_hand(self, player_ids: List[int], player_names: Optional[Dict[int, str]] = None):
+        """Call at the start of each new hand.
+
+        Parameters
+        ----------
+        player_ids : list of int
+        player_names : dict, optional
+            {player_id: name} — used to populate the range estimator's
+            pid→name mapping so showdown calibration is keyed by name
+            rather than seat ID (seats can be reused across sessions).
+        """
         self._vpip_recorded.clear()
         self._pfr_recorded.clear()
+        names = player_names or {}
         for pid in player_ids:
             self.opponent_model.record_hand_start(pid)
             # Reset range estimator: prior = historical VPIP (or 0.35 if unknown)
             stats = self.opponent_model.get(pid)
             prior = stats.vpip if stats.hands_seen >= 10 else 0.35
-            self.range_estimator.reset_hand(pid, prior_range=prior)
+            name = names.get(pid, self.opponent_model._id_to_name.get(pid, str(pid)))
+            self.range_estimator.reset_hand(pid, prior_range=prior, name=name)
 
     @property
     def last_equity(self) -> float:

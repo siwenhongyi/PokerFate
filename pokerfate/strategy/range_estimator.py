@@ -44,7 +44,43 @@ Pluribus (Brown & Sandholm, 2019)
 """
 
 from __future__ import annotations
-from typing import Dict
+import json
+import os
+from typing import Dict, List
+
+
+# ---------------------------------------------------------------------------
+# Showdown 手牌强度估算
+# ---------------------------------------------------------------------------
+# rank char → 0-based index (2=0 … A=12)
+_RANK_TO_IDX: Dict[str, int] = {
+    '2': 0, '3': 1, '4': 2, '5': 3, '6': 4, '7': 5, '8': 6,
+    '9': 7, 'T': 8, 'J': 9, 'Q': 10, 'K': 11, 'A': 12,
+}
+
+
+def _hand_strength_pct(cards) -> float:
+    """将两张底牌转换为 0-1 强度分位值（1.0=AA，~0.36=72o）。
+
+    适用于 Card 对象或形如 "As"/"Td" 的字符串。
+    数学推导：
+      - 对子：score = 156 + rank*2（范围 156-180，高于所有非对子）
+      - 非对子：score = hi*13 + lo + 3(如果同花)（最大 170=AKs）
+      - 归一化至 [0, 1]，分母 180（AA 得分上限）
+    """
+    if not cards or len(cards) < 2:
+        return 0.5
+    c1, c2 = str(cards[0]), str(cards[1])
+    r1 = _RANK_TO_IDX.get(c1[0].upper(), 6)
+    r2 = _RANK_TO_IDX.get(c2[0].upper(), 6)
+    suited = len(c1) > 1 and len(c2) > 1 and c1[1].lower() == c2[1].lower()
+    is_pair = r1 == r2
+    hi, lo = max(r1, r2), min(r1, r2)
+    if is_pair:
+        score = 156 + hi * 2
+    else:
+        score = hi * 13 + lo + (3 if suited else 0)
+    return min(1.0, score / 180.0)
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +135,82 @@ def _equity_discount(range_fraction: float) -> float:
 
 
 # ---------------------------------------------------------------------------
+# ShowdownCalibrator
+# ---------------------------------------------------------------------------
+
+class ShowdownCalibrator:
+    """从 showdown 底牌数据中学习对手的实际 raise 范围压缩系数。
+
+    核心思想
+    --------
+    如果一个人打 all-in 时 showdown 的平均手牌强度分位值为 P，
+    则他的 raise range 约为全部手牌的 X = 2*(1-P) 比例：
+      - maniac（永远 all-in）→ 平均 P≈0.50 → X≈1.0（全范围，不压缩）
+      - nit（只有 AA/KK raise）→ 平均 P≈0.95 → X≈0.10（极紧范围）
+      - GTO 玩家 preflop raise  → 平均 P≈0.835 → X≈0.33（与固定系数吻合）
+
+    样本不足（< _MIN_SAMPLES）时退回 GTO 先验，与原行为完全一致。
+    """
+
+    _MIN_SAMPLES = 5
+
+    def __init__(self) -> None:
+        # 玩家名字 → {(street, action): [hand_strength_pct, ...]}
+        # 用名字而非座位号，跨 session 座位换人时数据不会挂错人
+        self._data: Dict[str, Dict[tuple, list]] = {}
+
+    def record(self, name: str, action_sequence: list, hand_strength_pct: float) -> None:
+        """记录一次 showdown 观察。
+
+        Parameters
+        ----------
+        name : str
+            玩家名字（跨 session 稳定标识）。
+        action_sequence : list of (street, action) tuples
+        hand_strength_pct : float
+            showdown 底牌强度分位值，0-1（1=AA，~0.36=72o）。
+        """
+        player_data = self._data.setdefault(name, {})
+        for street, action in action_sequence:
+            player_data.setdefault((street, action), []).append(hand_strength_pct)
+
+    def calibrated_factor(
+        self, name: str, action: str, street: str, gto_default: float
+    ) -> float:
+        """返回校准后的压缩系数；样本不足时返回 GTO 先验。"""
+        samples = self._data.get(name, {}).get((street, action), [])
+        if len(samples) < self._MIN_SAMPLES:
+            return gto_default
+        mean_strength = sum(samples) / len(samples)
+        return max(0.05, min(1.0, 2.0 * (1.0 - mean_strength)))
+
+    def sample_count(self, name: str, action: str, street: str) -> int:
+        """返回已积累的样本数量。"""
+        return len(self._data.get(name, {}).get((street, action), []))
+
+    def to_dict(self) -> dict:
+        """序列化为 JSON 兼容字典（key 为玩家名字）。"""
+        return {
+            name: {
+                f"{s}:{a}": samples
+                for (s, a), samples in pdata.items()
+            }
+            for name, pdata in self._data.items()
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ShowdownCalibrator":
+        """从序列化字典恢复（key 为玩家名字）。"""
+        cal = cls()
+        for name, pdata in data.items():
+            cal._data[name] = {
+                tuple(key.split(":", 1)): samples
+                for key, samples in pdata.items()
+            }
+        return cal
+
+
+# ---------------------------------------------------------------------------
 # HandRangeEstimator
 # ---------------------------------------------------------------------------
 
@@ -127,8 +239,14 @@ class HandRangeEstimator:
         self._streets_bet: Dict[int, int] = {}
         # 追踪本手是否已在某街行动（避免同一街重复计数）
         self._street_acted: Dict[int, set] = {}
+        # 本手行动序列记录（用于 showdown 校准）
+        self._hand_actions: Dict[int, list] = {}
+        # player_id → player name（每手 reset_hand 时填充，用于 showdown 校准器的 name key 查询）
+        self._pid_to_name: Dict[int, str] = {}
+        # Showdown 联合建模校准器
+        self.showdown_calibrator: ShowdownCalibrator = ShowdownCalibrator()
 
-    def reset_hand(self, player_id: int, prior_range: float = 0.35) -> None:
+    def reset_hand(self, player_id: int, prior_range: float = 0.35, name: str = "") -> None:
         """手牌开始时重置状态。
 
         Parameters
@@ -137,10 +255,15 @@ class HandRangeEstimator:
         prior_range : float
             先验范围分数，通常用对手历史VPIP。
             若未知，默认0.35（典型6人桌玩家）。
+        name : str
+            玩家名字，用于 showdown 校准器的跨 session 查询（name 为 key）。
         """
         self._range[player_id] = max(0.05, min(1.0, prior_range))
         self._streets_bet[player_id] = 0
         self._street_acted[player_id] = set()
+        self._hand_actions[player_id] = []
+        if name:
+            self._pid_to_name[player_id] = name
 
     def observe_action(self, player_id: int, action: str, street: str) -> None:
         """观察到对手行动，更新范围估算。
@@ -157,7 +280,12 @@ class HandRangeEstimator:
             self.reset_hand(player_id)
 
         if action == "raise":
-            factor = _ACTION_COMPRESSION_RAISE.get(street, 0.50)
+            gto_factor = _ACTION_COMPRESSION_RAISE.get(street, 0.50)
+            # 优先使用从 showdown 数据校准出的系数；样本不足时退回 GTO 先验
+            name = self._pid_to_name.get(player_id, str(player_id))
+            factor = self.showdown_calibrator.calibrated_factor(
+                name, action, street, gto_factor
+            )
         else:
             factor = _ACTION_COMPRESSION.get(action, 1.0)
 
@@ -166,9 +294,11 @@ class HandRangeEstimator:
 
         self._range[player_id] = max(0.02, self._range[player_id] * factor)
 
+        # 记录行动序列，供本手结束时的 showdown 校准使用
+        self._hand_actions.setdefault(player_id, []).append((street, action))
+
         # 统计加注街数（同一街只计一次）
         if action == "raise":
-            street_key = (player_id, street)
             acted = self._street_acted.setdefault(player_id, set())
             if street not in acted:
                 self._streets_bet[player_id] = self._streets_bet.get(player_id, 0) + 1
@@ -211,3 +341,50 @@ class HandRangeEstimator:
         if not player_ids:
             return 1.0
         return min(self.get_discount(pid) for pid in player_ids)
+
+    def has_calibration(self, player_id: int) -> bool:
+        """该对手是否已有足够样本（≥5）影响任意行动的压缩系数。"""
+        name = self._pid_to_name.get(player_id, str(player_id))
+        player_data = self.showdown_calibrator._data.get(name, {})
+        return any(
+            len(samples) >= ShowdownCalibrator._MIN_SAMPLES
+            for samples in player_data.values()
+        )
+
+    def observe_showdown(self, player_id: int, cards, name: str = "") -> None:
+        """在 showdown 时记录对手底牌，用于校准该对手的范围压缩系数。
+
+        Parameters
+        ----------
+        player_id : int
+        cards : list of Card or str
+            对手亮出的底牌（至少两张）。
+        name : str
+            玩家名字；若为空则从 _pid_to_name 查找，再 fallback 到 str(player_id)。
+        """
+        action_sequence = self._hand_actions.get(player_id, [])
+        if not action_sequence:
+            return  # 该对手本手没有主动行动，无需校准
+        if len(cards) < 2:
+            return  # 只亮了一张牌，信息不完整，不用于校准
+        resolved_name = name or self._pid_to_name.get(player_id, str(player_id))
+        hand_pct = _hand_strength_pct(cards)
+        self.showdown_calibrator.record(resolved_name, action_sequence, hand_pct)
+
+    def save_calibrator(self, filepath: str) -> None:
+        """将 showdown 校准数据持久化到 JSON 文件。"""
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(self.showdown_calibrator.to_dict(), f, indent=2)
+
+    def load_calibrator(self, filepath: str) -> None:
+        """从 JSON 文件加载 showdown 校准数据（文件不存在时静默跳过）。"""
+        if not os.path.exists(filepath):
+            return
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+        if not content:
+            return
+        try:
+            self.showdown_calibrator = ShowdownCalibrator.from_dict(json.loads(content))
+        except (json.JSONDecodeError, KeyError, ValueError):
+            pass  # 损坏的文件，保持空校准器

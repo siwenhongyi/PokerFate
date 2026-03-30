@@ -54,7 +54,7 @@ ACTION_INJECT_DELAY_MAX_SEC = 3.0
 PROFIT_LOCK_BB_THRESHOLD = 400
 
 # 离桌后等待多久再发 EnterRoomREQ（秒），给客户端切场景/结算一点时间。
-PROFIT_LOCK_REENTER_DELAY_SEC = 2.0
+PROFIT_LOCK_REENTER_DELAY_SEC = 4.0
 
 # LeaveRoomREQ.seat_reserve：True=留座（降低离桌瞬间座位被他人占走的概率）；若进房异常可改为 False。
 PROFIT_LOCK_LEAVE_SEAT_RESERVE = True
