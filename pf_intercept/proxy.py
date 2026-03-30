@@ -34,7 +34,7 @@ from pf_intercept.config import (
     PREFERRED_WSS_HOSTS,
 )
 from pf_intercept.framing import FrameBuffer, encode_frame
-from pf_intercept import codec
+from pf_intercept import codec, config
 from pf_intercept.bot import BotBridge
 
 _LOGS_DIR = Path(__file__).parent / "logs"
@@ -678,17 +678,21 @@ async def _handle_passthrough(
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-async def main(max_auto_rebuy: int = 1) -> None:
+async def main(max_auto_rebuy: int = 1, profit_lock_bb: int | None = None) -> None:
     global _bot
     if not Path(SERVER_CERT).exists():
         print("ERROR: certs not found. Run:  python -m pf_intercept.gen_cert")
         return
 
+    if profit_lock_bb is not None:
+        config.PROFIT_LOCK_BB_THRESHOLD = profit_lock_bb
+
     _bot = BotBridge(max_auto_rebuy=max_auto_rebuy)
     log.info(
         "[BOT] Waiting for SitDownRSP and EnterRoomRSP to detect seat / blinds "
-        "(max_auto_rebuy=%d)",
+        "(max_auto_rebuy=%d, profit_lock_bb=%d)",
         max_auto_rebuy,
+        config.PROFIT_LOCK_BB_THRESHOLD,
     )
 
     server_ssl = _make_server_ssl()
@@ -731,9 +735,16 @@ def _parse_proxy_args() -> argparse.Namespace:
         choices=range(1, 21),
         help="本房间筹码清零时最多自动续入次数（1–20，默认 1）",
     )
+    p.add_argument(
+        "--profit-lock-bb",
+        type=int,
+        default=None,
+        metavar="BB",
+        help=f"盈利锁仓阈值（大盲倍数），达到后离桌再以 100BB 进房（默认用 config.py 里的值 {config.PROFIT_LOCK_BB_THRESHOLD}）",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     _args = _parse_proxy_args()
-    asyncio.run(main(max_auto_rebuy=_args.max_auto_rebuy))
+    asyncio.run(main(max_auto_rebuy=_args.max_auto_rebuy, profit_lock_bb=_args.profit_lock_bb))
