@@ -51,7 +51,7 @@ ACTION_INJECT_DELAY_MAX_SEC = 3.0
 
 # 盈利锁仓：一手结束后若桌上筹码 >= 该值（大盲倍数），则 LeaveRoomREQ 离桌再以 100BB 进房（EnterRoomREQ）。
 # （与客户端菜单一致；StandUpREQ 在客户端里基本未使用，服务端常不处理。）
-PROFIT_LOCK_BB_THRESHOLD = 200
+PROFIT_LOCK_BB_THRESHOLD = 250
 
 # 离桌后等待多久再发 EnterRoomREQ（秒），给客户端切场景/结算一点时间。
 PROFIT_LOCK_REENTER_DELAY_SEC = 2.0
