@@ -166,7 +166,18 @@ class PokerBot:
         # hands, making our raw MC equity (vs random) an over-estimate.
         # discount = f(range_fraction), see range_estimator.py for calibration.
         discount = self.range_estimator.worst_discount(opp_ids)
-        equity = raw_equity * discount
+
+        # ── Equity Realization (EQR) 修正 ───────────────────────────────────
+        # 标准框架：discount 只作用于"对手赢的那部分概率"，而不是乘在全部胜率上。
+        #   effective = raw - (1 - discount) × (1 - raw)
+        #
+        # 推导：(1 - raw) 是对手的胜率，(1 - discount) 是因为对手范围强而需要
+        # 额外让出的份额。强手 raw→1 时 (1-raw)→0，修正趋近于 0，不影响强手。
+        # 弱手 raw=0.5 时与原始乘法 raw×discount 完全等价，基准不变。
+        #
+        # 参考：GTO Wizard - Equity Realization
+        #       Upswing Poker - Equity Realization Explained
+        equity = max(0.0, raw_equity - (1.0 - discount) * (1.0 - raw_equity))
         self._last_equity = equity
 
         # Get exploit adjustments
