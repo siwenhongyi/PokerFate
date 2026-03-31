@@ -357,18 +357,22 @@ class PokerLogger:
         cards_str = _fmt_cards(cards, self._color)
         strength_str = f"{hand_strength_pct:.0%}"
 
+        _CALIB_THRESHOLD = 5
+        first_active = any(s["sample_count"] == _CALIB_THRESHOLD for s in streets)
+
         def _street_tag(s: Dict) -> str:
             n = s["sample_count"]
-            if n >= 5:
+            if n >= _CALIB_THRESHOLD:
                 direction = "↑宽" if s["calibrated_factor"] > s["gto_factor"] else "↓紧"
-                return f"{s['street']}:{s['calibrated_factor']:.2f}{direction}({n}手)"
-            return f"{s['street']}:积累{n}/5"
+                suffix = "★首次生效" if n == _CALIB_THRESHOLD else ""
+                return f"{s['street']}:{s['calibrated_factor']:.2f}{direction}({n}手){suffix}"
+            return f"{s['street']}:积累{n}/{_CALIB_THRESHOLD}"
 
         streets_str = "  ".join(_street_tag(s) for s in streets)
         self._raw(
             f"  ◈ 校准  {player_name}  {cards_str} 强度{strength_str}  {streets_str}",
             color=_C.MAGENTA,
-            dim=True,
+            dim=not first_active,
         )
 
     def opponent_pattern(

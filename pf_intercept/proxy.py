@@ -326,96 +326,136 @@ def _make_client_ssl() -> ssl.SSLContext:
 
 # ── WSS MITM ──────────────────────────────────────────────────────────────────
 
+async def _do_inject(
+    server_ws,
+    bridge: "BotBridge",
+    inject: tuple,
+    inject_room_id: int,
+) -> None:
+    """Fire-and-forget coroutine: encode and send a bot action to the server."""
+    if len(inject) == 3:
+        inject_type, inject_fields, delay_sec = inject
+    else:
+        inject_type, inject_fields = inject
+        delay_sec = 0.0
+
+    if delay_sec and delay_sec > 0:
+        await asyncio.sleep(float(delay_sec))
+
+    pb_body = codec.encode(inject_type, inject_fields)
+    if pb_body is None:
+        log.warning(
+            "[BOT→S] %s encode failed (pb2 missing / ParseDict error) — skipping injection",
+            inject_type,
+        )
+        bridge.notify_inject_failed(inject_type)
+        return
+
+    if inject_room_id == 0 and inject_type in (
+        "pb.LeaveRoomREQ",
+        "pb.EnterRoomREQ",
+        "pb.QuickStartREQ",
+        "pb.RebyREQ",
+    ):
+        log.warning(
+            "[BOT→S] %s 使用 room_id=0，服务器通常会忽略；"
+            "请确认日志里出现过 EnterRoomRSP 且含 roomid，或 S2C 帧头曾出现非 0 room_id。",
+            inject_type,
+        )
+
+    wire = encode_frame(inject_type, inject_room_id, pb_body)
+    log.info("[BOT→S] %s room_id=%s %s", inject_type, inject_room_id, inject_fields)
+    try:
+        await server_ws.send(wire)
+    except Exception as exc:
+        log.warning("[BOT→S] inject send failed: %s", exc)
+
+
+async def _c2s_analysis_worker(buf: FrameBuffer, queue: asyncio.Queue) -> None:
+    """Consume raw C2S bytes and log watched message types (runs concurrently with forwarding)."""
+    while True:
+        raw = await queue.get()
+        if raw is None:
+            break
+        for frame in buf.feed(raw):
+            if frame.type_name in WATCH_C2S:
+                msg = codec.decode(frame.type_name, frame.pb_body)
+                log.debug("[C→S] %s  %s", frame.type_name, msg)
+
+
+async def _s2c_analysis_worker(
+    server_ws,
+    buf: FrameBuffer,
+    bridge: "BotBridge",
+    queue: asyncio.Queue,
+) -> None:
+    """Consume raw S2C bytes, parse frames, run bot logic, spawn inject tasks.
+
+    Runs concurrently with the forwarding loop — the main loop forwards each
+    message to the client immediately and only queues bytes here for analysis.
+    Inject tasks are spawned as independent asyncio tasks so a delayed inject
+    (e.g. sleep before action) never stalls analysis of subsequent messages.
+    """
+    while True:
+        raw = await queue.get()
+        if raw is None:
+            break
+        for frame in buf.feed(raw):
+            bridge.note_seen_room_id(frame.room_id)
+            if frame.type_name not in WATCH_S2C:
+                continue
+            msg = codec.decode(frame.type_name, frame.pb_body)
+            if msg is None:
+                log.warning("[S→C] %s  (decode failed — run gen_pb2.sh first)", frame.type_name)
+                continue
+            log.info("[S→C] %s  %s", frame.type_name, msg)
+            result = bridge.handle(frame.type_name, msg)
+            if result is not None:
+                inject_room_id = bridge.room_id_for_c2s(frame.room_id)
+                asyncio.create_task(_do_inject(server_ws, bridge, result, inject_room_id))
+
+
 async def _pipe_c2s(client_ws, server_ws, buf: FrameBuffer) -> None:
-    """Game client → real server."""
+    """Game client → real server: forward immediately, analyze asynchronously."""
+    analysis_queue: asyncio.Queue = asyncio.Queue()
+    analysis_task = asyncio.create_task(_c2s_analysis_worker(buf, analysis_queue))
     msg_count = 0
     try:
         async for raw in client_ws:
             msg_count += 1
             if isinstance(raw, str):
                 raw = raw.encode()
-            for frame in buf.feed(raw):
-                if frame.type_name in WATCH_C2S:
-                    msg = codec.decode(frame.type_name, frame.pb_body)
-                    log.debug("[C→S] %s  %s", frame.type_name, msg)
+            # Forward first — analysis must not block the relay path
             await server_ws.send(raw)
+            analysis_queue.put_nowait(raw)
     finally:
+        analysis_queue.put_nowait(None)   # signal worker to exit
+        await analysis_task
         log.info("[WSS] pipe c2s ended; messages=%d", msg_count)
 
 
 async def _pipe_s2c(client_ws, server_ws, buf: FrameBuffer) -> None:
-    """Real server → game client, with bot action injection."""
+    """Real server → game client: forward immediately, analyze + inject asynchronously."""
     bridge = _bot
     if bridge is None:
         raise RuntimeError("BotBridge not initialised (main() must run first)")
+
+    analysis_queue: asyncio.Queue = asyncio.Queue()
+    analysis_task = asyncio.create_task(
+        _s2c_analysis_worker(server_ws, buf, bridge, analysis_queue)
+    )
     msg_count = 0
     try:
         async for raw in server_ws:
             msg_count += 1
             if isinstance(raw, str):
                 raw = raw.encode()
-
-            inject: tuple[str, dict] | tuple[str, dict, float] | None = None
-            inject_room_id: int = 0
-
-            for frame in buf.feed(raw):
-                bridge.note_seen_room_id(frame.room_id)
-
-                if frame.type_name not in WATCH_S2C:
-                    continue
-
-                msg = codec.decode(frame.type_name, frame.pb_body)
-                if msg is None:
-                    log.warning("[S→C] %s  (decode failed — run gen_pb2.sh first)", frame.type_name)
-                    continue
-
-                log.info("[S→C] %s  %s", frame.type_name, msg)
-
-                result = bridge.handle(frame.type_name, msg)
-                if result is not None:
-                    inject = result
-                    inject_room_id = bridge.room_id_for_c2s(frame.room_id)
-
-            # Forward original server message to the game client
+            # Forward original message to client immediately — analysis runs in parallel
             await client_ws.send(raw)
-
-            # Inject bot message to the real server (after client got the notify)
-            if inject is not None:
-                if len(inject) == 3:
-                    inject_type, inject_fields, delay_sec = inject
-                else:
-                    inject_type, inject_fields = inject
-                    delay_sec = 0.0
-                if delay_sec and delay_sec > 0:
-                    await asyncio.sleep(float(delay_sec))
-                pb_body = codec.encode(inject_type, inject_fields)
-                if pb_body is None:
-                    log.warning(
-                        "[BOT→S] %s encode failed (pb2 missing / ParseDict error) — skipping injection",
-                        inject_type,
-                    )
-                    bridge.notify_inject_failed(inject_type)
-                else:
-                    if inject_room_id == 0 and inject_type in (
-                        "pb.LeaveRoomREQ",
-                        "pb.EnterRoomREQ",
-                        "pb.QuickStartREQ",
-                        "pb.RebyREQ",
-                    ):
-                        log.warning(
-                            "[BOT→S] %s 使用 room_id=0，服务器通常会忽略；"
-                            "请确认日志里出现过 EnterRoomRSP 且含 roomid，或 S2C 帧头曾出现非 0 room_id。",
-                            inject_type,
-                        )
-                    wire = encode_frame(inject_type, inject_room_id, pb_body)
-                    log.info(
-                        "[BOT→S] %s room_id=%s %s",
-                        inject_type,
-                        inject_room_id,
-                        inject_fields,
-                    )
-                    await server_ws.send(wire)
+            analysis_queue.put_nowait(raw)
     finally:
+        analysis_queue.put_nowait(None)   # signal worker to exit
+        await analysis_task
         log.info("[WSS] pipe s2c ended; messages=%d", msg_count)
 
 

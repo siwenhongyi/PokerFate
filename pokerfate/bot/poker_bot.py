@@ -423,7 +423,7 @@ class PokerBot:
         # Update range estimator for every opponent action
         self.range_estimator.observe_action(player_id, act, street)
 
-    def observe_showdown(self, player_id: int, cards, name: str = "") -> None:
+    def observe_showdown(self, player_id: int, cards, name: str = "", board=None) -> None:
         """在 showdown 时记录对手底牌，校准其 raise 范围压缩系数。
 
         Parameters
@@ -433,8 +433,10 @@ class PokerBot:
             对手亮出的底牌。
         name : str
             玩家名字，用于 showdown 校准器的 name key。
+        board : list of Card or str, optional
+            本手最终公牌，用于计算翻牌后实际手牌强度。
         """
-        self.range_estimator.observe_showdown(player_id, cards, name=name)
+        self.range_estimator.observe_showdown(player_id, cards, name=name, board=board)
 
     def new_hand(self, player_ids: List[int], player_names: Optional[Dict[int, str]] = None):
         """Call at the start of each new hand.

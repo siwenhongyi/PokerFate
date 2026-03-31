@@ -84,7 +84,7 @@ class OpponentStats:
 
     def player_type(self) -> str:
         """Classify opponent into a rough player type."""
-        if self.hands_seen < 5:
+        if self.hands_seen < 20:
             return 'unknown'
         if self.vpip < 0.18 and self.pfr < 0.14:
             return 'nit'
@@ -279,7 +279,7 @@ class OpponentModel:
         s = self.get(player_id)
         adj = {}
 
-        if s.hands_seen < 5:
+        if s.hands_seen < 20:
             return adj
 
         ptype = s.player_type()

@@ -62,6 +62,8 @@ _RANK_TO_IDX: Dict[str, int] = {
 def _hand_strength_pct(cards) -> float:
     """将两张底牌转换为 0-1 强度分位值（1.0=AA，~0.36=72o）。
 
+    仅用于翻牌前（preflop）强度评估。翻牌后请用 _hand_equity_postflop。
+
     适用于 Card 对象或形如 "As"/"Td" 的字符串。
     数学推导：
       - 对子：score = 156 + rank*2（范围 156-180，高于所有非对子）
@@ -81,6 +83,25 @@ def _hand_strength_pct(cards) -> float:
     else:
         score = hi * 13 + lo + (3 if suited else 0)
     return min(1.0, score / 180.0)
+
+
+def _hand_equity_postflop(cards, board, n_iters: int = 300) -> float:
+    """翻牌后实际手牌强度：底牌 + 公牌条件下，相对随机对手的 MC 胜率（0-1）。
+
+    比翻牌前底牌排名更准确：
+      - 37o 打出葫芦 → ~0.97（而非底牌排名的 0.24）
+      - AK 翻牌未中高牌 → ~0.55（而非 0.93）
+      - T9s 有开口顺子摸牌 → ~0.55（实际权益，含摸牌出路）
+    """
+    from pokerfate.core.card import Card as _Card
+    from pokerfate.core.equity import EquityCalculator
+
+    def _to_card(c):
+        return _Card.from_str(str(c)) if not hasattr(c, 'rank') else c
+
+    hole = [_to_card(c) for c in cards[:2]]
+    board_cards = [_to_card(c) for c in board]
+    return EquityCalculator().calculate(hole, board_cards, 1, iterations=n_iters)
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +180,7 @@ class ShowdownCalibrator:
         # 用名字而非座位号，跨 session 座位换人时数据不会挂错人
         self._data: Dict[str, Dict[tuple, list]] = {}
 
-    def record(self, name: str, action_sequence: list, hand_strength_pct: float) -> None:
+    def record(self, name: str, action_sequence: list, strength_by_street: Dict[str, float]) -> None:
         """记录一次 showdown 观察。
 
         Parameters
@@ -167,12 +188,14 @@ class ShowdownCalibrator:
         name : str
             玩家名字（跨 session 稳定标识）。
         action_sequence : list of (street, action) tuples
-        hand_strength_pct : float
-            showdown 底牌强度分位值，0-1（1=AA，~0.36=72o）。
+        strength_by_street : dict
+            {street: hand_strength} — 各街道下注时的实际手牌强度（0-1）。
+            preflop 用底牌预选强度，翻牌后用 equity vs random。
         """
         player_data = self._data.setdefault(name, {})
         for street, action in action_sequence:
-            player_data.setdefault((street, action), []).append(hand_strength_pct)
+            pct = strength_by_street.get(street, 0.5)
+            player_data.setdefault((street, action), []).append(pct)
 
     def calibrated_factor(
         self, name: str, action: str, street: str, gto_default: float
@@ -351,7 +374,7 @@ class HandRangeEstimator:
             for samples in player_data.values()
         )
 
-    def observe_showdown(self, player_id: int, cards, name: str = "") -> None:
+    def observe_showdown(self, player_id: int, cards, name: str = "", board=None) -> None:
         """在 showdown 时记录对手底牌，用于校准该对手的范围压缩系数。
 
         Parameters
@@ -361,15 +384,37 @@ class HandRangeEstimator:
             对手亮出的底牌（至少两张）。
         name : str
             玩家名字；若为空则从 _pid_to_name 查找，再 fallback 到 str(player_id)。
+        board : list of Card or str, optional
+            本手最终公牌。用于计算翻牌后各街道的实际手牌强度（equity vs random），
+            比单纯用底牌预选强度更准确（37o 打葫芦 raise 应记为强而非弱）。
         """
         action_sequence = self._hand_actions.get(player_id, [])
         if not action_sequence:
-            return  # 该对手本手没有主动行动，无需校准
+            return
         if len(cards) < 2:
-            return  # 只亮了一张牌，信息不完整，不用于校准
+            return
         resolved_name = name or self._pid_to_name.get(player_id, str(player_id))
-        hand_pct = _hand_strength_pct(cards)
-        self.showdown_calibrator.record(resolved_name, action_sequence, hand_pct)
+        board = list(board) if board else []
+
+        # 按街道划分公牌，计算各街道下注时的实际手牌强度
+        board_by_street = {
+            'preflop': [],
+            'flop':    board[:3] if len(board) >= 3 else [],
+            'turn':    board[:4] if len(board) >= 4 else [],
+            'river':   board[:5] if len(board) >= 5 else [],
+        }
+        streets_with_raise = {s for s, a in action_sequence if a == 'raise'}
+        strength_by_street: Dict[str, float] = {}
+        for street in streets_with_raise:
+            b = board_by_street.get(street, [])
+            if not b:
+                # preflop：用底牌预选强度（快速、确定性）
+                strength_by_street[street] = _hand_strength_pct(cards)
+            else:
+                # 翻牌后：用实际 equity，反映成牌/摸牌的真实强度
+                strength_by_street[street] = _hand_equity_postflop(cards, b)
+
+        self.showdown_calibrator.record(resolved_name, action_sequence, strength_by_street)
 
     def save_calibrator(self, filepath: str) -> None:
         """将 showdown 校准数据持久化到 JSON 文件。"""

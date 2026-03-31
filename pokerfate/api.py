@@ -297,8 +297,8 @@ class PokerFateAPI:
             "unknown":         "未知",
         }
 
-        # 与 OpponentStats.player_type() 一致：hands_seen < 5 时统计不可靠，只标「数据不足N手」
-        _MIN_HANDS_FOR_TYPE = 5
+        # 与 OpponentStats.player_type() 一致：hands_seen < 20 时统计不可靠，只标「数据不足N手」
+        _MIN_HANDS_FOR_TYPE = 20
 
         def _player_type_tag(player_id: int) -> str:
             if player_id == self.my_player_id:
@@ -554,8 +554,17 @@ class PokerFateAPI:
             s = str(c)          # e.g. "As", "Td"
             return s[:-1] + _SUIT_SYM.get(s[-1], s[-1])
 
-        counts = Counter(c.rank.value for c in cards)
-        sorted_cards = sorted(cards, key=lambda c: (counts[c.rank.value], c.rank.value), reverse=True)
+        is_straight = score[0] in (4, 8)  # STRAIGHT or STRAIGHT_FLUSH
+        if is_straight:
+            # Wheel (A-2-3-4-5): A acts as 1, sort as 5-4-3-2-A
+            is_wheel = score[1] == 5 and any(c.rank.value == 14 for c in cards)
+            if is_wheel:
+                sorted_cards = sorted(cards, key=lambda c: c.rank.value if c.rank.value != 14 else 0, reverse=True)
+            else:
+                sorted_cards = sorted(cards, key=lambda c: c.rank.value, reverse=True)
+        else:
+            counts = Counter(c.rank.value for c in cards)
+            sorted_cards = sorted(cards, key=lambda c: (counts[c.rank.value], c.rank.value), reverse=True)
         return ' '.join(_fmt_card(c) for c in sorted_cards)
 
     # Server hand type int → Chinese name (from PKHelper.lua)
@@ -672,7 +681,7 @@ class PokerFateAPI:
                 if pid == self.my_player_id:
                     continue
                 name = self._session_names.get(pid, str(pid))
-                self._bot.observe_showdown(pid, cards, name=name)
+                self._bot.observe_showdown(pid, cards, name=name, board=self._board)
                 # Log calibration detail — one line per player, all streets combined
                 cal = self._bot.range_estimator.showdown_calibrator
                 hand_pct = _hand_strength_pct(cards)
@@ -746,7 +755,7 @@ class PokerFateAPI:
     def _maybe_log_opponent_pattern(self, player_id: int, name: str):
         """Surface significant opponent patterns to the log (throttled)."""
         s = self._bot.opponent_model.get(player_id)
-        if s.hands_seen < 5:
+        if s.hands_seen < 20:
             return
         adj = self._bot.opponent_model.exploit_adjustments(player_id)
         if not adj:
