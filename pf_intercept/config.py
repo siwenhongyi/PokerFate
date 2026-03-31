@@ -49,11 +49,13 @@ SMALL_BLIND: float | None = None   # None = auto-detect
 # 由 pf_intercept.bot 按 street / 动作 / 底池 随机取值，模拟真人思考时间。
 ACTION_INJECT_DELAY_MAX_SEC = 3.0
 
-# 盈利锁仓：一手结束后若桌上筹码 >= 该值（大盲倍数），则 LeaveRoomREQ 离桌再以 100BB 进房（EnterRoomREQ）。
+# 盈利锁仓：一手结束后若桌上筹码 >= 该值（大盲倍数），则记入待离桌；在收到下一手
+# pb.DealerInfoRSP（新一手开始）后再发 LeaveRoomREQ，再以 100BB 进房（EnterRoomREQ）。
+# 避免 Winner 当下立即离桌与客户端结算界面并发导致 UI 卡住。
 # （与客户端菜单一致；StandUpREQ 在客户端里基本未使用，服务端常不处理。）
 PROFIT_LOCK_BB_THRESHOLD = 400
 
-# 离桌后等待多久再发 EnterRoomREQ（秒），给客户端切场景/结算一点时间。
+# 离桌后等待多久再发 EnterRoomREQ（秒），给客户端切场景/进桌动画一点时间。
 PROFIT_LOCK_REENTER_DELAY_SEC = 4.0
 
 # LeaveRoomREQ.seat_reserve：True=留座（降低离桌瞬间座位被他人占走的概率）；若进房异常可改为 False。

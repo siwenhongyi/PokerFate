@@ -5,6 +5,22 @@ from pf_intercept.bot import BotBridge
 
 
 class TestBotBridgeProfitLock:
+    def _next_hand_dealer(self, bridge: BotBridge, gameid: str = "t_next"):
+        """盈利锁仓达标后需再收到一手 DealerInfo 才会注入 LeaveRoomREQ。"""
+        return bridge.handle(
+            "pb.DealerInfoRSP",
+            {
+                "dealer": 0,
+                "small_blind": 1,
+                "big_blind": 0,
+                "start_info": [
+                    {"seatid": 0, "chips": 200},
+                    {"seatid": 1, "chips": 200},
+                ],
+                "gameid": gameid,
+            },
+        )
+
     def _bootstrap_table(self, bridge: BotBridge, room_id: int = 20242379) -> None:
         bridge.handle(
             "pb.EnterRoomRSP",
@@ -72,9 +88,17 @@ class TestBotBridgeProfitLock:
                 "profit": [{"uid": "99", "chips": profit}],
             },
         )
-        assert out[0] == "pb.LeaveRoomREQ"
-        assert out[1] == {"seat_reserve": bool(getattr(config, "PROFIT_LOCK_LEAVE_SEAT_RESERVE", True))}
-        assert out[2] == 0.0
+        assert out is None
+        assert b._profit_lock_deferred is not None
+        assert b._profit_lock_deferred["roomid"] == rid
+        assert b._profit_lock_deferred["byin_chips"] == int(100 * bb)
+        assert not b._profit_lock_award_rebuy_after_enter
+
+        out_leave = self._next_hand_dealer(b)
+        assert out_leave[0] == "pb.LeaveRoomREQ"
+        assert out_leave[1] == {"seat_reserve": bool(getattr(config, "PROFIT_LOCK_LEAVE_SEAT_RESERVE", True))}
+        assert out_leave[2] == 0.0
+        assert b._profit_lock_deferred is None
         assert b._profit_lock_reenter is not None
         assert b._profit_lock_reenter["roomid"] == rid
         assert b._profit_lock_reenter["byin_chips"] == int(100 * bb)
@@ -116,6 +140,7 @@ class TestBotBridgeProfitLock:
             "pb.WinnerRSP",
             {"winner": [], "profit": [{"uid": "99", "chips": thr - 200}]},
         )
+        self._next_hand_dealer(b)
         out = b.handle(
             "pb.LeaveRoomRSP",
             {"roomid": rid, "game_type": 1},
@@ -136,6 +161,7 @@ class TestBotBridgeProfitLock:
             "pb.WinnerRSP",
             {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
         )
+        self._next_hand_dealer(b)
         out = b.handle("pb.LeaveRoomRSP", {"code": -1})
         assert out is None
         assert b._profit_lock_reenter is None
@@ -152,6 +178,7 @@ class TestBotBridgeProfitLock:
             "pb.WinnerRSP",
             {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
         )
+        self._next_hand_dealer(b)
         b.handle("pb.LeaveRoomRSP", {"code": 0})
         qs = b.handle(
             "pb.EnterRoomRSP",
@@ -164,6 +191,36 @@ class TestBotBridgeProfitLock:
         assert qs[1]["byin_chips"] == 200
         assert b._max_auto_rebuy == 3
         assert not b._profit_lock_award_rebuy_after_enter
+
+
+def test_enter_room_syncs_hand_start_chips_from_table() -> None:
+    """重进房后必须用 table_status.hand_chips 覆盖 DealerInfo 留下的 _hand_start_chips。"""
+    b = BotBridge(max_auto_rebuy=3)
+    b._my_uid = "10086"
+    b._table_room_id = 1
+    b._bb = 1000.0
+    b._sb = 500.0
+    b.handle(
+        "pb.EnterRoomRSP",
+        {
+            "code": 0,
+            "roomid": 1,
+            "game_type": 10010101,
+            "room_info": {"bb": "1000", "sb": "500", "lobby_coin": 10100001},
+            "table_status": {
+                "seat": [
+                    {
+                        "seatid": 5,
+                        "player": {"uid": "10086", "name": "me"},
+                        "hand_chips": "100000",
+                    },
+                ],
+            },
+        },
+    )
+    assert b._my_seat == 5
+    assert b._hand_start_chips[5] == 100000
+    assert b._seat_chips[5] == 100000
 
 
 def test_profit_lock_threshold_in_config() -> None:
