@@ -86,13 +86,13 @@ def update(type_name: str, msg: dict, my_seat_id: int | None = None) -> None:
         state.board.extend(msg.get("board", []))
 
     elif type_name == "pb.ActionNotifyBRC":
-        state.action_seat_id  = msg.get("seatid", -1)
+        state.action_seat_id  = msg.get("seatid", 0)  # pb omits field when value is 0
         state.call_need_chips = msg.get("call_need_chips", 0)
         state.min_chipin      = msg.get("min_chipin", 0)
         state.max_chipin      = msg.get("max_chipin", 0)
 
     elif type_name == "pb.ActionBRC":
-        seat = msg.get("seatid", -1)
+        seat = msg.get("seatid", 0)  # pb omits field when value is 0
         if seat in state.players:
             state.players[seat].chips   = msg.get("hand_chips", state.players[seat].chips)
             state.players[seat].is_fold = msg.get("action_type") == 1  # FOLD
@@ -106,14 +106,14 @@ def update(type_name: str, msg: dict, my_seat_id: int | None = None) -> None:
 
     elif type_name == "pb.ShowHandRSP":
         for info in msg.get("info", []):
-            seat = info.get("seatid", -1)
+            seat = info.get("seatid", 0)  # pb omits field when value is 0
             cards = [info[k] for k in ("card1", "card2", "card3", "card4") if k in info and info[k]]
             if seat in state.players:
                 state.players[seat].cards = cards
 
     elif type_name == "pb.ShowMyCardBRC":
         for info in msg.get("info", []):
-            seat = info.get("seatid", -1)
+            seat = info.get("seatid", 0)  # pb omits field when value is 0
             # hand_cards is repeated int32; 0 = slot not shown
             cards = [c for c in info.get("hand_cards", []) if c]
             if seat in state.players and cards:

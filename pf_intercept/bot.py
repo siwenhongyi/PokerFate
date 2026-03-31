@@ -678,9 +678,7 @@ class BotBridge:
     def _on_show_hand(self, msg: dict) -> None:
         """Capture ShowHandRSP — hole cards revealed at showdown."""
         for info in msg.get("info", []):
-            seat = info.get("seatid")
-            if seat is None:
-                continue
+            seat = info.get("seatid", 0)  # pb omits field when value is 0
             cards = []
             for key in ("card1", "card2", "card3", "card4"):
                 code = info.get(key)
@@ -698,9 +696,7 @@ class BotBridge:
         Card encoding is identical to other messages: code = suit * 256 + rank_num.
         """
         for info in msg.get("info", []):
-            seat = info.get("seatid")
-            if seat is None:
-                continue
+            seat = info.get("seatid", 0)  # pb omits field when value is 0
             cards = []
             for code in info.get("hand_cards", []):
                 if code:
