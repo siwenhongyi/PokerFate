@@ -151,7 +151,9 @@ class BotBridge:
         self._max_auto_rebuy: int = max(1, min(20, int(max_auto_rebuy)))
         self._auto_rebuy_done: int = 0
 
-        # 盈利锁仓：WinnerRSP 后发 LeaveRoom；LeaveRoomRSP 成功后发 EnterRoom（100BB）
+        # 盈利锁仓：WinnerRSP 达标后先记入 _profit_lock_deferred；下一手 DealerInfoRSP 再发
+        # LeaveRoom（避免与结算界面并发）；LeaveRoomRSP 成功后发 EnterRoom（100BB）
+        self._profit_lock_deferred: dict[str, int | str | bool | None] | None = None
         self._profit_lock_reenter: dict[str, int | str | None] | None = None
         self._profit_lock_award_rebuy_after_enter: bool = False
         # 最近一次注入的 EnterRoomREQ 字段（失败时打日志 / 人工对照）
@@ -210,7 +212,9 @@ class BotBridge:
 
     def notify_inject_failed(self, inject_type: str) -> None:
         """Proxy could not serialize/send a C2S frame — drop dependent bot state."""
-        if inject_type == "pb.LeaveRoomREQ" and self._profit_lock_reenter is not None:
+        if inject_type == "pb.LeaveRoomREQ" and (
+            self._profit_lock_reenter is not None or self._profit_lock_deferred is not None
+        ):
             log.warning("[BOT] 盈利锁仓：LeaveRoom 未发出，已取消离桌重进。")
             self._profit_lock_cancel_reenter()
         elif inject_type == "pb.EnterRoomREQ" and self._profit_lock_award_rebuy_after_enter:
@@ -221,6 +225,7 @@ class BotBridge:
             log.warning("[BOT] 盈利锁仓：QuickStartREQ 编码/发送失败，请手动从大厅进桌。")
 
     def _profit_lock_cancel_reenter(self) -> None:
+        self._profit_lock_deferred = None
         self._profit_lock_reenter = None
         self._profit_lock_award_rebuy_after_enter = False
         self._profit_lock_last_enter_fields = None
@@ -244,7 +249,7 @@ class BotBridge:
         elif type_name == "pb.SitDownRSP":      self._on_sit_down(msg)
         elif type_name == "pb.SitDownBRC":       self._on_sit_down_brc(msg)
         elif type_name == "pb.EnterRoomRSP":     return self._on_enter_room(msg)
-        elif type_name == "pb.DealerInfoRSP":    self._on_dealer_info(msg)
+        elif type_name == "pb.DealerInfoRSP":    return self._on_dealer_info(msg)
         elif type_name == "pb.HandCardRSP":      self._on_hand_card(msg)
         elif type_name == "pb.RoundStartBRC":    self._on_round_start(msg)
         elif type_name == "pb.ActionBRC":        self._on_action_brc(msg)
@@ -282,10 +287,18 @@ class BotBridge:
         if "seatid" not in msg:
             log.debug("[BOT] SitDownRSP missing seatid; assume 0")
         self._set_my_seat(seat, "SitDownRSP")
+        raw = msg.get("chips") or msg.get("hand_chips")
+        if raw is not None:
+            chips = _chip_int(raw, 0)
+            self._seat_chips[seat] = chips
+            self._hand_start_chips[seat] = chips
+            if self._my_seat is not None and seat == self._my_seat:
+                self._my_chips = chips
 
     def _on_enter_room(self, msg: dict) -> tuple[str, dict, float] | None:
         self._auto_rebuy_done = 0   # reset per room entry
         self._profit_lock_reenter = None
+        self._profit_lock_deferred = None
 
         if "game_type" in msg:
             self._session_game_type = _chip_int(msg.get("game_type"), 0)
@@ -349,6 +362,9 @@ class BotBridge:
                     self._set_my_seat(seat, "EnterRoomRSP.uid")
                     break
 
+        # 重进 / 回桌后必须用服务端筹码覆盖快照（见 _sync_stacks_from_table_snapshot 注释）
+        self._sync_stacks_from_table_snapshot(table_status)
+
         return fallback_inject
 
     def _profit_lock_quick_start_fallback(self) -> tuple[str, dict, float] | None:
@@ -394,6 +410,30 @@ class BotBridge:
         if seat >= 0 and uid is not None:
             self._uid_to_seat[str(uid)] = seat
 
+    def _sync_stacks_from_table_snapshot(self, table_status: dict) -> None:
+        """用 EnterRoomRSP.table_status 里的 hand_chips 对齐本地快照。
+
+        盈利锁仓在 DealerInfo 里会写入 _hand_start_chips 后发 LeaveRoom；若重进后不刷新，
+        WinnerRSP 仍用离桌前的大筹码作基准 + profit，会误再次触发锁仓。
+        """
+        for seat_status in table_status.get("seat", []) or []:
+            seat = _chip_int(seat_status.get("seatid", 0), 0)
+            if "seatid" not in seat_status:
+                log.debug(
+                    "[BOT] table_status seat missing seatid; assume 0: %s",
+                    seat_status,
+                )
+            raw = seat_status.get("hand_chips")
+            if raw is None:
+                raw = seat_status.get("begin_chips")
+            if raw is None:
+                continue
+            chips = _chip_int(raw, 0)
+            self._seat_chips[seat] = chips
+            self._hand_start_chips[seat] = chips
+            if self._my_seat is not None and seat == self._my_seat:
+                self._my_chips = chips
+
     def _ensure_api(self) -> bool:
         """Create PokerFateAPI once seat and blind values are known. Returns True if ready."""
         if self._api is not None:
@@ -416,9 +456,9 @@ class BotBridge:
 
     # ── Hand lifecycle ────────────────────────────────────────────────────────
 
-    def _on_dealer_info(self, msg: dict) -> None:
+    def _on_dealer_info(self, msg: dict) -> tuple[str, dict, float] | None:
         if not self._ensure_api():
-            return
+            return None
 
         self._stage   = 1
         self._pot     = 0
@@ -462,6 +502,30 @@ class BotBridge:
             ))
 
         self._api.new_hand(players=players, dealer_id=msg.get("dealer", 0))
+
+        # 盈利锁仓：上一手 Winner 已达标则等到本手 DealerInfo（下一手开始）再离桌
+        deferred = self._profit_lock_deferred
+        if deferred is not None:
+            self._profit_lock_deferred = None
+            room_id = _chip_int(deferred.get("roomid", 0), 0)
+            byin = _chip_int(deferred.get("byin_chips", 0), 0)
+            seat_reserve = bool(deferred.get("seat_reserve", True))
+            self._profit_lock_reenter = {
+                "roomid": room_id,
+                "byin_chips": byin,
+                "uid": deferred.get("uid"),
+                "seat_reserve": seat_reserve,
+            }
+            self._profit_lock_award_rebuy_after_enter = True
+            log.warning(
+                "[BOT] 盈利锁仓：已收到下一手 DealerInfo，现离桌（留座=%s）再以 %d（100BB）重进房间 %d。",
+                seat_reserve,
+                byin,
+                room_id,
+            )
+            return "pb.LeaveRoomREQ", {"seat_reserve": seat_reserve}, 0.0
+
+        return None
 
     def _on_hand_card(self, msg: dict) -> None:
         if self._api is None:
@@ -712,8 +776,12 @@ class BotBridge:
     def _maybe_profit_lock_leave_reenter(
         self, final_stacks: dict[int, int]
     ) -> tuple[str, dict, float] | None:
-        """筹码 >= 阈值则离桌再以 100BB 进同一房间（与客户端 Leave / 再进桌一致）。"""
-        if self._my_seat is None or self._profit_lock_reenter is not None:
+        """筹码 >= 阈值则记在 deferred，下一手 DealerInfo 再离桌并以 100BB 进同一房间。"""
+        if (
+            self._my_seat is None
+            or self._profit_lock_reenter is not None
+            or self._profit_lock_deferred is not None
+        ):
             return None
         bb = float(self._bb or 0.0)
         if bb <= 0:
@@ -732,15 +800,14 @@ class BotBridge:
 
         buyin = int(100 * bb)
         seat_reserve = bool(getattr(config, "PROFIT_LOCK_LEAVE_SEAT_RESERVE", True))
-        self._profit_lock_reenter = {
+        self._profit_lock_deferred = {
             "roomid": room_id,
             "byin_chips": buyin,
             "uid": self._my_uid,
             "seat_reserve": seat_reserve,
         }
-        self._profit_lock_award_rebuy_after_enter = True
         log.warning(
-            "[BOT] 盈利锁仓：本手结束后筹码 %d >= %d（%dBB），将离桌（留座=%s）再以 %d（100BB）重进房间 %d。",
+            "[BOT] 盈利锁仓：本手结束后筹码 %d >= %d（%dBB），将在下一手 DealerInfo 开始后离桌（留座=%s）再以 %d（100BB）重进房间 %d。",
             my_final,
             threshold,
             lock_bb,
@@ -748,7 +815,7 @@ class BotBridge:
             buyin,
             room_id,
         )
-        return "pb.LeaveRoomREQ", {"seat_reserve": seat_reserve}, 0.0
+        return None
 
     def _on_leave_room_rsp(self, msg: dict) -> tuple[str, dict, float] | None:
         """盈利锁仓：离桌成功后带买入重新进房。"""
