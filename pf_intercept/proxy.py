@@ -8,6 +8,7 @@ Setup (one-time):
            127.0.0.1  <SERVER_HOST>
     4. python -m pf_intercept.proxy
        (Seat ID and blinds are auto-detected from game messages)
+       Bark: device key in data/bark_key.txt (first line)
 
 Traffic flow:
     Game  ->  127.0.0.1:9012  (TLS, WSS MITM)  ->  Real Server :9012
@@ -33,9 +34,18 @@ from pf_intercept.config import (
     WATCH_S2C, WATCH_C2S,
     PREFERRED_WSS_HOSTS,
 )
-from pf_intercept.framing import FrameBuffer, encode_frame
+from pf_intercept.framing import Frame, FrameBuffer, encode_frame
 from pf_intercept import codec, config
 from pf_intercept.bot import BotBridge
+from pf_notify import notify, set_bark_key, load_bark_key_file
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_BARK_KEY_FILE = _PROJECT_ROOT / "data" / "bark_key.txt"
+
+
+def _wss_close_is_abnormal(code: int | None) -> bool:
+    return code is not None and code not in (1000, 1001)
+
 
 _LOGS_DIR = Path(__file__).parent / "logs"
 _LOGS_DIR.mkdir(exist_ok=True)
@@ -91,6 +101,9 @@ log = logging.getLogger("pf_proxy")
 
 # ── Bot singleton (constructed in main() with CLI options) ────────────────────
 _bot: BotBridge | None = None
+
+# Set from pb.SelfUserInfoRSP.brief.uid so pb.EnterRoomRSP can patch table_status.seat[].player
+_spoof_account_uid: str | None = None
 
 # ── Server state ──────────────────────────────────────────────────────────────
 _real_server_sni: str = SERVER_HOST       # fallback SNI when Host header is absent
@@ -326,6 +339,50 @@ def _make_client_ssl() -> ssl.SSLContext:
 
 # ── WSS MITM ──────────────────────────────────────────────────────────────────
 
+def _patch_spoof_role_skin_frame(frame: Frame) -> Frame:
+    """Rewrite SelfUserInfoRSP + EnterRoomRSP role_id / skin_id for local client display."""
+    global _spoof_account_uid
+    role = getattr(config, "SPOOF_USER_BRIEF_ROLE_ID", None)
+    skin = getattr(config, "SPOOF_USER_BRIEF_SKIN_ID", None)
+    if role is None and skin is None:
+        return frame
+    if frame.type_name not in ("pb.SelfUserInfoRSP", "pb.EnterRoomRSP"):
+        return frame
+    msg = codec.decode(frame.type_name, frame.pb_body)
+    if not msg:
+        return frame
+
+    if frame.type_name == "pb.SelfUserInfoRSP":
+        brief = msg.get("brief")
+        if isinstance(brief, dict) and brief.get("uid") is not None:
+            _spoof_account_uid = str(brief["uid"])
+        if isinstance(brief, dict):
+            if role is not None:
+                brief["role_id"] = int(role)
+            if skin is not None:
+                brief["skin_id"] = int(skin)
+        pb = codec.encode("pb.SelfUserInfoRSP", msg)
+    else:
+        if _spoof_account_uid:
+            table = msg.get("table_status") or {}
+            for seat in table.get("seat") or []:
+                player = seat.get("player")
+                if not isinstance(player, dict):
+                    continue
+                if str(player.get("uid")) != _spoof_account_uid:
+                    continue
+                if role is not None:
+                    player["role_id"] = int(role)
+                if skin is not None:
+                    player["skin_id"] = int(skin)
+                break
+        pb = codec.encode("pb.EnterRoomRSP", msg)
+
+    if pb is None:
+        return frame
+    return Frame(frame.type_name, frame.room_id, pb)
+
+
 async def _do_inject(
     server_ws,
     bridge: "BotBridge",
@@ -445,13 +502,28 @@ async def _pipe_s2c(client_ws, server_ws, buf: FrameBuffer) -> None:
         _s2c_analysis_worker(server_ws, buf, bridge, analysis_queue)
     )
     msg_count = 0
+    use_spoof = (
+        getattr(config, "SPOOF_USER_BRIEF_ROLE_ID", None) is not None
+        or getattr(config, "SPOOF_USER_BRIEF_SKIN_ID", None) is not None
+    )
+    forward_buf = FrameBuffer() if use_spoof else None
+    if use_spoof:
+        global _spoof_account_uid
+        _spoof_account_uid = None
     try:
         async for raw in server_ws:
             msg_count += 1
             if isinstance(raw, str):
                 raw = raw.encode()
-            # Forward original message to client immediately — analysis runs in parallel
-            await client_ws.send(raw)
+            if use_spoof and forward_buf is not None:
+                frames = forward_buf.feed(raw)
+                parts: list[bytes] = []
+                for frame in frames:
+                    frame = _patch_spoof_role_skin_frame(frame)
+                    parts.append(encode_frame(frame.type_name, frame.room_id, frame.pb_body))
+                await client_ws.send(b"".join(parts) + forward_buf.pending)
+            else:
+                await client_ws.send(raw)
             analysis_queue.put_nowait(raw)
     finally:
         analysis_queue.put_nowait(None)   # signal worker to exit
@@ -583,15 +655,19 @@ async def _handle_wss(client_ws) -> None:
     except Exception:
         log.exception("[WSS] session error")
     finally:
+        _cc = getattr(client_ws, "close_code", None)
+        _uc = getattr(server_ws, "close_code", None) if server_ws is not None else None
         log.info(
             "[WSS] session ended; client(code=%s reason=%r state=%s) upstream(code=%s reason=%r state=%s)",
-            getattr(client_ws, "close_code", None),
+            _cc,
             getattr(client_ws, "close_reason", None),
             getattr(client_ws, "state", None),
-            getattr(server_ws, "close_code", None) if server_ws is not None else None,
+            _uc,
             getattr(server_ws, "close_reason", None) if server_ws is not None else None,
             getattr(server_ws, "state", None) if server_ws is not None else None,
         )
+        if _wss_close_is_abnormal(_cc) or _wss_close_is_abnormal(_uc):
+            notify("wss_disconnected")
 
 
 # ── TCP pass-through (non-WSS ports) ─────────────────────────────────────────
@@ -719,8 +795,21 @@ async def _handle_passthrough(
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-async def main(max_auto_rebuy: int = 1, profit_lock_bb: int | None = None) -> None:
+def _load_bark_key_from_file() -> None:
+    key = load_bark_key_file(_DEFAULT_BARK_KEY_FILE)
+    set_bark_key(key)
+    if not key:
+        log.info("[Bark] no key in %s; push disabled", _DEFAULT_BARK_KEY_FILE)
+
+
+async def main(
+    max_auto_rebuy: int = 1,
+    profit_lock_bb: int | None = None,
+    spoof_role_id: int | None = None,
+    spoof_skin_id: int | None = None,
+) -> None:
     global _bot
+    _load_bark_key_from_file()
     if not Path(SERVER_CERT).exists():
         print("ERROR: certs not found. Run:  python -m pf_intercept.gen_cert")
         return
@@ -728,12 +817,19 @@ async def main(max_auto_rebuy: int = 1, profit_lock_bb: int | None = None) -> No
     if profit_lock_bb is not None:
         config.PROFIT_LOCK_BB_THRESHOLD = profit_lock_bb
 
+    if spoof_role_id is not None:
+        config.SPOOF_USER_BRIEF_ROLE_ID = spoof_role_id
+    if spoof_skin_id is not None:
+        config.SPOOF_USER_BRIEF_SKIN_ID = spoof_skin_id
+
     _bot = BotBridge(max_auto_rebuy=max_auto_rebuy)
     log.info(
         "[BOT] Waiting for SitDownRSP and EnterRoomRSP to detect seat / blinds "
-        "(max_auto_rebuy=%d, profit_lock_bb=%d)",
+        "(max_auto_rebuy=%d, profit_lock_bb=%d, spoof_role_id=%s, spoof_skin_id=%s)",
         max_auto_rebuy,
         config.PROFIT_LOCK_BB_THRESHOLD,
+        config.SPOOF_USER_BRIEF_ROLE_ID,
+        config.SPOOF_USER_BRIEF_SKIN_ID,
     )
 
     server_ssl = _make_server_ssl()
@@ -783,9 +879,30 @@ def _parse_proxy_args() -> argparse.Namespace:
         metavar="BB",
         help=f"盈利锁仓阈值（大盲倍数），达到后离桌再以 100BB 进房（默认用 config.py 里的值 {config.PROFIT_LOCK_BB_THRESHOLD}）",
     )
+    p.add_argument(
+        "--role-id",
+        type=int,
+        default=None,
+        metavar="ID",
+        help="篡改 SelfUserInfoRSP.brief 与 EnterRoomRSP 内本人座位的 player.role_id（本地展示）",
+    )
+    p.add_argument(
+        "--skin-id",
+        type=int,
+        default=None,
+        metavar="ID",
+        help="篡改 SelfUserInfoRSP.brief 与 EnterRoomRSP 内本人座位的 player.skin_id（本地展示）",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     _args = _parse_proxy_args()
-    asyncio.run(main(max_auto_rebuy=_args.max_auto_rebuy, profit_lock_bb=_args.profit_lock_bb))
+    asyncio.run(
+        main(
+            max_auto_rebuy=_args.max_auto_rebuy,
+            profit_lock_bb=_args.profit_lock_bb,
+            spoof_role_id=_args.role_id,
+            spoof_skin_id=_args.skin_id,
+        )
+    )

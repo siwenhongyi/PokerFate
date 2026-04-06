@@ -61,6 +61,11 @@ class FrameBuffer:
     def __init__(self) -> None:
         self._buf = b""
 
+    @property
+    def pending(self) -> bytes:
+        """Trailing bytes that are not yet a complete frame (forward verbatim)."""
+        return self._buf
+
     def feed(self, data: bytes) -> list[Frame]:
         self._buf += data
         frames: list[Frame] = []

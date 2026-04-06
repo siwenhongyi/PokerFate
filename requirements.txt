@@ -5,6 +5,7 @@ pytest-cov>=4.0
 # WSS MITM proxy (pf_intercept)
 websockets>=14.0
 cryptography>=42.0
+certifi>=2024.0
 
 # Protobuf — install after compiling protos with pf_intercept/gen_pb2.sh
 protobuf>=4.0
