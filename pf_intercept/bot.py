@@ -28,6 +28,7 @@ import random
 from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
 from pf_intercept import config
 from pf_intercept.action_types import ACTION_TYPE_TO_EVENT_ACTION, FOLD_ACTION_TYPES
+from pf_notify import notify
 
 log = logging.getLogger("pf_bot")
 
@@ -158,6 +159,7 @@ class BotBridge:
         self._profit_lock_award_rebuy_after_enter: bool = False
         # 最近一次注入的 EnterRoomREQ 字段（失败时打日志 / 人工对照）
         self._profit_lock_last_enter_fields: dict | None = None
+        self._profit_lock_times: int = 0  # 本房间累计锁仓次数（Bark）
         # 从最近一次成功进房 RSP 缓存，供 QuickStart 兜底（与客户端大厅一致）
         self._session_game_type: int = 0
         self._session_lobby_coin: int = 0
@@ -296,9 +298,11 @@ class BotBridge:
                 self._my_chips = chips
 
     def _on_enter_room(self, msg: dict) -> tuple[str, dict, float] | None:
+        profit_lock_times_snapshot = self._profit_lock_times
         self._auto_rebuy_done = 0   # reset per room entry
         self._profit_lock_reenter = None
         self._profit_lock_deferred = None
+        self._profit_lock_times = 0
 
         if "game_type" in msg:
             self._session_game_type = _chip_int(msg.get("game_type"), 0)
@@ -308,6 +312,7 @@ class BotBridge:
 
         code = _s2c_rsp_code(msg, 0)
         fallback_inject: tuple[str, dict, float] | None = None
+        profit_lock_reenter_notify = False
         if self._profit_lock_award_rebuy_after_enter:
             if code == 0:
                 self._max_auto_rebuy += 1
@@ -317,6 +322,7 @@ class BotBridge:
                     self._max_auto_rebuy,
                 )
                 self._profit_lock_award_rebuy_after_enter = False
+                profit_lock_reenter_notify = True
             else:
                 log.warning(
                     "[BOT] 盈利锁仓：重新进房失败 code=%s，未增加续入次数。",
@@ -364,6 +370,16 @@ class BotBridge:
 
         # 重进 / 回桌后必须用服务端筹码覆盖快照（见 _sync_stacks_from_table_snapshot 注释）
         self._sync_stacks_from_table_snapshot(table_status)
+
+        if profit_lock_reenter_notify:
+            notify(
+                "profit_lock_reenter",
+                nth=profit_lock_times_snapshot,
+                exit_room_chips_total=0,
+                table_chips=int(self._my_chips or 0),
+                buyin_chips=int(100 * float(self._bb or 0)),
+                room_id=int(self._table_room_id or 0),
+            )
 
         return fallback_inject
 
@@ -802,6 +818,16 @@ class BotBridge:
             "uid": self._my_uid,
             "seat_reserve": seat_reserve,
         }
+        self._profit_lock_times += 1
+        notify(
+            "profit_lock_trigger",
+            nth=self._profit_lock_times,
+            stack_chips=my_final,
+            threshold_chips=threshold,
+            lock_bb=lock_bb,
+            room_id=room_id,
+            big_blind=int(bb),
+        )
         log.warning(
             "[BOT] 盈利锁仓：本手结束后筹码 %d >= %d（%dBB），将在下一手 DealerInfo 开始后离桌（留座=%s）再以 %d（100BB）重进房间 %d。",
             my_final,
@@ -869,6 +895,14 @@ class BotBridge:
             return None
 
         self._auto_rebuy_done += 1
+        notify(
+            "auto_rebuy",
+            nth=self._auto_rebuy_done,
+            max_n=self._max_auto_rebuy,
+            rebuy_chips=rebuy_chips,
+            balance_chips=0,
+            rebuy_window_sec=reby_left_time,
+        )
         log.warning(
             "[BOT] ⚠️  筹码清零！自动续入 %d（100BB） 第 %d/%d 次，rebuy 窗口 %d 秒。",
             rebuy_chips,

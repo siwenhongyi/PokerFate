@@ -1,8 +1,7 @@
 """PokerFate main bot: integrates preflop, postflop, GTO, and opponent modeling."""
 
 from __future__ import annotations
-import random
-from typing import List, Optional, Tuple
+from typing import List, Optional, Dict
 
 from pokerfate.core.card import Card
 from pokerfate.core.game_state import GameState, Player, Street, Action, ActionType

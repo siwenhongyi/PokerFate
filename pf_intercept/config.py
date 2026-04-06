@@ -61,6 +61,11 @@ PROFIT_LOCK_REENTER_DELAY_SEC = 4.0
 # LeaveRoomREQ.seat_reserve：True=留座（降低离桌瞬间座位被他人占走的概率）；若进房异常可改为 False。
 PROFIT_LOCK_LEAVE_SEAT_RESERVE = True
 
+# 仅影响发往游戏客户端的 pb.SelfUserInfoRSP 与 pb.EnterRoomRSP（本人座位 player）：本地展示，不改服务器。
+# 设为 None 表示不篡改对应字段。EnterRoom 依赖同连接内先收到 SelfUserInfoRSP 以识别 uid。
+SPOOF_USER_BRIEF_ROLE_ID: int | None = None
+SPOOF_USER_BRIEF_SKIN_ID: int | None = None
+
 # EnterRoom 失败后必发 QuickStartREQ 随机配桌（逻辑在 bot 内固定，与 LobbyByinDialog 一致）。
 # 仅当本局从未缓存到 EnterRoomRSP.game_type / EnterRoomRSP.room_info.lobby_coin 时用下列默认：
 #   game_type  ← EnumConfig.lua GAME_GAME_TYPE.LOBBY_HOLDEM_GAME (=10010101)，与 pb.EnterRoomRSP.game_type 同源；
