@@ -20,6 +20,7 @@ if str(_REPO_ROOT) not in sys.path:
 from pf_intercept.config import PREFERRED_WSS_HOSTS, SERVER_WSS_PORT  # single source of truth
 
 _DISCOVERED_FILE = _REPO_ROOT / "pf_intercept" / "discovered_server.json"
+_TOKEN_FILE = _REPO_ROOT / "data" / "auth_token.txt"
 _IP_PATTERN = re.compile(r"wss?://\d+\.\d+\.\d+\.\d+")
 _PREFERRED_HOSTS = set(PREFERRED_WSS_HOSTS)
 
@@ -49,6 +50,17 @@ class ForceDomain:
             data = json.loads(flow.response.content)
         except Exception:
             return
+
+        # 拦截登录响应：data.authorization 就是 HTTP Authorization token
+        if data.get("code") == 0:
+            token = data.get("authorization")
+            if token:
+                try:
+                    _TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+                    _TOKEN_FILE.write_text(token, encoding="utf-8")
+                    print(f"[force_domain] Token 已写入 {_TOKEN_FILE.name}  ({token[:12]}…)")
+                except Exception as e:
+                    print(f"[force_domain] Token 写入失败: {e}")
 
         servers = data.get("server", {}).get("server", [])
         if not servers:

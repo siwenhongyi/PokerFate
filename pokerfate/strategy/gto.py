@@ -99,6 +99,43 @@ class GTOMath:
         return stack / max(pot, 0.01)
 
     @staticmethod
+    def spr_category(spr: float) -> str:
+        """Human-readable SPR bucket for logs and sizing."""
+        if spr < 4.0:
+            return "低SPR"
+        if spr < 8.0:
+            return "中SPR"
+        if spr < 15.0:
+            return "偏高SPR"
+        return "深SPR"
+
+    @staticmethod
+    def stack_bb_category(stack: float, big_blind: float) -> str:
+        """Effective depth in big blinds (preflop / general)."""
+        bb = max(big_blind, 1e-9)
+        s = stack / bb
+        if s < 22.0:
+            return "短码"
+        if s < 45.0:
+            return "标准"
+        if s < 100.0:
+            return "深码"
+        return "超深"
+
+    @staticmethod
+    def implied_odds_bonus(spr: float, street: str) -> float:
+        """Extra equity credit for drawing hands (not river). Deep stacks → more."""
+        if street == "river":
+            return 0.0
+        if spr >= 15.0:
+            return 0.08
+        if spr >= 8.0:
+            return 0.06
+        if spr >= 4.0:
+            return 0.04
+        return 0.02
+
+    @staticmethod
     def pot_fraction_bet(fraction: float, pot: float, min_bet: float, stack: float) -> float:
         """Calculate a bet of `fraction` of pot, clamped to stack."""
         return min(max(pot * fraction, min_bet), stack)

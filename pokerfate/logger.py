@@ -238,9 +238,13 @@ class PokerLogger:
         to_call: float,
         bot_name: str = "PokerFate",
         reasoning: str = "",
+        equity_random: Optional[float] = None,
+        spr: Optional[float] = None,
+        equity_mode: Optional[str] = None,
+        gto_refs: Optional[dict] = None,
     ):
         """Log the bot's own decision."""
-        self._file({
+        rec: Dict = {
             "event": "decision",
             "hand": self._hand_num[0],
             "street": street,
@@ -249,11 +253,24 @@ class PokerLogger:
             "equity": round(equity, 3),
             "pot": pot,
             "to_call": to_call,
-        })
+        }
+        if equity_random is not None:
+            rec["equity_random"] = round(equity_random, 3)
+        if spr is not None:
+            rec["spr"] = round(spr, 2)
+        if equity_mode:
+            rec["equity_mode"] = equity_mode
+        self._file(rec)
         if not self._console:
             return
 
-        eq_str  = f"胜率 {equity:.0%}"
+        eq_str = f"胜率 {equity:.0%}"
+        if equity_random is not None and abs(equity_random - equity) >= 0.01:
+            eq_str += f" (vs随机{equity_random:.0%})"
+        if spr is not None:
+            eq_str += f"  SPR≈{spr:.1f}"
+        if equity_mode:
+            eq_str += f"  [{equity_mode}]"
         pot_str = f"底池 {pot:.0f}"
         cn = _ACTION_CN.get(action, action)
 
@@ -274,6 +291,14 @@ class PokerLogger:
         self._raw(line, color=color, bold=True)
         if reasoning:
             self._raw(f"      💭 {reasoning}", dim=True)
+        if gto_refs:
+            key = gto_refs.get("chart_key", "")
+            hand = gto_refs.get("hand", "")
+            gl = gto_refs.get("greenline", "—")
+            pk = gto_refs.get("pekarstas", "—")
+            self._raw(f"      📊 [Greenline]  {key} {hand} → {gl}", dim=True)
+            if pk != "—":
+                self._raw(f"      📊 [Pekarstas]  {key} {hand} → {pk}", dim=True)
 
     def hand_result(
         self,
@@ -333,7 +358,6 @@ class PokerLogger:
         self,
         player_name: str,
         cards: List[str],
-        hand_strength_pct: float,
         streets: List[Dict],
     ):
         """Log a showdown calibration update (one line per player per hand).
@@ -342,35 +366,38 @@ class PokerLogger:
         ----------
         streets : list of dict
             Each dict: {"street": str, "action": str, "calibrated_factor": float,
-                        "gto_factor": float, "sample_count": int}
+                        "gto_factor": float, "sample_count": int,
+                        "hand_strength_pct": float or None}
+            hand_strength_pct 是该街道下注时的实际手牌强度：
+              preflop = 翻前起手牌排名，flop/turn/river = equity vs random
         """
         self._file({
             "event": "showdown_calibration",
             "hand": self._hand_num[0],
             "player": player_name,
             "cards": cards,
-            "hand_strength_pct": round(hand_strength_pct, 3),
             "streets": streets,
         })
         if not self._console or not streets:
             return
         cards_str = _fmt_cards(cards, self._color)
-        strength_str = f"{hand_strength_pct:.0%}"
 
         _CALIB_THRESHOLD = 5
         first_active = any(s["sample_count"] == _CALIB_THRESHOLD for s in streets)
 
         def _street_tag(s: Dict) -> str:
             n = s["sample_count"]
+            pct = s.get("hand_strength_pct")
+            pct_str = f"{pct:.0%}" if pct is not None else "?"
             if n >= _CALIB_THRESHOLD:
                 direction = "↑宽" if s["calibrated_factor"] > s["gto_factor"] else "↓紧"
                 suffix = "★首次生效" if n == _CALIB_THRESHOLD else ""
-                return f"{s['street']}:{s['calibrated_factor']:.2f}{direction}({n}手){suffix}"
-            return f"{s['street']}:积累{n}/{_CALIB_THRESHOLD}"
+                return f"{s['street']}:{pct_str} {s['calibrated_factor']:.2f}{direction}({n}手){suffix}"
+            return f"{s['street']}:{pct_str} 积累{n}/{_CALIB_THRESHOLD}"
 
         streets_str = "  ".join(_street_tag(s) for s in streets)
         self._raw(
-            f"  ◈ 校准  {player_name}  {cards_str} 强度{strength_str}  {streets_str}",
+            f"  ◈ 校准  {player_name}  {cards_str}  {streets_str}",
             color=_C.MAGENTA,
             dim=not first_active,
         )
@@ -480,6 +507,10 @@ class PokerLogger:
             print(f"{prefix}{msg}{suffix}", flush=True)
         else:
             print(msg, flush=True)
+
+    def note(self, msg: str) -> None:
+        """写一行系统备注到控制台日志（pokerfate_console.log）。不触发 JSONL 记录。"""
+        self._raw(msg)
 
     # back-compat alias
     def _con(self, msg: str, color: str = "", bold: bool = False, dim: bool = False):

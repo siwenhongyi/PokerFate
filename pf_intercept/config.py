@@ -75,6 +75,19 @@ PROFIT_LOCK_FALLBACK_LOBBY_COIN = 10100001
 # 发 QuickStart 前短暂延迟（秒），给客户端落到大厅状态。
 PROFIT_LOCK_QUICKSTART_DELAY_SEC = 0.5
 
+# 房间逃离：连续破产达次数后离桌并以 QuickStart 随机换桌（逻辑类似盈利锁仓后的兜底）。
+# 中间若出现盈利锁仓会清零破产计数。发起 QuickStart 前会清零本策略统计，避免池子小回到同房时立刻再次逃离。
+ROOM_ESCAPE_ENABLED = True
+ROOM_ESCAPE_CONSECUTIVE_BUSTS = 2
+
+# ── GameData API (30-day player stats) ───────────────────────────────────────
+# HTTP API host — from the login response's server list (UrlManager.getHttpUrl).
+# Differs by region; update when you see 401/404 errors.
+# curl capture 显示实际使用: ga-foreign.poker-fate.com
+GAMEDATA_HTTP_HOST: str = "ga-foreign.poker-fate.com"
+GAMEDATA_CHNL: int = 10          # G_CHNL_ID from Lua (channel / app store ID)
+GAMEDATA_GAME_TYPE: int = 10010101  # Texas Hold'em lobby game type
+
 # ── Watched messages ─────────────────────────────────────────────────────────
 WATCH_S2C = {
     # Session setup (auto-detect seat & blinds, track player names)

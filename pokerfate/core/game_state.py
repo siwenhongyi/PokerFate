@@ -131,13 +131,6 @@ class GameState:
         total_pot = self.pot + call_amt
         return call_amt / total_pot
 
-    def effective_stack_vs_pot(self) -> float:
-        """SPR: effective stack / pot."""
-        acting = self.acting_player
-        if self.pot == 0:
-            return float('inf')
-        return acting.stack / self.pot
-
     def position_of(self, player: Player) -> str:
         """Return position label for the player."""
         n = len(self.players)

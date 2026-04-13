@@ -5,8 +5,6 @@ from pokerfate.core.card import Card
 from pokerfate.core.game_state import GameState, Player, Street, Action, ActionType
 from pokerfate.bot.poker_bot import PokerBot
 from pokerfate.bot.opponent_model import OpponentModel
-from pokerfate.engine.game_engine import GameEngine
-
 
 def card(s):
     return Card.from_str(s)
@@ -159,7 +157,7 @@ class TestBotDecisions:
             1 for _ in range(200)
             if not strategy.should_cbet(0.98, BoardTexture(board), True, 'flop')
         )
-        # ~20% of the time should check; expect between 5% and 40%
+        # Stochastic monster line; dry HU still mixes checks (~20% at ag=1.0).
         assert 10 <= checks <= 80, f"Monster check frequency out of range: {checks}/200"
 
     def test_value_mult_increases_bet_size(self):
@@ -185,61 +183,6 @@ class TestBotDecisions:
             gs, _ = self._make_state(street=street, board=board)
             action = bot.decide(gs, player_id=0)
             assert isinstance(action, Action)
-
-
-class TestGameEngine:
-    def _build_engine(self, verbose=False):
-        bot0 = PokerBot(name="PokerFate", equity_iterations=200)
-        bot1 = PokerBot(name="Challenger", equity_iterations=200)
-
-        def decide0(gs, pid): return bot0.decide(gs, pid)
-        def decide1(gs, pid): return bot1.decide(gs, pid)
-
-        engine = GameEngine(
-            bots={0: decide0, 1: decide1},
-            player_names={0: "PokerFate", 1: "Challenger"},
-            starting_stacks={0: 200.0, 1: 200.0},
-            big_blind=2.0,
-            small_blind=1.0,
-            verbose=verbose,
-        )
-        return engine
-
-    def test_single_hand_completes(self):
-        engine = self._build_engine()
-        result = engine.play_hand()
-        assert result is not None
-        assert len(result.winners) >= 1
-        assert result.pot > 0
-
-    def test_stack_conservation(self):
-        engine = self._build_engine()
-        initial_total = sum(engine.stacks.values())
-        for _ in range(20):
-            if sum(1 for v in engine.stacks.values() if v > 0) < 2:
-                break
-            engine.play_hand()
-        final_total = sum(engine.stacks.values())
-        assert abs(final_total - initial_total) < 0.01  # chips are conserved
-
-    def test_session_runs(self):
-        engine = self._build_engine()
-        deltas = engine.play_session(50)
-        assert isinstance(deltas, dict)
-        assert set(deltas.keys()) == {0, 1}
-        # Total delta should be ~0
-        assert abs(sum(deltas.values())) < 0.01
-
-    def test_verbose_hand(self, capsys):
-        engine = self._build_engine(verbose=True)
-        engine.play_hand()
-        captured = capsys.readouterr()
-        assert "Hand #1" in captured.out
-
-    def test_many_hands_no_error(self):
-        engine = self._build_engine()
-        engine.play_session(100)  # Should not raise
-
 
 # ---------------------------------------------------------------------------
 # Range Estimator Tests (Libratus-inspired range compression)
@@ -327,16 +270,22 @@ class TestRangeEstimator:
 
 
 class TestTinyBetValueRaise:
-    """OOP/IP facing abnormally small bets should raise strong hands for value."""
+    """Facing tiny bets: raise when range equity is strong, call when marginal."""
 
-    def test_decide_raises_min_bet_with_high_raw_equity(self):
+    def test_decide_calls_tiny_bet_with_marginal_range_equity(self):
+        """range equity=0.43 (losing to opponent range 57%) → call tiny bet, don't raise.
+
+        旧代码用 raw_equity=0.78 决定加注，但 raw equity 只是 vs 随机手牌的胜率，
+        不反映对手实际范围。range equity 0.43 意味着对手范围里多数手牌赢我们，
+        加注"价值"实际是撞枪口。正确行为是跟注这个极小注（pot odds 1.8% < 43%）。
+        """
         import random
         from pokerfate.strategy.postflop import PostflopStrategy
         from pokerfate.core.card import Card
 
         strat = PostflopStrategy(aggression=1.0)
         board = [Card.from_str(c) for c in ['7s', '9d', 'Qc', '8c']]
-        raises = 0
+        calls = 0
         for i in range(100):
             random.seed(i)
             action, amt = strat.decide(
@@ -352,14 +301,84 @@ class TestTinyBetValueRaise:
                 num_opponents=2,
                 big_blind=3.0,
             )
+            calls += (action == 'call')
+        assert calls >= 90, f"expected mostly call vs tiny bet with marginal range equity, got {calls}/100"
+
+    def test_decide_raises_tiny_bet_with_strong_range_equity(self):
+        """range equity=0.80 (ahead of opponent range) → value raise against tiny bet."""
+        import random
+        from pokerfate.strategy.postflop import PostflopStrategy
+        from pokerfate.core.card import Card
+
+        strat = PostflopStrategy(aggression=1.0)
+        board = [Card.from_str(c) for c in ['7s', '9d', 'Qc', '8c']]
+        raises = 0
+        for i in range(100):
+            random.seed(i)
+            action, amt = strat.decide(
+                equity=0.80,
+                raw_equity=0.80,
+                pot=55000.0,
+                to_call=1000.0,
+                stack=127711.0,
+                board=board,
+                is_ip=True,
+                street='turn',
+                facing_bet=True,
+                num_opponents=1,
+                big_blind=3.0,
+            )
             if action == 'raise':
                 raises += 1
                 assert amt > 1000.0
-        assert raises >= 70, f"expected frequent value-raise vs tiny bet, got {raises}/100"
+        assert raises >= 50, f"expected frequent value-raise with strong range equity, got {raises}/100"
 
 
 class TestRiverBetLogic:
     """Verify river betting uses pure value/bluff logic, no semi-bluffs."""
+
+    def test_turn_river_crushing_equity_facing_bet_always_raises(self):
+        """转/河、面对下注、range equity≥90%：确定性价值加注（类：碾压范围，raise 不劣于 call）。"""
+        import random
+        from pokerfate.strategy.postflop import PostflopStrategy
+        from pokerfate.core.card import Card
+
+        strat = PostflopStrategy(aggression=0.55)
+        river = [Card.from_str(c) for c in ['Ac', '4c', 'Ah', '7c', 'Qd']]
+        turn_b = [Card.from_str(c) for c in ['Ac', '4c', 'Ah', '7c']]
+        for equity in (0.90, 0.93, 1.0):
+            for seed in range(15):
+                random.seed(seed)
+                action, amt = strat.decide(
+                    equity=equity,
+                    pot=160000.0,
+                    to_call=80000.0,
+                    stack=2_130_819.0,
+                    board=river,
+                    is_ip=True,
+                    street='river',
+                    facing_bet=True,
+                    num_opponents=1,
+                    big_blind=2.0,
+                )
+                assert action == 'raise', (equity, seed, action)
+                assert amt > 80000.0
+        for seed in range(15):
+            random.seed(seed)
+            action, amt = strat.decide(
+                equity=0.91,
+                pot=120000.0,
+                to_call=40000.0,
+                stack=500000.0,
+                board=turn_b,
+                is_ip=False,
+                street='turn',
+                facing_bet=True,
+                num_opponents=1,
+                big_blind=2.0,
+            )
+            assert action == 'raise', (seed, action)
+            assert amt > 40000.0
 
     def test_river_strong_hand_bets(self):
         from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture

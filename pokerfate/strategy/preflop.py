@@ -72,11 +72,13 @@ def _expand_range(spec: str) -> Set[str]:
 
 
 # ---------------------------------------------------------------------------
-# Position-based opening ranges (9-max, 100BB)
+# Position-based opening ranges (6-max cash, 100BB)
+# RFI 与公开 solver/教学区间对齐：UTG ~14–16%，BTN ~42–48%（加权组合占比）；
+# ThinkGTO / 常见 6-max 表：UTG 含 22+ 对子；BTN 略窄于旧版「全 Axo」式超宽。
 # ---------------------------------------------------------------------------
 
 _UTG_RANGE = _expand_range(
-    'AA, KK, QQ, JJ, TT, 99, 88, 77, '
+    '22+, '
     'AKs, AQs, AJs, ATs, A9s, '
     'KQs, KJs, KTs, '
     'QJs, QTs, JTs, '
@@ -100,10 +102,11 @@ _CO_RANGE = _HJ_RANGE | _expand_range(
     'ATo, KJo, QJo, KTo, QTo, JTo'
 )
 
+# BTN 相对 CO 的增量：在旧版超宽基础上剔除 solver 表中较少游戏的底端牌（弱 Axo、K5o–K6o、最小连张 off 等）
 _BTN_RANGE = _CO_RANGE | _expand_range(
-    'K5o, K6o, K7o, K8o, Q8o, Q9o, J8o, J9o, T8o, T9o, 97o, 98o, 87o, 86o, 76o, 75o, 65o, '
-    'A2o, A3o, A4o, A5o, A6o, A7o, A8o, A9o, '
-    'Q4s, Q3s, Q2s, J6s, J5s, J4s, J3s, T6s, T5s, 95s'
+    'K7o, K8o, Q8o, Q9o, J8o, J9o, T8o, T9o, 97o, 98o, 87o, 86o, 76o, '
+    'A5o, A6o, A7o, A8o, A9o, '
+    'Q4s, Q3s, Q2s, J5s, J4s, J3s, T6s, T5s, 95s'
 )
 
 _SB_RANGE = _CO_RANGE | _expand_range(
@@ -210,13 +213,15 @@ class PreflopStrategy:
             return random.random() < 0.5
         return False
 
-    def open_raise_size(self, position: str, big_blind: float) -> float:
-        """Standard open raise sizing in BB."""
+    def open_raise_size(self, position: str, big_blind: float, stack_bb: float = 100.0) -> float:
+        """Standard open raise sizing in chips. Shorter stacks use slightly smaller opens."""
         if position in ('SB',):
-            return big_blind * 3.0
-        if position in ('BTN', 'CO'):
-            return big_blind * 2.5
-        return big_blind * 3.0
+            mul = 3.0
+        elif position in ('BTN', 'CO'):
+            mul = 2.5 if stack_bb >= 20.0 else 2.2
+        else:
+            mul = 3.0 if stack_bb >= 22.0 else 2.7
+        return big_blind * mul
 
     def three_bet_size(self, open_raise: float, is_ip: bool, big_blind: float) -> float:
         """3-bet sizing."""
@@ -239,31 +244,29 @@ class PreflopStrategy:
         to_call: float = 0.0,
         num_players: int = 6,
         num_active_opponents: int = 5,
+        stack_bb: float = 100.0,
+        villain_position: str = '',
     ) -> Tuple[str, float]:
         """Return (action, amount). action in: fold, call, raise, check."""
         cat = _hand_category(hole_cards)
+        stack_bb = max(stack_bb, 1.0)
 
         if facing_action == 'none':
-            if is_big_blind:
-                # BB option: everyone limped (or no action), BB can check for free.
-                # Never fold — that would surrender the forced blind for nothing.
-                # Iso-raise strong hands to thin the field and play OOP with equity advantage.
-                # Iso size scales with limper count: 1 limper→3BB, 2→4BB, 3→5BB...
-                if cat in _BB_ISO_RAISE:
-                    iso_size = big_blind * (2 + max(num_limpers, 1))
-                    return ('raise', min(iso_size, stack))
+            # Free check: to_call == 0 means we have option to check (BB or forced-post edge case).
+            # Strategy: if we can check for free, always check — never iso-raise.
+            if to_call == 0:
                 return ('check', 0.0)
 
             # SB heads-up steal: only BB left, use wide steal range
             if position == 'SB' and num_active_opponents == 1:
                 if cat in _SB_STEAL_VS_BB:
-                    size = self.open_raise_size(position, big_blind)
+                    size = self.open_raise_size(position, big_blind, stack_bb)
                     return ('raise', min(size, stack))
                 return ('fold', 0.0)
 
             # Normal positions: open or fold (range adjusted for player count)
             if self.in_open_range(hole_cards, position, num_players):
-                size = self.open_raise_size(position, big_blind)
+                size = self.open_raise_size(position, big_blind, stack_bb)
                 return ('raise', min(size, stack))
             return ('fold', 0.0)
 
@@ -277,7 +280,9 @@ class PreflopStrategy:
             pot_odds = call_amt / (pot + call_amt) if (pot + call_amt) > 0 else 0.0
             # OOP penalty: SB calling OOP requires extra equity vs IP callers
             oop_penalty = 0.04 if (position == 'SB') else 0.0
-            if equity < pot_odds + oop_penalty:
+            # Stack depth: short stacks need stronger hands to commit good chips
+            depth_margin = 0.025 if stack_bb < 22.0 else (0.0 if stack_bb < 75.0 else -0.02)
+            if equity < pot_odds + oop_penalty + depth_margin:
                 return ('fold', 0.0)
             # BB defense range only applies when we are actually in the big blind.
             in_range = self.in_open_range(hole_cards, position, num_players) or (
@@ -288,10 +293,21 @@ class PreflopStrategy:
             return ('fold', 0.0)
 
         elif facing_action == '3bet':
-            if self.should_4bet(hole_cards):
-                # 4-bet to ~2.5x the 3-bet
-                size = min(open_raise * 2.5, stack)
-                return ('raise', size)
+            # GTO exceptions: call instead of shove (villain range too tight to justify shove)
+            # AKo from UTG/MP vs SB 3-bet: SB range vs EP is near AA/KK/QQ/AKs → call
+            ako_call = (cat == 'AKo' and position in ('UTG', 'MP') and villain_position == 'SB')
+
+            if not ako_call:
+                # JJ: shove from BTN/SB always; from CO only when OOP (3-bet came from BTN)
+                if cat == 'JJ' and (position in ('BTN', 'SB')
+                                    or (position == 'CO' and not is_ip)):
+                    return ('raise', stack)
+                if cat == 'TT' and position == 'SB':
+                    return ('raise', stack)  # SB vs BB 3-bet: allin
+                if self.should_4bet(hole_cards):
+                    # GTO: shove (not 2.5× — avoids awkward 5-bet decision with QQ/AK)
+                    return ('raise', stack)
+
             # Call with premium hands
             if cat in _expand_range('QQ, JJ, TT, AKs, AKo, AQs, KQs'):
                 return ('call', min(open_raise, stack))
