@@ -107,23 +107,67 @@ def _hand_equity_postflop(cards, board, n_iters: int = 300) -> float:
 # ---------------------------------------------------------------------------
 # 行动压缩系数（按街道区分，基于GTO下注频率研究）
 # ---------------------------------------------------------------------------
-# raise 系数按街道区分（宽池调优：略放宽 preflop / flop，减少 open+cbet 一步过紧）：
-#   preflop：3-bet/4-bet代表极化强范围，压缩最猛（~0.33）
-#   flop：c-bet 常见较宽（~0.58）
-#   turn：第二街下注代表更强范围（~0.50）
-#   river：河牌下注高度极化（~0.42）
-_ACTION_COMPRESSION_RAISE: Dict[str, float] = {
-    "preflop": 0.33,
-    "flop":    0.58,
-    "turn":    0.50,
-    "river":   0.42,
+# raise 翻前压缩（更新 preflop_rf）：
+#   preflop：GTO 开牌约 15-20%，3-bet 约 5-10%，系数 ~0.33
+# raise 翻后压缩（更新 postflop_rf，在翻前范围内进一步裁切）：
+#   flop：c-bet 代表约 50% 的翻前范围，系数 0.50
+#   turn：第二街连续下注代表更强范围，系数 0.45
+#   river：河牌高度极化（强价值 + 纯诈唬），系数 0.40
+# 来源：Bayes' Bluff (Alberta 2005)；GTO Wizard Range Morphology；Upswing Poker
+_ACTION_COMPRESSION_RAISE_PREFLOP: float = 0.33
+
+_ACTION_COMPRESSION_RAISE_POSTFLOP: Dict[str, float] = {
+    "flop":  0.50,
+    "turn":  0.45,
+    "river": 0.40,
 }
 
 _ACTION_COMPRESSION: Dict[str, float] = {
-    "call":  0.76,   # 跟注：范围收缩（跟注更宽，含摸牌手）
-    "check": 0.92,   # 过牌：范围几乎不变（含慢打和弱手混合）
+    "call":  0.76,   # 跟注：宽但封顶（call 范围不含顶端强手），业界参考值 45-76%
+    "check": 1.0,    # 过牌：不压缩。强手可慢打、弱手可过牌、免费看牌更是全范围 check，
+                     # 过牌几乎不携带范围信息，任何压缩均无 GTO 依据。
     "fold":  0.0,    # 弃牌：不再追踪（对手已出局）
 }
+
+# ---------------------------------------------------------------------------
+# PFR/VPIP 加权 + 诈唬例外：根据玩家风格调整翻后 raise 的 postflop_rf 压缩系数
+# ---------------------------------------------------------------------------
+# 核心原则：加注是强信号，无论任何玩家类型，默认强力压缩。
+#
+#   - 被动玩家（whale/跟注站）极少加注，一旦加注几乎是顶端价值 → 压缩最强
+#   - GTO 玩家 raise 含价值 + 诈唬，频率较高 → 标准压缩
+#   - 唯一例外：已知高频诈唬玩家，raise 可信度低 → 放宽到 GTO 基准
+#
+# 公式：adjusted = gto_factor × (pfr_vpip / R_ref)
+#   pfr_vpip_ratio 越低（跟注站），adjusted 越小（压缩更快，range 更窄）
+#   pfr_vpip_ratio 越高（Nit/GTO），adjusted ≈ gto_factor（标准压缩）
+#
+# 效果示例（gto_factor=0.50）：
+#   Whale  PFR/VPIP=0.13 → 0.50×(0.13/0.75)=0.087 → clip 到 0.20（极紧，强手信号）
+#   GTO    PFR/VPIP=0.75 → 0.50×(0.75/0.75)=0.50（无调整）
+#   Nit    PFR/VPIP=0.87 → 0.50×(0.87/0.75)=0.58 → clip 到 0.58
+#   已知诈唬者（bluff_win_rate>40%）→ factor≥0.50（不额外压缩）
+#
+# 边界：
+#   lo = gto_factor × 0.40（最多比 GTO 再压紧 60%，避免极端低估）
+#   hi = gto_factor × 1.20（最多比 GTO 宽 20%，防止无效信号）
+_PFR_VPIP_R_REF: float = 0.75
+
+
+def _adjusted_postflop_raise_factor(gto_factor: float, pfr_vpip_ratio: float) -> float:
+    """样本不足时，用 PFR/VPIP 比值调整 GTO 先验压缩系数（启发式路）。
+
+    仅在 showdown 样本不足（< 5 次）时使用。
+    有足够 showdown 数据时，调用方直接用 showdown_calibrator 的结果，不走此函数。
+
+    核心：加注是强信号，被动玩家（低 PFR/VPIP）一旦加注 range 极窄，压缩更强。
+    诈唬例外由调用方在拿到 factor 后统一处理（两条路共用同一逻辑）。
+    """
+    ratio = max(0.01, min(1.0, pfr_vpip_ratio))
+    raw = gto_factor * (ratio / _PFR_VPIP_R_REF)
+    lo = gto_factor * 0.40   # 最多比 GTO 再压紧 60%
+    hi = gto_factor * 1.20   # 最多比 GTO 放宽 20%
+    return max(lo, min(hi, raw))
 
 # ---------------------------------------------------------------------------
 # 胜率折扣校准表（分段线性插值）
@@ -256,8 +300,16 @@ class HandRangeEstimator:
     """
 
     def __init__(self) -> None:
-        # 当前手牌中每位对手的范围分数
+        # 两阶段 range 追踪：
+        #   _preflop_rf：翻前行动压缩（仅由 preflop raise/call/check 更新）
+        #   _postflop_rf：翻后行动在翻前范围内的二次裁切（由 flop/turn/river 行动更新）
+        # 组合 rf = preflop_rf * postflop_rf，用于胜率折扣计算
+        self._preflop_rf: Dict[int, float] = {}
+        self._postflop_rf: Dict[int, float] = {}
+        # 向后兼容：get_range_fraction 返回组合 rf
         self._range: Dict[int, float] = {}
+        # 每位对手的先验范围（VPIP），作为 call/check 压缩的下界
+        self._prior: Dict[int, float] = {}
         # 本手中对手下注/加注的街数（用于决策原因说明）
         self._streets_bet: Dict[int, int] = {}
         # 追踪本手是否已在某街行动（避免同一街重复计数）
@@ -266,10 +318,20 @@ class HandRangeEstimator:
         self._hand_actions: Dict[int, list] = {}
         # player_id → player name（每手 reset_hand 时填充，用于 showdown 校准器的 name key 查询）
         self._pid_to_name: Dict[int, str] = {}
+        # player_id → PFR/VPIP 比值（用于调整翻后 raise 压缩系数）
+        self._pfr_vpip: Dict[int, float] = {}
+        # 诈唬指标（用于 raise 压缩的诈唬例外判断）
+        self._bluff_wr: Dict[int, float] = {}       # bluff_win_rate
+        self._bet_win_n: Dict[int, int] = {}         # bet_win_count（样本数）
+        self._river_bf: Dict[int, float] = {}        # river_bet_frequency
+        self._river_bf_n: Dict[int, int] = {}        # river_bf 样本数（bets+checks）
         # Showdown 联合建模校准器
         self.showdown_calibrator: ShowdownCalibrator = ShowdownCalibrator()
 
-    def reset_hand(self, player_id: int, prior_range: float = 0.35, name: str = "") -> None:
+    def reset_hand(self, player_id: int, prior_range: float = 0.35, name: str = "",
+                   pfr_vpip_ratio: float = _PFR_VPIP_R_REF,
+                   bluff_win_rate: float = 0.0, bet_win_samples: int = 0,
+                   river_bet_freq: float = 0.0, river_bf_samples: int = 0) -> None:
         """手牌开始时重置状态。
 
         Parameters
@@ -280,8 +342,24 @@ class HandRangeEstimator:
             若未知，默认0.35（典型6人桌玩家）。
         name : str
             玩家名字，用于 showdown 校准器的跨 session 查询（name 为 key）。
+        bluff_win_rate : float
+            对手 bluff_win_rate（弱牌赢的比率）。> 0.40 时视为诈唬玩家。
+        bet_win_samples : int
+            bluff_win_rate 的样本数（bet_win_count）。< 5 时不使用。
+        river_bet_freq : float
+            对手河牌下注频率。> 0.55 时视为诈唬玩家。
+        river_bf_samples : int
+            river_bet_freq 的样本数。< 8 时不使用。
         """
-        self._range[player_id] = max(0.05, min(1.0, prior_range))
+        self._preflop_rf[player_id] = max(0.05, min(1.0, prior_range))
+        self._postflop_rf[player_id] = 1.0   # 翻后尚无行动，postflop_rf 从 1.0 开始
+        self._range[player_id] = self._preflop_rf[player_id]  # 组合 rf（初始等于翻前 rf）
+        self._prior[player_id] = max(0.05, min(1.0, prior_range))
+        self._pfr_vpip[player_id] = max(0.01, min(1.0, pfr_vpip_ratio))
+        self._bluff_wr[player_id] = max(0.0, min(1.0, bluff_win_rate))
+        self._bet_win_n[player_id] = bet_win_samples
+        self._river_bf[player_id] = max(0.0, min(1.0, river_bet_freq))
+        self._river_bf_n[player_id] = river_bf_samples
         self._streets_bet[player_id] = 0
         self._street_acted[player_id] = set()
         self._hand_actions[player_id] = []
@@ -299,23 +377,82 @@ class HandRangeEstimator:
         street : str
             'preflop', 'flop', 'turn', 'river'
         """
-        if player_id not in self._range:
+        if player_id not in self._preflop_rf:
             self.reset_hand(player_id)
 
+        is_preflop = (street == "preflop")
+        name = self._pid_to_name.get(player_id, str(player_id))
+
         if action == "raise":
-            gto_factor = _ACTION_COMPRESSION_RAISE.get(street, 0.50)
-            # 优先使用从 showdown 数据校准出的系数；样本不足时退回 GTO 先验
-            name = self._pid_to_name.get(player_id, str(player_id))
-            factor = self.showdown_calibrator.calibrated_factor(
-                name, action, street, gto_factor
-            )
+            if is_preflop:
+                # 翻前加注：更新 preflop_rf
+                gto_factor = _ACTION_COMPRESSION_RAISE_PREFLOP
+                factor = self.showdown_calibrator.calibrated_factor(
+                    name, action, street, gto_factor
+                )
+                new_pf = max(0.02, self._preflop_rf[player_id] * factor)
+                self._preflop_rf[player_id] = new_pf
+            else:
+                # 翻后加注：在翻前范围内二次裁切，更新 postflop_rf
+                gto_factor = _ACTION_COMPRESSION_RAISE_POSTFLOP.get(street, 0.45)
+                # Showdown 实测数据 vs PFR/VPIP 启发式：二选一，不叠加
+                #   有足够 showdown 样本 → 直接用实测（更准，不再叠加 PFR/VPIP）
+                #   样本不足            → 用 PFR/VPIP 调整 GTO 先验（启发式）
+                # 两条路最后都叠加诈唬例外（已知诈唬者放宽压缩）
+                sd_samples = self.showdown_calibrator.sample_count(name, action, street)
+                if sd_samples >= ShowdownCalibrator._MIN_SAMPLES:
+                    # 实测路：直接从 showdown 得到 factor，不再乘 PFR/VPIP
+                    factor = self.showdown_calibrator.calibrated_factor(
+                        name, action, street, gto_factor
+                    )
+                else:
+                    # 启发式路：PFR/VPIP 调整 GTO 先验
+                    pfr_vpip = self._pfr_vpip.get(player_id, _PFR_VPIP_R_REF)
+                    factor = _adjusted_postflop_raise_factor(gto_factor, pfr_vpip)
+                # 诈唬例外：两条路都适用（已知诈唬者放宽到 GTO 基准）
+                is_bluffer = (
+                    (self._bet_win_n.get(player_id, 0) >= 5
+                     and self._bluff_wr.get(player_id, 0.0) > 0.40) or
+                    (self._river_bf_n.get(player_id, 0) >= 8
+                     and self._river_bf.get(player_id, 0.0) > 0.55)
+                )
+                if is_bluffer:
+                    factor = max(factor, gto_factor)
+                new_po = max(0.02, self._postflop_rf[player_id] * factor)
+                self._postflop_rf[player_id] = new_po
         else:
             factor = _ACTION_COMPRESSION.get(action, 1.0)
+            if factor == 0.0:
+                # 弃牌：不更新（对手已出局，无需追踪）
+                self._hand_actions.setdefault(player_id, []).append((street, action))
+                return
 
-        if factor == 0.0:
-            return  # 弃牌，不更新（对手已出局，无需追踪）
+            # 翻后 call：用 showdown 校准数据替换固定压缩系数。
+            # 校准逻辑：calibrated_factor = 2*(1 - mean_call_strength)
+            #   宽范围跟注站（call 均强度 ~0.35）→ factor ≈ 1.30 → 压缩更少，postflop_rf 保持更高
+            #   紧手 call（call 均强度 ~0.65）    → factor ≈ 0.70 → 压缩更多，postflop_rf 更低
+            # check 和 preflop call 继续使用固定值（check=1.0 无压缩，preflop call 由 VPIP floor 保护）
+            if not is_preflop and action == 'call':
+                gto_factor = _ACTION_COMPRESSION['call']   # 0.76（GTO 先验）
+                factor = self.showdown_calibrator.calibrated_factor(
+                    name, action, street, gto_factor
+                )
 
-        self._range[player_id] = max(0.02, self._range[player_id] * factor)
+            if is_preflop:
+                new_pf = max(0.02, self._preflop_rf[player_id] * factor)
+                # VPIP 下界：跟注站 call 不应被压缩到与 VPIP 严重脱节的程度
+                if action != "raise":
+                    vpip_floor = self._prior.get(player_id, 0.35) * 0.65
+                    new_pf = max(new_pf, vpip_floor)
+                self._preflop_rf[player_id] = new_pf
+            else:
+                new_po = max(0.05, self._postflop_rf[player_id] * factor)
+                # 翻后 call/check：保留至少 40% 的翻后范围（防止跟注站被误判为紧手）
+                new_po = max(new_po, 0.40)
+                self._postflop_rf[player_id] = new_po
+
+        # 同步组合 rf（用于胜率折扣计算）
+        self._range[player_id] = self._preflop_rf[player_id] * self._postflop_rf[player_id]
 
         # 记录行动序列，供本手结束时的 showdown 校准使用
         self._hand_actions.setdefault(player_id, []).append((street, action))
@@ -328,12 +465,38 @@ class HandRangeEstimator:
                 acted.add(street)
 
     def get_range_fraction(self, player_id: int) -> float:
-        """返回对手当前估算范围分数 [0.02, 1.0]。
+        """返回对手当前组合范围分数 preflop_rf * postflop_rf [0.02, 1.0]。
 
-        若该对手在本手中从未被追踪（new_hand 未调用），返回 1.0——
+        若该对手在本手中从未被追踪（reset_hand 未调用），返回 1.0——
         即"无信息，使用原始MC胜率"，与 Libratus 均匀先验一致。
         """
         return self._range.get(player_id, 1.0)
+
+    def last_postflop_action(self, player_id: int) -> str:
+        """返回该对手在本手中最后一次翻后行动类型（'raise'/'call'/'check'）。
+
+        用于判断其范围形态：
+          raise → 极化范围（强手 + 诈唬）
+          call  → 线性范围（中等强度）
+          check → 全范围（无压缩信息）
+        未追踪或无翻后行动时返回 'check'。
+        """
+        for street, action in reversed(self._hand_actions.get(player_id, [])):
+            if street != 'preflop':
+                return action
+        return 'check'
+
+    def get_two_stage_rf(self, player_id: int):
+        """返回 (preflop_rf, postflop_rf) 元组，用于两阶段范围构建。
+
+        preflop_rf：翻前行动压缩后的翻前范围分数
+        postflop_rf：翻后行动在翻前范围内的二次裁切比例
+
+        两个值均在 [0.02, 1.0] 区间；未追踪的对手返回 (1.0, 1.0)。
+        """
+        pf = self._preflop_rf.get(player_id, 1.0)
+        po = self._postflop_rf.get(player_id, 1.0)
+        return (pf, po)
 
     def get_discount(self, player_id: int) -> float:
         """返回胜率折扣因子 [0.44, 1.0]。
@@ -403,18 +566,24 @@ class HandRangeEstimator:
             'turn':    board[:4] if len(board) >= 4 else [],
             'river':   board[:5] if len(board) >= 5 else [],
         }
-        streets_with_raise = {s for s, a in action_sequence if a == 'raise'}
+        # 同时计算 raise 和 call 街道的手牌强度，两者都需要校准：
+        #   raise：价值/诈唬的强度分布 → 压缩系数
+        #   call：跟注范围宽窄 → 跟注压缩系数（宽手跟注站 factor>0.76，紧手 factor<0.76）
+        # preflop call 不计算（由 VPIP floor 保护，无需额外校准）
+        streets_with_action = {s for s, a in action_sequence
+                                if a in ('raise', 'call') and (a != 'call' or s != 'preflop')}
         strength_by_street: Dict[str, float] = {}
-        for street in streets_with_raise:
+        for street in streets_with_action:
             b = board_by_street.get(street, [])
             if not b:
-                # preflop：用底牌预选强度（快速、确定性）
+                # preflop raise：用底牌预选强度（快速、确定性）
                 strength_by_street[street] = _hand_strength_pct(cards)
             else:
-                # 翻牌后：用实际 equity，反映成牌/摸牌的真实强度
+                # 翻牌后：用实际 equity，反映成牌/摸牌/听牌的真实强度
                 strength_by_street[street] = _hand_equity_postflop(cards, b)
 
         self.showdown_calibrator.record(resolved_name, action_sequence, strength_by_street)
+        return strength_by_street
 
     def save_calibrator(self, filepath: str) -> None:
         """将 showdown 校准数据持久化到 JSON 文件。"""

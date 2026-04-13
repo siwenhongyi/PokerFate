@@ -3,8 +3,45 @@
 import json
 import os
 import tempfile
+
 import pytest
+
 from pokerfate.bot.opponent_model import OpponentModel, OpponentStats
+
+
+class TestPlayerTypePriority:
+    """player_type() uses VPIP/PFR/gap/AF/WTSD/flop AFq; see opponent_model module docstring."""
+
+    def _stats(self, hands, vpip_c, pfr_c, bet, ra, ca, ch):
+        s = OpponentStats()
+        s.hands_seen = hands
+        s.vpip_count = vpip_c
+        s.pfr_count = pfr_c
+        s.bet_count = bet
+        s.raise_count = ra
+        s.call_count = ca
+        s.check_count = ch
+        return s
+
+    def test_loose_passive_low_pfr_is_fish_not_calling_station(self):
+        s = self._stats(50, 22, 6, 5, 5, 80, 40)  # VPIP 44%, PFR 12%, AF low
+        assert s.player_type() == "fish"
+
+    def test_maniac_before_loose_passive_buckets(self):
+        s = self._stats(50, 25, 10, 40, 40, 10, 10)  # ~50% VPIP, AF > 2.5
+        assert s.player_type() == "maniac"
+
+    def test_whale_super_loose_passive_before_fish(self):
+        s = self._stats(50, 35, 3, 2, 2, 100, 50)  # ~70% VPIP, ~6% PFR, AF < 1.2
+        assert s.player_type() == "whale"
+
+    def test_reg_excludes_large_vpip_pfr_gap(self):
+        s = self._stats(40, 12, 3, 2, 2, 20, 15)  # 30% VPIP, 7.5% PFR → gap too large for reg
+        assert s.player_type() != "reg"
+
+    def test_calling_station_moderate_pfr(self):
+        s = self._stats(50, 22, 11, 5, 5, 60, 30)  # 44% VPIP, 22% PFR, AF low
+        assert s.player_type() == "calling_station"
 
 
 class TestPersistence:

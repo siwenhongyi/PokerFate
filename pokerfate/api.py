@@ -27,6 +27,8 @@
 
 from __future__ import annotations
 import os
+import traceback
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 from enum import Enum
@@ -39,9 +41,18 @@ from pokerfate.core.game_state import GameState, Player, Street, Action, ActionT
 from pokerfate.core.hand_evaluator import HandEvaluator, HandRank
 from pokerfate.bot.poker_bot import PokerBot
 from pokerfate.logger import PokerLogger, get_logger
+from pokerfate.strategy.range_estimator import (
+    _hand_strength_pct,
+    _ACTION_COMPRESSION_RAISE_PREFLOP,
+    _ACTION_COMPRESSION_RAISE_POSTFLOP,
+)
+from pokerfate.data import init as _init_data
+
+# 启动时预加载静态数据（GTO charts 等）
+_init_data()
 
 _DEFAULT_LOG_FILE    = str(Path(__file__).resolve().parent / "logs" / "pokerfate.log")
-_DEFAULT_OPPONENTS   = str(Path(__file__).resolve().parent / "opponents.json")
+_DEFAULT_OPPONENTS   = str(Path(__file__).resolve().parent / "data" / "opponents.json")
 _DEFAULT_SHOWDOWN_CAL = str(Path(__file__).resolve().parent / "opponents_showdown.json")
 
 
@@ -154,6 +165,7 @@ class PokerFateAPI:
         autosave_path: Optional[str] = _UNSET,
         log_file: Optional[str] = _UNSET,
         verbose: bool = False,
+        use_range_equity: bool = True,
     ):
         """
         Parameters
@@ -196,6 +208,7 @@ class PokerFateAPI:
             name="PokerFate",
             equity_iterations=equity_iterations,
             aggression=aggression,
+            use_range_equity=use_range_equity,
         )
 
         # Auto-load opponent data (+ embedded showdown calibration) from disk on startup
@@ -222,6 +235,12 @@ class PokerFateAPI:
         self._action_history: List[tuple] = []
         self._dealer_id: int = 0
         self._hand_number: int = 0
+
+    def set_table_blinds(self, big_blind: float, small_blind: float) -> None:
+        """Update blinds after EnterRoomRSP (new table); refreshes unknown-stack fallback."""
+        self.big_blind = float(big_blind)
+        self.small_blind = float(small_blind)
+        self._default_stack = 100.0 * self.big_blind
 
     # ------------------------------------------------------------------
     # Hand lifecycle events
@@ -292,6 +311,7 @@ class PokerFateAPI:
             "nit":             "紧手",
             "calling_station": "跟注站",
             "maniac":          "疯狂激进",
+            "whale":           "超松被动",
             "reg":             "常规玩家",
             "fish":            "鱼",
             "unknown":         "未知",
@@ -335,6 +355,10 @@ class PokerFateAPI:
 
         self._log.hole_cards(cards)
 
+    def restore_board(self, cards: List[str]) -> None:
+        """重连时静默恢复公共牌，不触发日志/统计（仅还原 _board 状态）。"""
+        self._board = [Card.from_str(c) for c in cards]
+
     def deal_board(self, cards: List[str], street: str, pot: Optional[float] = None) -> None:
         """Notify the bot of new community cards.
 
@@ -356,6 +380,12 @@ class PokerFateAPI:
         if pot is not None:
             self._last_known_pot = pot
         self._log.board(street, cards, pot=display_pot)
+
+        # Track flop_seen for WTSD denominator: all non-hero, non-folded players
+        if street.lower() == 'flop':
+            for p in self._players:
+                if p.player_id != self.my_player_id and not p.is_folded:
+                    self._bot.opponent_model.record_flop_seen(p.player_id)
 
     # ------------------------------------------------------------------
     # Action notification
@@ -532,6 +562,10 @@ class PokerFateAPI:
             to_call=effective_to_call,
             bot_name=my_name,
             reasoning=self._bot.last_reasoning,
+            equity_random=getattr(self._bot, "last_equity_random", None),
+            spr=getattr(self._bot, "last_spr", None),
+            equity_mode=getattr(self._bot, "last_equity_mode", None),
+            gto_refs=getattr(self._bot, "last_gto_refs", None),
         )
 
         return decision
@@ -547,7 +581,6 @@ class PokerFateAPI:
         排序规则：按出现频率降序（多张在前），同频率内按点数降序。
         示例：葫芦 → 三张在前+两张在后；两对 → 大对+小对+踢脚；四条 → 四张+踢脚
         """
-        from collections import Counter
         _SUIT_SYM = {'s': '♠', 'h': '♥', 'd': '♦', 'c': '♣'}
 
         def _fmt_card(c) -> str:
@@ -569,6 +602,7 @@ class PokerFateAPI:
 
     # Server hand type int → Chinese name (from PKHelper.lua)
     _SERVER_HAND_TYPE_CN = {
+        1: '高牌',
         2: '一对', 3: '两对', 4: '三条', 5: '顺子',
         6: '同花', 7: '葫芦', 8: '四条', 9: '同花顺', 10: '皇家同花顺',
     }
@@ -639,8 +673,9 @@ class PokerFateAPI:
                     if rank_cn is None:
                         rank_cn = HandRank(score[0]).cn_name()
                     hand_combos[name] = f"{rank_cn} {self._fmt_best5(score, best5)}"
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[hand_combos ERROR] pid={pid} cards={cards} board={[str(c) for c in self._board]}")
+                    traceback.print_exc()
         # 兜底：有 winner_hand_types 但没有底牌数据时，至少展示牌型名
         # （包括：preflop 结束 / 对手没有亮牌但服务端下发了牌型）
         if wht:
@@ -652,14 +687,28 @@ class PokerFateAPI:
                         hand_combos[name] = rank_cn
 
         # 自己的成品：本地计算（服务端不单独下发我的牌型）
+        _SUIT_SYM = {'s': '♠', 'h': '♥', 'd': '♦', 'c': '♣'}
+        def _fmt_hole(cards) -> str:
+            """底牌格式化（带花色符号），用于 fallback 展示。"""
+            parts = []
+            for c in cards:
+                s = str(c)
+                parts.append(s[:-1] + _SUIT_SYM.get(s[-1], s[-1]) if len(s) >= 2 else s)
+            return ' '.join(parts)
+
         my_combo: str | None = None
         if self._hole_cards and self._board:
             try:
                 score, best5 = HandEvaluator.best_five(self._hole_cards + self._board)
                 rank_cn = HandRank(score[0]).cn_name()
                 my_combo = f"{rank_cn} {self._fmt_best5(score, best5)}"
-            except Exception:
-                my_combo = " ".join(str(c) for c in self._hole_cards)
+            except Exception as e:
+                print(f"[best_five ERROR] hole={[str(c) for c in self._hole_cards]} board={[str(c) for c in self._board]}")
+                traceback.print_exc()
+                my_combo = _fmt_hole(self._hole_cards)
+        elif self._hole_cards:
+            # 翻前弃牌（无公牌）：显示底牌
+            my_combo = _fmt_hole(self._hole_cards)
 
         self._log.hand_result(
             winner_names=winner_names,
@@ -674,20 +723,70 @@ class PokerFateAPI:
             my_combo=my_combo,
         )
 
-        # Showdown calibration: update range estimator with revealed hands + log
+        # Track showdown stats (WTSD / WMSD)
+        winner_id_set = set(winner_ids) if winner_ids else set()
         if showdown_hands:
-            from pokerfate.strategy.range_estimator import _hand_strength_pct, _ACTION_COMPRESSION_RAISE
-            for pid, cards in showdown_hands.items():
+            for pid in showdown_hands:
+                if pid != self.my_player_id:
+                    self._bot.opponent_model.record_showdown(pid, won=(pid in winner_id_set))
+
+        # bluff_win_rate：赢底池时记录牌型（含无底牌的上界估算）
+        # 对每个赢家：有下注行为 + 知道牌型（服务端下发或摊牌得到）→ 记录
+        if winner_ids and wht:
+            re = self._bot.range_estimator
+            for pid in winner_ids:
                 if pid == self.my_player_id:
                     continue
+                hand_type = wht.get(pid)
+                if hand_type is None:
+                    continue
+                # 判断本手该玩家是否有过下注/加注行为
+                action_seq = re._hand_actions.get(pid, [])
+                had_aggression = any(a == 'raise' for _, a in action_seq)
+                self._bot.opponent_model.record_win_with_hand_type(pid, hand_type, had_aggression)
+
+        # 无底牌时用牌型上界校准：赢家有牌型但没有亮牌（折叠赢）
+        # 在公牌上找满足该牌型的最强 combo 作为上界，更新校准数据
+        no_showdown_winners = [
+            pid for pid in (winner_ids or [])
+            if pid != self.my_player_id
+            and pid not in (showdown_hands or {})
+            and wht.get(pid) is not None
+            and self._board
+        ]
+        if no_showdown_winners:
+            from pokerfate.strategy.range_hands import all_hole_combos
+
+            _ACTION_COMPRESSION_RAISE_ALL_NS = {
+                "preflop": _ACTION_COMPRESSION_RAISE_PREFLOP,
+                **_ACTION_COMPRESSION_RAISE_POSTFLOP,
+            }
+            known_cards = set(self._board) | set(self._hole_cards)
+            all_combos = all_hole_combos(known_cards)
+            for pid in no_showdown_winners:
+                hand_type = wht[pid]
+                target_rank = hand_type - 1  # server int is HandEvaluator int + 1
+                # 找满足目标牌型的所有 combo，取强度最高的作为上界
+                matched = []
+                for combo in all_combos:
+                    try:
+                        score, _ = HandEvaluator.best_five(list(combo) + self._board)
+                        if score[0] == target_rank:
+                            matched.append((score, combo))
+                    except Exception as e:
+                        print(f"[no_showdown combo ERROR] combo={[str(c) for c in combo]} board={[str(c) for c in self._board]}: {e}")
+                if not matched:
+                    continue
+                # 取最强 combo（上界假设）
+                best_combo = max(matched, key=lambda x: x[0])[1]
                 name = self._session_names.get(pid, str(pid))
-                self._bot.observe_showdown(pid, cards, name=name, board=self._board)
-                # Log calibration detail — one line per player, all streets combined
+                strength_by_street = self._bot.observe_showdown(
+                    pid, best_combo, name=name, board=self._board
+                ) or {}
+                # 记录校准日志（标注为上界估算）
                 cal = self._bot.range_estimator.showdown_calibrator
-                hand_pct = _hand_strength_pct(cards)
-                card_strs = [str(c) for c in cards]
                 street_entries = []
-                for street_key, gto_factor in _ACTION_COMPRESSION_RAISE.items():
+                for street_key, gto_factor in _ACTION_COMPRESSION_RAISE_ALL_NS.items():
                     n = cal.sample_count(name, "raise", street_key)
                     if n == 0:
                         continue
@@ -697,12 +796,49 @@ class PokerFateAPI:
                         "calibrated_factor": cal.calibrated_factor(name, "raise", street_key, gto_factor),
                         "gto_factor": gto_factor,
                         "sample_count": n,
+                        "hand_strength_pct": strength_by_street.get(street_key),
+                    })
+                if street_entries:
+                    rank_cn = self._SERVER_HAND_TYPE_CN.get(hand_type, f"type{hand_type}")
+                    # 显示上界推断的具体底牌 + 牌型标注
+                    combo_strs = [str(c) for c in best_combo]
+                    self._log.showdown_calibration(
+                        player_name=name,
+                        cards=combo_strs + [f"({rank_cn}上界)"],
+                        streets=street_entries,
+                    )
+
+        # Showdown calibration: update range estimator with revealed hands + log
+        if showdown_hands:
+            _ACTION_COMPRESSION_RAISE_ALL = {
+                "preflop": _ACTION_COMPRESSION_RAISE_PREFLOP,
+                **_ACTION_COMPRESSION_RAISE_POSTFLOP,
+            }
+            for pid, cards in showdown_hands.items():
+                if pid == self.my_player_id:
+                    continue
+                name = self._session_names.get(pid, str(pid))
+                strength_by_street = self._bot.observe_showdown(pid, cards, name=name, board=self._board) or {}
+                # Log calibration detail — one line per player, all streets combined
+                cal = self._bot.range_estimator.showdown_calibrator
+                card_strs = [str(c) for c in cards]
+                street_entries = []
+                for street_key, gto_factor in _ACTION_COMPRESSION_RAISE_ALL.items():
+                    n = cal.sample_count(name, "raise", street_key)
+                    if n == 0:
+                        continue
+                    street_entries.append({
+                        "street": street_key,
+                        "action": "raise",
+                        "calibrated_factor": cal.calibrated_factor(name, "raise", street_key, gto_factor),
+                        "gto_factor": gto_factor,
+                        "sample_count": n,
+                        "hand_strength_pct": strength_by_street.get(street_key),
                     })
                 if street_entries:
                     self._log.showdown_calibration(
                         player_name=name,
                         cards=card_strs,
-                        hand_strength_pct=hand_pct,
                         streets=street_entries,
                     )
 
@@ -773,6 +909,34 @@ class PokerFateAPI:
         elif "bluff_freq" in adj:
             self._log.opponent_pattern(name, "player_type",
                                        s.vpip, adj.get("bluff_freq", ""))
+
+        # ── 新信号：面对对手下注时的读牌信号 ──
+        river_bf_samples = s.river_bet_count + s.river_check_count
+        if river_bf_samples >= 8:
+            if adj.get("river_bluff_likely"):
+                self._log.opponent_pattern(
+                    name, "river_bluff_likely",
+                    s.river_bet_frequency, "equity+7%")
+            elif adj.get("river_bet_rare"):
+                self._log.opponent_pattern(
+                    name, "river_bet_rare",
+                    s.river_bet_frequency, "equity-5%")
+
+        if adj.get("flop_float_favorable"):
+            self._log.opponent_pattern(
+                name, "flop_afq_high",
+                s.flop_afq, "float+5%")
+        if adj.get("turn_bluff_then_fold"):
+            self._log.opponent_pattern(
+                name, "turn_barrel_give_up",
+                s.turn_afq, "equity+5%@turn")
+
+        # ── 新信号：我方主动决策时的手牌质量信号 ──
+        if s.showdown_count >= 8:
+            if adj.get("value_sizing") == "large" and adj.get("bluff_freq") == "none":
+                self._log.opponent_pattern(
+                    name, "calling_station",
+                    s.wmsd, f"wtsd={s.wtsd:.0%} thin_value+no_bluff")
 
     def session_summary(self):
         """Print and log a session-end summary."""

@@ -807,6 +807,7 @@ async def main(
     profit_lock_bb: int | None = None,
     spoof_role_id: int | None = None,
     spoof_skin_id: int | None = None,
+    use_range_equity: bool = True,
 ) -> None:
     global _bot
     _load_bark_key_from_file()
@@ -822,7 +823,7 @@ async def main(
     if spoof_skin_id is not None:
         config.SPOOF_USER_BRIEF_SKIN_ID = spoof_skin_id
 
-    _bot = BotBridge(max_auto_rebuy=max_auto_rebuy)
+    _bot = BotBridge(max_auto_rebuy=max_auto_rebuy, use_range_equity=use_range_equity)
     log.info(
         "[BOT] Waiting for SitDownRSP and EnterRoomRSP to detect seat / blinds "
         "(max_auto_rebuy=%d, profit_lock_bb=%d, spoof_role_id=%s, spoof_skin_id=%s)",
@@ -893,6 +894,12 @@ def _parse_proxy_args() -> argparse.Namespace:
         metavar="ID",
         help="篡改 SelfUserInfoRSP.brief 与 EnterRoomRSP 内本人座位的 player.skin_id（本地展示）",
     )
+    p.add_argument(
+        "--equity-mode",
+        choices=["range", "eqr"],
+        default="range",
+        help="胜率模型：range=两阶段Range估算（默认），eqr=GTO+EQR（同mingli分支）",
+    )
     return p.parse_args()
 
 
@@ -904,5 +911,6 @@ if __name__ == "__main__":
             profit_lock_bb=_args.profit_lock_bb,
             spoof_role_id=_args.role_id,
             spoof_skin_id=_args.skin_id,
+            use_range_equity=(_args.equity_mode == "range"),
         )
     )

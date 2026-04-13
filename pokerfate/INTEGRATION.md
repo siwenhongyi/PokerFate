@@ -46,7 +46,7 @@ api.hand_over(winner_ids=[0], pot=9.0, final_stacks={0: 207.0, 1: 193.0})
 
 ### 依赖
 
-无第三方依赖，仅需 Python 3.10+。
+无第三方依赖，仅需 Python 3.12+。
 
 ### 创建实例
 
@@ -55,14 +55,16 @@ api = PokerFateAPI(
     my_player_id=0,          # bot 在本局中的 player_id（整数）
     big_blind=2.0,           # 大盲注金额
     small_blind=1.0,         # 小盲注金额（默认 big_blind / 2）
-    equity_iterations=800,   # 胜率计算精度（越高越准但越慢，建议 500-1500）
+    equity_iterations=800,   # 胜率计算精度（越高越准但越慢，建议 500-3000）
     aggression=1.0,          # 翻牌后激进系数（1.0 = GTO 基准）
-    autosave_path="opponents.json",  # 对手数据持久化文件（None = 禁用）
-    verbose=False,           # True 时打印调试日志
+    use_range_equity=True,   # True=两阶段 range equity 决策；False=纯蒙卡胜率
+    autosave_path=None,      # 对手数据持久化文件路径；None 时使用包内默认路径
+    log_file=None,           # JSONL 日志路径；None 时使用包内默认路径
+    verbose=False,           # True 时打印调试级别的内部细节到控制台
 )
 ```
 
-`PokerFateAPI` 在初始化时会**自动从 `autosave_path` 加载历史对手数据**（文件不存在时安全忽略）。
+**`autosave_path` 默认行为**：不传时自动写入包目录内的 `pokerfate/opponents.json`；传 `None` 则禁用自动保存。
 
 ---
 
@@ -162,7 +164,7 @@ decision = api.request_action(
 api.notify_action(ActionEvent(1, "call", 6.0, "preflop"))
 
 # ── 翻牌 ──────────────────────────────────────
-api.deal_board(["Qd", "7h", "2c"], street="flop")   # 只传新增的牌
+api.deal_board(["Qd", "7h", "2c"], street="flop", pot=12.0)
 
 # 对手 check
 api.notify_action(ActionEvent(1, "check", 0.0, "flop"))
@@ -215,7 +217,7 @@ api.hand_over(
 
 ---
 
-### `deal_board(cards, street)`
+### `deal_board(cards, street, pot=None)`
 
 发公共牌。每次只传**新发的牌**，不要传已有的牌。
 
@@ -223,6 +225,7 @@ api.hand_over(
 |------|------|------|
 | `cards` | `List[str]` | 新发的牌，翻牌传 3 张，转牌/河牌传 1 张 |
 | `street` | `str` | `"flop"` / `"turn"` / `"river"` |
+| `pot` | `float` \| `None` | 本街开始时的实际底池（可选，建议传入以保证日志准确） |
 
 ---
 
@@ -249,6 +252,7 @@ api.hand_over(
 | `my_stack` | `float` | bot 当前筹码 |
 | `num_active_opponents` | `int` | 仍在手的对手人数（默认 1） |
 | `my_current_bet_this_street` | `float` | bot 本街已投入金额（默认 0） |
+| `is_bb_option` | `bool` | bot 是 BB 且无人加注（面对免费看牌机会）时传 True（默认 False） |
 
 返回 `BotDecision(action, amount)`：
 
@@ -257,7 +261,7 @@ api.hand_over(
 
 ---
 
-### `hand_over(winner_ids, pot, final_stacks, showdown_hands)`
+### `hand_over(winner_ids, pot, final_stacks, showdown_hands, winner_hand_types)`
 
 每手结束时调用。调用后**自动保存对手数据**到磁盘。
 
@@ -266,7 +270,8 @@ api.hand_over(
 | `winner_ids` | `List[int]` | 赢家的 player_id 列表（平局时多个） |
 | `pot` | `float` | 本手总底池 |
 | `final_stacks` | `Dict[int, float]` | **强烈建议传入**：手牌结束后各玩家筹码 |
-| `showdown_hands` | `Dict[int, List[str]]` | 可选：摊牌时的手牌，用于未来扩展 |
+| `showdown_hands` | `Dict[int, List[str]]` | 可选：摊牌时亮出的手牌，用于对手建模校准 |
+| `winner_hand_types` | `Dict[int, int]` | 可选：服务端下发的赢家牌型整数（优先于本地评估） |
 
 ---
 
@@ -281,6 +286,16 @@ api.notify_player_joined(player_id=2, name="GPT-4o", stack=300.0)
 
 - 若该 `name` 曾在历史数据中出现（即使 `player_id` 不同），其历史统计自动迁移到新 ID。
 - `stack=None` 时使用 100 BB 作为默认值。
+
+---
+
+### `notify_player_left(player_id)`
+
+玩家离桌时调用。清除该 seat 的筹码/名称缓存，确保下一个占用该座位的新玩家不会继承旧数据。
+
+```python
+api.notify_player_left(player_id=2)
+```
 
 ---
 
@@ -340,8 +355,8 @@ PlayerInfo(player_id=3, name="NewBot", stack=None)    # 同样默认 100 BB
 对手模型**每局结束后自动保存**，程序被强制结束（Ctrl+C / IDE Stop）最多损失当局数据。
 
 ```python
-# 默认保存到 opponents.json（当前目录）
-api = PokerFateAPI(autosave_path="opponents.json")
+# 不传 autosave_path：自动保存到包目录内的 pokerfate/opponents.json
+api = PokerFateAPI()
 
 # 自定义路径
 api = PokerFateAPI(autosave_path="/data/pokerfate/gpt_opponents.json")

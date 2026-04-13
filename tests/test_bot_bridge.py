@@ -226,3 +226,28 @@ def test_enter_room_syncs_hand_start_chips_from_table() -> None:
 def test_profit_lock_threshold_in_config() -> None:
     assert isinstance(config.PROFIT_LOCK_BB_THRESHOLD, int)
     assert config.PROFIT_LOCK_BB_THRESHOLD >= 1
+
+
+def test_room_escape_two_busts_then_quickstart() -> None:
+    """连续破产 2 次（仍可自动续入）：第二弹离桌并以 QuickStart 换桌。"""
+    b = BotBridge(max_auto_rebuy=5)
+    b._my_seat = 0
+    b._bb = 1000.0
+    b._table_room_id = 42
+    b._session_game_type = 10010101
+    b._session_lobby_coin = 10100001
+    r1 = b.handle("pb.NoticeRebyRSP", {"seatid": 0, "reby_left_time": 30})
+    assert r1 is not None
+    assert r1[0] == "pb.RebyREQ"
+    assert b._room_escape_bust_count == 1
+    assert b._auto_rebuy_done == 1
+    r2 = b.handle("pb.NoticeRebyRSP", {"seatid": 0, "reby_left_time": 30})
+    assert r2 is not None
+    assert r2[0] == "pb.LeaveRoomREQ"
+    assert r2[1]["seat_reserve"] is False
+    assert b._room_escape_reenter == {"quickstart": True}
+    r3 = b.handle("pb.LeaveRoomRSP", {"code": 0})
+    assert r3 is not None
+    assert r3[0] == "pb.QuickStartREQ"
+    assert r3[1]["byin_chips"] == 100_000
+    assert b._room_escape_reenter is None
