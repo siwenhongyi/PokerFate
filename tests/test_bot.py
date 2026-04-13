@@ -290,7 +290,6 @@ class TestTinyBetValueRaise:
             random.seed(i)
             action, amt = strat.decide(
                 equity=0.43,
-                raw_equity=0.78,
                 pot=55000.0,
                 to_call=1000.0,
                 stack=127711.0,
@@ -317,7 +316,6 @@ class TestTinyBetValueRaise:
             random.seed(i)
             action, amt = strat.decide(
                 equity=0.80,
-                raw_equity=0.80,
                 pot=55000.0,
                 to_call=1000.0,
                 stack=127711.0,

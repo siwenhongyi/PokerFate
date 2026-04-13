@@ -252,9 +252,12 @@ class PreflopStrategy:
         stack_bb = max(stack_bb, 1.0)
 
         if facing_action == 'none':
-            # Free check: to_call == 0 means we have option to check (BB or forced-post edge case).
-            # Strategy: if we can check for free, always check — never iso-raise.
-            if to_call == 0:
+            if is_big_blind and to_call == 0:
+                # BB with free option: iso-raise premiums against limpers, otherwise check.
+                if num_limpers > 0 and _hand_category(hole_cards) in _BB_ISO_RAISE:
+                    # Standard BB iso formula: (num_limpers + 2) × BB
+                    size = (num_limpers + 2) * big_blind
+                    return ('raise', min(size, stack))
                 return ('check', 0.0)
 
             # SB heads-up steal: only BB left, use wide steal range

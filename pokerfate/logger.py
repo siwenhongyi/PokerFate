@@ -266,7 +266,7 @@ class PokerLogger:
 
         eq_str = f"胜率 {equity:.0%}"
         if equity_random is not None and abs(equity_random - equity) >= 0.01:
-            eq_str += f" (vs随机{equity_random:.0%})"
+            eq_str += f"(vs随机{equity_random:.0%})"
         if spr is not None:
             eq_str += f"  SPR≈{spr:.1f}"
         if equity_mode:
@@ -289,8 +289,14 @@ class PokerLogger:
 
         line = f"  ► {bot_name:<12}  {action_col:<14}  {eq_str}   {pot_str}"
         self._raw(line, color=color, bold=True)
+
+        # reasoning 可能包含多行（\n 分隔），逐行输出
         if reasoning:
-            self._raw(f"      💭 {reasoning}", dim=True)
+            lines = reasoning.split("\n")
+            self._raw(f"      💭 {lines[0]}", dim=True)
+            for extra in lines[1:]:
+                self._raw(f"         {extra.strip()}", dim=True)
+
         if gto_refs:
             key = gto_refs.get("chart_key", "")
             hand = gto_refs.get("hand", "")

@@ -81,14 +81,10 @@ def _fh(filename: str) -> logging.Handler:
     h.setFormatter(_LOG_FMT)
     return h
 
-# Console + proxy.log for all non-TCP logs.
-# Use explicit setup instead of basicConfig() to avoid silent no-op when
-# third-party libraries (websockets, asyncio) pre-register handlers before import.
+# proxy.log only — no console output.
+# 控制台只保留决策层日志（pokerfate.logger），proxy 消息量太大会干扰观察决策。
 _root_logger = logging.getLogger()
 _root_logger.setLevel(logging.INFO)
-_root_console = logging.StreamHandler()
-_root_console.setFormatter(_LOG_FMT)
-_root_logger.addHandler(_root_console)
 _root_logger.addHandler(_fh("proxy.log"))
 
 # Dedicated TCP passthrough logger → tcp.log only (not mixed into proxy.log)
@@ -602,6 +598,7 @@ async def _handle_wss(client_ws) -> None:
         path, upstream_uri, upstream_ip, SERVER_WSS_PORT,
         len(additional_headers), subprotocols,
     )
+    print(f"[proxy] WSS 已连接  {upstream_uri}  (ip={upstream_ip})")
 
     def _connect_kwargs(ip: str):
         return dict(
@@ -632,6 +629,7 @@ async def _handle_wss(client_ws) -> None:
                 "[WSS] connect to %s (%s) failed: %s; refreshing DNS and retrying",
                 upstream_host, upstream_ip, net_err,
             )
+            print(f"[proxy] WSS 连接失败 {upstream_host} ({upstream_ip})，正在刷新 DNS 重试...")
             fresh_ip = _pick_ip(force_refresh=True)
             if fresh_ip and fresh_ip != upstream_ip:
                 log.info("[WSS] retry with fresh IP: %s → %s", upstream_host, fresh_ip)
@@ -666,7 +664,10 @@ async def _handle_wss(client_ws) -> None:
             getattr(server_ws, "close_reason", None) if server_ws is not None else None,
             getattr(server_ws, "state", None) if server_ws is not None else None,
         )
-        if _wss_close_is_abnormal(_cc) or _wss_close_is_abnormal(_uc):
+        abnormal = _wss_close_is_abnormal(_cc) or _wss_close_is_abnormal(_uc)
+        print(f"[proxy] WSS 已断开  client_code={_cc}  upstream_code={_uc}"
+              + ("  ⚠️ 异常断开" if abnormal else ""))
+        if abnormal:
             notify("wss_disconnected")
 
 
@@ -832,6 +833,11 @@ async def main(
         config.SPOOF_USER_BRIEF_ROLE_ID,
         config.SPOOF_USER_BRIEF_SKIN_ID,
     )
+    print(
+        f"[proxy] Bot 初始化完成  max_rebuy={max_auto_rebuy}  "
+        f"profit_lock={config.PROFIT_LOCK_BB_THRESHOLD}BB  "
+        f"equity_mode={'range' if use_range_equity else 'eqr'}"
+    )
 
     server_ssl = _make_server_ssl()
 
@@ -845,6 +851,7 @@ async def main(
         ping_timeout=10,
     )
     log.info("WSS MITM   %s:%d  →  wss://<domain>:%d  (dynamic per-connection)", PROXY_HOST, WSS_PORT, SERVER_WSS_PORT)
+    print(f"[proxy] WSS MITM 已启动  {PROXY_HOST}:{WSS_PORT}  →  wss://<domain>:{SERVER_WSS_PORT}")
 
     for port in PASSTHROUGH_PORTS:
         if port == WSS_PORT:
@@ -855,9 +862,12 @@ async def main(
             PROXY_HOST, port,
         )
         log.info("TCP passthrough %s:%d  (target host from SNI/Host)", PROXY_HOST, port)
+        print(f"[proxy] TCP passthrough 已启动  {PROXY_HOST}:{port}")
 
     for _h in PREFERRED_WSS_HOSTS:
         log.info("hosts entry:  127.0.0.1  %s", _h)
+        print(f"[proxy] hosts entry:  127.0.0.1  {_h}")
+    print("[proxy] 等待连接中... (Ctrl+C 停止)")
     await asyncio.Future()
 
 
