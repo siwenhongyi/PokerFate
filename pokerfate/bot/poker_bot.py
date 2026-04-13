@@ -54,6 +54,11 @@ class PokerBot:
         # Per-hand dedup guards: prevent counting VPIP/PFR more than once per player per hand
         self._vpip_recorded: set = set()
         self._pfr_recorded: set = set()
+        # P6/P9 – cross-street action tracking for delayed cbet / probe detection
+        # {street: action_str} e.g. {'flop': 'check', 'turn': 'raise'}
+        self._my_street_actions: dict = {}
+        # {player_id: {street: action_str}} for primary opponent
+        self._opp_street_actions: dict = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -291,11 +296,6 @@ class PokerBot:
         opp_fold_rate = self._adjusted_fold_rate(primary_opp_id, adj)
 
         # 当 range equity 被大幅压缩时，对手本手处于强手范围，实际弃牌率远低于历史统计。
-        # compression = range_equity / raw_equity：越接近 0 说明对手越强、越不会弃牌。
-        # 调整后的弃牌率用于诈唬判断，防止在对手持有强手范围时仍尝试诈唬。
-        # 公式：adjusted = historical × min(1, compression + 0.20)
-        #   compression=1.0（无压缩）→ adjusted = historical（不变）
-        #   compression=0.25（严重压缩）→ adjusted ≈ historical × 0.45
         if raw_mc > 0:
             compression = equity / raw_mc
             opp_fold_rate = opp_fold_rate * min(1.0, compression + 0.20)
@@ -321,15 +321,52 @@ class PokerBot:
         facing_large_bet = facing_bet and to_call > 0 and pot_odds_pre >= 0.30 and spr < 5.0
         exploit_tighten_call = bool(value_only and facing_large_bet)
 
+        # ── P3: measured fold-to-cbet (more specific than generic fold_rate) ──
+        fold_to_cbet_val: float | None = None
+        if primary_opp_id >= 0:
+            opp_stats = self.opponent_model.get(primary_opp_id)
+            if opp_stats.fold_to_cbet_opps >= 5:
+                fold_to_cbet_val = opp_stats.fold_to_cbet
+
+        # ── P8: opponent AF ──────────────────────────────────────────────
+        opp_af = 1.5
+        if primary_opp_id >= 0:
+            opp_af = self.opponent_model.get(primary_opp_id).aggression_factor
+
+        # ── P1: nut advantage heuristic ──────────────────────────────────
+        # Proxy: how much my range equity exceeds raw MC equity.
+        # range_eq >> raw_mc → my hands beat opponent's tight range → nut advantage.
+        nut_adv = 0.0
+        if range_eq is not None and raw_mc > 0:
+            nut_adv = max(0.0, min(1.0, (range_eq - raw_mc) / 0.25))
+
+        # ── P6: delayed c-bet detection ─────────────────────────────────
+        # True when: I was the preflop aggressor, checked flop, now it's turn (no bet)
+        prev_street = {'turn': 'flop', 'river': 'turn'}.get(street, '')
+        is_delayed_cbet = (
+            not facing_bet
+            and prev_street != ''
+            and self._my_street_actions.get(prev_street) == 'check'
+        )
+
+        # ── P9: opponent IP check-back detection ────────────────────────
+        # True when primary opponent (who was IP) checked back last street
+        opponent_checked_back = False
+        if primary_opp_id is not None and primary_opp_id >= 0 and prev_street:
+            opp_prev = self._opp_street_actions.get(primary_opp_id, {}).get(prev_street)
+            if opp_prev == 'check' and not facing_bet:
+                opponent_checked_back = True
+
+        # ── P5: pass last flop bet fraction for multi-street consistency ─
+        last_bet_frac_val = self.postflop._last_bet_frac if self.postflop._last_bet_street == 'flop' else 0.0
+
         # Street-level AFq adjustments: widen call range when opponent's betting
         # range on that street is known to be wide (more bluffs included).
         effective_equity = equity
         if facing_bet:
             if street == 'flop' and adj.get('flop_float_favorable'):
-                # Opponent bets flop widely → float more, plan to take pot on turn
                 effective_equity = min(equity + 0.05, 1.0)
             elif street == 'turn' and adj.get('turn_bluff_then_fold'):
-                # Opponent barrels turn then gives up river → call turn more liberally
                 effective_equity = min(equity + 0.05, 1.0)
             elif street == 'river':
                 if adj.get('river_bluff_likely'):
@@ -339,7 +376,6 @@ class PokerBot:
 
         action_str, amount = self.postflop.decide(
             equity=effective_equity,
-            raw_equity=raw_mc,
             pot=pot,
             to_call=to_call,
             stack=stack,
@@ -350,13 +386,22 @@ class PokerBot:
             num_opponents=num_opponents,
             big_blind=bb,
             opponent_fold_rate=opp_fold_rate,
+            fold_to_cbet=fold_to_cbet_val,
             spr=spr,
             value_only=value_only,
             position=pos,
             is_drawing_heavy=is_dh,
             facing_large_bet=facing_large_bet,
             exploit_tighten_call=exploit_tighten_call,
+            opponent_af=opp_af,
+            nut_advantage=nut_adv,
+            is_delayed_cbet=is_delayed_cbet,
+            opponent_checked_back=opponent_checked_back,
+            last_bet_frac=last_bet_frac_val,
         )
+
+        # ── Track my own action for next-street cross-street logic ───────
+        self._my_street_actions[street] = action_str
 
         # 下注金额不超过可以行动的对手中筹码最多的那个（超出无意义）
         if action_str == 'raise' and amount > 0:
@@ -429,6 +474,11 @@ class PokerBot:
             num_opp=num_opponents,
             opp_label=opp_label,
             adj_summary=adj_summary,
+            is_delayed_cbet=is_delayed_cbet,
+            opponent_checked_back=opponent_checked_back,
+            nut_advantage=nut_adv,
+            opp_af=opp_af,
+            fold_to_cbet_val=fold_to_cbet_val,
         )
         return self._to_action(action_str, amount, to_call, stack)
 
@@ -552,6 +602,11 @@ class PokerBot:
         num_opp: int = 1,
         opp_label: str = "",
         adj_summary: str = "",
+        is_delayed_cbet: bool = False,
+        opponent_checked_back: bool = False,
+        nut_advantage: float = 0.0,
+        opp_af: float = 1.5,
+        fold_to_cbet_val: float = None,
     ) -> str:
         from ..strategy.postflop import BoardTexture
         made = self._made_hand_label_cn(hole_cards, board)
@@ -572,41 +627,88 @@ class PokerBot:
         else:
             eq = f"决策胜率{equity:.0%}"
 
-        # 对手标签上下文：类型 + PWI + 关键 adj 信号
         opp_ctx = f" [{opp_label}]" if opp_label else ""
         adj_ctx = f" 调整:{adj_summary}" if adj_summary else ""
-
         head = f"{tag} {made} {position}/{mw} SPR≈{spr:.1f}({spr_lbl}) {tex}{opp_ctx}{adj_ctx}"
 
+        # ── action label ──────────────────────────────────────────────────
         if action_str == "raise":
             if facing_bet:
                 role = "IP加注" if is_ip else "check-raise"
-                return f"{head} {eq} {pos} 面对下注→{role}"
+                action_label = f"{pos} 面对下注→{role}"
             else:
                 if street == "river":
                     if equity >= 0.60:
-                        return f"{head} {eq} 河牌价值下注"
+                        action_label = "河牌价值下注"
                     elif equity >= 0.50:
-                        return f"{head} {eq} 河牌薄价值"
+                        action_label = "河牌薄价值"
                     else:
-                        return f"{head} {eq} 诈唬(对手弃牌率{opp_fold_rate:.0%})"
-                if equity >= 0.90:
-                    return f"{head} {eq} 强牌下注"
+                        action_label = f"诈唬(弃牌率{opp_fold_rate:.0%})"
+                elif is_delayed_cbet:
+                    action_label = "延迟续注(delayed-cbet)"
+                elif opponent_checked_back and not is_ip:
+                    action_label = "探测下注(probe)"
+                elif opponent_checked_back and not is_ip:
+                    action_label = "donk下注"
+                elif equity >= 0.90:
+                    action_label = "强牌下注"
                 elif equity >= 0.60:
-                    return f"{head} {eq} 价值持续下注"
+                    action_label = "价值持续下注"
                 elif equity >= 0.30:
-                    return f"{head} {eq} 半诈唬"
+                    action_label = "半诈唬"
                 else:
-                    return f"{head} {eq} 纯诈唬(弃牌率{opp_fold_rate:.0%})"
+                    action_label = f"纯诈唬(弃牌率{opp_fold_rate:.0%})"
         elif action_str == "call":
-            return f"{head} {eq} 底池赔率{pot_odds:.0%}→跟注"
+            action_label = f"底池赔率{pot_odds:.0%}→跟注"
         elif action_str == "check":
-            if equity >= 0.85:
-                return f"{head} {eq} 强牌过牌控池"
+            action_label = "强牌过牌控池" if equity >= 0.85 else "过牌"
+        else:
+            action_label = f"赔率{pot_odds:.0%}不足→弃牌"
+
+        main_line = f"{head} {eq} {action_label}"
+
+        # ── detail lines ──────────────────────────────────────────────────
+        details = []
+
+        # Decision seed (P14)
+        seed = self.postflop._last_decision_seed
+        details.append(f"seed={seed}")
+
+        # Cbet branch + random trace (P14)
+        cd = self.postflop._last_cbet_detail
+        if cd:
+            branch = cd.get('branch', '?')
+            rv = cd.get('random_val')
+            thr = cd.get('threshold')
+            ag_val = cd.get('ag', '')
+            if rv is not None and thr is not None:
+                details.append(f"分支={branch} rand={rv:.3f} 阈值={thr:.3f} ag={ag_val}")
             else:
-                return f"{head} {eq} 过牌"
-        else:  # fold
-            return f"{head} {eq} 赔率{pot_odds:.0%}不足→弃牌"
+                details.append(f"分支={branch} ag={ag_val}")
+
+        # Bet size detail (P1/P5/P10)
+        bd = self.postflop._last_bet_detail
+        if bd and action_str == 'raise' and not facing_bet:
+            base_f = bd.get('base_frac', '')
+            fin_f = bd.get('final_frac', '')
+            rsn = bd.get('reason', '')
+            nut_s = f" nut={nut_advantage:.2f}" if nut_advantage > 0.05 else ""
+            details.append(f"注码: base={base_f} → final={fin_f}{nut_s}  ({rsn})")
+
+        # Context flags
+        ctx_flags = []
+        if is_delayed_cbet:
+            ctx_flags.append("delayed-cbet")
+        if opponent_checked_back:
+            ctx_flags.append("opp-checked-back")
+        if fold_to_cbet_val is not None:
+            ctx_flags.append(f"fold_to_cbet={fold_to_cbet_val:.0%}")
+        ctx_flags.append(f"AF={opp_af:.1f}")
+        if ctx_flags:
+            details.append(" ".join(ctx_flags))
+
+        detail_line = "  │  " + "  │  ".join(details) if details else ""
+        return main_line + ("\n      " + detail_line if detail_line else "")
 
     def _compute_value_mult(self, adj: dict) -> float:
         """Bet-size multiplier: larger vs calling stations, normal otherwise."""
@@ -677,6 +779,11 @@ class PokerBot:
         # Update range estimator for every opponent action
         self.range_estimator.observe_action(player_id, act, street)
 
+        # P9 – track opponent street actions for check-back detection
+        if player_id not in self._opp_street_actions:
+            self._opp_street_actions[player_id] = {}
+        self._opp_street_actions[player_id][street] = act
+
     def observe_showdown(self, player_id: int, cards, name: str = "", board=None) -> None:
         """在 showdown 时记录对手底牌，校准其 raise 范围压缩系数。
 
@@ -705,6 +812,11 @@ class PokerBot:
         """
         self._vpip_recorded.clear()
         self._pfr_recorded.clear()
+        # Reset cross-street action trackers for each new hand
+        self._my_street_actions.clear()
+        self._opp_street_actions.clear()
+        self.postflop._last_bet_frac = 0.0
+        self.postflop._last_bet_street = ""
         names = player_names or {}
         for pid in player_ids:
             self.opponent_model.record_hand_start(pid)
