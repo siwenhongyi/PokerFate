@@ -141,9 +141,15 @@ def _start_dns_elevated() -> subprocess.Popen | None:
     dns_cmd = [python, "-m", "pf_intercept.dns_server"]
     env_path = _venv_path()
 
+    # sudo/root 下 cwd 与 PYTHONPATH 常与交互 shell 不一致，需显式带上项目根以便 -m 能解析包
+    env = os.environ.copy()
+    root = str(_PROJECT_ROOT)
+    pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = root if not pp else f"{root}{os.pathsep}{pp}"
+
     if os.geteuid() == 0:
         print("[launcher] 启动 dns_server（当前已是 root）")
-        return subprocess.Popen(dns_cmd)
+        return subprocess.Popen(dns_cmd, env=env)
 
     # 统一方案：PTY + sudo
     # PTY 让 sudo 看到终端 → PAM 触发 Touch ID（如果配了 pam_tid.so）
@@ -151,7 +157,7 @@ def _start_dns_elevated() -> subprocess.Popen | None:
     print("[launcher] 启动 dns_server（sudo）...")
     master_fd, slave_fd = pty.openpty()
     proc = subprocess.Popen(
-        ["sudo", "-E", "env", f"PATH={env_path}"] + dns_cmd,
+        ["sudo", "-E", "env", f"PATH={env_path}", f"PYTHONPATH={env['PYTHONPATH']}"] + dns_cmd,
         stdin=slave_fd,
         stdout=slave_fd,
         stderr=slave_fd,
