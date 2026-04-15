@@ -242,6 +242,7 @@ class PokerLogger:
         spr: Optional[float] = None,
         equity_mode: Optional[str] = None,
         gto_refs: Optional[dict] = None,
+        elapsed_ms: Optional[float] = None,
     ):
         """Log the bot's own decision."""
         rec: Dict = {
@@ -260,6 +261,8 @@ class PokerLogger:
             rec["spr"] = round(spr, 2)
         if equity_mode:
             rec["equity_mode"] = equity_mode
+        if elapsed_ms is not None:
+            rec["elapsed_ms"] = round(elapsed_ms, 1)
         self._file(rec)
         if not self._console:
             return
@@ -287,7 +290,8 @@ class PokerLogger:
             action_col = cn
             color = _C.YELLOW
 
-        line = f"  ► {bot_name:<12}  {action_col:<14}  {eq_str}   {pot_str}"
+        time_str = f"  {elapsed_ms:.0f}ms" if elapsed_ms is not None else ""
+        line = f"  ► {bot_name:<12}  {action_col:<14}  {eq_str}   {pot_str}{time_str}"
         self._raw(line, color=color, bold=True)
 
         # reasoning 可能包含多行（\n 分隔），逐行输出

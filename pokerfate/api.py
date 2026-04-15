@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 import os
+import time
 import traceback
 from collections import Counter
 from dataclasses import dataclass, field
@@ -547,7 +548,9 @@ class PokerFateAPI:
             my_current_bet_this_street=my_current_bet_this_street,
         )
 
+        t0 = time.perf_counter()
         action = self._bot.decide(gs, self.my_player_id, is_bb_option=is_bb_option)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
         decision = self._to_decision(action)
 
         my_name = self._session_names.get(self.my_player_id, "PokerFate")
@@ -566,6 +569,7 @@ class PokerFateAPI:
             spr=getattr(self._bot, "last_spr", None),
             equity_mode=getattr(self._bot, "last_equity_mode", None),
             gto_refs=getattr(self._bot, "last_gto_refs", None),
+            elapsed_ms=elapsed_ms,
         )
 
         return decision
