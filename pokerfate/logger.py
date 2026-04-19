@@ -4,8 +4,8 @@
 文件：JSONL 格式，每行一个完整事件，供后续分析/迭代使用
 
 用法：
-    from pokerfate.logger import get_logger
-    log = get_logger()          # 使用默认配置
+    from pokerfate.logger import PokerLogger
+    log = PokerLogger()         # 使用默认配置
     log.decision(...)           # 记录 bot 决策
     log.hand_result(...)        # 记录手牌结果
 """
@@ -203,6 +203,14 @@ class PokerLogger:
         action: str,
         amount: float,
         street: str,
+        *,
+        big_blind: float = 0.0,
+        pot: float = 0.0,
+        player_type: str = "",
+        pwi: float = 0.0,
+        range_pct: float = 0.0,
+        bucket_dist: Optional[Dict[str, float]] = None,
+        to_call: float = 0.0,
     ):
         self._file({
             "event": "opponent_action",
@@ -211,20 +219,75 @@ class PokerLogger:
             "action": action,
             "amount": amount,
             "street": street,
+            "player_type": player_type or None,
+            "range_pct": round(range_pct, 3) if range_pct > 0 else None,
+            "bucket_dist": {k: round(v, 3) for k, v in (bucket_dist or {}).items() if v > 0.01} or None,
         })
         if not self._console:
             return
 
         cn = _ACTION_CN.get(action, action)
+        bb = big_blind if big_blind > 0 else 1.0
+
+        # ── 标签：type/PWI ──
+        tag = ""
+        if player_type and player_type != 'unknown':
+            _TYPE_SHORT = {
+                'nit': '紧手', 'reg': 'reg', 'maniac': '疯狂',
+                'whale': '鲸鱼', 'fish': '鱼', 'calling_station': '跟注站',
+            }
+            tag = f"[{_TYPE_SHORT.get(player_type, player_type)}/PWI{pwi:+.0f}]"
+
+        # ── 范围信息 ──
+        range_str = ""
+        if range_pct > 0 and action != 'fold':
+            _CAT_SHORT = {
+                'nuts': '坚果', 'strong': '强', 'medium': '中',
+                'draw': '听牌', 'weak_draw': '弱听', 'air': '空气',
+            }
+            if bucket_dist:
+                # 只显示 > 10% 的 bucket，按占比降序
+                parts = sorted(
+                    ((cat, pct) for cat, pct in bucket_dist.items() if pct >= 0.10),
+                    key=lambda x: x[1], reverse=True,
+                )
+                dist = "/".join(f"{_CAT_SHORT.get(c, c)}{p:.0%}" for c, p in parts)
+                range_str = f"range {range_pct:.0%} [{dist}]"
+            else:
+                range_str = f"range {range_pct:.0%}"
+
+        # ── 格式化输出 ──
         if action == "raise":
-            amt_str = f"{amount:.0f}"
-            self._raw(f"    {player_name:<12}  {cn}   {amt_str}", color=_C.YELLOW)
+            amt_bb = amount / bb
+            # pot 比率（翻后）或 bb 倍数（翻前）
+            if street.lower() == "preflop":
+                size_str = f"({amt_bb:.0f}bb)"
+            elif pot > 0:
+                ratio = amount / pot
+                size_str = f"({amt_bb:.0f}bb {ratio:.1f}x pot)"
+            else:
+                size_str = f"({amt_bb:.0f}bb)"
+            # 需跟金额（如果有）
+            call_str = ""
+            if to_call > 0:
+                call_str = f"  需跟{to_call / bb:.0f}bb 赔率{to_call / (pot + to_call):.0%}"
+            self._raw(
+                f"    {player_name:<12}  {cn}  {amt_bb:.0f}bb  {size_str}  {tag}  {range_str}{call_str}",
+                color=_C.YELLOW,
+            )
         elif action == "fold":
             self._raw(f"    {player_name:<12}  {cn}", color=_C.RED, dim=True)
         elif action == "call":
-            self._raw(f"    {player_name:<12}  {cn}", dim=True)
+            self._raw(
+                f"    {player_name:<12}  {cn}  {tag}  {range_str}",
+                dim=True,
+            )
         elif action == "check":
-            self._raw(f"    {player_name:<12}  {cn}", dim=True)
+            self._raw(
+                f"    {player_name:<12}  {cn}  {tag}  {range_str}" if range_str else
+                f"    {player_name:<12}  {cn}",
+                dim=True,
+            )
         else:
             self._raw(f"    {player_name:<12}  {cn}", dim=True)
 
@@ -412,6 +475,68 @@ class PokerLogger:
             dim=not first_active,
         )
 
+    def showdown_learner(
+        self,
+        player_name: str,
+        cards: List[str],
+        streets: List[Dict],
+    ):
+        """Log a Range V2 ShowdownLearner update.
+
+        Parameters
+        ----------
+        streets : list of dict
+            Each dict: {"street": str, "action": str, "sample_count": int,
+                        "category": str or None,
+                        "learned_freq": dict or None}
+            category: 本次摊牌该街道的手牌分类 (nuts/strong/medium/draw/air)
+            learned_freq: 积累够样本后的分布 {category: pct}，不够时 None
+        """
+        self._file({
+            "event": "showdown_learner",
+            "hand": self._hand_num[0],
+            "player": player_name,
+            "cards": cards,
+            "streets": streets,
+        })
+        if not self._console or not streets:
+            return
+        cards_str = _fmt_cards(cards, self._color)
+
+        _LEARNER_THRESHOLD = 8
+
+        # 分类缩写
+        _CAT_SHORT = {
+            'nuts': '坚果', 'strong': '强', 'medium': '中',
+            'draw': '听牌', 'weak_draw': '弱听', 'air': '空气',
+        }
+
+        first_active = any(s["sample_count"] == _LEARNER_THRESHOLD for s in streets)
+
+        def _street_tag(s: Dict) -> str:
+            n = s["sample_count"]
+            cat = s.get("category")
+            cat_str = _CAT_SHORT.get(cat, cat) if cat else ""
+
+            if n >= _LEARNER_THRESHOLD:
+                learned = s.get("learned_freq")
+                if learned:
+                    # 显示 top 3 类别
+                    sorted_cats = sorted(learned.items(), key=lambda x: x[1], reverse=True)[:3]
+                    dist_str = "/".join(f"{_CAT_SHORT.get(c, c)}{p:.0%}" for c, p in sorted_cats)
+                else:
+                    dist_str = "?"
+                suffix = " ★首次生效" if n == _LEARNER_THRESHOLD else ""
+                return f"{s['street']}:[{cat_str}] {dist_str}({n}手){suffix}"
+            return f"{s['street']}:[{cat_str}] 积累{n}/{_LEARNER_THRESHOLD}"
+
+        streets_str = "  ".join(_street_tag(s) for s in streets)
+        self._raw(
+            f"  ◈ 学习  {player_name}  {cards_str}  {streets_str}",
+            color=_C.MAGENTA,
+            dim=not first_active,
+        )
+
     def opponent_pattern(
         self,
         player_name: str,
@@ -542,24 +667,3 @@ def _rotate_log(filepath: str) -> None:
     with open(bak, "a", encoding="utf-8") as dst, \
          open(p, "r", encoding="utf-8") as src:
         dst.write(src.read())
-
-
-# ---------------------------------------------------------------------------
-# Singleton / factory
-# ---------------------------------------------------------------------------
-_default_logger: Optional[PokerLogger] = None
-
-
-def get_logger(
-    log_file: Optional[str] = _DEFAULT_LOG_FILE,
-    console: bool = True,
-) -> PokerLogger:
-    global _default_logger
-    if _default_logger is None:
-        _default_logger = PokerLogger(log_file=log_file, console=console)
-    return _default_logger
-
-
-def set_logger(logger: Optional[PokerLogger]) -> None:
-    global _default_logger
-    _default_logger = logger

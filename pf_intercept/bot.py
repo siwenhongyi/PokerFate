@@ -345,11 +345,20 @@ class BotBridge:
         fallback_inject: tuple[str, dict, float] | None = None
         if self._profit_lock_award_rebuy_after_enter:
             if code == 0:
+                reenter_buyin = _chip_int(
+                    (self._profit_lock_last_enter_fields or {}).get("byin_chips", 0),
+                    0,
+                )
+                if reenter_buyin > 0:
+                    self._session_pnl_chips -= float(reenter_buyin)
                 self._max_auto_rebuy += 1
                 self._profit_lock_last_enter_fields = None
+                pnl_str = format_chips_km_signed(self._session_pnl_chips)
                 log.warning(
-                    "[BOT] 盈利锁仓：已重新进房，自动续入次数上限 +1 → %d",
+                    "[BOT] 盈利锁仓：已重新进房，扣除买入 %d，自动续入次数上限 +1 → %d。累计盈亏 %s（筹码）",
+                    reenter_buyin,
                     self._max_auto_rebuy,
+                    pnl_str,
                 )
                 self._profit_lock_award_rebuy_after_enter = False
             else:

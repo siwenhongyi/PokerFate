@@ -30,9 +30,8 @@ import os
 import time
 import traceback
 from collections import Counter
-from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
-from enum import Enum
+from dataclasses import dataclass
+from typing import List, Optional, Dict
 from pathlib import Path
 
 _UNSET = object()  # sentinel for log_file default
@@ -41,12 +40,14 @@ from pokerfate.core.card import Card
 from pokerfate.core.game_state import GameState, Player, Street, Action, ActionType
 from pokerfate.core.hand_evaluator import HandEvaluator, HandRank
 from pokerfate.bot.poker_bot import PokerBot
-from pokerfate.logger import PokerLogger, get_logger
+from pokerfate.logger import PokerLogger
 from pokerfate.strategy.range_estimator import (
-    _hand_strength_pct,
     _ACTION_COMPRESSION_RAISE_PREFLOP,
     _ACTION_COMPRESSION_RAISE_POSTFLOP,
 )
+from pokerfate.strategy.range_v2.showdown_learner import ShowdownLearner, _board_at_street
+from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards
+from pokerfate.strategy.range_estimator import ShowdownCalibrator
 from pokerfate.data import init as _init_data
 
 # 启动时预加载静态数据（GTO charts 等）
@@ -60,13 +61,6 @@ _DEFAULT_SHOWDOWN_CAL = str(Path(__file__).resolve().parent / "opponents_showdow
 # ---------------------------------------------------------------------------
 # Public data types for the external interface
 # ---------------------------------------------------------------------------
-
-class StreetName(str, Enum):
-    PREFLOP = "preflop"
-    FLOP = "flop"
-    TURN = "turn"
-    RIVER = "river"
-
 
 @dataclass
 class PlayerInfo:
@@ -212,17 +206,23 @@ class PokerFateAPI:
             use_range_equity=use_range_equity,
         )
 
-        # Auto-load opponent data (+ embedded showdown calibration) from disk on startup
+        # Auto-load opponent data (+ embedded showdown/learner data) from disk on startup
         if autosave_path:
             self._bot.opponent_model = self._bot.opponent_model.__class__.load(autosave_path)
             if self._bot.opponent_model._stats:
                 self._log.raw({"event": "model_loaded", "path": autosave_path,
                                "known_opponents": len(self._bot.opponent_model._stats)})
-            # Restore showdown calibration from the same file
             showdown_raw = self._bot.opponent_model._showdown_data
             if showdown_raw:
-                from pokerfate.strategy.range_estimator import ShowdownCalibrator
-                self._bot.range_estimator.showdown_calibrator = ShowdownCalibrator.from_dict(showdown_raw)
+                if use_range_equity:
+                    # Range V2: load ShowdownLearner data (key: "range_v2_learner")
+                    v2_data = showdown_raw.get('range_v2_learner')
+                    if v2_data:
+                        self._bot._showdown_learner = ShowdownLearner.from_dict(v2_data)
+                        self._bot._action_model.showdown_learner = self._bot._showdown_learner
+                else:
+                    # EQR: load ShowdownCalibrator
+                    self._bot.range_estimator.showdown_calibrator = ShowdownCalibrator.from_dict(showdown_raw)
 
         # Session-level state: persists across hands
         self._session_stacks: Dict[int, float] = {}   # player_id -> last known stack
@@ -354,6 +354,9 @@ class PokerFateAPI:
         if my_player:
             my_player.hole_cards = self._hole_cards
 
+        # Range V2: card removal for bot's hole cards
+        self._bot.set_hole_cards(self._hole_cards)
+
         self._log.hole_cards(cards)
 
     def restore_board(self, cards: List[str]) -> None:
@@ -376,6 +379,9 @@ class PokerFateAPI:
         """
         new_cards = [Card.from_str(c) for c in cards]
         self._board.extend(new_cards)
+
+        # Range V2: update board for observe_action
+        self._bot.update_board(self._board)
 
         display_pot = pot if pot is not None else self._last_known_pot
         if pot is not None:
@@ -430,7 +436,39 @@ class PokerFateAPI:
 
         pobj = self._get_player(event.player_id)
         name = pobj.name if pobj else str(event.player_id)
-        self._log.opponent_action(name, event.action, event.amount, event.street)
+
+        # Gather extra context for enriched opponent action log
+        opp_stats = self._bot.opponent_model.get(event.player_id)
+        ptype = opp_stats.player_type() if opp_stats.hands_seen >= 20 else ''
+        pwi = opp_stats.pwi()
+
+        range_pct = 0.0
+        bucket_dist = None
+        if self._bot.use_range_equity:
+            range_pct = self._bot._range_tracker.get_effective_range_pct(event.player_id)
+            if self._board:
+                bucket_dist = self._bot._range_tracker.get_bucket_distribution(
+                    event.player_id, self._board,
+                )
+
+        # to_call for the BOT (how much we'd need to call if it's our turn next)
+        to_call = 0.0
+        if event.action == 'raise':
+            my_player = self._get_my_player()
+            if my_player:
+                my_current_bet = getattr(my_player, 'current_bet', 0.0) or 0.0
+                to_call = max(0.0, event.amount - my_current_bet)
+
+        self._log.opponent_action(
+            name, event.action, event.amount, event.street,
+            big_blind=self.big_blind,
+            pot=self._last_known_pot,
+            player_type=ptype,
+            pwi=pwi,
+            range_pct=range_pct,
+            bucket_dist=bucket_dist,
+            to_call=to_call,
+        )
 
         # Check for newly significant opponent patterns and surface them
         self._maybe_log_opponent_pattern(event.player_id, name)
@@ -737,7 +775,6 @@ class PokerFateAPI:
         # bluff_win_rate：赢底池时记录牌型（含无底牌的上界估算）
         # 对每个赢家：有下注行为 + 知道牌型（服务端下发或摊牌得到）→ 记录
         if winner_ids and wht:
-            re = self._bot.range_estimator
             for pid in winner_ids:
                 if pid == self.my_player_id:
                     continue
@@ -745,112 +782,92 @@ class PokerFateAPI:
                 if hand_type is None:
                     continue
                 # 判断本手该玩家是否有过下注/加注行为
-                action_seq = re._hand_actions.get(pid, [])
+                if self._bot.use_range_equity:
+                    action_seq = self._bot._v2_action_history.get(pid, [])
+                else:
+                    action_seq = self._bot.range_estimator._hand_actions.get(pid, [])
                 had_aggression = any(a == 'raise' for _, a in action_seq)
                 self._bot.opponent_model.record_win_with_hand_type(pid, hand_type, had_aggression)
 
-        # 无底牌时用牌型上界校准：赢家有牌型但没有亮牌（折叠赢）
-        # 在公牌上找满足该牌型的最强 combo 作为上界，更新校准数据
-        no_showdown_winners = [
-            pid for pid in (winner_ids or [])
-            if pid != self.my_player_id
-            and pid not in (showdown_hands or {})
-            and wht.get(pid) is not None
-            and self._board
-        ]
-        if no_showdown_winners:
-            from pokerfate.strategy.range_hands import all_hole_combos
-
-            _ACTION_COMPRESSION_RAISE_ALL_NS = {
-                "preflop": _ACTION_COMPRESSION_RAISE_PREFLOP,
-                **_ACTION_COMPRESSION_RAISE_POSTFLOP,
-            }
-            known_cards = set(self._board) | set(self._hole_cards)
-            all_combos = all_hole_combos(known_cards)
-            for pid in no_showdown_winners:
-                hand_type = wht[pid]
-                target_rank = hand_type - 1  # server int is HandEvaluator int + 1
-                # 找满足目标牌型的所有 combo，取强度最高的作为上界
-                matched = []
-                for combo in all_combos:
-                    try:
-                        score, _ = HandEvaluator.best_five(list(combo) + self._board)
-                        if score[0] == target_rank:
-                            matched.append((score, combo))
-                    except Exception as e:
-                        print(f"[no_showdown combo ERROR] combo={[str(c) for c in combo]} board={[str(c) for c in self._board]}: {e}")
-                if not matched:
-                    continue
-                # 取最强 combo（上界假设）
-                best_combo = max(matched, key=lambda x: x[0])[1]
-                name = self._session_names.get(pid, str(pid))
-                strength_by_street = self._bot.observe_showdown(
-                    pid, best_combo, name=name, board=self._board
-                ) or {}
-                # 记录校准日志（标注为上界估算）
-                cal = self._bot.range_estimator.showdown_calibrator
-                street_entries = []
-                for street_key, gto_factor in _ACTION_COMPRESSION_RAISE_ALL_NS.items():
-                    n = cal.sample_count(name, "raise", street_key)
-                    if n == 0:
+        if self._bot.use_range_equity:
+            # ── Range V2 showdown processing ──
+            if showdown_hands:
+                for pid, cards in showdown_hands.items():
+                    if pid == self.my_player_id:
                         continue
-                    street_entries.append({
-                        "street": street_key,
-                        "action": "raise",
-                        "calibrated_factor": cal.calibrated_factor(name, "raise", street_key, gto_factor),
-                        "gto_factor": gto_factor,
-                        "sample_count": n,
-                        "hand_strength_pct": strength_by_street.get(street_key),
-                    })
-                if street_entries:
-                    rank_cn = self._SERVER_HAND_TYPE_CN.get(hand_type, f"type{hand_type}")
-                    # 显示上界推断的具体底牌 + 牌型标注
-                    combo_strs = [str(c) for c in best_combo]
-                    self._log.showdown_calibration(
-                        player_name=name,
-                        cards=combo_strs + [f"({rank_cn}上界)"],
-                        streets=street_entries,
-                    )
-
-        # Showdown calibration: update range estimator with revealed hands + log
-        if showdown_hands:
-            _ACTION_COMPRESSION_RAISE_ALL = {
-                "preflop": _ACTION_COMPRESSION_RAISE_PREFLOP,
-                **_ACTION_COMPRESSION_RAISE_POSTFLOP,
-            }
-            for pid, cards in showdown_hands.items():
-                if pid == self.my_player_id:
-                    continue
-                name = self._session_names.get(pid, str(pid))
-                strength_by_street = self._bot.observe_showdown(pid, cards, name=name, board=self._board) or {}
-                # Log calibration detail — one line per player, all streets combined
-                cal = self._bot.range_estimator.showdown_calibrator
-                card_strs = [str(c) for c in cards]
-                street_entries = []
-                for street_key, gto_factor in _ACTION_COMPRESSION_RAISE_ALL.items():
-                    n = cal.sample_count(name, "raise", street_key)
-                    if n == 0:
+                    name = self._session_names.get(pid, str(pid))
+                    hole = [Card.from_str(str(c)) if isinstance(c, str) else c for c in cards[:2]]
+                    self._bot.observe_showdown(pid, cards, name=name, board=self._board)
+                    # Log with Range V2 format
+                    learner = self._bot._showdown_learner
+                    card_strs = [str(c) for c in cards]
+                    action_seq = self._bot._v2_action_history.get(pid, [])
+                    street_entries = []
+                    for street_key in ('preflop', 'flop', 'turn', 'river'):
+                        n = learner.sample_count(name, street_key, 'raise')
+                        if n == 0:
+                            continue
+                        learned = learner.get_learned_freq(name, street_key, 'raise')
+                        # 本次摊牌在该街道的 category
+                        street_board = _board_at_street(self._board, street_key)
+                        cat = categorize_cards(hole, street_board) if street_board or street_key == 'preflop' else None
+                        # 只有本手在该街道有 raise 行动才显示 category
+                        had_action = any(s == street_key and a == 'raise' for s, a in action_seq)
+                        street_entries.append({
+                            "street": street_key,
+                            "action": "raise",
+                            "sample_count": n,
+                            "category": cat if had_action else None,
+                            "learned_freq": learned,
+                        })
+                    if street_entries:
+                        self._log.showdown_learner(
+                            player_name=name,
+                            cards=card_strs,
+                            streets=street_entries,
+                        )
+        else:
+            # ── EQR showdown processing ──
+            # Showdown calibration: update range estimator with revealed hands + log
+            if showdown_hands:
+                _ACTION_COMPRESSION_RAISE_ALL = {
+                    "preflop": _ACTION_COMPRESSION_RAISE_PREFLOP,
+                    **_ACTION_COMPRESSION_RAISE_POSTFLOP,
+                }
+                for pid, cards in showdown_hands.items():
+                    if pid == self.my_player_id:
                         continue
-                    street_entries.append({
-                        "street": street_key,
-                        "action": "raise",
-                        "calibrated_factor": cal.calibrated_factor(name, "raise", street_key, gto_factor),
-                        "gto_factor": gto_factor,
-                        "sample_count": n,
-                        "hand_strength_pct": strength_by_street.get(street_key),
-                    })
-                if street_entries:
-                    self._log.showdown_calibration(
-                        player_name=name,
-                        cards=card_strs,
-                        streets=street_entries,
-                    )
+                    name = self._session_names.get(pid, str(pid))
+                    strength_by_street = self._bot.observe_showdown(pid, cards, name=name, board=self._board) or {}
+                    cal = self._bot.range_estimator.showdown_calibrator
+                    card_strs = [str(c) for c in cards]
+                    street_entries = []
+                    for street_key, gto_factor in _ACTION_COMPRESSION_RAISE_ALL.items():
+                        n = cal.sample_count(name, "raise", street_key)
+                        if n == 0:
+                            continue
+                        street_entries.append({
+                            "street": street_key, "action": "raise",
+                            "calibrated_factor": cal.calibrated_factor(name, "raise", street_key, gto_factor),
+                            "gto_factor": gto_factor, "sample_count": n,
+                            "hand_strength_pct": strength_by_street.get(street_key),
+                        })
+                    if street_entries:
+                        self._log.showdown_calibration(
+                            player_name=name, cards=card_strs, streets=street_entries,
+                        )
 
-        # Auto-save opponent model + showdown calibration into one file
+        # Auto-save opponent model + showdown/learner data into one file
         if self.autosave_path:
+            if self._bot.use_range_equity:
+                sd_data = {
+                    'range_v2_learner': self._bot._showdown_learner.to_dict(),
+                }
+            else:
+                sd_data = self._bot.range_estimator.showdown_calibrator.to_dict()
             self._bot.opponent_model.save(
                 self.autosave_path,
-                showdown_data=self._bot.range_estimator.showdown_calibrator.to_dict(),
+                showdown_data=sd_data,
             )
 
     # ------------------------------------------------------------------

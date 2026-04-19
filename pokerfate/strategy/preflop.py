@@ -59,7 +59,7 @@ def _expand_range(spec: str) -> Set[str]:
                 # e.g. ATs+ or ATo+
                 r1, r2, suf = base[0], base[1], base[2]
                 start_idx = rank_idx[r2]
-                top_idx = rank_idx[r1] - 1
+                top_idx = rank_idx[r1]
                 for i in range(start_idx, top_idx):
                     r = ranks_order[i]
                     result.add(f"{r1}{r}{suf}")
@@ -72,57 +72,57 @@ def _expand_range(spec: str) -> Set[str]:
 
 
 # ---------------------------------------------------------------------------
-# Position-based opening ranges (6-max cash, 100BB)
-# RFI 与公开 solver/教学区间对齐：UTG ~14–16%，BTN ~42–48%（加权组合占比）；
-# ThinkGTO / 常见 6-max 表：UTG 含 22+ 对子；BTN 略窄于旧版「全 Axo」式超宽。
+# Position-based opening ranges (6-max cash, 100BB)  — V2
+# GTO solver 共识对齐：UTG ~15–18%，HJ ~20–23%，CO ~25–30%，BTN ~40–48%。
+# 详见 docs/PREFLOP_OPEN_RANGE_V2.md
 # ---------------------------------------------------------------------------
 
 _UTG_RANGE = _expand_range(
-    '22+, '
-    'AKs, AQs, AJs, ATs, A9s, '
-    'KQs, KJs, KTs, '
-    'QJs, QTs, JTs, '
-    'AKo, AQo, AJo, KQo'
+    '55+, '
+    'AKs, AQs, AJs, ATs, A9s, A8s, A7s, A6s, A5s, A4s, A3s, A2s, '
+    'KQs, KJs, KTs, K9s, '
+    'QJs, QTs, Q9s, '
+    'JTs, J9s, '
+    'T9s, T8s, 98s, 87s, '
+    'AKo, AQo, AJo, ATo, KQo, KJo'
 )
 
 _UTG1_RANGE = _UTG_RANGE | _expand_range(
-    '66, A8s, A7s, K9s, T9s, 98s'
+    'K8s, 76s'
 )
 
-_UTG2_RANGE = _UTG1_RANGE | _expand_range(
-    '55, A6s, A5s, K8s, Q9s, J9s, T8s, 87s, 76s'
-)
+_UTG2_RANGE = _UTG1_RANGE
 
 _HJ_RANGE = _UTG2_RANGE | _expand_range(
-    '44, A4s, A3s, A2s, K7s, K6s, Q8s, 97s, 86s, 75s, 65s, 54s'
+    '44, 33, 22, '
+    'K7s, K6s, Q8s, 97s, 86s, 75s, 65s, 54s, '
+    'QJo'
 )
 
 _CO_RANGE = _HJ_RANGE | _expand_range(
-    '33, 22, K5s, K4s, K3s, K2s, Q7s, Q6s, Q5s, J8s, J7s, T7s, 96s, 85s, 74s, 64s, 53s, 43s, '
-    'ATo, KJo, QJo, KTo, QTo, JTo'
+    'K5s, K4s, K3s, K2s, Q7s, Q6s, Q5s, J8s, J7s, T7s, 96s, 85s, 74s, 64s, 53s, 43s, '
+    'KTo, QTo, JTo'
 )
 
-# BTN 相对 CO 的增量：在旧版超宽基础上剔除 solver 表中较少游戏的底端牌（弱 Axo、K5o–K6o、最小连张 off 等）
 _BTN_RANGE = _CO_RANGE | _expand_range(
-    'K7o, K8o, Q8o, Q9o, J8o, J9o, T8o, T9o, 97o, 98o, 87o, 86o, 76o, '
+    'K8o, K9o, Q8o, Q9o, J8o, J9o, T8o, T9o, '
     'A5o, A6o, A7o, A8o, A9o, '
-    'Q4s, Q3s, Q2s, J5s, J4s, J3s, T6s, T5s, 95s'
+    'J6s, J5s, T6s'
 )
 
 _SB_RANGE = _CO_RANGE | _expand_range(
-    'K9o, Q9o, J9o, T8o, 98o, 87o, 76o, 65o, '
-    'A2o, A3o, A4o, A5o, A6o, A7o, A8o'
+    'K9o, Q9o, J9o, T9o, T8o, 98o, 87o, 76o, 65o, '
+    'A2o, A3o, A4o, A5o, A6o, A7o, A8o, A9o'
 )
 
-# SB heads-up steal vs BB only: ~55% of hands
-# SB仅剩BB时的偷盲范围，远比普通SB开加范围宽
+# SB heads-up steal vs BB only: ~63% of hands
 _SB_STEAL_VS_BB = _BTN_RANGE | _expand_range(
-    'K2o, K3o, K4o, K5o, K6o, '
+    'K2o, K3o, K4o, K5o, K6o, K7o, '
     'Q5o, Q6o, Q7o, '
     'J6o, J7o, '
     'T6o, T7o, '
-    '96o, '
-    'Q2s, Q3s, Q4s, J2s, J3s, J4s, J5s, T2s, T3s, T4s, T5s'
+    '96o, 97o, 98o, 87o, 86o, 76o, '
+    'Q2s, Q3s, Q4s, J2s, J3s, J4s, T2s, T3s, T4s, T5s, 95s'
 )
 
 # 短手位置映射：n人桌时，早位按等效位置放宽范围
@@ -136,7 +136,9 @@ _SHORT_HAND_POSITION: dict = {
 
 # BB defends vs SB open — wide defense range
 _BB_VS_SB_DEFENSE = _BTN_RANGE | _expand_range(
-    'K4o, K3o, K2o, Q7o, Q6o, Q5o, J7o, T7o, 96o, 85o, 74o, 63o, 52o, 42o, 32o'
+    'K4o, K3o, K2o, K7o, Q7o, Q6o, Q5o, J7o, T7o, '
+    '96o, 97o, 98o, 87o, 86o, 76o, 85o, 74o, 63o, 52o, 42o, 32o, '
+    'Q2s, Q3s, Q4s, J3s, J4s, T5s, 95s'
 )
 
 # BB iso-raise range when facing limpers (no one raised, BB has option to raise).
@@ -292,7 +294,7 @@ class PreflopStrategy:
                 position == 'BB' and cat in _BB_VS_SB_DEFENSE
             )
             if in_range:
-                return ('call', min(open_raise, stack))
+                return ('call', min(to_call or open_raise, stack))
             return ('fold', 0.0)
 
         elif facing_action == '3bet':
@@ -301,26 +303,23 @@ class PreflopStrategy:
             ako_call = (cat == 'AKo' and position in ('UTG', 'MP') and villain_position == 'SB')
 
             if not ako_call:
-                # JJ: shove from BTN/SB always; from CO only when OOP (3-bet came from BTN)
-                if cat == 'JJ' and (position in ('BTN', 'SB')
-                                    or (position == 'CO' and not is_ip)):
-                    return ('raise', stack)
-                if cat == 'TT' and position == 'SB':
-                    return ('raise', stack)  # SB vs BB 3-bet: allin
                 if self.should_4bet(hole_cards):
-                    # GTO: shove (not 2.5× — avoids awkward 5-bet decision with QQ/AK)
-                    return ('raise', stack)
+                    # 标准 4bet 尺度 = 3bet × 2.5，短码（<= 40bb）直接 jam
+                    four_bet = open_raise * 2.5
+                    if stack_bb <= 40 or four_bet >= stack * 0.65:
+                        return ('raise', stack)   # 短码或 4bet 已超过 65% 筹码 → jam
+                    return ('raise', min(four_bet, stack))
 
-            # Call with premium hands
+            # Call with premium hands（含 JJ/TT）
             if cat in _expand_range('QQ, JJ, TT, AKs, AKo, AQs, KQs'):
-                return ('call', min(open_raise, stack))
+                return ('call', min(to_call or open_raise, stack))
             return ('fold', 0.0)
 
         elif facing_action == '4bet':
             if cat in _expand_range('AA, KK'):
                 return ('raise', stack)  # 5-bet shove
             if cat in _expand_range('QQ, AKs, AKo'):
-                return ('call', min(open_raise, stack))
+                return ('call', min(to_call or open_raise, stack))
             return ('fold', 0.0)
 
         return ('fold', 0.0)

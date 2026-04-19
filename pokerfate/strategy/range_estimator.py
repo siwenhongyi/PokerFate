@@ -472,32 +472,6 @@ class HandRangeEstimator:
         """
         return self._range.get(player_id, 1.0)
 
-    def last_postflop_action(self, player_id: int) -> str:
-        """返回该对手在本手中最后一次翻后行动类型（'raise'/'call'/'check'）。
-
-        用于判断其范围形态：
-          raise → 极化范围（强手 + 诈唬）
-          call  → 线性范围（中等强度）
-          check → 全范围（无压缩信息）
-        未追踪或无翻后行动时返回 'check'。
-        """
-        for street, action in reversed(self._hand_actions.get(player_id, [])):
-            if street != 'preflop':
-                return action
-        return 'check'
-
-    def get_two_stage_rf(self, player_id: int):
-        """返回 (preflop_rf, postflop_rf) 元组，用于两阶段范围构建。
-
-        preflop_rf：翻前行动压缩后的翻前范围分数
-        postflop_rf：翻后行动在翻前范围内的二次裁切比例
-
-        两个值均在 [0.02, 1.0] 区间；未追踪的对手返回 (1.0, 1.0)。
-        """
-        pf = self._preflop_rf.get(player_id, 1.0)
-        po = self._postflop_rf.get(player_id, 1.0)
-        return (pf, po)
-
     def get_discount(self, player_id: int) -> float:
         """返回胜率折扣因子 [0.44, 1.0]。
 

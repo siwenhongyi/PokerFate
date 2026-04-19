@@ -17,6 +17,13 @@ P12 空气诈唬加入 equity_scale 连续衰减（equity 越低频率越低）
 P13 位置粒度细化：BTN=+12%，CO=+5%，UTG=-12%，UTG+1=-10%，LJ=-7%
 P14 RNG 隔离：所有 random 调用改为 self._rng，每次 decide() 生成可复现种子
 P15 多人底池封顶：num_opponents>1 时 frac ≤ 0.80，不超池避免吓跑松散跟注者
+P16 多街薄利提取：翻牌尺度由牌面质地驱动（非权益），各档牌力尺度重合防止读牌
+P17 几何尺度动态 cap：用 geometric_frac(spr, streets_left) 做分街上限
+P18 P1 坚果加成仅河牌生效，翻/转不放大尺度
+P19 value_mult 分街差异化：对跟注站翻/转缩小、河牌放大（多街套利）
+P20 缩小因子不叠加：P19/质地惩罚/深SPR惩罚取 min，避免三重压缩
+P21 ag 拆分：value_ag 控制价值下注频率，bluff_ag 控制诈唬频率，独立调参
+P22 坚果强制下注：equity >= 0.95 时 bypass 随机判断，100% 下注
 ──────────────────────────────────────────────────────────────────────────
 """
 
@@ -105,6 +112,10 @@ class PostflopStrategy:
                      Pass None to get a fresh instance seeded from os.urandom.
         """
         self.aggression = aggression
+        # P21 – 拆分 ag: value_ag 控制价值下注频率, bluff_ag 控制诈唬频率
+        # 设为 None 时 fallback 到统一的 self.aggression（向后兼容）
+        self.value_ag: float | None = None
+        self.bluff_ag: float | None = None
         self.value_mult = 1.0
         self.gto = GTOMath()
 
@@ -169,8 +180,18 @@ class PostflopStrategy:
         effective_fold_rate = fold_to_cbet if fold_to_cbet is not None else opponent_fold_rate
 
         # ── Step 0: aggression multiplier ────────────────────────────────
+        # P21 – 拆分 ag: 价值手用 value_ag, 诈唬手用 bluff_ag
+        # equity >= 0.52 视为价值手（领先多数对手范围）
+        _VALUE_EQ_BOUNDARY = 0.52
+        _base_ag = self.aggression
+        if equity >= _VALUE_EQ_BOUNDARY and self.value_ag is not None:
+            ag = self.value_ag
+        elif equity < _VALUE_EQ_BOUNDARY and self.bluff_ag is not None:
+            ag = self.bluff_ag
+        else:
+            ag = _base_ag
+
         # P13 – finer position granularity (BTN vs CO, UTG vs LJ)
-        ag = self.aggression
         if position == "BTN":
             ag *= 1.12
         elif position == "CO":
@@ -214,15 +235,22 @@ class PostflopStrategy:
                                    'branch': 'unknown', 'decision': False}
 
         # ── Step 1: pure value mode (vs calling stations) ────────────────
+        # P21: value_only 仍然先看 equity 门槛，但过了门槛后用 ag 做概率判断，
+        # 不再 100% 下注。这样 value_ag=0.80 → 80% 下注，留 20% 过牌防止可预测。
+        # P22: equity >= 0.95 坚果牌强制下注，不需要平衡。
         if value_only:
             threshold = (
                 0.60 if street == 'river'
                 else (0.50 if num_opponents <= 1 and board.is_dry else 0.55)
             )
-            result = equity >= (threshold - eq_discount)
-            self._last_cbet_detail.update({'branch': 'value_only', 'threshold': threshold,
-                                            'decision': result})
-            return result
+            if equity < (threshold - eq_discount):
+                self._last_cbet_detail.update({'branch': 'value_only', 'threshold': threshold,
+                                                'decision': False})
+                return False
+            if equity >= 0.95:
+                self._last_cbet_detail.update({'branch': 'value_only_nuts', 'decision': True})
+                return True
+            return _rand_bet(min(ag, 1.0), 'value_only')
 
         # ── Step 2: river → separate logic ───────────────────────────────
         if street == 'river':
@@ -234,6 +262,10 @@ class PostflopStrategy:
 
         # ── Step 3: monster hand (flop/turn), equity >= 0.90 ─────────────
         if equity >= 0.90:
+            # P22: equity >= 0.95 坚果牌强制下注
+            if equity >= 0.95:
+                self._last_cbet_detail.update({'branch': 'monster_nuts', 'decision': True})
+                return True
             if num_opponents >= 2:
                 self._last_cbet_detail['branch'] = 'monster_multiway'
                 self._last_cbet_detail['decision'] = True
@@ -409,6 +441,9 @@ class PostflopStrategy:
                 return rv < min(0.18 * cbet_scale, 0.35)
         return False
 
+    # P16 – 分街硬上限（几何 cap 之外的绝对兜底）
+    _STREET_HARD_CAP = {'flop': 0.75, 'turn': 1.00, 'river': 1.55}
+
     def bet_size(
         self,
         equity: float,
@@ -418,26 +453,24 @@ class PostflopStrategy:
         street: str,
         big_blind: float,
         spr: float = 8.0,
-        nut_advantage: float = 0.0,     # P1 – scales up sizing toward overbet
+        nut_advantage: float = 0.0,     # P1/P18 – only boosts river sizing
         last_bet_frac: float = 0.0,     # P5 – previous-street bet fraction
         num_opponents: int = 1,         # P15 – multiway cap: no overbet vs 2+ opponents
     ) -> float:
         """Determine bet size using action abstraction (Libratus/Pluribus approach).
 
-        Discrete menu of pot fractions per street, mixed within tiers to prevent
-        opponents from reverse-engineering hand strength from bet size.
-
-        New in this version:
-        - nut_advantage: strong nut advantage allows larger/polarised sizing (P1)
-        - last_bet_frac: constrains turn/river to avoid jarring size jumps (P5)
+        P16-P19 改版：
+        - 翻牌尺度由牌面质地驱动，不同牌力档尺度重合防止读牌
+        - 几何尺度作为动态 cap，防止前面街透支后续价值空间
+        - P1 坚果加成仅河牌生效
+        - value_mult 分街差异化（对跟注站前小后大）
         """
         min_bet = big_blind
         self._last_bet_detail = {}
-        _p10_wet_sizing = False   # P10: set True when weak-flop wet-board path taken
 
         if street == 'river':
             if equity >= 0.85:
-                # P1 – nut advantage boosts toward overbet
+                # P18 – nut advantage boosts toward overbet (仅河牌)
                 if nut_advantage >= 0.5:
                     frac = self._rng.choices([1.0, 1.25, 1.5], weights=[0.30, 0.45, 0.25])[0]
                 else:
@@ -450,13 +483,19 @@ class PostflopStrategy:
                 frac = self._rng.choices([0.50, 0.66], weights=[0.60, 0.40])[0]
             reason = f"river eq={equity:.2f}"
 
+            # P18 – nut advantage boost 仅在河牌生效
+            if nut_advantage >= 0.3 and equity >= 0.60:
+                eq_scale = min(1.0, (equity - 0.60) / 0.05)
+                boost = 0.3 * nut_advantage * eq_scale
+                frac = min(frac * (1.0 + boost), 1.55)
+
         elif street == 'turn':
             if equity >= 0.75:
-                frac = self._rng.choices([0.66, 0.75], weights=[0.45, 0.55])[0]
+                frac = self._rng.choices([0.55, 0.66], weights=[0.45, 0.55])[0]
             elif equity >= 0.50:
-                frac = self._rng.choices([0.50, 0.66], weights=[0.55, 0.45])[0]
+                frac = self._rng.choices([0.45, 0.55], weights=[0.55, 0.45])[0]
             else:
-                frac = 0.50
+                frac = 0.45
             reason = f"turn eq={equity:.2f}"
 
             # P5 – multi-street consistency: avoid jarring size jumps
@@ -464,66 +503,81 @@ class PostflopStrategy:
                 if last_bet_frac <= 0.35 and frac > 0.66:
                     frac = 0.66   # flop small → turn max 2/3
                     reason += " (capped:flop_small)"
-                elif last_bet_frac >= 0.66 and frac < 0.50:
-                    frac = 0.50   # flop big → turn min 1/2
-                    reason += " (floored:flop_big)"
+                elif last_bet_frac >= 0.55 and frac < 0.45:
+                    frac = 0.45   # flop medium+ → turn min 45%
+                    reason += " (floored:flop_med)"
 
         else:
-            # Flop
-            if equity >= 0.80:
-                frac = self._rng.choices([0.66, 0.75], weights=[0.50, 0.50])[0]
-            elif equity >= 0.55:
-                base = board.recommended_cbet_size_fraction()
-                frac = self._rng.choices(
-                    [max(0.25, base - 0.15), base, min(1.0, base + 0.20)],
-                    weights=[0.25, 0.50, 0.25]
-                )[0]
-            else:
-                # P10 – wet boards: weak semi-bluff uses larger sizes to deny equity
-                if board.is_wet:
-                    frac = self._rng.choices([0.50, 0.66], weights=[0.60, 0.40])[0]
-                    _p10_wet_sizing = True   # board texture already factored in
+            # P16 – Flop: 尺度由牌面质地驱动，各牌力档重合防止读牌
+            if board.is_dry:
+                # 干面：所有牌力统一小注  {0.25, 0.33}
+                frac = self._rng.choices([0.25, 0.33], weights=[0.45, 0.55])[0]
+            elif board.is_wet:
+                # 湿面：强牌 {0.55, 0.66}，中等/半诈唬 {0.45, 0.55}
+                if equity >= 0.80:
+                    frac = self._rng.choices([0.55, 0.66], weights=[0.50, 0.50])[0]
                 else:
-                    frac = self._rng.choices([0.33, 0.50], weights=[0.55, 0.45])[0]
-            reason = f"flop eq={equity:.2f} wet={board.is_wet}"
-            # _last_bet_frac is stored AFTER all calibrations (see below) so that
-            # the next street's P5 constraint sees the actual final frac, not the raw pick.
+                    frac = self._rng.choices([0.45, 0.55], weights=[0.55, 0.45])[0]
+            else:
+                # 中等面：强牌 {0.33, 0.45}，中等/半诈唬 {0.33, 0.40}
+                if equity >= 0.80:
+                    frac = self._rng.choices([0.33, 0.45], weights=[0.50, 0.50])[0]
+                else:
+                    frac = self._rng.choices([0.33, 0.40], weights=[0.55, 0.45])[0]
+            reason = f"flop eq={equity:.2f} wet={board.is_wet} dry={board.is_dry}"
 
         base_frac = frac
-        # P1 – nut advantage allows larger sizing on all streets.
-        # R4: gate lowered to equity >= 0.60 with a linear ramp-in from 0.60→0.65
-        # so there's no abrupt cliff at 0.64 vs 0.65.
-        if nut_advantage >= 0.3 and equity >= 0.60:
-            eq_scale = min(1.0, (equity - 0.60) / 0.05)   # 0.0 at eq=0.60, 1.0 at eq≥0.65
-            boost = 0.3 * nut_advantage * eq_scale
-            frac = min(frac * (1.0 + boost), 1.55)
 
-        # Apply value sizing multiplier (exploit adjustment vs calling stations)
-        frac = min(frac * self.value_mult, 1.5)
+        # P20 – 缩小因子取最严格的一个，不叠加。
+        # 每个因子都有独立的存在价值，但乘法叠加会过度压缩尺度。
+        # 取 min(penalties) = "最紧的瓶颈决定流量"。
+        _penalties = []
 
-        # Texture calibration: flush-heavy boards with non-nut hands.
-        # Skip wet-board penalties when P10 already chose a larger size for the wet board.
-        if not _p10_wet_sizing:
+        # P19 – value_mult 分街差异化（对跟注站：前小后大，多街套利）
+        if self.value_mult != 1.0:
+            street_vm = {
+                'flop':  0.80,
+                'turn':  0.90,
+                'river': 1.25,
+            }.get(street, 1.0)
+            if street_vm < 1.0:
+                _penalties.append(street_vm)
+            else:
+                frac = frac * street_vm   # river 放大直接生效，不参与 min
+
+        # Texture calibration: flush-heavy / wet boards with non-nut hands.
+        # P16: 翻牌的牌面质地已在基础尺度选择里处理，不再重复惩罚。
+        if street != 'flop':
             if board.is_flush_heavy and equity < 0.88:
-                frac *= 0.70
+                _penalties.append(0.70)
             elif board.is_wet and equity < 0.82:
-                frac *= 0.85
-        if spr > 12.0 and board.is_wet and equity < 0.90:
-            frac *= 0.88
+                _penalties.append(0.85)
+            if spr > 12.0 and board.is_wet and equity < 0.90:
+                _penalties.append(0.88)
 
-        frac = min(frac, 1.55)
+        if _penalties:
+            frac *= min(_penalties)
 
         # P5 – re-enforce multi-street floor after texture calibration
-        if last_bet_frac >= 0.66 and frac < 0.50:
-            frac = 0.50
+        if last_bet_frac >= 0.55 and frac < 0.40:
+            frac = 0.40
 
         # P15 – multiway cap: never overbet when 2+ opponents are in the pot.
-        # Overbet opens fold to marginal hands; keeping sizing ≤0.80 retains more callers.
         if num_opponents > 1:
-            frac = min(frac, 0.80)
+            frac = min(frac, 0.70)
 
-        # Shallow SPR: amplify sizing for strong hands
-        if spr < 5.0 and equity >= 0.72:
+        # P17 – 几何尺度动态 cap：防止前面街透支后续价值空间
+        streets_left = {'flop': 3, 'turn': 2, 'river': 1}.get(street, 1)
+        geo_cap = GTOMath.geometric_frac(spr, streets_left)
+        # 河牌不受几何 cap 限制（允许超池），翻/转受限
+        if street != 'river':
+            frac = min(frac, geo_cap)
+
+        # P16 – 分街硬上限兜底
+        frac = min(frac, self._STREET_HARD_CAP.get(street, 1.55))
+
+        # Shallow SPR: amplify sizing for strong hands (仅在 cap 之后微调)
+        if spr < 5.0 and equity >= 0.72 and street == 'river':
             if not (board.is_flush_heavy and equity < 0.90):
                 frac = min(frac * 1.22, 1.55)
 
@@ -540,6 +594,7 @@ class PostflopStrategy:
             'reason': reason,
             'spr': round(spr, 2),
             'nut_adv': round(nut_advantage, 3),
+            'geo_cap': round(geo_cap, 3),
         }
         return GTOMath.pot_fraction_bet(frac, pot, min_bet, stack)
 
@@ -620,7 +675,9 @@ class PostflopStrategy:
         self._new_decision_seed()
 
         texture = BoardTexture(board)
-        pot_odds = to_call / (pot + to_call) if to_call > 0 else 0.0
+        # 用有效投入计算赔率（短码时 to_call 可能超过 stack）
+        effective_call = min(to_call, stack) if to_call > 0 else 0.0
+        pot_odds = effective_call / (pot + effective_call) if effective_call > 0 else 0.0
 
         if facing_bet:
             raise_ag = max(min(self.aggression, 1.55), 1.0)
@@ -636,11 +693,12 @@ class PostflopStrategy:
             if to_call >= stack:
                 need = pot_odds + (0.04 if exploit_tighten_call and not is_drawing_heavy else 0.0)
                 if equity >= need:
-                    return ('call', to_call)
+                    return ('call', effective_call)
                 return ('fold', 0.0)
 
-            # Nuts-level all-in raise: threshold lifted by opp_raise_premium
-            if street in ('turn', 'river') and equity >= (0.90 + opp_raise_premium):
+            # Nuts-level all-in raise: equity >= 0.90 时不再叠加 premium，
+            # 已经是坚果级别不需要"尊重"对手的下注信号。
+            if street in ('turn', 'river') and equity >= 0.90:
                 raise_size = self._raise_size(to_call, pot, stack)
                 return ('raise', raise_size)
 

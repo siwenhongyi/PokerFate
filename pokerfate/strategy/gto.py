@@ -136,6 +136,20 @@ class GTOMath:
         return 0.02
 
     @staticmethod
+    def geometric_frac(spr: float, streets_left: int) -> float:
+        """每街下多少 % pot，刚好在最后一街 all-in。
+
+        数学: ((1+2*spr)^(1/n) - 1) / 2
+        底池每街增长 (1+2b) 倍，n 街后 pot×(1+2b)^n = pot+2×stack。
+        例: SPR=8, 3街 → ~0.79;  SPR=4, 3街 → ~0.54;  SPR=2, 3街 → ~0.36
+        用作分街尺度上限的参考锚点，防止前面街透支后续价值空间。
+        """
+        if streets_left <= 0 or spr <= 0:
+            return 0.5
+        ratio = 1.0 + 2.0 * spr
+        return (ratio ** (1.0 / streets_left) - 1.0) / 2.0
+
+    @staticmethod
     def pot_fraction_bet(fraction: float, pot: float, min_bet: float, stack: float) -> float:
         """Calculate a bet of `fraction` of pot, clamped to stack."""
         return min(max(pot * fraction, min_bet), stack)
