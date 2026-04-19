@@ -117,16 +117,17 @@ class TestOOPMonsterCheckRaise:
     """P2: OOP equity >= 0.90 should be less likely to directly cbet (vs. old +8pp)."""
 
     def test_oop_monster_bet_prob_lower_than_ip(self):
-        """OOP monster cbet freq must be lower than IP monster (check-raise space)."""
+        """OOP monster cbet freq must be lower than IP monster (check-raise space).
+        P22: equity >= 0.95 强制下注，用 0.93 测试 OOP 降频逻辑。"""
         board = _dry_board()
         n_trials = 500
         ip_bets = sum(
             1 for i in range(n_trials)
-            if _strategy(seed=i).should_cbet(0.95, board, True, 'flop')
+            if _strategy(seed=i).should_cbet(0.93, board, True, 'flop')
         )
         oop_bets = sum(
             1 for i in range(n_trials)
-            if _strategy(seed=i).should_cbet(0.95, board, False, 'flop')
+            if _strategy(seed=i).should_cbet(0.93, board, False, 'flop')
         )
         ip_rate = ip_bets / n_trials
         oop_rate = oop_bets / n_trials
@@ -249,15 +250,15 @@ class TestMultiStreetConsistency:
         assert turn_size <= 68.0, f"Turn size {turn_size} after small flop should be ≤68 (≤66% pot)"
 
     def test_large_flop_prevents_too_small_turn(self):
-        """After a large flop bet (≥66%), turn bet should not drop below 50% pot."""
+        """After a medium+ flop bet (≥55%), turn bet should not drop below 40% pot."""
         board_c = cards("Jh", "Th", "8h")
         s = _strategy(seed=200)
         s._last_bet_frac = 0.75
         s._last_bet_street = 'flop'
         texture = BoardTexture(board_c)
         turn_size = s.bet_size(0.45, 100.0, texture, 500.0, 'turn', 2.0, last_bet_frac=0.75)
-        # 50% pot of 100 = 50; give some slack for min_bet
-        assert turn_size >= 48.0, f"Turn size {turn_size} after large flop should be ≥48 (≥50% pot)"
+        # P5 updated: floor is now 40% (was 50%) for multi-street consistency
+        assert turn_size >= 38.0, f"Turn size {turn_size} after large flop should be ≥38 (≥40% pot)"
 
 
 # ---------------------------------------------------------------------------
@@ -459,15 +460,15 @@ class TestWetBoardSemiBluffSizing:
             f"Wet board weak bluff size {wet_med:.0f} should be >= dry {dry_med:.0f}"
         )
 
-    def test_wet_weak_bluff_min_50pct(self):
-        """Wet board weak semi-bluff should never use < 50% pot."""
+    def test_wet_weak_bluff_min_45pct(self):
+        """P16: Wet board weak semi-bluff should never use < 45% pot."""
         wet = _wet_board()
         sizes = [
             _strategy(seed=i).bet_size(0.35, 100.0, wet, 500.0, 'flop', 2.0)
             for i in range(200)
         ]
-        # 50% pot = 50; account for min_bet effects
-        assert min(sizes) >= 48.0, f"Wet weak bluff min size {min(sizes):.0f} should be >= 48"
+        # P16: 湿面弱牌 {0.45, 0.55}, 最小 45%
+        assert min(sizes) >= 43.0, f"Wet weak bluff min size {min(sizes):.0f} should be >= 43"
 
 
 # ---------------------------------------------------------------------------

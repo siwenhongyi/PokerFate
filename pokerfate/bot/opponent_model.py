@@ -31,7 +31,7 @@ unknown — 以上皆不满足。
 from __future__ import annotations
 import json
 import os
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional
 
 
@@ -484,32 +484,47 @@ class OpponentModel:
         # ── 第一层：方向信号（基于类型 + AF + WTSD）──────────────────────────
 
         if ptype == 'whale':
-            # 极度被动：永不弃牌，永不加注 → 纯价值，不诈唬，加大注码
+            # 极度被动：跟注率~80%，弃牌率~20%
+            # → 价值下注极赚（高频），诈唬-EV（极低频）
             adj['bluff_freq'] = 'none'
             adj['cbet_freq'] = 'value_only'
             adj['value_sizing'] = 'large'
+            adj['value_ag_scale'] = 0.80    # P21: 价值手 80% 下注
+            adj['bluff_ag_scale'] = 0.10    # P21: 几乎不诈唬
 
         elif ptype == 'calling_station':
-            # 跟注站：很少弃牌 → 禁止诈唬，价值下注
+            # 跟注站：跟注率~75%，弃牌率~25%
+            # → 价值下注很赚，诈唬仍然-EV
             adj['bluff_freq'] = 'none'
             adj['cbet_freq'] = 'value_only'
             adj['value_sizing'] = 'large'
+            adj['value_ag_scale'] = 0.75    # P21
+            adj['bluff_ag_scale'] = 0.12    # P21
 
         elif ptype == 'maniac':
-            # 疯狂加注者：用强手慢打，让他们把钱送进来
+            # 疯狂加注者：会反加，下注给他加注机会
+            # → 慢打引诱先下注再 check-raise，诈唬会被反加
             adj['bluff_freq'] = 'low'
             adj['check_raise_freq'] = 'high'
             adj['trap_freq'] = 'high'
+            adj['value_ag_scale'] = 0.45    # P21: 多慢打
+            adj['bluff_ag_scale'] = 0.15    # P21: 不和疯子对着诈唬
 
         elif ptype == 'fish':
-            # 普通鱼：入池太多但有时会弃牌，价值为主偶尔诈唬
+            # 普通鱼：跟注率~65%，弃牌率~35%
+            # → 价值下注赚，半诈唬勉强+EV
             adj['bluff_freq'] = 'low'
             adj['value_sizing'] = 'large'
+            adj['value_ag_scale'] = 0.70    # P21
+            adj['bluff_ag_scale'] = 0.25    # P21
 
         elif ptype == 'nit':
-            # 超紧：弃牌率高，诈唬有价值
+            # 超紧：弃牌率~65%，跟注=强牌
+            # → 薄价值危险，诈唬很赚
             adj['cbet_freq'] = 'high'
             adj['bluff_freq'] = 'high'
+            adj['value_ag_scale'] = 0.50    # P21: 薄价值小心
+            adj['bluff_ag_scale'] = 0.70    # P21: 多诈唬
 
         # ── 第二层：强度信号（PWI 连续映射）────────────────────────────────
         # PWI > 60: 极度可剥削 (whale/super fish) → aggression_scale 低至 0.3

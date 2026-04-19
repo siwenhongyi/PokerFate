@@ -1,10 +1,14 @@
 """Integration tests: bot makes valid decisions in full game scenarios."""
 
+import random as _rng
+
 import pytest
 from pokerfate.core.card import Card
 from pokerfate.core.game_state import GameState, Player, Street, Action, ActionType
 from pokerfate.bot.poker_bot import PokerBot
 from pokerfate.bot.opponent_model import OpponentModel
+from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+from pokerfate.strategy.range_estimator import HandRangeEstimator
 
 def card(s):
     return Card.from_str(s)
@@ -148,29 +152,42 @@ class TestBotDecisions:
                 assert action.amount <= 200.0, "Cannot raise more than stack"
 
     def test_monster_check_frequency(self):
-        """Strong hand (equity ~98%) should occasionally check (slowplay) when not facing a bet."""
-        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
-        from pokerfate.core.card import Card
+        """P22: equity >= 0.95 (nuts) always bets; equity 0.90-0.94 occasionally checks."""
+
         strategy = PostflopStrategy(aggression=1.0)
         board = [Card.from_str(c) for c in ['2d', '7h', 'Jc']]
-        checks = sum(
+        # P22: equity 0.98 = nuts → 强制下注，0 checks
+        checks_nuts = sum(
             1 for _ in range(200)
             if not strategy.should_cbet(0.98, BoardTexture(board), True, 'flop')
         )
-        # Stochastic monster line; dry HU still mixes checks (~20% at ag=1.0).
-        assert 10 <= checks <= 80, f"Monster check frequency out of range: {checks}/200"
+        assert checks_nuts == 0, f"P22: nuts (eq=0.98) should always bet, got {checks_nuts} checks"
+        # equity 0.92 = strong but not nuts → still mixes checks
+        checks_strong = sum(
+            1 for _ in range(200)
+            if not strategy.should_cbet(0.92, BoardTexture(board), True, 'flop')
+        )
+        assert 10 <= checks_strong <= 80, f"Strong (eq=0.92) check frequency out of range: {checks_strong}/200"
 
-    def test_value_mult_increases_bet_size(self):
-        """value_mult > 1.0 should produce larger bets."""
-        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
-        from pokerfate.core.card import Card
+    def test_value_mult_per_street_sizing(self):
+        """P19: value_mult != 1.0 → flop 缩小, river 放大（多街薄利提取）."""
+
+
         board = [Card.from_str(c) for c in ['2d', '7h', 'Jc']]
         texture = BoardTexture(board)
-        s1 = PostflopStrategy(); s1.value_mult = 1.0
-        s2 = PostflopStrategy(); s2.value_mult = 1.3
-        size1 = s1.bet_size(0.85, 100.0, texture, 200.0, 'flop', 2.0)
-        size2 = s2.bet_size(0.85, 100.0, texture, 200.0, 'flop', 2.0)
-        assert size2 > size1
+        # 使用相同种子确保 base_frac 一致
+        s1 = PostflopStrategy(rng=_rng.Random(99)); s1.value_mult = 1.0
+        s2 = PostflopStrategy(rng=_rng.Random(99)); s2.value_mult = 1.3
+        # flop: 对跟注站缩小（×0.80）
+        flop1 = s1.bet_size(0.85, 100.0, texture, 200.0, 'flop', 2.0)
+        flop2 = s2.bet_size(0.85, 100.0, texture, 200.0, 'flop', 2.0)
+        assert flop2 < flop1, "P19: flop should be smaller vs calling stations"
+        # river: 对跟注站放大（×1.25）
+        s1 = PostflopStrategy(rng=_rng.Random(99)); s1.value_mult = 1.0
+        s2 = PostflopStrategy(rng=_rng.Random(99)); s2.value_mult = 1.3
+        river1 = s1.bet_size(0.85, 100.0, texture, 200.0, 'river', 2.0)
+        river2 = s2.bet_size(0.85, 100.0, texture, 200.0, 'river', 2.0)
+        assert river2 > river1, "P19: river should be larger vs calling stations"
 
     def test_bot_does_not_crash_any_street(self):
         bot = PokerBot(equity_iterations=200)
@@ -192,7 +209,7 @@ class TestRangeEstimator:
     """Unit tests for HandRangeEstimator — core innovation from Libratus."""
 
     def setup_method(self):
-        from pokerfate.strategy.range_estimator import HandRangeEstimator
+
         self.est = HandRangeEstimator()
 
     def test_reset_sets_prior(self):
@@ -280,8 +297,7 @@ class TestTinyBetValueRaise:
         加注"价值"实际是撞枪口。正确行为是跟注这个极小注（pot odds 1.8% < 43%）。
         """
         import random
-        from pokerfate.strategy.postflop import PostflopStrategy
-        from pokerfate.core.card import Card
+
 
         strat = PostflopStrategy(aggression=1.0)
         board = [Card.from_str(c) for c in ['7s', '9d', 'Qc', '8c']]
@@ -306,8 +322,7 @@ class TestTinyBetValueRaise:
     def test_decide_raises_tiny_bet_with_strong_range_equity(self):
         """range equity=0.80 (ahead of opponent range) → value raise against tiny bet."""
         import random
-        from pokerfate.strategy.postflop import PostflopStrategy
-        from pokerfate.core.card import Card
+
 
         strat = PostflopStrategy(aggression=1.0)
         board = [Card.from_str(c) for c in ['7s', '9d', 'Qc', '8c']]
@@ -338,8 +353,7 @@ class TestRiverBetLogic:
     def test_turn_river_crushing_equity_facing_bet_always_raises(self):
         """转/河、面对下注、range equity≥90%：确定性价值加注（类：碾压范围，raise 不劣于 call）。"""
         import random
-        from pokerfate.strategy.postflop import PostflopStrategy
-        from pokerfate.core.card import Card
+
 
         strat = PostflopStrategy(aggression=0.55)
         river = [Card.from_str(c) for c in ['Ac', '4c', 'Ah', '7c', 'Qd']]
@@ -379,7 +393,7 @@ class TestRiverBetLogic:
             assert amt > 40000.0
 
     def test_river_strong_hand_bets(self):
-        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+
         strategy = PostflopStrategy()
         board = [card(c) for c in ['As', 'Kd', '2c', '7h', 'Jc']]
         # Strong hand on river: should bet
@@ -389,7 +403,7 @@ class TestRiverBetLogic:
 
     def test_river_medium_equity_semi_bluff_suppressed(self):
         """0.40 equity on river: should NOT bet frequently (no draws, just a bluff)."""
-        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+
         strategy = PostflopStrategy()
         board = [card(c) for c in ['As', 'Kd', '2c', '7h', 'Jc']]
         # 40% equity on river = no draws, no semi-bluff justification
@@ -401,7 +415,7 @@ class TestRiverBetLogic:
 
     def test_river_pure_bluff_with_fold_equity(self):
         """Low equity + high fold rate on river: allow some pure bluffs."""
-        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+
         strategy = PostflopStrategy()
         board = [card(c) for c in ['As', 'Kd', '2c', '7h', 'Jc']]
         results = [strategy.should_cbet(0.15, BoardTexture(board), True, 'river',
@@ -416,7 +430,7 @@ class TestBBDecisions:
 
     def _make_bb_state(self, hole_cards_str, num_players=3, limper_count=1):
         """Create a state where the bot is in BB with limpers and no raise."""
-        from pokerfate.core.game_state import GameState, Player, Street, Action, ActionType
+
         # Build players: p0 = BTN (dealer), p1 = SB, p2 = BB (bot)
         # For this test bot is player_id=2 in BB
         players = [
@@ -466,7 +480,7 @@ class TestBBDecisions:
 
     def test_postflop_value_threshold_60pct(self):
         """60-65% equity hand should c-bet as value (not semi-bluff) on dry board."""
-        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+
         strategy = PostflopStrategy(aggression=1.0)
         board = [Card.from_str(c) for c in ['2d', '7h', 'Jc']]  # dry board
         # Run many trials: at 62% equity on dry HU board, should almost always bet
@@ -479,7 +493,7 @@ class TestBBDecisions:
 
     def test_postflop_dry_board_multiway_60pct_bets_most(self):
         """60%+ equity on dry board even multiway should bet most of the time."""
-        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+
         strategy = PostflopStrategy(aggression=1.0)
         board = [Card.from_str(c) for c in ['2d', '7h', 'Jc']]  # dry
         bets = sum(
@@ -496,7 +510,7 @@ class TestMultiwayBetting:
 
     def test_weak_hand_not_bet_3way(self):
         """35% equity hand: should never c-bet into 3 opponents."""
-        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+
         strategy = PostflopStrategy()
         board = [card(c) for c in ['As', 'Kd', '2c']]
         results = [strategy.should_cbet(0.35, BoardTexture(board), True, 'flop',
@@ -506,7 +520,7 @@ class TestMultiwayBetting:
 
     def test_value_hand_still_bets_multiway(self):
         """70%+ equity: should still bet even multiway (just with lower frequency)."""
-        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+
         strategy = PostflopStrategy()
         board = [card(c) for c in ['As', 'Kd', '2c']]
         results = [strategy.should_cbet(0.75, BoardTexture(board), True, 'flop',
@@ -516,7 +530,7 @@ class TestMultiwayBetting:
 
     def test_thin_value_bets_more_hu_than_multiway(self):
         """65% equity: bets more heads-up than 4-way."""
-        from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+
         strategy = PostflopStrategy()
         board = [card(c) for c in ['As', 'Kd', '2c']]
         hu = sum(strategy.should_cbet(0.65, BoardTexture(board), True, 'flop',

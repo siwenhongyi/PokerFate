@@ -12,8 +12,11 @@ from pokerfate.strategy.preflop import PreflopStrategy
 from pokerfate.strategy.postflop import PostflopStrategy
 from pokerfate.strategy.gto import GTOMath
 from pokerfate.strategy.range_estimator import HandRangeEstimator
-from pokerfate.strategy.range_hands import two_stage_hole_combos
 from pokerfate.bot.opponent_model import OpponentModel
+from pokerfate.strategy.range_v2.action_model import ActionContext, ActionModel, PlayerProfile
+from pokerfate.strategy.range_v2.bayesian_range_tracker import BayesianRangeTracker
+from pokerfate.strategy.range_v2.range_equity_calculator import RangeEquityCalculator
+from pokerfate.strategy.range_v2.showdown_learner import ShowdownLearner
 
 
 class PokerBot:
@@ -42,9 +45,17 @@ class PokerBot:
         self.postflop = PostflopStrategy(aggression=aggression)
         self.gto = GTOMath()
         self.opponent_model = OpponentModel()
-        self.range_estimator = HandRangeEstimator()
+        self.range_estimator = HandRangeEstimator()  # EQR mode only
         self.equity_iterations = equity_iterations
-        self.use_range_equity = use_range_equity   # True=range模式, False=GTO+EQR模式(同mingli分支)
+        self.use_range_equity = use_range_equity   # True=range_v2模式, False=EQR模式
+
+        # Range V2 (completely independent from EQR)
+        self._showdown_learner = ShowdownLearner()
+        self._action_model = ActionModel(showdown_learner=self._showdown_learner)
+        self._range_tracker = BayesianRangeTracker(self._action_model)
+        self._range_equity_calc = RangeEquityCalculator()
+        self._current_board: List[Card] = []
+        self._v2_action_history: Dict[int, list] = {}
         self._last_equity: float = 0.5
         self._last_equity_random: float = 0.5
         self._last_spr: float = 0.0
@@ -102,27 +113,17 @@ class PokerBot:
         # 翻前面对加注时使用 range equity 作为决策依据（random 仅供参考对比）
         opp_ids = [p.player_id for p in gs.active_players if p.player_id != player.player_id]
         if self.use_range_equity and opp_ids and facing_action in ('open', '3bet', '4bet'):
-            two_stage_rfs = {pid: self.range_estimator.get_two_stage_rf(pid) for pid in opp_ids}
+            # Range V2: use Bayesian 1326-dim range distribution
             primary_opp_id = gs.aggressor_opponent_id(player)
-            if primary_opp_id is not None and primary_opp_id in two_stage_rfs:
-                target_preflop_rf, _ = two_stage_rfs[primary_opp_id]
-            else:
-                target_preflop_rf = min(v[0] for v in two_stage_rfs.values())
-            if target_preflop_rf < 0.99:
-                exclude = set(player.hole_cards)
-                # 4bet/3bet 范围极化（价值 + 诈唬），open 范围线性
-                polarized_pf = facing_action in ('3bet', '4bet')
-                pf_opp_hands = two_stage_hole_combos(
-                    target_preflop_rf, 1.0, exclude, [],
-                    polarized=polarized_pf,
-                )
-                if pf_opp_hands:
-                    pf_range_eq = self.equity_calc.calculate_vs_top_range_multi(
-                        player.hole_cards, [], max(num_opponents, 1),
-                        pf_opp_hands, self.equity_iterations,
-                    )
-                    self._last_equity = pf_range_eq
-                    self._last_equity_mode = "range_top"
+            if primary_opp_id is None:
+                primary_opp_id = opp_ids[0]
+            opp_weights = self._range_tracker.get_distribution(primary_opp_id)
+            pf_range_eq = self._range_equity_calc.weighted_equity(
+                player.hole_cards, [], opp_weights,
+                max(num_opponents, 1), self.equity_iterations,
+            )
+            self._last_equity = pf_range_eq
+            self._last_equity_mode = "range_v2"
 
         # is_bb_option: explicit server signal (forced_post + call_need==0)
         # Auto-detect fallback: BB position + no raises + nothing to call = free check option
@@ -229,59 +230,24 @@ class PokerBot:
         raw_mc = self._get_equity(player.hole_cards, board, max(num_opponents, 1))
         self._last_equity_random = raw_mc
 
-        # 两阶段 rf：翻前行动压缩 + 翻后行动在翻前范围内的二次裁切
-        # facing_bet=True：用主要对手（加注者）的 rf——该玩家决定了我们的决策上下文；
-        # 取 min 会错误地把范围估得比实际更窄（当存在 limper 时尤其严重）。
-        # facing_bet=False（主动下注）：用 min 保守估计，避免高估胜率冒进。
-        if opp_ids:
-            two_stage_rfs = {pid: self.range_estimator.get_two_stage_rf(pid) for pid in opp_ids}
-            if facing_bet and primary_opp_id is not None and primary_opp_id >= 0 and primary_opp_id in two_stage_rfs:
-                # 用加注者的 rf
-                target_preflop_rf, target_postflop_rf = two_stage_rfs[primary_opp_id]
-            else:
-                # 保守：取所有对手的 min
-                pf_rfs = [v[0] for v in two_stage_rfs.values()]
-                po_rfs = [v[1] for v in two_stage_rfs.values()]
-                target_preflop_rf = min(pf_rfs)
-                target_postflop_rf = min(po_rfs)
-        else:
-            target_preflop_rf = 1.0
-            target_postflop_rf = 1.0
-        min_rf = target_preflop_rf * target_postflop_rf  # 组合 rf，用于 use_range 判断
-
-        # polarized=True 对应 raise 范围（价值手 + 诈唬），False 对应 call 范围（线性）
-        if primary_opp_id is not None and primary_opp_id >= 0:
-            last_action = self.range_estimator.last_postflop_action(primary_opp_id)
-            polarized = last_action == 'raise'
-        else:
-            polarized = facing_bet  # 面对下注时默认 polarized
-
-        use_range = self.use_range_equity and bool(board) and min_rf < 0.99 and opp_ids
-        range_eq: float | None = None
-        if use_range:
-            exclude = set(player.hole_cards) | set(board)
-            opp_hands = two_stage_hole_combos(
-                target_preflop_rf, target_postflop_rf, exclude, board,
-                polarized=polarized, street=street,
+        if self.use_range_equity and bool(board) and opp_ids:
+            # ── Range V2 path ──
+            target_opp = primary_opp_id if (primary_opp_id is not None and primary_opp_id >= 0) else opp_ids[0]
+            opp_weights = self._range_tracker.get_distribution(target_opp)
+            range_eq = self._range_equity_calc.weighted_equity(
+                player.hole_cards, board, opp_weights,
+                num_opponents, self.equity_iterations,
             )
-            # 只要候选手牌非空就使用 range equity：range 越紧（opp_hands 越少）
-            # 反而说明对手范围越确定，信息量越高，不应该回退到 EQR。
-            # MC 采样时会从候选列表随机选取，即使候选只有几个也是有效的。
-            if opp_hands:
-                range_eq = self.equity_calc.calculate_vs_top_range_multi(
-                    player.hole_cards,
-                    board,
-                    num_opponents,
-                    opp_hands,
-                    self.equity_iterations,
-                )
-
-        if range_eq is not None:
             call_equity = range_eq
             discount = 1.0
-            self._last_equity_mode = "range_top"
+            min_rf = self._range_tracker.get_effective_range_pct(target_opp)
+            self._last_equity_mode = "range_v2"
         else:
+            # ── EQR path (completely independent) ──
             discount = self.range_estimator.worst_discount(opp_ids)
+            min_rf = self.range_estimator.get_range_fraction(
+                primary_opp_id if (primary_opp_id is not None and primary_opp_id >= 0) else -1
+            )
             call_equity = max(
                 0.0,
                 raw_mc - (1.0 - discount) * (1.0 - raw_mc),
@@ -302,6 +268,9 @@ class PokerBot:
 
         # Apply exploitative adjustments to postflop sizing
         self.postflop.aggression = self._compute_aggression(adj)
+        # P21 – 拆分 ag: value_ag 控制价值下注频率, bluff_ag 控制诈唬频率
+        self.postflop.value_ag = adj.get('value_ag_scale')    # None = fallback to aggression
+        self.postflop.bluff_ag = adj.get('bluff_ag_scale')    # None = fallback to aggression
         self.postflop.value_mult = self._compute_value_mult(adj)
 
         spr = self.gto.spr(stack, max(pot, 0.01))
@@ -335,10 +304,10 @@ class PokerBot:
 
         # ── P1: nut advantage heuristic ──────────────────────────────────
         # Proxy: how much my range equity exceeds raw MC equity.
-        # range_eq >> raw_mc → my hands beat opponent's tight range → nut advantage.
+        # equity >> raw_mc → my hands beat opponent's tight range → nut advantage.
         nut_adv = 0.0
-        if range_eq is not None and raw_mc > 0:
-            nut_adv = max(0.0, min(1.0, (range_eq - raw_mc) / 0.25))
+        if self._last_equity_mode != "mc_eqr" and raw_mc > 0:
+            nut_adv = max(0.0, min(1.0, (equity - raw_mc) / 0.25))
 
         # ── P6: delayed c-bet detection ─────────────────────────────────
         # True when: I was the preflop aggressor, checked flop, now it's turn (no bet)
@@ -403,18 +372,29 @@ class PokerBot:
         # ── Track my own action for next-street cross-street logic ───────
         self._my_street_actions[street] = action_str
 
-        # 下注金额不超过可以行动的对手中筹码最多的那个（超出无意义）
+        # 加注金额不超过对手有效可投入的上限（超出无意义）。
+        # 有效上限 = 对手剩余筹码 + 对手本街已投入（因为 amount 是 bot 的总额语义）。
         if action_str == 'raise' and amount > 0:
-            acting_opp_stacks = [p.stack for p in gs.active_players
-                                 if p.player_id != player.player_id and p.can_act()]
-            if acting_opp_stacks:
-                max_opp_stack = max(acting_opp_stacks)
-                amount = min(amount, max_opp_stack)
+            acting_effective = [
+                p.stack + getattr(p, 'current_bet', 0)
+                for p in gs.active_players
+                if p.player_id != player.player_id and p.can_act()
+            ]
+            if acting_effective:
+                max_effective = max(acting_effective)
+                amount = min(amount, max_effective)
 
-        use_calibration = (
-            primary_opp_id >= 0
-            and self.range_estimator.has_calibration(primary_opp_id)
-        )
+        if self.use_range_equity:
+            use_calibration = (
+                primary_opp_id >= 0
+                and self._showdown_learner.sample_count(
+                    self.opponent_model._id_to_name.get(primary_opp_id, ''), street, 'raise') >= 8
+            )
+        else:
+            use_calibration = (
+                primary_opp_id >= 0
+                and self.range_estimator.has_calibration(primary_opp_id)
+            )
 
         # 对手标签日志：类型 + PWI + 关键 adj 信号摘要
         opp_label = ""
@@ -464,7 +444,9 @@ class PokerBot:
             action_str,
             raw_equity=raw_mc,
             discount=discount,
-            streets_bet=self.range_estimator.streets_bet(primary_opp_id) if primary_opp_id >= 0 else 0,
+            streets_bet=(len(set(s for s, a in self._v2_action_history.get(primary_opp_id, []) if a == 'raise'))
+                         if self.use_range_equity and primary_opp_id >= 0
+                         else self.range_estimator.streets_bet(primary_opp_id) if primary_opp_id >= 0 else 0),
             street=street,
             use_calibration=use_calibration,
             spr=spr,
@@ -711,9 +693,13 @@ class PokerBot:
         return main_line + ("\n      " + detail_line if detail_line else "")
 
     def _compute_value_mult(self, adj: dict) -> float:
-        """Bet-size multiplier: larger vs calling stations, normal otherwise."""
+        """Bet-size multiplier flag for calling station / fish exploit.
+
+        P19: 返回非 1.0 时，bet_size() 内部按分街差异化处理
+        （flop ×0.80, turn ×0.90, river ×1.25），多街薄利提取。
+        """
         if adj.get('value_sizing') == 'large':
-            return 1.30   # 30% larger value bets vs calling stations / fish
+            return 1.30   # 非 1.0 即触发 P19 分街逻辑
         return 1.0
 
     def _to_action(self, action_str: str, amount: float, to_call: float, stack: float) -> Action:
@@ -777,7 +763,23 @@ class PokerBot:
             self.opponent_model.record_fold_to_cbet(player_id, folded)
 
         # Update range estimator for every opponent action
-        self.range_estimator.observe_action(player_id, act, street)
+        if self.use_range_equity:
+            # Range V2: Bayesian update
+            profile = self._build_player_profile(player_id)
+            pos = ''  # position unknown at action time
+            ctx = ActionContext(
+                position=pos, board=[], street=street,
+                facing_action=act, facing_cbet=False,
+            )
+            self._range_tracker.observe_action(
+                player_id, act, street, ctx, profile,
+                board=getattr(self, '_current_board', []),
+            )
+            # Track action history for ShowdownLearner
+            self._v2_action_history.setdefault(player_id, []).append((street, act))
+        else:
+            # EQR mode
+            self.range_estimator.observe_action(player_id, act, street)
 
         # P9 – track opponent street actions for check-back detection
         if player_id not in self._opp_street_actions:
@@ -785,19 +787,21 @@ class PokerBot:
         self._opp_street_actions[player_id][street] = act
 
     def observe_showdown(self, player_id: int, cards, name: str = "", board=None) -> None:
-        """在 showdown 时记录对手底牌，校准其 raise 范围压缩系数。
+        """在 showdown 时记录对手底牌，校准范围估算。
 
-        Parameters
-        ----------
-        player_id : int
-        cards : list of Card or str
-            对手亮出的底牌。
-        name : str
-            玩家名字，用于 showdown 校准器的 name key。
-        board : list of Card or str, optional
-            本手最终公牌，用于计算翻牌后实际手牌强度。
+        Range V2: feeds ShowdownLearner (category×action frequency).
+        EQR: feeds ShowdownCalibrator (average hand strength).
         """
-        return self.range_estimator.observe_showdown(player_id, cards, name=name, board=board)
+        if self.use_range_equity:
+            # Range V2: record to ShowdownLearner
+            resolved_name = name or self.opponent_model._id_to_name.get(player_id, str(player_id))
+            hole = [Card.from_str(str(c)) if not hasattr(c, 'rank') else c for c in cards[:2]]
+            board_cards = [Card.from_str(str(c)) if not hasattr(c, 'rank') else c for c in (board or [])]
+            action_seq = self._v2_action_history.get(player_id, [])
+            self._showdown_learner.record(resolved_name, action_seq, hole, board_cards)
+            return None
+        else:
+            return self.range_estimator.observe_showdown(player_id, cards, name=name, board=board)
 
     def new_hand(self, player_ids: List[int], player_names: Optional[Dict[int, str]] = None):
         """Call at the start of each new hand.
@@ -817,28 +821,44 @@ class PokerBot:
         self._opp_street_actions.clear()
         self.postflop._last_bet_frac = 0.0
         self.postflop._last_bet_street = ""
+        self._current_board = []  # track board for Range V2 observe_action
+        self._v2_action_history: Dict[int, list] = {}  # player_id → [(street, action)]
         names = player_names or {}
         for pid in player_ids:
             self.opponent_model.record_hand_start(pid)
-            # Reset range estimator: prior = historical VPIP (or 0.35 if unknown)
-            stats = self.opponent_model.get(pid)
-            prior = stats.vpip if stats.hands_seen >= 10 else 0.35
-            # PFR/VPIP 比值：样本不足时用 GTO 参考值 0.75（不偏不倚）
-            pfr_vpip = (stats.pfr / stats.vpip
-                        if stats.hands_seen >= 10 and stats.vpip > 0
-                        else 0.75)
-            # 诈唬指标：用于 raise 压缩的诈唬例外判断
-            bluff_wr = stats.bluff_win_rate
-            bet_win_n = stats.bet_win_count
-            river_bf_n = stats.river_bet_count + stats.river_check_count
-            river_bf = stats.river_bet_frequency
             name = names.get(pid, self.opponent_model._id_to_name.get(pid, str(pid)))
-            self.range_estimator.reset_hand(
-                pid, prior_range=prior, name=name,
-                pfr_vpip_ratio=pfr_vpip,
-                bluff_win_rate=bluff_wr, bet_win_samples=bet_win_n,
-                river_bet_freq=river_bf, river_bf_samples=river_bf_n,
-            )
+
+            if self.use_range_equity:
+                # Range V2: reset Bayesian tracker
+                profile = self._build_player_profile(pid)
+                # Position not known yet at new_hand time — use 'CO' as neutral default
+                self._range_tracker.reset_hand(pid, 'CO', profile)
+            else:
+                # EQR mode: reset scalar range estimator
+                stats = self.opponent_model.get(pid)
+                prior = stats.vpip if stats.hands_seen >= 10 else 0.35
+                pfr_vpip = (stats.pfr / stats.vpip
+                            if stats.hands_seen >= 10 and stats.vpip > 0
+                            else 0.75)
+                bluff_wr = stats.bluff_win_rate
+                bet_win_n = stats.bet_win_count
+                river_bf_n = stats.river_bet_count + stats.river_check_count
+                river_bf = stats.river_bet_frequency
+                self.range_estimator.reset_hand(
+                    pid, prior_range=prior, name=name,
+                    pfr_vpip_ratio=pfr_vpip,
+                    bluff_win_rate=bluff_wr, bet_win_samples=bet_win_n,
+                    river_bet_freq=river_bf, river_bf_samples=river_bf_n,
+                )
+
+    def update_board(self, board: List[Card]) -> None:
+        """Update tracked board for Range V2 observe_action."""
+        self._current_board = list(board)
+
+    def set_hole_cards(self, cards: List[Card]) -> None:
+        """Tell Range V2 tracker about bot's hole cards (card removal)."""
+        if self.use_range_equity:
+            self._range_tracker.set_known_cards(cards)
 
     @property
     def last_equity(self) -> float:
@@ -926,3 +946,39 @@ class PokerBot:
         if raiser is None:
             return ""
         return self._normalize_pos(gs.position_of(raiser))
+
+    def _build_player_profile(self, player_id: int) -> PlayerProfile:
+        """Build a PlayerProfile from OpponentModel data (read-only)."""
+        s = self.opponent_model.get(player_id)
+        name = self.opponent_model._id_to_name.get(player_id, str(player_id))
+        return PlayerProfile(
+            name=name,
+            hands_seen=s.hands_seen,
+            vpip=s.vpip,
+            pfr=s.pfr,
+            af=s.aggression_factor,
+            three_bet_pct=s.three_bet_pct,
+            fold_to_3bet=s.fold_to_3bet,
+            fold_to_cbet=s.fold_to_cbet,
+            fold_to_cbet_opps=s.fold_to_cbet_opps,
+            wtsd=s.wtsd,
+            wmsd=s.wmsd,
+            flop_afq=s.flop_afq,
+            turn_afq=s.turn_afq,
+            river_afq=s.river_afq,
+            river_fold_rate=s.river_fold_rate,
+            river_bet_freq=s.river_bet_frequency,
+            bluff_win_rate=s.bluff_win_rate,
+            bet_win_count=s.bet_win_count,
+            river_bet_count=s.river_bet_count,
+            river_check_count=s.river_check_count,
+            player_type=s.player_type(),
+            pwi=s.pwi(),
+            flop_action_count=s.flop_bet_count + s.flop_passive_count,
+            turn_action_count=s.turn_bet_count + s.turn_passive_count,
+            river_action_count=s.river_action_count,
+            server_af_prior=s.server_af_prior,
+            server_cbet_prior=s.server_cbet_prior,
+            server_3bet_prior=s.server_3bet_prior,
+            server_wtsd_prior=s.server_wtsd_prior,
+        )

@@ -53,7 +53,7 @@ ACTION_INJECT_DELAY_MAX_SEC = 3.0
 # pb.DealerInfoRSP（新一手开始）后再发 LeaveRoomREQ，再以 100BB 进房（EnterRoomREQ）。
 # 避免 Winner 当下立即离桌与客户端结算界面并发导致 UI 卡住。
 # （与客户端菜单一致；StandUpREQ 在客户端里基本未使用，服务端常不处理。）
-PROFIT_LOCK_BB_THRESHOLD = 400
+PROFIT_LOCK_BB_THRESHOLD = 5_000
 
 # 离桌后等待多久再发 EnterRoomREQ（秒），给客户端切场景/进桌动画一点时间。
 PROFIT_LOCK_REENTER_DELAY_SEC = 4.0

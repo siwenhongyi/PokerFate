@@ -1,9 +1,7 @@
-"""Card and Deck representations."""
+"""Card representations."""
 
 from __future__ import annotations
-import random
 from enum import IntEnum
-from typing import List
 
 
 class Rank(IntEnum):
@@ -66,42 +64,3 @@ class Card:
         suit_map = {'c': 0, 'd': 1, 'h': 2, 's': 3}
         s = s.strip()
         return Card(rank_map[s[0].upper()], suit_map[s[1].lower()])
-
-
-class Deck:
-    def __init__(self):
-        self.cards: List[Card] = [
-            Card(rank, suit)
-            for rank in Rank
-            for suit in Suit
-        ]
-        self._dealt: set = set()
-
-    def shuffle(self) -> None:
-        random.shuffle(self.cards)
-        self._dealt.clear()
-
-    def deal(self, n: int = 1) -> List[Card]:
-        result = []
-        for card in self.cards:
-            if card not in self._dealt:
-                self._dealt.add(card)
-                result.append(card)
-                if len(result) == n:
-                    break
-        return result
-
-    def deal_excluding(self, exclude: List[Card], n: int = 1) -> List[Card]:
-        excluded_set = set(exclude) | self._dealt
-        result = []
-        for card in self.cards:
-            if card not in excluded_set:
-                self._dealt.add(card)
-                result.append(card)
-                if len(result) == n:
-                    break
-        return result
-
-    def remaining(self, exclude: List[Card]) -> List[Card]:
-        excluded_set = set(exclude)
-        return [c for c in self.cards if c not in excluded_set]
