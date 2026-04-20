@@ -18,7 +18,6 @@ import argparse
 import asyncio
 import json
 import logging
-import logging.handlers
 import socket
 import ssl
 import struct
@@ -75,9 +74,8 @@ def _persist_ip_cache() -> None:
 _LOG_FMT = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
 
 def _fh(filename: str) -> logging.Handler:
-    h = logging.handlers.RotatingFileHandler(
-        _LOGS_DIR / filename, maxBytes=10 * 1024 * 1024, backupCount=3, encoding="utf-8"
-    )
+    # 每次启动覆盖，不追加。
+    h = logging.FileHandler(_LOGS_DIR / filename, mode="w", encoding="utf-8")
     h.setFormatter(_LOG_FMT)
     return h
 

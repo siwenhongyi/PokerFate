@@ -252,3 +252,85 @@ class TestSeatReuse:
         model.get(5).hands_seen = 10
         model.register_name(5, "Stable")  # same id, same name
         assert model.get(5).hands_seen == 10  # stats intact
+
+
+class TestSparseSampleNoFakeAggression:
+    """10-19 手稀疏样本（只观察到 preflop fold，零主动行为）不应产生
+    伪激进 bluff_ag_scale。见 review-2026-04-22.md E.2。
+    """
+
+    def test_only_preflop_folds_returns_baseline(self):
+        model = OpponentModel()
+        s = model.get(1)
+        s.hands_seen = 15
+        s.fold_count = 15        # 只 fold 过 preflop，零主动行为
+        # AF = (0+0)/max(0+0,1) = 0
+        assert s.aggression_factor == 0.0
+        adj = model.exploit_adjustments(1)
+        # baseline 0.55，不是旧代码算出的 0.85（伪激进）
+        assert adj.get('bluff_ag_scale', 0.55) == pytest.approx(0.55, abs=1e-6)
+        assert adj.get('value_ag_scale', 0.85) == pytest.approx(0.85, abs=1e-6)
+
+    def test_enough_action_samples_enables_af_fallback(self):
+        """action_samples ≥ 10 时 AF 兜底可以启用。"""
+        model = OpponentModel()
+        s = model.get(1)
+        s.hands_seen = 15
+        s.call_count = 10        # 有 10 次 postflop call，AF=0 但样本够
+        adj = model.exploit_adjustments(1)
+        # 此时 af=0（低），AF 兜底启用，base_bluff = 0.55 - (0-1.5)*0.2 = 0.85
+        # 但 sticky_score 仍为 0（无 fold_to_cbet_opps/wtsd/river 样本）
+        # → 最终 bluff_ag_scale = 0.85（不再是 baseline）
+        assert adj.get('bluff_ag_scale', 0.55) > 0.70
+
+
+class TestOpponentStatsToVillainStats:
+    """OpponentStats.to_villain_stats() 应把所有字段原样映射。"""
+
+    def test_river_fold_rate_uses_facing_bet_opportunities(self):
+        s = OpponentStats()
+        s.river_action_count = 10
+        s.river_fold_count = 4
+        assert s.river_fold_rate == 0.0
+        s.river_facing_bet_opps = 5
+        s.river_facing_bet_fold_count = 2
+        assert s.river_fold_rate == pytest.approx(0.4)
+
+    def test_full_field_projection(self):
+        s = OpponentStats()
+        s.hands_seen = 50
+        s.vpip_count = 20
+        s.pfr_count = 10
+        s.fold_to_cbet_count = 5
+        s.fold_to_cbet_opps = 10
+        s.bet_count = 8
+        s.raise_count = 5
+        s.call_count = 15
+        s.check_count = 12
+        s.bet_win_count = 6
+        s.bluff_win_count = 3        # bluff_win_rate = 0.5
+        s.river_action_count = 10
+        s.river_fold_count = 4
+        s.river_facing_bet_opps = 10
+        s.river_facing_bet_fold_count = 4       # river_fold_rate = 0.4
+        s.flop_bet_count = 6
+        s.flop_passive_count = 4     # flop_afq = 0.6
+        s.turn_bet_count = 3
+        s.turn_passive_count = 5     # turn_afq = 0.375
+        s.river_bet_count = 2
+        s.river_check_count = 3      # river_afq 分母 total=10
+        s.flop_seen_count = 20
+        s.showdown_count = 10
+        s.showdown_win_count = 6     # wmsd = 0.6
+        vs = s.to_villain_stats()
+        assert vs.hands_seen == 50
+        assert vs.fold_to_cbet_opps == 10
+        assert vs.bet_win_count == 6
+        assert vs.river_action_count == 10
+        assert vs.bluff_win_rate == pytest.approx(0.5)
+        assert vs.wmsd == pytest.approx(0.6)
+        assert vs.flop_afq == pytest.approx(0.6)
+        assert vs.river_fold_rate == pytest.approx(0.4)
+        # VillainStats 不含 player_type 字段 —— 标签仅在 log 层由
+        # OpponentStats.player_type() 方法直接提供，不经过 v3 context。
+        assert not hasattr(vs, 'player_type')

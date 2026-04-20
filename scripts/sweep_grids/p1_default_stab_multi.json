@@ -1,0 +1,9 @@
+{
+  "configs": [
+    {},
+    {"PF_DEFAULT_STAB_MULTI": "0.3"},
+    {"PF_DEFAULT_STAB_MULTI": "0.5"},
+    {"PF_DEFAULT_STAB_MULTI": "0.7"},
+    {"PF_DEFAULT_STAB_MULTI": "0.9"}
+  ]
+}

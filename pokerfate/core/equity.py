@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import random
-from typing import List
+from typing import List, Optional
 from pokerfate.core.card import Card
 from pokerfate.core.hand_evaluator import HandEvaluator
 
@@ -14,6 +14,8 @@ class EquityCalculator:
         board: List[Card],
         num_opponents: int = 1,
         iterations: int = 5000,
+        seed: Optional[int] = None,
+        rng: Optional[random.Random] = None,
     ) -> float:
         """Estimate win equity via Monte Carlo simulation.
 
@@ -32,16 +34,18 @@ class EquityCalculator:
 
         board_needed = 5 - len(board)
 
+        local_rng = rng if rng is not None else random.Random(seed)
+
         for _ in range(iterations):
-            sample = random.sample(remaining_deck, board_needed + num_opponents * 2)
+            sample = local_rng.sample(remaining_deck, board_needed + num_opponents * 2)
             run_board = board + sample[:board_needed]
             opp_hands = [
                 sample[board_needed + i * 2: board_needed + i * 2 + 2]
                 for i in range(num_opponents)
             ]
 
-            my_score = HandEvaluator.evaluate(hole_cards + run_board)
-            opp_scores = [HandEvaluator.evaluate(h + run_board) for h in opp_hands]
+            my_score = HandEvaluator.eval_int(hole_cards + run_board)
+            opp_scores = [HandEvaluator.eval_int(h + run_board) for h in opp_hands]
 
             best_opp = max(opp_scores)
             if my_score > best_opp:
@@ -50,4 +54,3 @@ class EquityCalculator:
                 ties += 1
 
         return (wins + ties * 0.5) / iterations
-

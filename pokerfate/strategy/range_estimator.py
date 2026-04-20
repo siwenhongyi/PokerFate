@@ -48,6 +48,9 @@ import json
 import os
 from typing import Dict, List
 
+from pokerfate.core.card import Card as _Card
+from pokerfate.core.equity import EquityCalculator
+
 
 # ---------------------------------------------------------------------------
 # Showdown 手牌强度估算
@@ -93,9 +96,6 @@ def _hand_equity_postflop(cards, board, n_iters: int = 300) -> float:
       - AK 翻牌未中高牌 → ~0.55（而非 0.93）
       - T9s 有开口顺子摸牌 → ~0.55（实际权益，含摸牌出路）
     """
-    from pokerfate.core.card import Card as _Card
-    from pokerfate.core.equity import EquityCalculator
-
     def _to_card(c):
         return _Card.from_str(str(c)) if not hasattr(c, 'rank') else c
 

@@ -4,6 +4,38 @@ from pf_intercept import config
 from pf_intercept.bot import BotBridge
 
 
+class TestBotBridgeActionAmounts:
+    class _FakeAPI:
+        def __init__(self):
+            self.events = []
+
+        def notify_action(self, event):
+            self.events.append(event)
+
+    def test_opponent_raise_amount_sent_to_api_as_street_total(self):
+        b = BotBridge()
+        b._api = self._FakeAPI()
+        b._stage = 1
+        b._my_seat = 0
+
+        b._on_action_brc({"seatid": 1, "action_type": 4, "chips": 6, "hand_chips": 194})
+        b._on_action_brc({"seatid": 1, "action_type": 4, "chips": 12, "hand_chips": 182})
+
+        assert b._api.events[0].amount == 6
+        assert b._api.events[1].amount == 18
+
+    def test_opponent_call_amount_sent_to_api_as_added_chips(self):
+        b = BotBridge()
+        b._api = self._FakeAPI()
+        b._stage = 1
+        b._my_seat = 0
+
+        b._on_action_brc({"seatid": 2, "action_type": 3, "chips": 6, "hand_chips": 194})
+
+        assert b._api.events[0].action == "call"
+        assert b._api.events[0].amount == 6
+
+
 class TestBotBridgeProfitLock:
     def _next_hand_dealer(self, bridge: BotBridge, gameid: str = "t_next"):
         """盈利锁仓达标后需再收到一手 DealerInfo 才会注入 LeaveRoomREQ。"""
@@ -52,12 +84,16 @@ class TestBotBridgeProfitLock:
         )
 
     def test_winner_below_threshold_no_leave(self) -> None:
+        """Trigger condition: on-table chips my_final >= threshold.
+        my_final < threshold → no trigger, regardless of PnL history."""
         b = BotBridge(max_auto_rebuy=3)
         b._my_uid = "99"
         self._bootstrap_table(b)
         b._uid_to_seat["99"] = 0
         bb = 2.0
         thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)
+        # Hero starts 200 chips; profit X → my_final = 200 + X.
+        # To stay below threshold, profit = thr - 200 - 1.
         start = 200
         profit = thr_chips - start - 1
         out = b.handle(
@@ -79,6 +115,7 @@ class TestBotBridgeProfitLock:
         b._uid_to_seat["99"] = 0
         bb = 2.0
         thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)
+        # Hero starts 200 chips; profit = thr - 200 → my_final = thr → trigger.
         start = 200
         profit = thr_chips - start
         out = b.handle(
@@ -191,6 +228,105 @@ class TestBotBridgeProfitLock:
         assert qs[1]["byin_chips"] == 200
         assert b._max_auto_rebuy == 3
         assert not b._profit_lock_award_rebuy_after_enter
+
+
+class TestProfitLockDisplayPnL:
+    """Session PnL is display-only. It accumulates at leave-success
+    (+= table_chips) and gets debited on rebuy/reenter (-= 100 BB).
+    The trigger condition is on-table chips (my_final), NOT PnL.
+    """
+
+    def _setup(self, bb: float = 2.0, room_id: int = 20242379):
+        helper = TestBotBridgeProfitLock()
+        b = BotBridge(max_auto_rebuy=5)
+        b._my_uid = "99"
+        helper._bootstrap_table(b, room_id=room_id)
+        b._uid_to_seat["99"] = 0
+        return b
+
+    def test_winning_a_hand_does_not_change_pnl(self):
+        """Per-hand profit does NOT accumulate into _session_pnl_chips.
+        PnL is booked only at leave-success + rebuy/reenter.
+        (Earlier versions tried per-hand delta; rake made it noisy.)"""
+        b = self._setup()
+        assert b._session_pnl_chips == 0.0
+        b.handle(
+            "pb.WinnerRSP",
+            {"winner": [], "profit": [{"uid": "99", "chips": 150}]},
+        )
+        assert b._session_pnl_chips == 0.0
+
+    def test_auto_rebuy_debits_pnl(self):
+        """Hero busts → NoticeReby → auto rebuy path debits 100 BB."""
+        b = self._setup()
+        bb = 2.0
+        rebuy_chips = int(100 * bb)
+        b.handle("pb.NoticeRebyRSP", {"seatid": 0, "reby_left_time": 30})
+        assert b._session_pnl_chips == -rebuy_chips
+
+    def test_full_profit_lock_cycle_books_table_chips_minus_buyin(self):
+        """Full cycle: trigger → leave → reenter.
+        PnL gain = table_chips brought away − 100 BB reenter buyin."""
+        b = self._setup()
+        bb = 2.0
+        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)   # 800 for 400 BB at BB=2
+        # Bring on-table chips to exactly threshold (hero started 200).
+        b.handle(
+            "pb.WinnerRSP",
+            {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
+        )
+        assert b._profit_lock_deferred is not None
+        # Next hand DealerInfo → LeaveRoomREQ
+        TestBotBridgeProfitLock()._next_hand_dealer(b)
+        # LeaveRoomRSP success → PnL += table_chips (= thr_chips)
+        b.handle("pb.LeaveRoomRSP", {"code": 0})
+        assert b._session_pnl_chips == thr_chips
+        # EnterRoomRSP success → buyin deducted on award path (-100 BB)
+        b.handle(
+            "pb.EnterRoomRSP",
+            {
+                "code": 0, "roomid": 20242379, "game_type": 10010101,
+                "room_info": {"bb": 2.0, "sb": 1.0, "lobby_coin": 10100001},
+                "table_status": {"seat": []},
+            },
+        )
+        assert b._session_pnl_chips == thr_chips - int(100 * bb)
+
+    def test_trigger_uses_on_table_not_pnl(self):
+        """Regression: even if PnL is 0 (first-ever trigger), on-table
+        chips above threshold MUST fire. This is the dead-lock regression —
+        earlier code gated on PnL and the first trigger was unreachable."""
+        b = self._setup()
+        bb = 2.0
+        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)
+        assert b._session_pnl_chips == 0.0     # starting state
+        out = b.handle(
+            "pb.WinnerRSP",
+            {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
+        )
+        assert out is None
+        assert b._profit_lock_deferred is not None, (
+            "first-ever trigger MUST fire from on-table chips alone "
+            "(dead-lock regression: trigger that gated on PnL was unreachable)"
+        )
+
+    def test_trigger_ignores_negative_pnl_history(self):
+        """Even after many rebuys (PnL deep negative), if hero's on-table
+        stack crosses threshold in one lucky hand, profit_lock fires."""
+        b = self._setup()
+        bb = 2.0
+        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)
+        # Simulate heavy prior losses (display-only)
+        b._session_pnl_chips = -5 * int(100 * bb)    # -500 BB
+        # But hero's on-table chips just crossed threshold.
+        out = b.handle(
+            "pb.WinnerRSP",
+            {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
+        )
+        assert out is None
+        assert b._profit_lock_deferred is not None, (
+            "PnL is display-only — trigger must still fire on on-table chips"
+        )
 
 
 def test_enter_room_syncs_hand_start_chips_from_table() -> None:

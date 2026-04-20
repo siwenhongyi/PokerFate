@@ -29,6 +29,7 @@ import random
 from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
 from pf_intercept import config
 from pf_intercept.action_types import ACTION_TYPE_TO_EVENT_ACTION, FOLD_ACTION_TYPES
+from pf_intercept.gamedata_fetcher import _load_token, _sync_fetch, seed_from_server
 from pf_notify import notify
 from pf_notify.templates import format_chips_km_signed
 
@@ -164,7 +165,11 @@ class BotBridge:
         self._profit_lock_award_rebuy_after_enter: bool = False
         # 最近一次注入的 EnterRoomREQ 字段（失败时打日志 / 人工对照）
         self._profit_lock_last_enter_fields: dict | None = None
-        # 累计盈亏（本次 proxy 启动起，单位筹码）：锁仓 +stack，自动续入 -续入额
+        # 累计盈亏（本次 proxy 启动起，单位筹码）：
+        #   1) 盈利锁仓离桌成功时：+离桌时桌上筹码
+        #   2) 盈利锁仓重进（100BB）：-100BB
+        #   3) 破产自动续入（100BB）：-100BB
+        # 启动时从 0 开始，不按每手 WinnerRSP.profit 逐手累加。
         self._session_pnl_chips: float = 0.0
         # 从最近一次成功进房 RSP 缓存，供 QuickStart 兜底（与客户端大厅一致）
         self._session_game_type: int = 0
@@ -178,10 +183,6 @@ class BotBridge:
         self._fetched_uids: set[str] = set()
         # 在 API 创建前到达的 server stats，缓存至 _ensure_api 创建后再注入
         self._pending_seeds: dict[int, dict] = {}   # seat_id → raw server data dict
-
-        # 筹码里程碑通知（每次进桌重置）
-
-        self._chips_high_milestones_notified: set[int] = set()
 
         # GameData 无历史数据通知（每次 proxy 进程启动只发一次）
         self._gamedata_no_history_notified: bool = False
@@ -200,6 +201,7 @@ class BotBridge:
         self._my_bet:   int       = 0   # my chips in this street
         self._max_bet:  int       = 0   # highest bet this street
         self._my_chips: int       = 0
+        self._street_bets: dict[int, int] = {}
         self._my_forced_post_this_street: bool = False
         self._folded:   set[int]  = set()
         self._all_seats: list[int] = []
@@ -330,8 +332,6 @@ class BotBridge:
         self._profit_lock_reenter = None
         self._profit_lock_deferred = None
         self._room_escape_reenter = None
-        # 每次进桌重置筹码里程碑
-        self._chips_high_milestones_notified = set()
 
         if "game_type" in msg:
             self._session_game_type = _chip_int(msg.get("game_type"), 0)
@@ -513,9 +513,6 @@ class BotBridge:
         chnl       = config.GAMEDATA_CHNL
         game_type  = config.GAMEDATA_GAME_TYPE
 
-        # Import here to avoid circular import at module load time
-        from pf_intercept.gamedata_fetcher import _load_token, _sync_fetch, seed_from_server
-
         pname = name or self._seat_names.get(seat) or f"seat{seat}"
 
         token = _load_token()
@@ -556,14 +553,12 @@ class BotBridge:
                 name = self._seat_names.get(seat) or f"seat{seat}"
                 log.info(
                     "[gamedata] %s 写入成功 | hands=%d VPIP=%.0f%% PFR=%.0f%% "
-                    "AF=%.2f 3bet=%.0f%% cbet=%.0f%% wtsd=%.0f%%",
+                    "AF=%.2f wtsd=%.0f%%",
                     name,
                     data.get("play_times", 0),
                     stats.vpip * 100,
                     stats.pfr * 100,
                     stats.aggression_factor,
-                    stats.three_bet_pct * 100,
-                    stats.cbet_pct * 100,
                     stats.wtsd * 100,
                 )
         else:
@@ -629,6 +624,7 @@ class BotBridge:
         self._pot     = 0
         self._my_bet  = 0
         self._max_bet = 0
+        self._street_bets = {}
         self._my_forced_post_this_street = False
         self._folded  = set()
         self._announced_stages = set()
@@ -670,7 +666,6 @@ class BotBridge:
         # 必须在 new_hand（内部调用 register_name）之前 pre-register 玩家名，
         # 否则 opponent_model 里 seat 还映射着上一局的旧玩家，seed 会写错位置。
         if self._pending_seeds:
-            from pf_intercept.gamedata_fetcher import seed_from_server
             om = self._api._bot.opponent_model
             # Pre-register：让 seat_id → player 映射与本手一致
             for p in players:
@@ -683,14 +678,12 @@ class BotBridge:
                     pname = seat_to_name.get(seat_id) or f"seat{seat_id}"
                     log.info(
                         "[gamedata] %s 缓存数据写入 | hands=%d VPIP=%.0f%% PFR=%.0f%% "
-                        "AF=%.2f 3bet=%.0f%% cbet=%.0f%% wtsd=%.0f%%",
+                        "AF=%.2f wtsd=%.0f%%",
                         pname,
                         data.get("play_times", 0),
                         stats.vpip * 100,
                         stats.pfr * 100,
                         stats.aggression_factor,
-                        stats.three_bet_pct * 100,
-                        stats.cbet_pct * 100,
                         stats.wtsd * 100,
                     )
             self._pending_seeds.clear()
@@ -709,6 +702,7 @@ class BotBridge:
                 "byin_chips": byin,
                 "uid": deferred.get("uid"),
                 "seat_reserve": seat_reserve,
+                "table_chips": _chip_int(deferred.get("table_chips", 0), 0),
             }
             self._profit_lock_award_rebuy_after_enter = True
             log.warning(
@@ -741,6 +735,7 @@ class BotBridge:
         self._stage   = stage
         self._my_bet  = 0
         self._max_bet = 0
+        self._street_bets = {}
         self._my_forced_post_this_street = False
 
         board_ids = msg.get("board", [])
@@ -768,16 +763,21 @@ class BotBridge:
         if action_type in FOLD_ACTION_TYPES:
             self._folded.add(seat)
 
-        self._pot     += chips
-        if chips > self._max_bet:
-            self._max_bet = chips
+        self._pot += chips
+        prev_street_bet = self._street_bets.get(seat, 0)
+        total_street_bet = prev_street_bet
+        if chips > 0:
+            total_street_bet = prev_street_bet + chips
+            self._street_bets[seat] = total_street_bet
+            if total_street_bet > self._max_bet:
+                self._max_bet = total_street_bet
 
         # Track remaining chips for every seat (used in final_stacks)
         if hand_chips is not None:
             self._seat_chips[seat] = _chip_int(hand_chips)
 
         if seat == self._my_seat:
-            self._my_bet += chips
+            self._my_bet = total_street_bet
             if action_type in (8, 9, 10, 11, 14) and chips > 0:
                 self._my_forced_post_this_street = True
             if hand_chips is not None:
@@ -792,10 +792,16 @@ class BotBridge:
                 log.warning("[BOT] Unknown action_type=%s in ActionBRC; skipped", action_type)
             return
         street     = _STAGE_TO_STREET.get(self._stage, "preflop")
+        if action_str == "raise":
+            api_amount = total_street_bet
+        elif action_str == "call":
+            api_amount = chips
+        else:
+            api_amount = 0
         self._api.notify_action(ActionEvent(
             player_id=seat,
             action=action_str,
-            amount=chips,
+            amount=api_amount,
             street=street,
         ))
 
@@ -938,6 +944,7 @@ class BotBridge:
         # already accounting for uncalled bet returns and rake.
         # This is more accurate than seat_chips + winner.chips.
         final_stacks: dict[int, int] = dict(self._hand_start_chips)
+        my_profit_delta: int = 0
         for p in msg.get("profit", []):
             uid = str(p.get("uid", ""))
             seat = self._uid_to_seat.get(uid, -1)
@@ -946,10 +953,23 @@ class BotBridge:
             profit_chips = _chip_int(p.get("chips", 0), 0)
             if seat in final_stacks:
                 final_stacks[seat] = final_stacks[seat] + profit_chips
+            if self._my_uid and uid == self._my_uid:
+                my_profit_delta = profit_chips
         # Fall back to seat_chips for any seat missing from profit.
         for seat, chips in self._seat_chips.items():
             if seat not in final_stacks:
                 final_stacks[seat] = chips
+
+        # NOTE: per-hand profit_delta is NOT folded into _session_pnl_chips.
+        # _session_pnl_chips is used for notification display only; it
+        # accumulates "on-table chips brought away" at leave-success (see
+        # _on_leave_room_rsp), minus rebuy / reenter buy-ins. The trigger
+        # condition for profit_lock is the on-table stack (my_final),
+        # NOT the session PnL — see _maybe_profit_lock_leave_reenter.
+        # Earlier commits tried per-hand deltas from WinnerRSP.profit;
+        # that conflated rake-sensitive bookkeeping with the trigger, and
+        # broke the "simple" design. The on-table-trigger + table_chips
+        # accumulate design is the intended one.
 
         self._api.hand_over(
             winner_ids=winner_ids,
@@ -957,36 +977,55 @@ class BotBridge:
             final_stacks=final_stacks,
             showdown_hands=self._pending_showdown or None,
             winner_hand_types=self._pending_winner_types or None,
+            my_profit_delta=my_profit_delta,
         )
         self._pending_showdown = {}
         self._pending_winner_types = {}
 
         if self._my_seat is not None:
-            self._check_chip_milestones(int(final_stacks.get(self._my_seat, 0)))
+            self._check_hand_swing(my_profit_delta)
 
         return self._maybe_profit_lock_leave_reenter(final_stacks)
 
-    def _check_chip_milestones(self, my_chips: int) -> None:
-        """每手结束后检测筹码里程碑，首次触发则推送通知。"""
+    def _check_hand_swing(self, profit_delta: int) -> None:
+        """单手盈亏波动：|delta| > 20BB 且 > 本手开始时筹码的 30%，发通知。
+
+        百分比基准是本手 DealerInfo 记录的开局筹码（_hand_start_chips），
+        不是牌局进行中的瞬时筹码（我们会不断下注，基数会变）。
+        """
         bb = float(self._bb or 0.0)
-        if bb <= 0:
+        if bb <= 0 or self._my_seat is None:
             return
-        my_bb = my_chips / bb
-        # 首次突破 200/300/x00bb 整百里程碑
-        milestone = int(my_bb // 100) * 100
-        if milestone >= 200 and milestone not in self._chips_high_milestones_notified:
-            self._chips_high_milestones_notified.add(milestone)
-            notify(
-                "chips_milestone",
-                chips=my_chips,
-                milestone_bb=milestone,
-                big_blind=int(bb),
-            )
+        start_chips = int(self._hand_start_chips.get(self._my_seat, 0))
+        if start_chips <= 0:
+            return
+        abs_delta = abs(int(profit_delta))
+        if abs_delta <= 20 * bb:
+            return
+        if abs_delta * 100 <= 30 * start_chips:
+            return
+        notify(
+            "hand_swing",
+            profit_delta=int(profit_delta),
+            start_chips=start_chips,
+            big_blind=int(bb),
+        )
 
     def _maybe_profit_lock_leave_reenter(
         self, final_stacks: dict[int, int]
     ) -> tuple[str, dict, float] | None:
-        """筹码 >= 阈值则记在 deferred，下一手 DealerInfo 再离桌并以 100BB 进同一房间。"""
+        """桌上筹码 >= 阈值则记在 deferred，下一手 DealerInfo 再离桌并以 100BB 进同一房间.
+
+        设计：
+          触发条件 = 桌上筹码 my_final >= PROFIT_LOCK_BB_THRESHOLD × BB
+            - 对游戏抽水不敏感（桌上多少就带走多少）
+            - 一手一判，不需要累计
+          累计盈亏 _session_pnl_chips（仅用于通知显示）：
+            - 启动时 0；首次进房买入不扣（~100 BB 偏差）
+            - 触发锁仓时先乐观入账 += 当前桌上筹码（用于当次通知可见）
+            - 自动续入 -= 100 BB（NoticeRebyRSP → RebyREQ）
+            - 盈利锁仓重进 -= 100 BB
+        """
         if (
             self._my_seat is None
             or self._profit_lock_reenter is not None
@@ -1015,8 +1054,11 @@ class BotBridge:
             "byin_chips": buyin,
             "uid": self._my_uid,
             "seat_reserve": seat_reserve,
+            # Keep trigger-time table chips for LeaveRoom success logs.
+            "table_chips": my_final,
         }
         self._room_escape_bust_count = 0
+        # 先把触发时桌上筹码计入展示口径，保证当次锁仓通知可见实时盈利。
         self._session_pnl_chips += float(my_final)
         pnl_chips = self._session_pnl_chips
         notify(
@@ -1030,7 +1072,7 @@ class BotBridge:
         )
         pnl_str = format_chips_km_signed(pnl_chips)
         msg = (
-            f"[BOT] 盈利锁仓：本手结束后筹码 {my_final} >= {threshold}（{lock_bb}BB），"
+            f"[BOT] 盈利锁仓：桌上筹码 {my_final} >= {threshold}（{lock_bb}BB），"
             f"将在下一手 DealerInfo 开始后离桌（留座={seat_reserve}）"
             f"再以 {buyin}（100BB）重进房间 {room_id}。累计盈亏 {pnl_str}（筹码）"
         )
@@ -1066,8 +1108,16 @@ class BotBridge:
 
         room_id = _chip_int(pending.get("roomid", 0), 0)
         byin = _chip_int(pending.get("byin_chips", 0), 0)
+        table_chips = _chip_int(pending.get("table_chips", 0), 0)
         uid = pending.get("uid")
         self._profit_lock_reenter = None
+
+        if table_chips > 0:
+            log.warning(
+                "[BOT] 盈利锁仓：离桌成功，累计盈亏 +%d（离桌桌上筹码），当前累计 %s（筹码）",
+                table_chips,
+                format_chips_km_signed(self._session_pnl_chips),
+            )
 
         fields: dict = {"roomid": room_id, "byin_chips": byin}
         if uid:
