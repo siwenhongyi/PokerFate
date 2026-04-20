@@ -3,13 +3,31 @@
 Sign formula (from pf_reverse/output/lua/src/manager/Net.lua, addSaltArgs):
     MD5("random=" + random + "&ts=" + ts + "&salt=" + SALT)
 
-Rate field scaling (empirically verified against sample: play_times=777):
+Rate field scaling (all /10000 to a [0, 1] percentage):
     pool_entry_rate           — raw VPIP count (treated as raw integer count)
     add_before_flipping_rate  — raw PFR count  (treated as raw integer count)
-    three_bet_rate  / 10000   → 3bet fraction per hand   (476  → 4.76%)
-    show_hand_rate  / 10000   → showdown fraction per VPIP hand  (4375 → 43.75%)
-    active_rate     / 1000    → aggression factor ratio   (1700 → 1.7)
-    c_bete_rate     / 10000   → cbet fraction per cbet opportunity (2727 → 27.27%)
+    three_bet_rate  / 10000   → 3bet fraction per hand        (476  → 4.76%)
+    show_hand_rate  / 10000   → showdown fraction per VPIP    (4375 → 43.75%)
+    active_rate     / 10000   → aggression frequency (AFq, pct; 1700 → 17%)
+    c_bete_rate     / 10000   → cbet fraction per opp          (2727 → 27.27%)
+
+字段使用现状（2026-04-22 清理）：
+    ✅ 使用：  play_times / pool_entry_rate / add_before_flipping_rate /
+              show_hand_rate / active_rate
+    ⛔ 解析但不写入：three_bet_rate / c_bete_rate
+       保留解析仅为前向兼容（服务端 JSON 结构不变），未来若接入决策层可
+       恢复写入到 stats。three_bet 的问题是 per-hand 与本地 per-opportunity
+       语义不符；cbet 此前没有下游决策路径。
+
+⚠️ active_rate note (fixed 2026-04-22):
+  The earlier `/1000` interpretation treated active_rate as an AF *ratio*
+  (bets/passive). The server actually stores it as a percentage — matches
+  the in-game UI display which clamps at 100%. This is AFq (bets/all-actions),
+  not AF. We convert AFq → AF ratio here so downstream `aggression_factor`
+  (which expects a ratio) gets a compatible value:
+        AF = AFq / (1 - AFq)
+  Examples:  AFq 17% → AF 0.20   |  AFq 50% → AF 1.0
+             AFq 67% → AF 2.0    |  AFq 80% → AF 4.0
 """
 
 from __future__ import annotations
@@ -100,11 +118,12 @@ def seed_from_server(stats: OpponentStats, data: dict) -> bool:
       vpip_count  ← pool_entry_rate
       pfr_count   ← add_before_flipping_rate
 
-    存服务端先验比率（server_ 前缀；使用时优先服务端，样本充足后切换到实测）：
-      server_af_prior   ← active_rate / 1000
-      server_3bet_prior ← three_bet_rate / 10000
-      server_cbet_prior ← c_bete_rate / 10000
+    存服务端先验比率（server_ 前缀；server > 0 时永久用服务端）：
+      server_af_prior   ← AFq (active_rate / 10000) 再转 AF 比率
       server_wtsd_prior ← show_hand_rate / 10000
+
+    解析但不写入（前向兼容保留）：
+      three_bet_rate / c_bete_rate  — 参见文件顶 docstring 说明
 
     不覆盖（服务端无此数据）：
       fold_to_cbet / fold_to_3bet / river_* / flop_* / turn_*
@@ -115,23 +134,32 @@ def seed_from_server(stats: OpponentStats, data: dict) -> bool:
     if play_times <= 0:
         return False
 
-    # ── 所有 rate 字段均 ×10000（pool_entry_rate=9600 > play_times=25 实测证明）──
+    # ── 所有 rate 字段均 /10000（pool_entry_rate=9600 > play_times=25 实测证明）──
     vpip = max(0.0, min(1.0, (data.get("pool_entry_rate")           or 0) / 10000))
     pfr  = max(0.0, min(vpip, (data.get("add_before_flipping_rate") or 0) / 10000))
-    af        = max(0.01, (data.get("active_rate")    or 0) / 1000)
-    three_bet = max(0.0, min(1.0, (data.get("three_bet_rate") or 0) / 10000))
-    cbet      = max(0.0, min(1.0, (data.get("c_bete_rate")    or 0) / 10000))
-    wtsd      = max(0.0, min(1.0, (data.get("show_hand_rate") or 0) / 10000))
+    wtsd = max(0.0, min(1.0, (data.get("show_hand_rate") or 0) / 10000))
+
+    # active_rate 是百分比（AFq = bets/(bets+passive), 见文件顶 docstring）。
+    # 转换成 AF 比率（bets/passive），与下游 `aggression_factor` property 语义对齐：
+    #   AFq = 0.5 → AF = 1.0 (均衡)    AFq = 0.8 → AF = 4.0 (疯狂)
+    # 上限截到 95% 避免除 0 爆炸值。
+    afq = max(0.0, min(0.95, (data.get("active_rate") or 0) / 10000))
+    af  = max(0.01, afq / max(1e-3, 1.0 - afq))
+
+    # 以下两个字段依然解析（不让 JSON schema 调用失败）但不使用：
+    #   three_bet_rate: per-hand 语义，与本地 per-opportunity 不兼容
+    #   c_bete_rate:    无下游决策路径
+    # 保留变量以便未来接入，当前版本只读不写。
+    _parsed_three_bet_rate_unused = (data.get("three_bet_rate") or 0) / 10000
+    _parsed_c_bete_rate_unused    = (data.get("c_bete_rate")    or 0) / 10000
 
     # ── 直接替换：hands_seen 为原始次数，vpip/pfr 由 rate × play_times 精确还原 ─
     stats.hands_seen = play_times
     stats.vpip_count = round(vpip * play_times)
     stats.pfr_count  = round(pfr  * play_times)
 
-    # ── 存服务端先验比率：使用时优先服务端，样本充足后切换到实测 ──────────
+    # ── 存服务端先验比率（server > 0 时永久覆盖本地）─────────────────────
     stats.server_af_prior   = af
-    stats.server_3bet_prior = three_bet
-    stats.server_cbet_prior = cbet
     stats.server_wtsd_prior = wtsd
 
     return True

@@ -19,6 +19,7 @@
 
 import sys
 import json
+import importlib
 from pathlib import Path
 
 # 把项目根加入 path，确保能 import pf_intercept
@@ -27,6 +28,13 @@ sys.path.insert(0, str(_ROOT))
 
 from pf_intercept.framing import FrameBuffer
 from pf_intercept import codec
+
+try:
+    HTTPFlow = importlib.import_module("mitmproxy.http").HTTPFlow
+    FlowReader = importlib.import_module("mitmproxy.io").FlowReader
+except ImportError:
+    HTTPFlow = None
+    FlowReader = None
 
 
 def _direction(from_client: bool) -> str:
@@ -45,10 +53,7 @@ def _print_decoded(obj: dict) -> None:
 
 
 def analyze(mitm_path: str) -> None:
-    try:
-        from mitmproxy.io import FlowReader
-        from mitmproxy.http import HTTPFlow
-    except ImportError:
+    if FlowReader is None or HTTPFlow is None:
         print("ERROR: 需要安装 mitmproxy:  pip install mitmproxy")
         sys.exit(1)
 

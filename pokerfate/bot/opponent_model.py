@@ -11,7 +11,7 @@ OpponentModel 支持将对手数据持久化到 JSON 文件。
     ...（对战过程中 model 自动更新）
     model.save("opponents.json")                  # 保存到文件
 
-player_type 标签（hands_seen >= 20；按下列顺序先匹配先胜出）
+player_type 标签（hands_seen >= MIN_HANDS_FOR_CLASSIFICATION；按下列顺序先匹配先胜出）
 ----------------------------------------------------------------
 nit — VPIP < 18% 且 PFR < 14%。
 
@@ -31,8 +31,14 @@ unknown — 以上皆不满足。
 from __future__ import annotations
 import json
 import os
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 from typing import Dict, List, Optional
+
+from pokerfate.core.config import MIN_HANDS_FOR_CLASSIFICATION
+
+
+def _clip(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
 
 
 @dataclass
@@ -47,8 +53,6 @@ class OpponentStats:
     fold_to_3bet_opps: int = 0
 
     # Postflop
-    cbet_count: int = 0
-    cbet_opportunities: int = 0
     fold_to_cbet_count: int = 0
     fold_to_cbet_opps: int = 0
 
@@ -58,11 +62,14 @@ class OpponentStats:
     call_count: int = 0
     check_count: int = 0
     fold_count: int = 0
-    # 服务端 30 天历史先验值（直接存比率，不猜分母）
-    # session 样本充足后切换到实测值（见对应 property）
-    server_af_prior: float = 0.0      # active_rate/1000
-    server_cbet_prior: float = 0.0    # c_bete_rate/10000
-    server_3bet_prior: float = 0.0    # three_bet_rate/10000
+
+    # 服务端 30 天历史先验（play_times 级别样本，远大于本地 session）。
+    # 对 AF / WTSD 两项：server 有值时**永久覆盖**本地（见 property）。
+    # 3bet / cbet 服务端数据已作废：
+    #   - three_bet_rate：per-hand 语义，与本地 per-opportunity 不同，不再接入
+    #   - c_bete_rate：cbet_pct 字段在决策层没有读取路径，彻底删除
+    # gamedata_fetcher 仍然解析这两个 JSON 字段（前向兼容），但不写入 stats。
+    server_af_prior: float = 0.0      # AF ratio (converted from active_rate/10000)
     server_wtsd_prior: float = 0.0    # show_hand_rate/10000（showdowns per VPIP hand）
 
     # River
@@ -71,6 +78,8 @@ class OpponentStats:
     river_call_count: int = 0
     river_check_count: int = 0   # checks on river (not facing a bet)
     river_action_count: int = 0
+    river_facing_bet_fold_count: int = 0
+    river_facing_bet_opps: int = 0
 
     # Street-level aggression (flop / turn; river already above)
     flop_bet_count: int = 0
@@ -98,8 +107,11 @@ class OpponentStats:
 
     @property
     def three_bet_pct(self) -> float:
-        if self.three_bet_opportunities < 15 and self.server_3bet_prior > 0:
-            return self.server_3bet_prior
+        """Per-opportunity 3bet frequency (本地实测 only).
+
+        服务端 three_bet_rate 是 per-hand 语义（3bet 次数 / 总手数），
+        与本地 per-opportunity 语义不兼容，直接作废。
+        """
         return self.three_bet_count / max(self.three_bet_opportunities, 1)
 
     @property
@@ -107,26 +119,25 @@ class OpponentStats:
         return self.fold_to_3bet_count / max(self.fold_to_3bet_opps, 1)
 
     @property
-    def cbet_pct(self) -> float:
-        if self.cbet_opportunities < 10 and self.server_cbet_prior > 0:
-            return self.server_cbet_prior
-        return self.cbet_count / max(self.cbet_opportunities, 1)
-
-    @property
     def fold_to_cbet(self) -> float:
         return self.fold_to_cbet_count / max(self.fold_to_cbet_opps, 1)
 
     @property
     def aggression_factor(self) -> float:
-        session_actions = self.call_count + self.check_count + self.bet_count + self.raise_count
-        if session_actions < 20 and self.server_af_prior > 0:
+        """AF = (bets+raises) / passive。服务端数据在就永久用服务端。
+
+        30 天服务端样本 ≫ 本地 session 实测。以前用 "session_actions<20" 切换
+        存在严重问题：对手坐 5-7 手就跨过阈值，1000 手服务端数据被丢弃。
+        现在规则简化为：server_af_prior > 0 → 永久服务端；否则本地 fallback。
+        """
+        if self.server_af_prior > 0:
             return self.server_af_prior
         passive = max(self.call_count + self.check_count, 1)
         return (self.bet_count + self.raise_count) / passive
 
     @property
     def river_fold_rate(self) -> float:
-        return self.river_fold_count / max(self.river_action_count, 1)
+        return self.river_facing_bet_fold_count / max(self.river_facing_bet_opps, 1)
 
     @property
     def river_bet_frequency(self) -> float:
@@ -152,8 +163,12 @@ class OpponentStats:
 
     @property
     def wtsd(self) -> float:
-        """Went to showdown: fraction of flop-seen hands that reached showdown."""
-        if self.flop_seen_count < 15 and self.server_wtsd_prior > 0:
+        """Went to showdown: fraction of flop-seen hands that reached showdown.
+
+        服务端数据在就永久用服务端（同 aggression_factor 的逻辑）。
+        服务端分母是 VPIP hands，本地分母是 flop_seen_count，差距 5-10% 可忽略。
+        """
+        if self.server_wtsd_prior > 0:
             return self.server_wtsd_prior
         return self.showdown_count / max(self.flop_seen_count, 1)
 
@@ -174,7 +189,7 @@ class OpponentStats:
         """Player Weakness Index：连续型可剥削分（参考业界 PWI 公式）。
 
         分值越高 = 越好打；负分 = reg/nit 对你不利。
-        只有 hands_seen >= 20 时才有意义，样本不足返回 0。
+        只有 hands_seen >= MIN_HANDS_FOR_CLASSIFICATION 时才有意义，样本不足返回 0。
 
         公式来源：行业标准指标加权组合
           (VPIP% - 26) × 1.0    — 超过正常水平的松牌程度
@@ -190,7 +205,7 @@ class OpponentStats:
           reg (VPIP25%, AF2.5):          ~-5
           nit (VPIP15%, AF2.0):         ~-15
         """
-        if self.hands_seen < 20:
+        if self.hands_seen < MIN_HANDS_FOR_CLASSIFICATION:
             return 0.0
         v = self.vpip * 100
         p = self.pfr * 100
@@ -206,7 +221,7 @@ class OpponentStats:
 
     def player_type(self) -> str:
         """Classify opponent into a rough player type. 命中条件见本文件模块 docstring。"""
-        if self.hands_seen < 20:
+        if self.hands_seen < MIN_HANDS_FOR_CLASSIFICATION:
             return 'unknown'
         vpip = self.vpip
         pfr = self.pfr
@@ -257,6 +272,35 @@ class OpponentStats:
             f"AF={self.aggression_factor:.1f}, "
             f"fold_cbet={self.fold_to_cbet:.0%}, "
             f"hands={self.hands_seen})"
+        )
+
+    def to_villain_stats(self):
+        """Project this OpponentStats into a v3 VillainStats.
+
+        所有字段原样传过去（含样本量字段 fold_to_cbet_opps /
+        river_action_count / bet_win_count / hands_seen），让 exploit.py 的
+        _value_lean / _bluff_lean / _trap_lean 能真正通过所有路驱动。
+        """
+        # Import lazily to avoid circular import at module load.
+        from pokerfate.strategy.v3.context import VillainStats
+        return VillainStats(
+            vpip=self.vpip,
+            pfr=self.pfr,
+            af=self.aggression_factor,
+            fold_to_cbet=self.fold_to_cbet,
+            fold_to_cbet_opps=self.fold_to_cbet_opps,
+            fold_to_3bet=self.fold_to_3bet,
+            wtsd=self.wtsd,
+            wmsd=self.wmsd,
+            bluff_win_rate=self.bluff_win_rate,
+            bet_win_count=self.bet_win_count,
+            flop_afq=self.flop_afq,
+            turn_afq=self.turn_afq,
+            river_afq=self.river_afq,
+            river_fold_rate=self.river_fold_rate,
+            river_bet_frequency=self.river_bet_frequency,
+            river_action_count=self.river_facing_bet_opps,
+            hands_seen=self.hands_seen,
         )
 
 
@@ -358,17 +402,17 @@ class OpponentModel:
         if folded:
             s.fold_to_3bet_count += 1
 
-    def record_cbet_opportunity(self, player_id: int, did_cbet: bool):
-        s = self.get(player_id)
-        s.cbet_opportunities += 1
-        if did_cbet:
-            s.cbet_count += 1
-
     def record_fold_to_cbet(self, player_id: int, folded: bool):
         s = self.get(player_id)
         s.fold_to_cbet_opps += 1
         if folded:
             s.fold_to_cbet_count += 1
+
+    def record_river_facing_bet(self, player_id: int, folded: bool):
+        s = self.get(player_id)
+        s.river_facing_bet_opps += 1
+        if folded:
+            s.river_facing_bet_fold_count += 1
 
     def record_action(self, player_id: int, action_type: str, street: str = ''):
         s = self.get(player_id)
@@ -439,7 +483,7 @@ class OpponentModel:
 
     def river_fold_rate(self, player_id: int) -> float:
         s = self.get(player_id)
-        if s.river_action_count < 5:
+        if s.river_facing_bet_opps < 5:
             return 0.40
         return s.river_fold_rate
 
@@ -463,144 +507,198 @@ class OpponentModel:
     def exploit_adjustments(self, player_id: int) -> dict:
         """Return suggested exploitative adjustments vs this opponent.
 
-        两层结构：
-          第一层 — 方向（bluff/value/trap）：由 player_type + AF + WTSD 决定
-          第二层 — 强度（aggression_scale）：由 PWI 连续分决定，线性映射到 [0.3, 1.5]
+        **完全指标驱动**：不再按 player_type 标签做决策分支（whale/fish/
+        calling_station/maniac/nit 只做 log 展示用途）。
 
-        aggression_scale 含义：
-          1.0 = GTO 基准（无调整）
-          < 1.0 = 减少下注频率（对手不弃牌，只做价值）
-          > 1.0 = 增加下注频率（对手容易弃牌，多诈唬）
+        输出字段全部是连续 scale 或由单一指标阈值派生的 boolean 信号，
+        下游（poker_bot / api）消费时只读连续数值，不读字符串枚举。
+
+        输出字段：
+          value_ag_scale      ∈ [0.30, 1.00]  价值下注频率乘子
+          bluff_ag_scale      ∈ [0.08, 1.15]  诈唬下注频率乘子
+          value_sizing_scale  ∈ [1.00, 1.35]  价值注码放大倍率
+          aggression_scale    ∈ [0.35, 1.30]  PWI 驱动整体攻击性
+          river_bluff_likely  bool            对手河牌偏向诈唬（提升跟注意愿）
+          river_bet_rare      bool            对手河牌下注罕见（下注=强手）
+          flop_float_favorable bool           对手翻牌激进但可浮牌剥削
+          turn_bluff_then_fold bool           对手常 turn 诈唬 river 放弃
+
+        连续化要点：
+          1. sticky 对手（whale/station/fish）原来由 ptype 枚举触发
+             bluff_freq='none'。现在由 fold_to_cbet/wtsd/river_fold_rate
+             三路指标共同下压 bluff_ag_scale 至 0.08-0.15；同时 sticky
+             越深 value_sizing_scale 越大（连续插值而非 0/1.30 二档）。
+          2. maniac 的慢打（原 value_ag_scale=0.45 硬值）现在由 AF + bwr
+             驱动：AF 2.5→0.75, AF 3.0→0.60, AF 3.5+bwr 0.40→0.45。
+          3. nit 的多诈唬（原 'high'）由 fold_to_cbet 本身驱动 bluff_ag
+             上升：fold_to_cbet 0.55→0.85, 0.65→1.10。
         """
         s = self.get(player_id)
         adj = {}
 
-        if s.hands_seen < 20:
+        if s.hands_seen < MIN_HANDS_FOR_CLASSIFICATION:
             return adj
 
-        ptype = s.player_type()
         pwi = s.pwi()
+        af = s.aggression_factor
 
-        # ── 第一层：方向信号（基于类型 + AF + WTSD）──────────────────────────
-
-        if ptype == 'whale':
-            # 极度被动：跟注率~80%，弃牌率~20%
-            # → 价值下注极赚（高频），诈唬-EV（极低频）
-            adj['bluff_freq'] = 'none'
-            adj['cbet_freq'] = 'value_only'
-            adj['value_sizing'] = 'large'
-            adj['value_ag_scale'] = 0.80    # P21: 价值手 80% 下注
-            adj['bluff_ag_scale'] = 0.10    # P21: 几乎不诈唬
-
-        elif ptype == 'calling_station':
-            # 跟注站：跟注率~75%，弃牌率~25%
-            # → 价值下注很赚，诈唬仍然-EV
-            adj['bluff_freq'] = 'none'
-            adj['cbet_freq'] = 'value_only'
-            adj['value_sizing'] = 'large'
-            adj['value_ag_scale'] = 0.75    # P21
-            adj['bluff_ag_scale'] = 0.12    # P21
-
-        elif ptype == 'maniac':
-            # 疯狂加注者：会反加，下注给他加注机会
-            # → 慢打引诱先下注再 check-raise，诈唬会被反加
-            adj['bluff_freq'] = 'low'
-            adj['check_raise_freq'] = 'high'
-            adj['trap_freq'] = 'high'
-            adj['value_ag_scale'] = 0.45    # P21: 多慢打
-            adj['bluff_ag_scale'] = 0.15    # P21: 不和疯子对着诈唬
-
-        elif ptype == 'fish':
-            # 普通鱼：跟注率~65%，弃牌率~35%
-            # → 价值下注赚，半诈唬勉强+EV
-            adj['bluff_freq'] = 'low'
-            adj['value_sizing'] = 'large'
-            adj['value_ag_scale'] = 0.70    # P21
-            adj['bluff_ag_scale'] = 0.25    # P21
-
-        elif ptype == 'nit':
-            # 超紧：弃牌率~65%，跟注=强牌
-            # → 薄价值危险，诈唬很赚
-            adj['cbet_freq'] = 'high'
-            adj['bluff_freq'] = 'high'
-            adj['value_ag_scale'] = 0.50    # P21: 薄价值小心
-            adj['bluff_ag_scale'] = 0.70    # P21: 多诈唬
-
-        # ── 第二层：强度信号（PWI 连续映射）────────────────────────────────
-        # PWI > 60: 极度可剥削 (whale/super fish) → aggression_scale 低至 0.3
-        # PWI 30-60: 明显可剥削 (standard fish)  → aggression_scale 0.5-0.7
-        # PWI 0-30: 轻微可剥削                   → aggression_scale 0.8-1.0
-        # PWI < 0: reg/nit，可增加诈唬频率       → aggression_scale 1.0-1.4
-        #
-        # 对被动型（bluff_freq=none）：scale 控制价值下注频率（低 = 更纯价值）
-        # 对激进型（bluff_freq=high）：scale 控制诈唬频率（高 = 更多诈唬）
-        if pwi >= 60:
-            adj['aggression_scale'] = 0.35   # whale: 极低，纯价值
-        elif pwi >= 40:
-            adj['aggression_scale'] = 0.55   # strong calling station
-        elif pwi >= 20:
-            adj['aggression_scale'] = 0.75   # fish
-        elif pwi >= 0:
-            adj['aggression_scale'] = 0.90   # 轻微可剥削
-        elif pwi >= -10:
-            adj['aggression_scale'] = 1.10   # reg 偏紧
-        else:
-            adj['aggression_scale'] = 1.30   # nit，增加诈唬
-
-        # ── 细粒度指标覆盖（有足够样本时，实测数据优先于类型推断）──────────
-
-        # fold_to_cbet 实测 > 60%：无论类型如何，c-bet 有利可图
-        if s.fold_to_cbet > 0.60 and s.fold_to_cbet_opps >= 5:
-            adj['cbet_freq'] = 'high'
-            adj.pop('bluff_freq', None)   # 取消 none/low 限制
-
-        # fold_to_3bet 实测 > 65%：3bet 挤压有价值
-        if s.fold_to_3bet > 0.65 and s.fold_to_3bet_opps >= 5:
-            adj['three_bet_freq'] = 'high'
-
-        # 河牌弃牌率高：河牌诈唬有利可图
-        if s.river_fold_rate > 0.55 and s.river_action_count >= 5:
-            adj['river_bluff_freq'] = 'high'
-
-        # WTSD：有服务端先验或本地 >= 15 手翻牌时使用
+        # ──────────────────────────────────────────────────────────────
+        # 连续指数：作为下游连续 scale 的共享输入
+        # ──────────────────────────────────────────────────────────────
+        # sticky_score ∈ [0, 1]：对手"不弃牌"强度。三路独立指标各贡献 1/3，
+        # 缺样本的路贡献 0（不惩罚），最终归一化。
+        sticky_parts = []
+        if s.fold_to_cbet_opps >= 5:
+            sticky_parts.append(_clip((0.50 - s.fold_to_cbet) / 0.35, 0.0, 1.0))
         if s.flop_seen_count >= 15 or s.server_wtsd_prior > 0:
-            if s.wtsd > 0.38:
-                # 频繁摊牌 = 不弃牌 → 强化禁止诈唬
-                adj['bluff_freq'] = 'none'
-                adj['value_sizing'] = 'large'
-            elif s.wtsd < 0.20:
-                # 极少摊牌 = 容易弃牌 → 可以诈唬
-                adj.setdefault('bluff_freq', 'high')
+            sticky_parts.append(_clip((s.wtsd - 0.22) / 0.22, 0.0, 1.0))
+        if s.river_facing_bet_opps >= 5:
+            sticky_parts.append(_clip((0.45 - s.river_fold_rate) / 0.30, 0.0, 1.0))
+        sticky_score = sum(sticky_parts) / len(sticky_parts) if sticky_parts else 0.0
 
-        # WMSD + WTSD 联合信号（样本 >= 8 次摊牌）
-        if s.showdown_count >= 8:
-            if s.wmsd < 0.45 and s.wtsd > 0.35:
-                # 频繁摊牌但经常输 → 只用强手来摊，加大价值注码
-                adj['bluff_freq'] = 'none'
-                adj['value_sizing'] = 'large'
-            elif s.wmsd > 0.62 and s.wtsd < 0.25:
-                # 只用强手摊牌 → 可以诈唬迫使弃牌
-                adj.setdefault('bluff_freq', 'high')
+        # fold_lean_score ∈ [0, 1]：对手"易弃牌"强度（与 sticky 对称）。
+        fold_lean_parts = []
+        if s.fold_to_cbet_opps >= 5:
+            fold_lean_parts.append(_clip((s.fold_to_cbet - 0.45) / 0.25, 0.0, 1.0))
+        if s.river_facing_bet_opps >= 5:
+            fold_lean_parts.append(_clip((s.river_fold_rate - 0.45) / 0.25, 0.0, 1.0))
+        if s.flop_seen_count >= 15 or s.server_wtsd_prior > 0:
+            fold_lean_parts.append(_clip((0.25 - s.wtsd) / 0.15, 0.0, 1.0))
+        fold_lean_score = sum(fold_lean_parts) / len(fold_lean_parts) if fold_lean_parts else 0.0
 
-        # bluff_win_rate：有下注行为时以弱牌赢的比例（>= 5手样本）
+        # ──────────────────────────────────────────────────────────────
+        # value_ag_scale：价值下注频率乘子
+        # ──────────────────────────────────────────────────────────────
+        #   sticky 对手跟注多 → value_ag 高（1.00）
+        #   fold-lean 对手常弃 → value_ag 低（0.50，薄价值风险高）
+        #   maniac（AF 高 + bwr 高）→ value_ag 进一步下压（慢打让他诈唬）
+        # action_samples：对手出过的**主动行为**样本量。
+        # 稀疏样本时（如 15 手里只 fold 过 preflop 从未进入 postflop 动作），
+        # AF 分母几乎是 1、分子是 0 → AF=0，原代码会当成"极度被动"给高 value_ag。
+        # 必须要求足够主动行为样本才启用 AF 兜底。
+        action_samples = (s.call_count + s.check_count
+                          + s.bet_count + s.raise_count)
+        if s.fold_to_cbet_opps >= 5:
+            base_val = _clip(1.0 - s.fold_to_cbet * 0.6, 0.50, 1.00)
+        elif action_samples >= 10:
+            af_norm = _clip((af - 1.0) / 2.0, 0.0, 1.0)
+            base_val = _clip(0.85 - af_norm * 0.30, 0.50, 1.00)
+        else:
+            base_val = 0.85  # baseline，样本不足不推断激进度
+        # sticky 加成（最高 +0.08）—— 非常粘的对手即使 fold_to_cbet 未必极低，
+        # wtsd/river_fold_rate 证据也能拉高 value_ag（摊牌怪要多收价值）。
+        base_val = _clip(base_val + sticky_score * 0.08, 0.50, 1.00)
+        # maniac 慢打覆盖：AF+bwr 驱动下压（替代旧 ptype=='maniac'→0.45 硬值）
+        maniac_pressure = 0.0
+        if s.hands_seen >= 20:
+            maniac_pressure += max(0.0, (af - 2.0) * 0.25)       # AF 2.5→0.125, 3.0→0.25
         if s.bet_win_count >= 5:
-            if s.bluff_win_rate > 0.40:
-                # 超过40%的赢都是高牌/一对 → 频繁诈唬得手，可以更多跟注
-                adj['river_bluff_likely'] = True
-                adj.setdefault('bluff_freq', 'none')   # 对他诈唬无意义，他会跟
-            elif s.bluff_win_rate < 0.15:
-                # 几乎从不用弱牌赢 → 下注时通常有货，收紧跟注
-                adj['river_bet_rare'] = True
+            maniac_pressure += max(0.0, (s.bluff_win_rate - 0.20) * 1.5)  # bwr 0.40→0.30
+        maniac_pressure = min(1.0, maniac_pressure)
+        if maniac_pressure > 0:
+            # 插值到最低 0.40 —— maniac_pressure=1 时 value_ag=0.40（比原 0.45 略激进）
+            base_val = min(base_val, 1.0 - maniac_pressure * 0.60)
+            base_val = max(base_val, 0.40)
+        adj['value_ag_scale'] = base_val
 
-        # 河牌下注频率信号
+        # ──────────────────────────────────────────────────────────────
+        # bluff_ag_scale：诈唬下注频率乘子
+        # ──────────────────────────────────────────────────────────────
+        #   fold_to_cbet 实测样本 ≥ 5 时主驱；否则用 AF 兜底；sticky 进一步下压，
+        #   fold-lean 进一步上提。最低 0.08（原 'bluff_freq=none' 等价效果），
+        #   最高 1.15（原 'bluff_freq=high' + fold_to_cbet 高的等价效果）。
+        if s.fold_to_cbet_opps >= 5:
+            # fold_to_cbet 0.20→0.40, 0.40→0.80, 0.60→1.10, 0.75→1.15(cap)
+            base_bluff = _clip(s.fold_to_cbet / 0.50, 0.25, 1.15)
+        elif action_samples >= 10:
+            # af 高 = 激进 = 我方诈唬易被反加 → 低；af 低 = 被动 = 但爱跟 → 也低
+            base_bluff = _clip(0.55 - (af - 1.5) * 0.20, 0.15, 1.10)
+        else:
+            base_bluff = 0.55  # baseline
+        # sticky 下压（可至 0.08）：sticky_score=1 时从 base 减 0.40，但不低于 0.08。
+        # 替代原 ptype=='whale/fish/station' → bluff_freq='none' 的语义。
+        base_bluff = max(0.08, base_bluff - sticky_score * 0.40)
+        # wtsd 极端高（>0.38）额外压制，等价原"禁止诈唬"
+        if (s.flop_seen_count >= 15 or s.server_wtsd_prior > 0) and s.wtsd > 0.38:
+            base_bluff = min(base_bluff, 0.12)
+        if s.showdown_count >= 8 and s.wmsd < 0.45 and s.wtsd > 0.35:
+            # 频繁摊牌但常输 → 只用强手摊 → 对他诈唬无意义
+            base_bluff = min(base_bluff, 0.10)
+        if s.bet_win_count >= 5 and s.bluff_win_rate > 0.40:
+            # 他诈唬多但能赢 → 经常跟 → 我方诈唬回应效率低
+            base_bluff = min(base_bluff, 0.12)
+        # fold-lean 上提（等价原 ptype=='nit' → bluff_freq='high'）
+        base_bluff = _clip(base_bluff + fold_lean_score * 0.20, 0.08, 1.15)
+        adj['bluff_ag_scale'] = base_bluff
+
+        # ──────────────────────────────────────────────────────────────
+        # value_sizing_scale：价值注码放大倍率
+        # ──────────────────────────────────────────────────────────────
+        #   驱动：sticky（不弃牌+爱摊牌）→ 加大价值注码。
+        #   上限从旧 1.30 提到 1.35（sticky_score=1 + WMSD 证据可加满）。
+        fold_w = _clip((0.45 - s.fold_to_cbet) / 0.30, 0.0, 1.0) \
+                 if s.fold_to_cbet_opps >= 5 else 0.5
+        wtsd_w = _clip((s.wtsd - 0.20) / 0.20, 0.0, 1.0) \
+                 if (s.flop_seen_count >= 15 or s.server_wtsd_prior > 0) else 0.5
+        sizing = 1.0 + 0.30 * fold_w * wtsd_w
+        # WTSD 极端高加满（原代码 hardcoded 1.30，现在保留但在新上限范围内）
+        if (s.flop_seen_count >= 15 or s.server_wtsd_prior > 0) and s.wtsd > 0.38:
+            sizing = max(sizing, 1.30)
+        if s.showdown_count >= 8 and s.wmsd < 0.45 and s.wtsd > 0.35:
+            sizing = max(sizing, 1.32)
+        adj['value_sizing_scale'] = min(1.35, sizing)
+
+        # ──────────────────────────────────────────────────────────────
+        # aggression_scale：PWI 连续映射（原分档保留，驱动指标本来就连续）
+        # ──────────────────────────────────────────────────────────────
+        if pwi >= 60:
+            adj['aggression_scale'] = 0.35
+        elif pwi >= 40:
+            adj['aggression_scale'] = 0.55
+        elif pwi >= 20:
+            adj['aggression_scale'] = 0.75
+        elif pwi >= 0:
+            adj['aggression_scale'] = 0.90
+        elif pwi >= -10:
+            adj['aggression_scale'] = 1.10
+        else:
+            adj['aggression_scale'] = 1.30
+
+        # ──────────────────────────────────────────────────────────────
+        # Boolean 派生信号（单一指标阈值 → 语义 flag，用于 log 与特定策略钩子）
+        # 这些不是"玩家类型标签"，而是从连续指标派生的具体行为模式 flag。
+        # ──────────────────────────────────────────────────────────────
+        # river_bluff_likely 闸门（2026-04-23 升级）：被动对手的"弱牌赢底"或
+        # "河牌高频下注"往往是误判牌力 / 误下注，不是真诈唬。用街位级 AFq 证据
+        # 把"真的会在晚街打出下注序列"过滤出来。turn_afq/river_afq 是局部频率，
+        # 不依赖 af ratio 归一化，server 先验/本地计算两条路径都成立。
+        # 样本门槛同时提高（5→10 / 8→12）降低小样本假阳性。
+        turn_samples_for_gate = s.turn_bet_count + s.turn_passive_count
+        bluff_capable = (
+            turn_samples_for_gate >= 10
+            and s.turn_afq >= 0.45
+            and s.river_afq >= 0.30
+        )
+
+        if s.bet_win_count >= 10 and bluff_capable:
+            if s.bluff_win_rate > 0.40:
+                adj['river_bluff_likely'] = True
+            elif s.bluff_win_rate < 0.15:
+                adj['river_bet_rare'] = True
+        elif s.bet_win_count >= 10 and s.bluff_win_rate < 0.15:
+            # river_bet_rare 反向不要求 bluff_capable——低 bluff_win_rate 本身是
+            # "下注就是真"的可信信号，被动对手更适合这个反向 flag。
+            adj['river_bet_rare'] = True
+
         river_bf_samples = s.river_bet_count + s.river_check_count
-        if river_bf_samples >= 8:
+        if river_bf_samples >= 12 and bluff_capable:
             if s.river_bet_frequency > 0.55:
                 adj['river_bluff_likely'] = True
             elif s.river_bet_frequency < 0.20:
                 adj['river_bet_rare'] = True
+        elif river_bf_samples >= 12 and s.river_bet_frequency < 0.20:
+            adj['river_bet_rare'] = True
 
-        # 各街 AFq 信号
         flop_samples = s.flop_bet_count + s.flop_passive_count
         turn_samples = s.turn_bet_count + s.turn_passive_count
         river_afq_samples = s.river_bet_count + s.river_call_count + s.river_check_count
@@ -612,8 +710,11 @@ class OpponentModel:
             if s.turn_afq > 0.50 and s.river_afq < 0.25:
                 adj['turn_bluff_then_fold'] = True
 
-        if flop_samples >= 10 and turn_samples >= 8 and river_afq_samples >= 8:
-            if s.river_afq >= s.flop_afq * 0.90:
+        # 第三处 river_bluff_likely：提高 river_afq_samples 门槛 + 要求
+        # bluff_capable（flop-afq-持平-river 的 barrel-through 模式只有在
+        # 晚街真的打出高 AFq 时才算诈唬证据）。
+        if flop_samples >= 10 and turn_samples >= 12 and river_afq_samples >= 12:
+            if s.river_afq >= s.flop_afq * 0.90 and bluff_capable:
                 adj['river_bluff_likely'] = True
 
         return adj
@@ -633,7 +734,7 @@ class OpponentModel:
         showdown_data : dict, optional
             Showdown calibrator data to embed in the same file under the
             ``"showdown"`` key. Pass ``calibrator.to_dict()`` here so both
-            datasets stay in one file and share the same encryption path.
+            datasets stay in one local JSON file.
         """
         data = {
             "stats": {
@@ -658,6 +759,12 @@ class OpponentModel:
 
         If the file does not exist, returns a fresh empty model
         (safe to call unconditionally at startup).
+
+        Unknown fields in persisted JSON are silently ignored — this allows
+        reading files written by older code versions that contained fields
+        we've since removed (e.g. cbet_count / server_cbet_prior /
+        server_3bet_prior). Without this filter, `OpponentStats(**dict)`
+        throws TypeError on stale files.
         """
         model = cls()
         if not os.path.exists(filepath):
@@ -670,12 +777,19 @@ class OpponentModel:
             data = json.loads(content)
         except json.JSONDecodeError:
             return model
+
+        valid_keys = {f.name for f in fields(OpponentStats)}
+
+        def _build(stats_dict: dict) -> OpponentStats:
+            return OpponentStats(**{k: v for k, v in stats_dict.items()
+                                     if k in valid_keys})
+
         for pid_str, stats_dict in data.get("stats", {}).items():
-            model._stats[int(pid_str)] = OpponentStats(**stats_dict)
+            model._stats[int(pid_str)] = _build(stats_dict)
         model._id_to_name = {int(k): v for k, v in data.get("id_to_name", {}).items()}
         model._name_to_id = data.get("name_to_id", {})
         for name, stats_dict in data.get("name_archive", {}).items():
-            model._name_archive[name] = OpponentStats(**stats_dict)
+            model._name_archive[name] = _build(stats_dict)
         model._showdown_data = data.get("showdown", {})
         return model
 
@@ -692,8 +806,6 @@ class OpponentModel:
                 s.three_bet_opportunities += o.three_bet_opportunities
                 s.fold_to_3bet_count += o.fold_to_3bet_count
                 s.fold_to_3bet_opps += o.fold_to_3bet_opps
-                s.cbet_count += o.cbet_count
-                s.cbet_opportunities += o.cbet_opportunities
                 s.fold_to_cbet_count += o.fold_to_cbet_count
                 s.fold_to_cbet_opps += o.fold_to_cbet_opps
                 s.bet_count += o.bet_count
@@ -706,6 +818,8 @@ class OpponentModel:
                 s.river_call_count += o.river_call_count
                 s.river_check_count += o.river_check_count
                 s.river_action_count += o.river_action_count
+                s.river_facing_bet_fold_count += o.river_facing_bet_fold_count
+                s.river_facing_bet_opps += o.river_facing_bet_opps
                 s.flop_bet_count += o.flop_bet_count
                 s.flop_passive_count += o.flop_passive_count
                 s.turn_bet_count += o.turn_bet_count

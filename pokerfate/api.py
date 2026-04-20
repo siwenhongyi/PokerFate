@@ -26,6 +26,7 @@
 """
 
 from __future__ import annotations
+import hashlib
 import os
 import time
 import traceback
@@ -37,6 +38,7 @@ from pathlib import Path
 _UNSET = object()  # sentinel for log_file default
 
 from pokerfate.core.card import Card
+from pokerfate.core.config import MIN_HANDS_FOR_CLASSIFICATION
 from pokerfate.core.game_state import GameState, Player, Street, Action, ActionType
 from pokerfate.core.hand_evaluator import HandEvaluator, HandRank
 from pokerfate.bot.poker_bot import PokerBot
@@ -81,7 +83,10 @@ class ActionEvent:
     """An action taken by any player (including opponents)."""
     player_id: int
     action: str           # "fold" | "check" | "call" | "raise"
-    amount: float = 0.0   # For raise: total bet size. 0 for others.
+    # raise/bet: total bet size this street. call: chips added by this call.
+    # For backwards compatibility, call amount=0 means "infer call amount from
+    # the current highest street bet".
+    amount: float = 0.0
     street: str = ""
 
 
@@ -156,11 +161,12 @@ class PokerFateAPI:
         big_blind: float = 2.0,
         small_blind: float = 1.0,
         equity_iterations: int = 800,
-        aggression: float = 1.0,
         autosave_path: Optional[str] = _UNSET,
         log_file: Optional[str] = _UNSET,
         verbose: bool = False,
         use_range_equity: bool = True,
+        enable_showdown_calibration: bool = True,
+        decision_seed: Optional[int] = None,
     ):
         """
         Parameters
@@ -173,8 +179,6 @@ class PokerFateAPI:
             Table small blind size.
         equity_iterations : int
             Monte Carlo iterations for equity (higher = more accurate but slower).
-        aggression : float
-            Postflop aggression multiplier. 1.0 = GTO baseline.
         autosave_path : str or None
             Path to JSON file for opponent model persistence.
             After every hand_over() call, the model is automatically saved here.
@@ -190,6 +194,8 @@ class PokerFateAPI:
         self.big_blind = big_blind
         self.small_blind = small_blind
         self.verbose = verbose
+        self._decision_seed_base = decision_seed
+        self._decision_index = 0
         _in_test = bool(os.environ.get("PYTEST_CURRENT_TEST"))
         if autosave_path is _UNSET:
             autosave_path = None if _in_test else _DEFAULT_OPPONENTS
@@ -202,7 +208,6 @@ class PokerFateAPI:
         self._bot = PokerBot(
             name="PokerFate",
             equity_iterations=equity_iterations,
-            aggression=aggression,
             use_range_equity=use_range_equity,
         )
 
@@ -220,6 +225,13 @@ class PokerFateAPI:
                     if v2_data:
                         self._bot._showdown_learner = ShowdownLearner.from_dict(v2_data)
                         self._bot._action_model.showdown_learner = self._bot._showdown_learner
+                    # 缺陷 C: Hero equity meta-calibrator 持久化
+                    heq_data = showdown_raw.get('hero_eq_calibrator')
+                    if heq_data:
+                        from pokerfate.strategy.range_v2.hero_eq_calibrator import (
+                            HeroEquityCalibrator,
+                        )
+                        self._bot._hero_eq_calibrator = HeroEquityCalibrator.from_dict(heq_data)
                 else:
                     # EQR: load ShowdownCalibrator
                     self._bot.range_estimator.showdown_calibrator = ShowdownCalibrator.from_dict(showdown_raw)
@@ -236,6 +248,36 @@ class PokerFateAPI:
         self._action_history: List[tuple] = []
         self._dealer_id: int = 0
         self._hand_number: int = 0
+        self._street_base_pot: float = 0.0
+        self._street_base_street: str = "preflop"
+        self._street_contribs: Dict[int, float] = {}
+
+        # ── 2026-04-23: Showdown calibration ──
+        # 每次 tracker range 调整时记录预测，手牌结束时对比摊牌实际，写入
+        # pokerfate.log JSON 流供 offline 校准分析。仅 range_v2 路径启用。
+        if self._bot.use_range_equity and enable_showdown_calibration:
+            from pokerfate.calibration import ShowdownCalibrator
+            self._calibrator = ShowdownCalibrator(logger=self._log)
+            # 挂到 tracker：每次权重更新会回调 calibrator.record_prediction
+            tracker = self._bot._range_tracker
+            def _prediction_hook_filtered(**kwargs):
+                # 不记录 hero 自己的 calibration 预测；只看对手
+                pid = kwargs.get("player_id")
+                if pid == self.my_player_id:
+                    return
+                # tracker._weights 里包括 hero 自己，active_weights 把 hero
+                # 也塞进去会让"多人池 hero eq"错误地把 hero 当成对手，并且
+                # 摊牌校准时 hero 不在 _shown_cards → 永远算不出"实全场"。
+                aw = kwargs.get("active_weights")
+                if aw:
+                    kwargs["active_weights"] = {
+                        p: w for p, w in aw.items() if p != self.my_player_id
+                    }
+                self._calibrator.record_prediction(**kwargs)
+            tracker._prediction_hook = _prediction_hook_filtered
+            tracker._name_resolver = lambda pid: self._session_names.get(pid, str(pid))
+        else:
+            self._calibrator = None
 
     def set_table_blinds(self, big_blind: float, small_blind: float) -> None:
         """Update blinds after EnterRoomRSP (new table); refreshes unknown-stack fallback."""
@@ -276,9 +318,25 @@ class PokerFateAPI:
         self._hole_cards = []
         self._board = []
         self._action_history = []
+        self._decision_index = 0
         self._my_stack_start: float = 0.0  # set after resolving stacks below
 
-        self._last_known_pot: float = 0.0
+        # Start showdown calibration for this hand
+        if self._calibrator is not None:
+            self._calibrator.start_hand(self._hand_number)
+
+        # Preflop 初始 pot ≈ SB + BB（盲注已投入）。以前设 0 会让 notify_action
+        # 里 `bet_ratio = bet_amount / pot` 在第一次 preflop open 时恒为 0，
+        # 吞掉 open 尺寸信号（问题 2 的 deep open-shove range 窄化依赖此信号）。
+        self._last_known_pot: float = self.small_blind + self.big_blind
+        self._street_base_pot = self._last_known_pot
+        self._street_base_street = "preflop"
+        self._street_contribs = {}
+        # Per-hand position map: player_id → position string (UTG/MP/CO/...).
+        # Populated from PlayerInfo.position at hand start; consumed by
+        # Range V2 tracker.reset_hand and per-action observe_action as
+        # `opp_position`. Fresh every hand (positions rotate).
+        self._hand_positions: Dict[int, str] = {}
         self._players = []
         for p in players:
             # Resolve stack: explicit > session history > default
@@ -287,6 +345,11 @@ class PokerFateAPI:
                 stack = self._session_stacks.get(p.player_id, self._default_stack)
 
             self._session_names[p.player_id] = p.name
+            # None → '' so downstream treats as unknown; '' triggers the
+            # CO-neutral fallback in tracker.reset_hand. (Never look this
+            # value up with dict.get(k, default) — the entry exists as '',
+            # so the default never fires. Use `value or 'CO'` instead.)
+            self._hand_positions[p.player_id] = p.position or ''
             if p.stack is not None:
                 self._session_stacks[p.player_id] = p.stack
 
@@ -306,7 +369,15 @@ class PokerFateAPI:
 
         all_ids = [p.player_id for p in players if p.player_id != self.my_player_id]
         player_names = {p.player_id: p.name for p in players if p.player_id != self.my_player_id}
-        self._bot.new_hand(all_ids, player_names=player_names)
+        player_positions = {
+            p.player_id: (p.position or '')
+            for p in players if p.player_id != self.my_player_id
+        }
+        self._bot.new_hand(
+            all_ids,
+            player_names=player_names,
+            player_positions=player_positions,
+        )
 
         _TYPE_CN = {
             "nit":             "紧手",
@@ -318,14 +389,14 @@ class PokerFateAPI:
             "unknown":         "未知",
         }
 
-        # 与 OpponentStats.player_type() 一致：hands_seen < 20 时统计不可靠，只标「数据不足N手」
-        _MIN_HANDS_FOR_TYPE = 20
+        # 与 OpponentStats.player_type() 共用 core.config.MIN_HANDS_FOR_CLASSIFICATION；
+        # 样本不足时只标「数据不足N手」，不用已失真的 player_type。
 
         def _player_type_tag(player_id: int) -> str:
             if player_id == self.my_player_id:
                 return ""
             s = self._bot.opponent_model.get(player_id)
-            if s.hands_seen < _MIN_HANDS_FOR_TYPE:
+            if s.hands_seen < MIN_HANDS_FOR_CLASSIFICATION:
                 return f"数据不足{s.hands_seen}手"
             return _TYPE_CN.get(s.player_type(), s.player_type())
 
@@ -379,6 +450,9 @@ class PokerFateAPI:
         """
         new_cards = [Card.from_str(c) for c in cards]
         self._board.extend(new_cards)
+        for p in self._players:
+            p.current_bet = 0.0
+        self._street_contribs = {}
 
         # Range V2: update board for observe_action
         self._bot.update_board(self._board)
@@ -386,6 +460,8 @@ class PokerFateAPI:
         display_pot = pot if pot is not None else self._last_known_pot
         if pot is not None:
             self._last_known_pot = pot
+        self._street_base_pot = display_pot
+        self._street_base_street = street.lower()
         self._log.board(street, cards, pot=display_pot)
 
         # Track flop_seen for WTSD denominator: all non-hero, non-folded players
@@ -409,29 +485,77 @@ class PokerFateAPI:
         if event.player_id == self.my_player_id:
             return  # Don't track our own actions for modeling
 
+        action_name = event.action.lower()
+        street_key = event.street.lower()
+        player = self._get_player(event.player_id)
+        street_max_before = self._current_street_max_bet()
+        amount_added, total_bet_after = self._normalize_action_amounts(
+            event, player, street_max_before,
+        )
+
         # Compute spot types BEFORE appending current action to history
         is_3bet_spot = self._detect_3bet_spot(event)
+        is_fold_to_3bet_spot = self._detect_fold_to_3bet_spot(event)
         is_cbet_spot = self._detect_cbet_spot(event)
+        is_facing_bet_spot = self._detect_facing_bet_spot(event)
 
-        action = self._parse_action(event)
+        # Determine if this raise is over someone else's bet (vs first-bet).
+        # MUST be computed BEFORE appending the current event — if we count
+        # AFTER the append, this event's own raise is always in the count,
+        # so `count > 0` is trivially true and `is_raise_over` becomes
+        # permanently True, silently disabling the `_ACT_BET` pattern branch
+        # and breaking triple_barrel detection. (Original P0 bug from review.)
+        is_raise_over = False
+        if action_name == 'raise':
+            prior_raises_this_street = sum(
+                1 for pid, a, s in self._action_history
+                if s == street_key and a.action_type == ActionType.RAISE
+            )
+            is_raise_over = prior_raises_this_street > 0
+
+        normalized_action_amount = (
+            total_bet_after if action_name == 'raise' else amount_added
+        )
+        action = self._parse_action(event, normalized_action_amount)
         # Include street so GameState can find last aggressor on this street (full-hand history).
-        self._action_history.append((event.player_id, action, event.street.lower()))
+        self._action_history.append((event.player_id, action, street_key))
 
-        # Update player state
-        player = self._get_player(event.player_id)
-        if player and event.action == "fold":
-            player.is_folded = True
-        if player and event.action in ("call", "raise"):
-            cost = event.amount - (player.current_bet if event.action == "raise" else 0)
-            player.stack = max(0, player.stack - max(cost, event.amount))
+        # Feed into opponent model with correct spot context.
+        # bet_ratio for sizing_adj: 也给 raise_over 喂一个可用的 ratio。
+        # 2026-04-25 修复：之前 raise_over 传 0 → SIZING_CATEGORY_ADJ 直接跳过 →
+        # tracker 对 whale 4.2x pot check-raise 和 0.5x bet 的桶间 likelihood 比例
+        # 完全一致。这导致 S2·20 / S3·57 等 hero 面对 whale 大 raise 仍认为
+        # villain range 有大量 air 的灾难。
+        #
+        # 估算：pot_at_action = _last_known_pot + 本街已累积 current_bet。
+        # 对首次下注这个就是 _last_known_pot。对 raise_over，我们加上桌上其他
+        # 玩家本街已投入的 current_bet 估计当前池子。
+        opp_pos = self._hand_positions.get(event.player_id) or ''
+        base_pot = getattr(self, '_street_base_pot', self._last_known_pot)
+        pot_at_action = base_pot + self._observed_street_contrib_total()
+        pot_for_model = max(1.0, pot_at_action)
+        bet_amount_for_model = (
+            total_bet_after if action_name == 'raise' else amount_added
+        )
 
-        # Feed into opponent model with correct spot context
+        # Update player state after deriving all pre-action diagnostics.
+        self._apply_player_action(
+            player, action_name, amount_added, total_bet_after,
+        )
+        self._record_street_contribution(event.player_id, amount_added)
+
         self._bot.observe_action(
             player_id=event.player_id,
             action=action,
             street=event.street,
             is_cbet_spot=is_cbet_spot,
             is_3bet_spot=is_3bet_spot,
+            is_fold_to_3bet_spot=is_fold_to_3bet_spot,
+            is_facing_bet_spot=is_facing_bet_spot,
+            bet_amount=bet_amount_for_model,
+            pot=pot_for_model,
+            opp_position=opp_pos,
+            is_raise_over=is_raise_over,
         )
 
         pobj = self._get_player(event.player_id)
@@ -439,34 +563,43 @@ class PokerFateAPI:
 
         # Gather extra context for enriched opponent action log
         opp_stats = self._bot.opponent_model.get(event.player_id)
-        ptype = opp_stats.player_type() if opp_stats.hands_seen >= 20 else ''
+        ptype = opp_stats.player_type() if opp_stats.hands_seen >= MIN_HANDS_FOR_CLASSIFICATION else ''
         pwi = opp_stats.pwi()
 
         range_pct = 0.0
         bucket_dist = None
+        vs_hero = None
         if self._bot.use_range_equity:
             range_pct = self._bot._range_tracker.get_effective_range_pct(event.player_id)
             if self._board:
                 bucket_dist = self._bot._range_tracker.get_bucket_distribution(
                     event.player_id, self._board,
                 )
+                # River HU: compute hero-relative distribution so log shows
+                # "beats hero %" instead of only the overloaded NUTS bucket
+                # (see get_vs_hero_dist docstring — fix for problem 8a).
+                if self._hole_cards and len(self._board) >= 5:
+                    vs_hero = self._bot._range_tracker.get_vs_hero_dist(
+                        event.player_id, self._board, self._hole_cards,
+                    )
 
         # to_call for the BOT (how much we'd need to call if it's our turn next)
         to_call = 0.0
-        if event.action == 'raise':
+        if action_name == 'raise':
             my_player = self._get_my_player()
             if my_player:
                 my_current_bet = getattr(my_player, 'current_bet', 0.0) or 0.0
-                to_call = max(0.0, event.amount - my_current_bet)
+                to_call = max(0.0, total_bet_after - my_current_bet)
 
         self._log.opponent_action(
-            name, event.action, event.amount, event.street,
+            name, event.action, normalized_action_amount, event.street,
             big_blind=self.big_blind,
             pot=self._last_known_pot,
             player_type=ptype,
             pwi=pwi,
             range_pct=range_pct,
             bucket_dist=bucket_dist,
+            vs_hero=vs_hero,
             to_call=to_call,
         )
 
@@ -577,6 +710,19 @@ class PokerFateAPI:
             The bot's chosen action and amount.
         """
         self._last_known_pot = pot
+        street_key = street.lower()
+        if getattr(self, '_street_base_street', street_key) != street_key:
+            for p in self._players:
+                p.current_bet = 0.0
+            self._street_contribs = {}
+            self._street_base_street = street_key
+        my_live = self._get_my_player()
+        if my_live:
+            my_live.stack = float(my_stack)
+            my_live.current_bet = float(my_current_bet_this_street)
+        self._street_base_pot = max(
+            0.0, float(pot) - self._observed_street_contrib_total(),
+        )
         # Build a minimal GameState for the bot
         gs = self._build_game_state(
             street=street,
@@ -586,14 +732,55 @@ class PokerFateAPI:
             my_current_bet_this_street=my_current_bet_this_street,
         )
 
+        self._bot.set_next_decision_seed(
+            self._next_decision_seed(
+                street=street_key,
+                pot=pot,
+                current_bet=current_bet,
+                to_call=to_call,
+                my_stack=my_stack,
+            )
+        )
         t0 = time.perf_counter()
         action = self._bot.decide(gs, self.my_player_id, is_bb_option=is_bb_option)
         elapsed_ms = (time.perf_counter() - t0) * 1000
         decision = self._to_decision(action)
 
+        # Record bot's own action into _action_history so that
+        # _classify_preflop_action's total-raise counter sees a correct
+        # bet level (e.g. "bot open + villain re-raise" → 2 raises → 3bet
+        # facing bot, not mis-classified as 'open'). notify_action skips
+        # my_player_id, so we must append manually here.
+        self._action_history.append(
+            (self.my_player_id, action, street.lower())
+        )
+
         my_name = self._session_names.get(self.my_player_id, "PokerFate")
         # 用实际需补差额，避免 BB 已 post 时 to_call 被误传为盲注金额
         effective_to_call = max(0.0, current_bet - my_current_bet_this_street)
+        # 短码时 hero 跟不到对手满注，日志显示应按实际能付金额封顶
+        # （不影响决策 — should_call 内部已根据短码 effective pot_odds 自行判断；
+        # 仅修日志误导：原来显示 "跟注 825000" 但 hero 只有 100000，实际 all-in）
+        effective_to_call = min(effective_to_call, float(my_stack))
+        if my_live:
+            if decision.action == 'raise':
+                total_bet_after = max(
+                    float(decision.amount or 0.0),
+                    float(my_current_bet_this_street),
+                )
+                amount_added = max(
+                    0.0, total_bet_after - float(my_current_bet_this_street),
+                )
+            elif decision.action == 'call':
+                amount_added = effective_to_call
+                total_bet_after = float(my_current_bet_this_street) + amount_added
+            else:
+                amount_added = 0.0
+                total_bet_after = float(my_current_bet_this_street)
+            self._apply_player_action(
+                my_live, decision.action, amount_added, total_bet_after,
+            )
+            self._record_street_contribution(self.my_player_id, amount_added)
         self._log.decision(
             action=decision.action,
             amount=decision.amount,
@@ -611,6 +798,35 @@ class PokerFateAPI:
         )
 
         return decision
+
+    def _next_decision_seed(
+        self,
+        *,
+        street: str,
+        pot: float,
+        current_bet: float,
+        to_call: float,
+        my_stack: float,
+    ) -> Optional[int]:
+        if self._decision_seed_base is None:
+            return None
+        self._decision_index += 1
+        payload = "|".join([
+            str(int(self._decision_seed_base)),
+            str(self._hand_number),
+            str(self._decision_index),
+            street,
+            ",".join(str(c) for c in self._hole_cards),
+            ",".join(str(c) for c in self._board),
+            f"{pot:.2f}",
+            f"{current_bet:.2f}",
+            f"{to_call:.2f}",
+            f"{my_stack:.2f}",
+            str(len(self._action_history)),
+        ])
+        digest = hashlib.blake2b(payload.encode("utf-8"), digest_size=4).digest()
+        seed = int.from_bytes(digest, "big")
+        return seed or 1
 
     # ------------------------------------------------------------------
     # Hand result (optional, for tracking)
@@ -656,6 +872,7 @@ class PokerFateAPI:
         final_stacks: Optional[Dict[int, float]] = None,
         showdown_hands: Optional[Dict[int, List[str]]] = None,
         winner_hand_types: Optional[Dict[int, int]] = None,
+        my_profit_delta: Optional[float] = None,
     ) -> None:
         """Notify the bot that the hand is over.
 
@@ -675,6 +892,12 @@ class PokerFateAPI:
         winner_hand_types : dict, optional
             {player_id: server_type_int} — server-provided hand type for winners
             (from WinnerRSP.winner.type). Takes priority over local evaluation.
+        my_profit_delta : float, optional
+            Hero's net gain/loss this hand, as reported by the server
+            (WinnerRSP.profit). Preferred over computing from stack diff,
+            because stack diff is wrong on profit_lock leave-reenter
+            cycles (stack drops to 100 BB re-buy while the hand itself
+            may have been a normal win/loss/chop).
         """
         if final_stacks:
             for pid, stack in final_stacks.items():
@@ -687,7 +910,17 @@ class PokerFateAPI:
             self._session_names.get(wid, str(wid)) for wid in winner_ids
         ))
         my_final = (final_stacks or {}).get(self.my_player_id)
-        my_delta = (my_final - self._my_stack_start) if my_final is not None else 0.0
+        # Prefer server-reported per-hand profit delta (WinnerRSP.profit):
+        # it is the authoritative hand outcome, already net of rake / uncalled
+        # bets, and — critically — is correct even on profit_lock leave-reenter
+        # cycles where my_final reflects the 100 BB rebuy rather than the hand.
+        # Fall back to stack diff for callers that don't plumb it through (tests).
+        if my_profit_delta is not None:
+            my_delta = float(my_profit_delta)
+        elif my_final is not None:
+            my_delta = my_final - self._my_stack_start
+        else:
+            my_delta = 0.0
         self._session_delta += my_delta
 
         # showdown_hands: pid→cards 转成 name→cards（用于 JSON 日志）
@@ -792,6 +1025,22 @@ class PokerFateAPI:
         if self._bot.use_range_equity:
             # ── Range V2 showdown processing ──
             if showdown_hands:
+                # 先把所有亮牌 villain 的底牌预先喂给 calibrator，这样每个
+                # villain 的 ⚖ 输出里"多人池实际胜率"能引用其他 villain 的
+                # 真手牌（多人池模拟需要所有活跃对手的牌）。
+                if self._calibrator is not None:
+                    for pid, cards in showdown_hands.items():
+                        if pid == self.my_player_id:
+                            continue
+                        hole_pre = [Card.from_str(str(c)) if isinstance(c, str) else c
+                                    for c in cards[:2]]
+                        self._calibrator.record_actual(
+                            player_id=pid,
+                            actual_cards=hole_pre,
+                            final_board=self._board,
+                            hero_cards=self._hole_cards,
+                        )
+
                 for pid, cards in showdown_hands.items():
                     if pid == self.my_player_id:
                         continue
@@ -826,6 +1075,36 @@ class PokerFateAPI:
                             cards=card_strs,
                             streets=street_entries,
                         )
+                    # 紧跟 ◈ 学习 之后输出该 villain 的所有 ⚖ 校准记录
+                    if self._calibrator is not None:
+                        results = self._calibrator.emit_records_for(
+                            player_id=pid,
+                            hero_cards=self._hole_cards,
+                            final_board=self._board,
+                        )
+                        # 缺陷 C: 同时把 (hero_bucket, street, n_opp,
+                        # action_ctx, predicted_multi, actual_multi) 喂给
+                        # hero 自校准器。action_ctx 从 snapshot 的 trigger
+                        # 推导——separating passive / bet / raise，避免不同
+                        # 压缩档位的 bias 互相稀释。
+                        from pokerfate.strategy.range_v2.hero_eq_calibrator import (
+                            classify_action_ctx_from_trigger,
+                        )
+                        for r in results:
+                            rec = r.record
+                            if (rec.predicted_hero_eq_multi is None
+                                    or r.actual_hero_eq_street_multi is None
+                                    or not rec.hero_bucket):
+                                continue
+                            action_ctx = classify_action_ctx_from_trigger(rec.trigger)
+                            self._bot._hero_eq_calibrator.record(
+                                bucket=rec.hero_bucket,
+                                street=rec.street,
+                                num_opp=len(rec.active_player_ids),
+                                predicted=rec.predicted_hero_eq_multi,
+                                actual=r.actual_hero_eq_street_multi,
+                                action_ctx=action_ctx,
+                            )
         else:
             # ── EQR showdown processing ──
             # Showdown calibration: update range estimator with revealed hands + log
@@ -862,6 +1141,7 @@ class PokerFateAPI:
             if self._bot.use_range_equity:
                 sd_data = {
                     'range_v2_learner': self._bot._showdown_learner.to_dict(),
+                    'hero_eq_calibrator': self._bot._hero_eq_calibrator.to_dict(),
                 }
             else:
                 sd_data = self._bot.range_estimator.showdown_calibrator.to_dict()
@@ -912,7 +1192,7 @@ class PokerFateAPI:
     def _maybe_log_opponent_pattern(self, player_id: int, name: str):
         """Surface significant opponent patterns to the log (throttled)."""
         s = self._bot.opponent_model.get(player_id)
-        if s.hands_seen < 20:
+        if s.hands_seen < MIN_HANDS_FOR_CLASSIFICATION:
             return
         adj = self._bot.opponent_model.exploit_adjustments(player_id)
         if not adj:
@@ -924,12 +1204,21 @@ class PokerFateAPI:
             return
         setattr(self, key, self._hand_number)
 
-        if "cbet_freq" in adj and s.fold_to_cbet_opps >= 5:
+        # adj 只含连续 scale（不再有 cbet_freq / bluff_freq 离散字段）。
+        # 从 scale 反推展示标签：bluff_ag_scale 是决策层用的连续值，
+        # 在这里派生成 log 的一行"模式摘要"。
+        bluff_ag = adj.get("bluff_ag_scale", 0.55)
+        value_ag = adj.get("value_ag_scale", 1.0)
+        if s.fold_to_cbet_opps >= 5 and (bluff_ag >= 0.85 or bluff_ag <= 0.18):
+            tag = "high_fold" if bluff_ag >= 0.85 else "value_only"
             self._log.opponent_pattern(name, "fold_to_cbet",
-                                       s.fold_to_cbet, adj["cbet_freq"])
-        elif "bluff_freq" in adj:
+                                       s.fold_to_cbet, tag)
+        elif bluff_ag <= 0.22:
             self._log.opponent_pattern(name, "player_type",
-                                       s.vpip, adj.get("bluff_freq", ""))
+                                       s.vpip, f"bluff_ag×{bluff_ag:.2f}")
+        elif bluff_ag >= 0.90:
+            self._log.opponent_pattern(name, "player_type",
+                                       s.vpip, f"bluff_ag×{bluff_ag:.2f}")
 
         # ── 新信号：面对对手下注时的读牌信号 ──
         river_bf_samples = s.river_bet_count + s.river_check_count
@@ -953,8 +1242,9 @@ class PokerFateAPI:
                 s.turn_afq, "equity+5%@turn")
 
         # ── 新信号：我方主动决策时的手牌质量信号 ──
+        # 原本用 bluff_freq=='none' 离散判断；改为 bluff_ag_scale 连续阈值。
         if s.showdown_count >= 8:
-            if adj.get("value_sizing") == "large" and adj.get("bluff_freq") == "none":
+            if adj.get("value_sizing_scale", 1.0) >= 1.10 and adj.get("bluff_ag_scale", 0.55) <= 0.18:
                 self._log.opponent_pattern(
                     name, "calling_station",
                     s.wmsd, f"wtsd={s.wtsd:.0%} thin_value+no_bluff")
@@ -975,24 +1265,98 @@ class PokerFateAPI:
         """
         if event.street.lower() != "preflop":
             return False
+        if event.action.lower() not in ("fold", "call", "raise"):
+            return False
+        player_already_raised = any(
+            len(item) >= 3
+            and item[2] == "preflop"
+            and item[0] == event.player_id
+            and item[1].action_type == ActionType.RAISE
+            for item in self._action_history
+        )
+        if player_already_raised:
+            return False
         raises_by_others = [
             item[0] for item in self._action_history
-            if item[1].action_type == ActionType.RAISE and item[0] != event.player_id
+            if len(item) >= 3
+            and item[2] == "preflop"
+            and item[1].action_type == ActionType.RAISE
+            and item[0] != event.player_id
         ]
         return len(raises_by_others) == 1
 
-    def _detect_cbet_spot(self, event: ActionEvent) -> bool:
-        """True if the bot made the last bet on this street and the opponent is responding.
-
-        Uses action history BEFORE the current event is appended.
-        """
-        if event.street.lower() == "preflop":
+    def _detect_fold_to_3bet_spot(self, event: ActionEvent) -> bool:
+        """True when the original opener is responding to a preflop 3bet."""
+        if event.street.lower() != "preflop":
             return False
+        if event.action.lower() not in ("fold", "call", "raise"):
+            return False
+        raises = [
+            item for item in self._action_history
+            if len(item) >= 3
+            and item[2] == "preflop"
+            and item[1].action_type == ActionType.RAISE
+        ]
+        if len(raises) != 2:
+            return False
+        last_raiser = raises[-1][0]
+        if last_raiser == event.player_id:
+            return False
+        return any(pid == event.player_id for pid, _, _ in raises[:-1])
+
+    def _detect_cbet_spot(self, event: ActionEvent) -> bool:
+        """True if villain is responding to a real continuation bet.
+
+        Requires hero to be the previous street's last aggressor and the
+        current street's first and latest bettor. This prevents turn/river
+        actions from inheriting an unrelated old raise.
+        """
+        street = event.street.lower()
+        if street == "preflop":
+            return False
+        raises_this_street = [
+            item for item in self._action_history
+            if len(item) >= 3
+            and item[2] == street
+            and item[1].action_type == ActionType.RAISE
+        ]
+        if not raises_this_street:
+            return False
+        if raises_this_street[0][0] != self.my_player_id:
+            return False
+        if raises_this_street[-1][0] != self.my_player_id:
+            return False
+        prev_street = {
+            "flop": "preflop",
+            "turn": "flop",
+            "river": "turn",
+        }.get(street)
+        if prev_street is None:
+            return False
+        return self._last_aggressor_on_street(prev_street) == self.my_player_id
+
+    def _detect_facing_bet_spot(self, event: ActionEvent) -> bool:
+        """True if this action responds to an existing bet on this street."""
+        if event.action.lower() not in ("fold", "call", "raise"):
+            return False
+        street = event.street.lower()
         for item in reversed(self._action_history):
+            if len(item) < 3 or item[2] != street:
+                continue
             pid, act = item[0], item[1]
             if act.action_type == ActionType.RAISE:
-                return pid == self.my_player_id
+                return pid != event.player_id
         return False
+
+    def _last_aggressor_on_street(self, street: str) -> Optional[int]:
+        sk = street.lower()
+        for item in reversed(self._action_history):
+            if len(item) < 3 or item[2] != sk:
+                continue
+            pid, act = item[0], item[1]
+            if act.action_type == ActionType.RAISE:
+                return pid
+        return None
 
     def _build_game_state(
         self,
@@ -1051,7 +1415,7 @@ class PokerFateAPI:
         )
         return gs
 
-    def _parse_action(self, event: ActionEvent) -> Action:
+    def _parse_action(self, event: ActionEvent, amount: Optional[float] = None) -> Action:
         action_map = {
             "fold":  ActionType.FOLD,
             "check": ActionType.CHECK,
@@ -1059,7 +1423,87 @@ class PokerFateAPI:
             "raise": ActionType.RAISE,
         }
         atype = action_map.get(event.action.lower(), ActionType.FOLD)
-        return Action(atype, event.amount)
+        return Action(atype, event.amount if amount is None else amount)
+
+    def _current_street_max_bet(self) -> float:
+        return max(
+            (getattr(p, 'current_bet', 0.0) or 0.0 for p in self._players),
+            default=0.0,
+        )
+
+    def _observed_street_contrib_total(self) -> float:
+        return sum(float(v or 0.0) for v in self._street_contribs.values())
+
+    def _record_street_contribution(self, player_id: int, amount_added: float) -> None:
+        if amount_added <= 0:
+            return
+        self._street_contribs[player_id] = (
+            self._street_contribs.get(player_id, 0.0) + float(amount_added)
+        )
+        self._last_known_pot = (
+            getattr(self, '_street_base_pot', self._last_known_pot)
+            + self._observed_street_contrib_total()
+        )
+
+    def _normalize_action_amounts(
+        self,
+        event: ActionEvent,
+        player: Optional[Player],
+        street_max_before: float,
+    ) -> tuple[float, float]:
+        """Return (amount_added, total_bet_after) for a public action event."""
+        action = event.action.lower()
+        raw = max(0.0, float(event.amount or 0.0))
+        prev_bet = getattr(player, 'current_bet', 0.0) if player else 0.0
+
+        if action == "raise":
+            total_bet_after = max(raw, prev_bet)
+            amount_added = max(0.0, total_bet_after - prev_bet)
+            return amount_added, total_bet_after
+
+        if action == "call":
+            amount_added = raw if raw > 0 else max(0.0, street_max_before - prev_bet)
+            total_bet_after = prev_bet + amount_added
+            if street_max_before > 0 and amount_added >= street_max_before - prev_bet:
+                total_bet_after = max(total_bet_after, street_max_before)
+            elif (
+                street_max_before > 0
+                and raw > 0
+                and player is not None
+                and float(player.stack) > raw
+            ):
+                # Live bridge sends call as added chips. Forced blinds are not
+                # model actions, so a blind player's prev_bet can be unknown
+                # here; if they are not all-in, a call closes to table max.
+                total_bet_after = max(total_bet_after, street_max_before)
+            return amount_added, total_bet_after
+
+        return 0.0, prev_bet
+
+    def _apply_player_action(
+        self,
+        player: Optional[Player],
+        action: str,
+        amount_added: float,
+        total_bet_after: float,
+    ) -> None:
+        if player is None:
+            return
+        action = action.lower()
+        if action == "fold":
+            player.is_folded = True
+            return
+        if action in ("raise", "call"):
+            player.current_bet = max(player.current_bet, total_bet_after)
+        elif action == "check":
+            return
+
+        if amount_added > 0:
+            pay = min(float(amount_added), float(player.stack))
+            player.stack = max(0.0, float(player.stack) - pay)
+            player.total_invested += pay
+            if player.stack <= 0:
+                player.is_all_in = True
 
     def _to_decision(self, action: Action) -> BotDecision:
         name = action.action_type.name.lower()

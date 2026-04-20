@@ -1,0 +1,261 @@
+{
+  "UTG-RFI": {
+    "22": ["raise", "fold"], "33": ["raise", "fold"], "44": ["raise", "fold"], "55": "raise",
+    "66": "raise", "77": "raise", "87s": ["raise", "fold"], "88": "raise",
+    "98s": "raise", "99": "raise", "A2s": "raise", "A3s": "raise", "A4s": "raise",
+    "A5s": "raise", "A6s": "raise", "A7s": "raise", "A8s": "raise", "A9s": "raise",
+    "AA": "raise", "AJo": "raise", "AJs": "raise", "AKo": "raise", "AKs": "raise",
+    "AQo": "raise", "AQs": "raise", "ATo": ["raise", "fold"], "ATs": "raise",
+    "JJ": "raise", "JTs": "raise", "KJs": "raise", "KK": "raise",
+    "KQo": "raise", "KQs": "raise", "KTs": "raise", "QJs": "raise", "QQ": "raise",
+    "QTs": "raise", "T9s": "raise", "TT": "raise"
+  },
+  "MP-RFI": {
+    "22": ["raise", "fold"], "33": "raise", "44": "raise", "55": "raise", "65s": "raise",
+    "66": "raise", "76s": "raise", "77": "raise", "87s": "raise", "88": "raise",
+    "98s": "raise", "99": "raise", "A2s": "raise", "A3s": "raise", "A4s": "raise",
+    "A5s": "raise", "A6s": "raise", "A7s": "raise", "A8s": "raise", "A9s": "raise",
+    "AA": "raise", "AJo": "raise", "AJs": "raise", "AKo": "raise", "AKs": "raise",
+    "AQo": "raise", "AQs": "raise", "ATo": "raise", "ATs": "raise",
+    "J9s": "raise", "JJ": "raise", "JTs": "raise", "K8s": "raise", "K9s": "raise",
+    "KJo": "raise", "KJs": "raise", "KK": "raise", "KQo": "raise", "KQs": "raise",
+    "KTs": "raise", "Q9s": "raise", "QJs": "raise", "QQ": "raise", "QTs": "raise",
+    "T8s": ["raise", "fold"], "T9s": "raise", "TT": "raise"
+  },
+  "SB-RFI": {
+    "22": "raise", "33": "raise", "43s": "raise", "44": "raise", "53s": "raise",
+    "54s": "raise", "55": "raise", "64s": "raise", "65s": "raise", "66": "raise",
+    "75s": "raise", "76s": "raise", "77": "raise", "86s": "raise", "87s": "raise",
+    "88": "raise", "96s": "raise", "97s": "raise", "98o": "raise", "98s": "raise",
+    "99": "raise", "A2s": "raise", "A3s": "raise", "A4o": "raise", "A4s": "raise",
+    "A5o": "raise", "A5s": "raise", "A6o": "raise", "A6s": "raise", "A7o": "raise",
+    "A7s": "raise", "A8o": "raise", "A8s": "raise", "A9o": "raise", "A9s": "raise",
+    "AA": "raise", "AJo": "raise", "AJs": "raise", "AKo": "raise", "AKs": "raise",
+    "AQo": "raise", "AQs": "raise", "ATo": "raise", "ATs": "raise",
+    "J5s": "raise", "J6s": "raise", "J7s": "raise", "J8o": "raise", "J8s": "raise",
+    "J9o": "raise", "J9s": "raise", "JJ": "raise", "JTo": "raise", "JTs": "raise",
+    "K2s": "raise", "K3s": "raise", "K4s": "raise", "K5s": "raise", "K6s": "raise",
+    "K7s": "raise", "K8o": ["raise", "fold"], "K8s": "raise", "K9o": "raise",
+    "K9s": "raise", "KJo": "raise", "KJs": "raise", "KK": "raise", "KQo": "raise",
+    "KQs": "raise", "KTo": "raise", "KTs": "raise", "Q3s": "raise", "Q4s": "raise",
+    "Q5s": "raise", "Q6s": "raise", "Q7s": "raise", "Q8o": "raise", "Q8s": "raise",
+    "Q9o": "raise", "Q9s": "raise", "QJo": "raise", "QJs": "raise", "QQ": "raise",
+    "QTo": "raise", "QTs": "raise", "T6s": "raise", "T7s": "raise", "T8o": "raise",
+    "T8s": "raise", "T9o": "raise", "T9s": "raise", "TT": "raise"
+  },
+  "UTG-vs-3bet-SB": {
+    "87s": "call", "88": "call", "99": "call",
+    "A4s": ["raise", "fold"], "A5s": ["raise", "fold"],
+    "AA": "allin", "AJs": "call", "AKo": "call", "AKs": "allin",
+    "AQs": "call", "ATs": "call", "JJ": "call", "JTs": "call",
+    "KJs": "call", "KK": "allin", "KQs": "call", "KTs": ["raise", "fold"],
+    "QJs": "call", "QQ": "allin", "T9s": "call", "TT": "call"
+  },
+  "UTG-vs-3bet-BB": {
+    "87s": "call", "88": "call", "99": "call",
+    "A4s": ["raise", "fold"], "A5s": ["raise", "fold"],
+    "AA": "allin", "AJs": "call", "AKo": "allin", "AKs": "allin",
+    "AQs": "call", "ATs": "call", "JJ": "call", "JTs": "call",
+    "KJs": "call", "KK": "allin", "KQs": "call", "KTs": ["raise", "fold"],
+    "QJs": "call", "QQ": "allin", "T9s": "call", "TT": "call"
+  },
+  "UTG-vs-3bet-MP": {
+    "99": "call", "A5s": ["raise", "fold"],
+    "AA": "allin", "AJs": "call", "AKo": "allin", "AKs": "allin",
+    "AQo": ["raise", "fold"], "AQs": "call", "ATs": "call",
+    "JJ": "call", "KJs": "call", "KK": "allin", "KQs": "call",
+    "KTs": "call", "QQ": "allin", "TT": "call"
+  },
+  "UTG-vs-3bet-CO": {
+    "88": "call", "99": "call", "A5s": ["raise", "fold"],
+    "AA": "allin", "AJs": "call", "AKo": "allin", "AKs": "allin",
+    "AQo": ["raise", "fold"], "AQs": "call", "ATs": "call",
+    "JJ": "call", "KJs": "call", "KK": "allin", "KQs": "call",
+    "KTs": "call", "QJs": "call", "QQ": "allin", "TT": "call"
+  },
+  "UTG-vs-3bet-BTN": {
+    "55": "call", "66": "call", "77": "call", "87s": "call", "88": "call", "99": "call",
+    "A4s": ["raise", "fold"], "A5s": ["raise", "fold"],
+    "AA": "allin", "AJs": "call", "AKo": "allin", "AKs": "allin",
+    "AQo": ["raise", "fold"], "AQs": "call", "ATs": "call",
+    "JJ": "call", "JTs": "call", "KJs": "call", "KK": "allin",
+    "KQs": "call", "KTs": "call", "QJs": "call", "QQ": "allin",
+    "QTs": "call", "T9s": "call", "TT": "call"
+  },
+  "MP-vs-3bet-SB": {
+    "55": "call", "65s": "call", "66": "call", "76s": "call", "77": "call",
+    "87s": "call", "88": "call", "99": "call",
+    "A4s": ["raise", "fold"], "A5s": ["raise", "fold"], "A9s": "call",
+    "AA": "allin", "AJs": "call", "AKo": "call", "AKs": "allin",
+    "AQo": ["raise", "fold"], "AQs": "call", "ATs": "call",
+    "JJ": "call", "JTs": "call", "KJs": "call", "KK": "allin",
+    "KQs": "call", "KTs": ["raise", "fold"], "QJs": "call", "QQ": "allin",
+    "QTs": "call", "T9s": "call", "TT": "call"
+  },
+  "MP-vs-3bet-BB": {
+    "65s": "call", "76s": "call", "77": "call", "87s": "call", "88": "call", "99": "call",
+    "A4s": ["raise", "fold"], "A5s": ["raise", "fold"],
+    "AA": "allin", "AJs": "call", "AKo": "allin", "AKs": "allin",
+    "AQs": "call", "ATs": "call", "JJ": "call", "JTs": "call",
+    "KJs": "call", "KK": "allin", "KQs": "call", "KTs": ["raise", "fold"],
+    "QJs": "call", "QQ": "allin", "TT": "call"
+  },
+  "MP-vs-3bet-CO": {
+    "77": "call", "88": "call", "99": "call",
+    "A4s": ["raise", "fold"], "A5s": ["raise", "fold"],
+    "AA": "allin", "AJs": "call", "AKo": "allin", "AKs": "allin",
+    "AQo": ["raise", "fold"], "AQs": "call", "ATs": "call",
+    "JJ": "call", "JTs": "call", "KJs": "call", "KK": "allin",
+    "KQs": "call", "KTs": ["raise", "fold"], "QJs": "call", "QQ": "allin",
+    "QTs": "call", "TT": "call"
+  },
+  "MP-vs-3bet-BTN": {
+    "55": "call", "65s": "call", "66": "call", "76s": "call", "77": "call",
+    "87s": "call", "88": "call", "99": "call",
+    "A4s": ["raise", "fold"], "A5s": ["raise", "fold"], "A9s": "call",
+    "AA": "allin", "AJs": "call", "AKo": "allin", "AKs": "allin",
+    "AQo": ["raise", "fold"], "AQs": "call", "ATs": "call",
+    "JJ": "call", "JTs": "call", "KJs": "call", "KK": "allin",
+    "KQs": "call", "KTs": ["raise", "fold"], "QJs": "call", "QQ": "allin",
+    "QTs": "call", "T9s": "call", "TT": "call"
+  },
+  "MP-vs-4bet-UTG": {
+    "77": ["call", "fold"], "88": ["call", "fold"], "99": ["call", "fold"],
+    "A4s": ["call", "fold"], "A5s": ["call", "fold"],
+    "AA": "call", "AJs": ["call", "fold"], "AKo": "call", "AKs": "call",
+    "AQo": ["call", "fold"], "AQs": "call", "ATs": ["call", "fold"],
+    "JJ": "call", "JTs": ["call", "fold"], "KJs": ["call", "fold"],
+    "KK": "call", "KQs": ["call", "fold"], "KTs": ["call", "fold"],
+    "QJs": ["call", "fold"], "QQ": "call", "QTs": ["call", "fold"], "TT": ["call", "fold"]
+  },
+  "MP-vs-open-UTG": {
+    "66": ["call", "fold"], "77": "raise", "88": "raise", "99": "raise",
+    "A4s": "raise", "A5s": "raise", "AA": "raise", "AJs": "raise", "AKo": "raise",
+    "AKs": "raise", "AQo": "raise", "AQs": "raise", "ATs": "raise",
+    "JJ": "raise", "JTs": "raise", "KJs": "raise", "KK": "raise",
+    "KQs": "raise", "KTs": "raise", "QJs": "raise", "QQ": "raise",
+    "QTs": "raise", "T9s": ["call", "fold"], "TT": "raise"
+  },
+  "CO-vs-4bet-UTG": {
+    "77": ["call", "fold"], "88": ["call", "fold"], "99": ["call", "fold"],
+    "A4s": ["call", "fold"], "A5s": ["call", "fold"],
+    "AA": "call", "AJs": "call", "AKo": "call", "AKs": "call",
+    "AQo": ["call", "fold"], "AQs": "call", "ATs": ["call", "fold"],
+    "JJ": "call", "JTs": ["call", "fold"], "KJs": ["call", "fold"],
+    "KK": "call", "KQs": ["call", "fold"], "KTs": ["call", "fold"],
+    "QJs": ["call", "fold"], "QQ": "call", "QTs": ["call", "fold"], "TT": "call"
+  },
+  "CO-vs-open-UTG": {
+    "66": ["call", "fold"], "77": "raise", "88": "raise", "99": "raise",
+    "A4s": "raise", "A5s": "raise", "AA": "raise", "AJs": "raise", "AKo": "raise",
+    "AKs": "raise", "AQo": "raise", "AQs": "raise", "ATs": "raise",
+    "JJ": "raise", "JTs": "raise", "KJs": "raise", "KK": "raise",
+    "KQs": "raise", "KTs": "raise", "QJs": "raise", "QQ": "raise",
+    "QTs": "raise", "T9s": ["call", "fold"], "TT": "raise"
+  },
+  "SB-vs-open-UTG": {
+    "87s": ["call", "fold"], "88": ["call", "fold"], "98s": ["call", "fold"],
+    "99": "raise", "A2s": ["call", "fold"], "A3s": ["call", "fold"],
+    "A4s": ["call", "fold"], "A5s": "raise", "A9s": ["call", "fold"],
+    "AA": "raise", "AJs": "raise", "AKo": "raise", "AKs": "raise",
+    "AQo": "raise", "AQs": "raise", "ATs": "raise", "JJ": "raise",
+    "JTs": "raise", "KJs": "raise", "KK": "raise", "KQs": "raise",
+    "QJs": "raise", "QQ": "raise", "T9s": ["call", "fold"], "TT": "raise"
+  },
+  "SB-vs-open-MP": {
+    "76s": "raise", "87s": "raise", "88": "raise", "98s": ["call", "fold"],
+    "99": "raise", "A2s": ["call", "fold"], "A3s": ["call", "fold"],
+    "A4s": "raise", "A5s": "raise", "A9s": ["call", "fold"],
+    "AA": "raise", "AJs": "raise", "AKo": "raise", "AKs": "raise",
+    "AQo": "raise", "AQs": "raise", "ATs": "raise", "JJ": "raise",
+    "JTs": "raise", "KJs": "raise", "KK": "raise", "KQs": "raise",
+    "KTs": "raise", "QJs": "raise", "QQ": "raise", "QTs": "raise",
+    "T9s": ["call", "fold"], "TT": "raise"
+  },
+  "SB-vs-open-CO": {
+    "66": ["call", "fold"], "76s": ["call", "fold"], "77": ["call", "fold"],
+    "86s": ["call", "fold"], "87s": "raise", "88": "raise", "98s": "raise",
+    "99": "raise", "A2s": ["call", "fold"], "A3s": ["call", "fold"],
+    "A4s": "raise", "A5s": "raise", "A9s": "raise",
+    "AA": "raise", "AJo": "raise", "AJs": "raise", "AKo": "raise", "AKs": "raise",
+    "AQo": "raise", "AQs": "raise", "ATs": "raise", "J9s": ["call", "fold"],
+    "JJ": "raise", "JTs": "raise", "K9s": ["call", "fold"], "KJs": "raise",
+    "KK": "raise", "KQo": "raise", "KQs": "raise", "KTs": "raise",
+    "Q9s": ["call", "fold"], "QJs": "raise", "QQ": "raise", "QTs": "raise",
+    "T9s": "raise", "TT": "raise"
+  },
+  "SB-vs-open-BTN": {
+    "44": ["call", "fold"], "55": ["call", "fold"], "66": ["call", "fold"],
+    "76s": "raise", "77": "raise", "87s": "raise", "88": "raise",
+    "98s": "raise", "99": "raise", "A2s": "raise", "A3s": "raise",
+    "A4s": "raise", "A5s": "raise", "A6s": "raise", "A7s": "raise",
+    "A8s": "raise", "A9s": "raise", "AA": "raise", "AJo": "raise",
+    "AJs": "raise", "AKo": "raise", "AKs": "raise", "AQo": "raise",
+    "AQs": "raise", "ATo": "raise", "ATs": "raise",
+    "J8s": ["call", "fold"], "J9s": "raise", "JJ": "raise", "JTo": ["call", "fold"],
+    "JTs": "raise", "K7s": ["call", "fold"], "K8s": ["call", "fold"],
+    "K9s": "raise", "KJo": ["call", "fold"], "KJs": "raise", "KK": "raise",
+    "KQo": "raise", "KQs": "raise", "KTs": "raise",
+    "Q7s": ["call", "fold"], "Q8s": ["call", "fold"], "Q9s": "raise",
+    "QJo": ["call", "fold"], "QJs": "raise", "QQ": "raise", "QTs": "raise",
+    "T8s": "raise", "T9s": "raise", "TT": "raise"
+  },
+  "SB-vs-3bet-BB": {
+    "22": "call", "33": "call", "44": "call", "54s": "call", "55": "call",
+    "65s": "call", "66": "call", "76s": "call", "77": "call", "87s": "call",
+    "88": "call", "97s": "call", "98s": "call", "99": "call",
+    "A2s": ["raise", "fold"], "A3s": "call", "A4s": "call", "A5s": "call",
+    "A6s": ["raise", "fold"], "A7s": "call", "A8s": "call", "A9s": "call",
+    "AA": "allin", "AJo": ["raise", "fold"], "AJs": "call", "AKo": "allin",
+    "AKs": "allin", "AQo": ["raise", "fold"], "AQs": "call",
+    "ATo": "call", "ATs": "call",
+    "J8s": ["raise", "fold"], "J9s": "call", "JJ": "allin", "JTs": "call",
+    "K6s": "call", "K7s": "call", "K8s": "call", "K9s": "call",
+    "KJo": "call", "KJs": "call", "KK": "allin",
+    "KQo": ["raise", "fold"], "KQs": "call", "KTs": "call",
+    "Q8s": ["raise", "fold"], "Q9s": "call", "QJs": "call", "QQ": "allin",
+    "QTs": "call", "T8s": "call", "T9s": "call", "TT": "allin"
+  },
+  "SB-vs-4bet-UTG": {
+    "99": ["call", "fold"], "A5s": ["call", "fold"],
+    "AA": "allin", "AJs": ["call", "fold"], "AKo": "call", "AKs": "allin",
+    "AQo": ["call", "fold"], "AQs": "call", "ATs": ["call", "fold"],
+    "JJ": "call", "JTs": ["call", "fold"], "KJs": ["call", "fold"],
+    "KK": "allin", "KQs": ["call", "fold"], "QJs": ["call", "fold"],
+    "QQ": "call", "TT": "call"
+  },
+  "SB-vs-4bet-MP": {
+    "76s": ["call", "fold"], "87s": ["call", "fold"], "88": ["call", "fold"],
+    "99": ["call", "fold"], "A4s": ["call", "fold"], "A5s": ["call", "fold"],
+    "AA": "allin", "AJs": ["call", "fold"], "AKo": "call", "AKs": "allin",
+    "AQo": ["call", "fold"], "AQs": "call", "ATs": ["call", "fold"],
+    "JJ": "call", "JTs": ["call", "fold"], "KJs": ["call", "fold"],
+    "KK": "allin", "KQs": ["call", "fold"], "KTs": ["call", "fold"],
+    "QJs": ["call", "fold"], "QQ": "call", "QTs": ["call", "fold"], "TT": "call"
+  },
+  "SB-vs-4bet-CO": {
+    "87s": "call", "88": "allin", "98s": "call", "99": "allin",
+    "A4s": ["call", "fold"], "A5s": ["call", "fold"], "A9s": ["call", "fold"],
+    "AA": "allin", "AJo": ["call", "fold"], "AJs": "call", "AKo": "allin",
+    "AKs": "allin", "AQo": ["call", "fold"], "AQs": "call", "ATs": "call",
+    "JJ": "allin", "JTs": ["call", "fold"], "KJs": ["call", "fold"],
+    "KK": "allin", "KQo": ["call", "fold"], "KQs": "call", "KTs": ["call", "fold"],
+    "QJs": ["call", "fold"], "QQ": "allin", "QTs": ["call", "fold"],
+    "T8s": ["call", "fold"], "T9s": ["call", "fold"], "TT": "call"
+  },
+  "SB-vs-4bet-BTN": {
+    "76s": "call", "77": ["call", "fold"], "87s": "call", "88": "allin",
+    "98s": "call", "99": "allin",
+    "A2s": ["call", "fold"], "A3s": ["call", "fold"], "A4s": ["call", "fold"],
+    "A5s": ["call", "fold"], "A6s": ["call", "fold"], "A7s": ["call", "fold"],
+    "A8s": ["call", "fold"], "A9s": ["call", "fold"],
+    "AA": "call", "AJo": ["call", "fold"], "AJs": "call", "AKo": "allin",
+    "AKs": "allin", "AQo": "call", "AQs": "call",
+    "ATo": ["call", "fold"], "ATs": "call",
+    "J9s": ["call", "fold"], "JJ": "allin", "JTs": ["call", "fold"],
+    "K9s": ["call", "fold"], "KJs": ["call", "fold"], "KK": "allin",
+    "KQo": ["call", "fold"], "KQs": "call", "KTs": ["call", "fold"],
+    "Q9s": ["call", "fold"], "QJs": ["call", "fold"], "QQ": "allin",
+    "QTs": ["call", "fold"], "T8s": ["call", "fold"], "T9s": "call", "TT": "call"
+  }
+}

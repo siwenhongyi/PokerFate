@@ -64,7 +64,7 @@ api = PokerFateAPI(
 )
 ```
 
-**`autosave_path` 默认行为**：不传时自动写入包目录内的 `pokerfate/opponents.json`；传 `None` 则禁用自动保存。
+**`autosave_path` 默认行为**：不传时自动写入包目录内的 `pokerfate/data/opponents.json`；传 `None` 则禁用自动保存。
 
 ---
 
@@ -355,7 +355,7 @@ PlayerInfo(player_id=3, name="NewBot", stack=None)    # 同样默认 100 BB
 对手模型**每局结束后自动保存**，程序被强制结束（Ctrl+C / IDE Stop）最多损失当局数据。
 
 ```python
-# 不传 autosave_path：自动保存到包目录内的 pokerfate/opponents.json
+# 不传 autosave_path：自动保存到包目录内的 pokerfate/data/opponents.json
 api = PokerFateAPI()
 
 # 自定义路径

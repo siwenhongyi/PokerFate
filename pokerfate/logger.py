@@ -210,6 +210,7 @@ class PokerLogger:
         pwi: float = 0.0,
         range_pct: float = 0.0,
         bucket_dist: Optional[Dict[str, float]] = None,
+        vs_hero: Optional[Dict[str, float]] = None,
         to_call: float = 0.0,
     ):
         self._file({
@@ -222,6 +223,7 @@ class PokerLogger:
             "player_type": player_type or None,
             "range_pct": round(range_pct, 3) if range_pct > 0 else None,
             "bucket_dist": {k: round(v, 3) for k, v in (bucket_dist or {}).items() if v > 0.01} or None,
+            "vs_hero": {k: round(v, 3) for k, v in (vs_hero or {}).items()} or None,
         })
         if not self._console:
             return
@@ -255,6 +257,14 @@ class PokerLogger:
                 range_str = f"range {range_pct:.0%} [{dist}]"
             else:
                 range_str = f"range {range_pct:.0%}"
+
+            # 河牌单挑场景：额外显示 hero 视角真实对比（问题 8a）——"坚果"桶
+            # 在 hero 自己持 NUTS 档时会过度解读，用 win/tie/loss 直观展示。
+            if vs_hero:
+                loss = vs_hero.get('loss', 0.0)
+                tie = vs_hero.get('tie', 0.0)
+                win = vs_hero.get('win', 0.0)
+                range_str += f" [≥你{loss:.0%}/平{tie:.0%}/≤你{win:.0%}]"
 
         # ── 格式化输出 ──
         if action == "raise":
@@ -555,6 +565,102 @@ class PokerLogger:
         self._raw(
             f"  ⚑ 对手模型  {player_name}: {pattern}={value:.0%} → {adjustment}",
             color=_C.MAGENTA,
+        )
+
+    def calibration_result(self, result) -> None:
+        """result: CalibrationResult，hand 结束摊牌后的对比。"""
+        rec = result.record
+        # 无法形成有效对比（未亮牌/无 hero 卡/阶段实值缺失）时，不写日志
+        if rec.predicted_hero_eq is None or result.actual_hero_eq_street is None:
+            return
+        self._file({
+            "event": "calibration_result",
+            "hand": rec.hand_id,
+            "street": rec.street,
+            "player": rec.player_name,
+            "player_id": rec.player_id,
+            "trigger": rec.trigger,
+            "board": [str(c) for c in rec.board],
+            "actual_cards": [str(c) for c in result.actual_cards],
+            "actual_bucket": result.actual_bucket,
+            "predicted_bucket_prob": round(result.predicted_bucket_prob, 4),
+            "predicted_hero_eq": (round(rec.predicted_hero_eq, 4)
+                                  if rec.predicted_hero_eq is not None
+                                  else None),
+            "actual_hero_eq_street": (round(result.actual_hero_eq_street, 4)
+                                      if result.actual_hero_eq_street is not None
+                                      else None),
+            "eq_prediction_error_street": (round(result.eq_prediction_error_street, 4)
+                                           if result.eq_prediction_error_street is not None
+                                           else None),
+            "predicted_hero_eq_multi": (round(rec.predicted_hero_eq_multi, 4)
+                                        if rec.predicted_hero_eq_multi is not None
+                                        else None),
+            "actual_hero_eq_street_multi": (round(result.actual_hero_eq_street_multi, 4)
+                                            if result.actual_hero_eq_street_multi is not None
+                                            else None),
+            "eq_prediction_error_street_multi": (round(result.eq_prediction_error_street_multi, 4)
+                                                 if result.eq_prediction_error_street_multi is not None
+                                                 else None),
+            "actual_hero_eq_street_multi_shown": (round(result.actual_hero_eq_street_multi_shown, 4)
+                                                  if result.actual_hero_eq_street_multi_shown is not None
+                                                  else None),
+            "active_player_ids": list(rec.active_player_ids),
+            "actual_hero_eq_final": (round(result.actual_hero_eq_final, 4)
+                                     if result.actual_hero_eq_final is not None
+                                     else None),
+            "eq_prediction_error": (round(result.eq_prediction_error, 4)
+                                    if result.eq_prediction_error is not None
+                                    else None),
+        })
+        if not self._console:
+            return
+
+        _CAT_SHORT = {
+            'nuts': '坚果', 'strong': '强', 'medium': '中',
+            'draw': '听', 'weak_draw': '弱', 'air': '空气',
+        }
+        bucket_str = _CAT_SHORT.get(result.actual_bucket, result.actual_bucket)
+        actual_cards_str = "".join(str(c) for c in result.actual_cards)
+
+        def _tag(err: float) -> str:
+            if abs(err) < 0.10:
+                return "✓"
+            return "↑" if err > 0 else "↓"
+
+        # 单挑 eq 对比（颜色按单挑 Δ 着色——和主逻辑一致）
+        err_hu = result.eq_prediction_error_street
+        if abs(err_hu) < 0.10:
+            color = _C.GREEN
+        elif err_hu > 0:
+            color = _C.YELLOW
+        else:
+            color = _C.RED
+        hu_part = (f"eq预单挑={rec.predicted_hero_eq:.0%} "
+                   f"实单挑={result.actual_hero_eq_street:.0%} "
+                   f"Δ={err_hu:+.0%}{_tag(err_hu)}")
+
+        # 多人池 eq 对比——日志只展示"只看亮牌 villain"的版本（人能看懂的真实
+        # 摊牌结果）。喂给 calibrator 的是另一个 random-fill 版本（同口径），
+        # 那个不打印。
+        multi_part = ""
+        if rec.predicted_hero_eq_multi is not None:
+            shown_actual = result.actual_hero_eq_street_multi_shown
+            if shown_actual is not None:
+                err_m_shown = rec.predicted_hero_eq_multi - shown_actual
+                multi_part = (f" 预全场={rec.predicted_hero_eq_multi:.0%} "
+                              f"实全场={shown_actual:.0%} "
+                              f"Δ={err_m_shown:+.0%}{_tag(err_m_shown)}")
+            else:
+                multi_part = f" 预全场={rec.predicted_hero_eq_multi:.0%} 实全场=—"
+
+        bucket_part = (f"实际桶={bucket_str}({actual_cards_str},"
+                       f"此桶={result.predicted_bucket_prob:.0%})")
+
+        self._raw(
+            f"      ⚖ {rec.street} {rec.player_name} {rec.trigger} "
+            f"{bucket_part} {hu_part}{multi_part}",
+            color=color,
         )
 
     def session_summary(

@@ -10,7 +10,30 @@ from itertools import combinations
 from typing import List, Tuple
 from collections import Counter
 
-from pokerfate.core.card import Card, Rank
+from pokerfate.core.card import Card
+
+try:
+    import eval7 as _eval7
+    _HAS_EVAL7 = True
+except ImportError:
+    _eval7 = None
+    _HAS_EVAL7 = False
+
+
+def _build_eval7_table() -> List:
+    if not _HAS_EVAL7:
+        return []
+    rank_chars = '23456789TJQKA'
+    suit_chars = 'cdhs'
+    table = [None] * 52
+    for ci in range(52):
+        rank = ci // 4 + 2
+        suit = ci % 4
+        table[ci] = _eval7.Card(rank_chars[rank - 2] + suit_chars[suit])
+    return table
+
+
+_EVAL7_CARDS = _build_eval7_table()
 
 
 class HandRank(IntEnum):
@@ -148,6 +171,21 @@ class HandEvaluator:
                 best_score = score
                 best_combo = list(combo)
         return best_score, best_combo
+
+    @staticmethod
+    def eval_int(cards: List[Card]):
+        """Comparable score (higher = better). Faster than evaluate() when
+        eval7 is installed: a single 7-card lookup instead of C(7,5)=21
+        five-card evaluations.
+
+        Returns an int when eval7 is available, otherwise falls back to the
+        tuple returned by evaluate(). Both forms support `>`/`==` comparison
+        but are not interchangeable across the boundary, so don't mix.
+        """
+        if _HAS_EVAL7:
+            e7 = [_EVAL7_CARDS[(int(c.rank) - 2) * 4 + int(c.suit)] for c in cards]
+            return _eval7.evaluate(e7)
+        return HandEvaluator.evaluate(cards)
 
     @staticmethod
     def hand_rank_name(score: HandScore) -> str:

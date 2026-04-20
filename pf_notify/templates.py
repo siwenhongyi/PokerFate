@@ -29,7 +29,8 @@ BARK_EVENT_ICONS: dict[str, str] = {
     "auto_rebuy": f"{_FE}/Money%20with%20Wings/3D/money_with_wings_3d.png",
     "profit_lock_trigger": f"{_FE}/Gem%20Stone/3D/gem_stone_3d.png",
     "chips_below_50bb": f"{_FE}/Face%20Screaming%20in%20Fear/3D/face_screaming_in_fear_3d.png",
-    "chips_milestone": f"{_FE}/Party%20Popper/3D/party_popper_3d.png",
+    "hand_swing_up": f"{_FE}/Chart%20Increasing/3D/chart_increasing_3d.png",
+    "hand_swing_down": f"{_FE}/Chart%20Decreasing/3D/chart_decreasing_3d.png",
     "gamedata_no_history": f"{_FE}/Ghost/3D/ghost_3d.png",
     "token_captured": f"{_FE}/Key/3D/key_3d.png",
 }
@@ -73,11 +74,26 @@ def format_bark_message(event: str, fields: dict[str, Any]) -> tuple[str, str, s
         )
         return title, body, icon
 
-    if event == "chips_milestone":
-        title = f"筹码 · 首次突破 {fields.get('milestone_bb')} BB"
+    if event == "hand_swing":
+        delta = fields.get("profit_delta", 0)
+        start = fields.get("start_chips", 0)
+        bb = fields.get("big_blind", 0)
+        try:
+            delta_f = float(delta)
+            start_f = float(start) if float(start) > 0 else 1.0
+            bb_f = float(bb) if float(bb) > 0 else 1.0
+        except (TypeError, ValueError):
+            delta_f, start_f, bb_f = 0.0, 1.0, 1.0
+        is_up = delta_f >= 0
+        pct = delta_f / start_f * 100.0
+        delta_bb = delta_f / bb_f
+        sign = "+" if is_up else ""
+        icon = BARK_EVENT_ICONS.get("hand_swing_up" if is_up else "hand_swing_down") or icon
+        title = f"单手波动 · {sign}{delta_bb:.1f} BB"
         body = (
-            f"当前筹码: {fields.get('chips')}（≥ {fields.get('milestone_bb')} BB）\n"
-            f"BB = {fields.get('big_blind')}"
+            f"本手盈亏: {sign}{int(delta_f)}（{sign}{delta_bb:.1f} BB）\n"
+            f"开局筹码: {int(start_f)}（占比 {sign}{pct:.1f}%）\n"
+            f"BB = {int(bb_f)}"
         )
         return title, body, icon
 

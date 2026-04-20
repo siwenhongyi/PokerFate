@@ -13,14 +13,19 @@ encode() returns None if the type is unknown or parsing fails; otherwise bytes (
 
 from __future__ import annotations
 
+import importlib
+import pkgutil
+import sys
 from pathlib import Path
+
+from google.protobuf import message as _msg
+from google.protobuf.json_format import MessageToDict, ParseDict
 
 _registry: dict[str, type] = {}   # "pb.ActionREQ" -> pb2 message class
 
 
 def _register_pb2_module(module) -> None:
     """Register all message classes from a compiled _pb2 module."""
-    import google.protobuf.message as _msg
     for name in dir(module):
         cls = getattr(module, name)
         try:
@@ -34,10 +39,7 @@ def _register_pb2_module(module) -> None:
 def _load_pb2_modules() -> None:
     """Try to import compiled pb2 modules (best-effort)."""
     try:
-        from pf_intercept import pb as pb_pkg
-        import importlib
-        import pkgutil
-        import sys
+        pb_pkg = importlib.import_module("pf_intercept.pb")
 
         # Generated pb2 files may use top-level imports like `import X_pb2`.
         # Ensure those imports resolve while loading package modules.
@@ -64,8 +66,6 @@ def _message_to_dict_compat(msg) -> dict:
     """
     Convert protobuf message to dict across protobuf 4/5/6 runtimes.
     """
-    from google.protobuf.json_format import MessageToDict
-
     try:
         return MessageToDict(
             msg,
@@ -105,7 +105,6 @@ def encode(type_name: str, fields: dict) -> bytes | None:
     if cls is None:
         return None
     try:
-        from google.protobuf.json_format import ParseDict
         msg = ParseDict(fields, cls())
         return msg.SerializeToString()
     except Exception:

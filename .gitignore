@@ -21,7 +21,6 @@ pf_intercept/discovered_server.json
 *.mitm
 pf_intercept/logs/
 # Runtime opponent model (accumulated during play, generate locally)
-# opponents.json is excluded; opponents.enc (encrypted) is tracked and safe to push
 opponents.json
 
 # Slumbot credentials (sensitive — create locally)
@@ -30,9 +29,11 @@ pokerfate/slum/auth.json
 # IDE
 .idea/
 .vscode/
+.claude/
 *.swp
 win/
 logs/
 .tmp/
 docs/
 data/
+!pokerfate/data

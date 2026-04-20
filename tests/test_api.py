@@ -6,7 +6,7 @@ import tempfile
 import pytest
 from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
 from pokerfate.bot.opponent_model import OpponentModel
-from pokerfate.core.game_state import GameState, Player, Street
+from pokerfate.core.game_state import Action, ActionType, GameState, Player, Street
 
 
 def make_api(verbose=False) -> PokerFateAPI:
@@ -72,6 +72,50 @@ class TestAPILifecycle:
             player_id=1, action="raise", amount=6.0, street="preflop"
         ))
         assert len(api._action_history) == 1
+        opp = api._get_player(1)
+        assert opp.current_bet == pytest.approx(6.0)
+        assert opp.stack == pytest.approx(194.0)
+
+    def test_deal_board_resets_current_bet_but_keeps_pot_base(self):
+        api = make_api()
+        start_hand(api)
+        api.deal_hole_cards(["Ac", "Kd"])
+        api.notify_action(ActionEvent(
+            player_id=1, action="raise", amount=6.0, street="preflop"
+        ))
+        assert api._last_known_pot == pytest.approx(9.0)
+
+        api.deal_board(["As", "7d", "2c"], street="flop")
+
+        assert api._get_player(1).current_bet == pytest.approx(0.0)
+        assert api._street_base_pot == pytest.approx(9.0)
+        assert api._street_contribs == {}
+
+    def test_call_zero_amount_infers_call_from_current_bet(self):
+        api = make_api()
+        start_hand(api)
+        api.deal_hole_cards(["Ac", "Kd"])
+        hero = api._get_my_player()
+        hero.current_bet = 6.0
+        api.notify_action(ActionEvent(
+            player_id=1, action="call", amount=0.0, street="preflop"
+        ))
+        opp = api._get_player(1)
+        assert opp.current_bet == pytest.approx(6.0)
+        assert opp.stack == pytest.approx(194.0)
+
+    def test_call_added_chips_closes_to_current_bet_when_blind_untracked(self):
+        api = make_api()
+        start_hand(api)
+        api.deal_hole_cards(["Ac", "Kd"])
+        hero = api._get_my_player()
+        hero.current_bet = 5.0
+        api.notify_action(ActionEvent(
+            player_id=1, action="call", amount=3.0, street="preflop"
+        ))
+        opp = api._get_player(1)
+        assert opp.current_bet == pytest.approx(5.0)
+        assert opp.stack == pytest.approx(197.0)
 
     def test_deal_board_flop(self):
         api = make_api()
@@ -444,7 +488,6 @@ class TestBugFixes:
         api.deal_hole_cards(["Ac", "Kd"])
 
         # Bot 开牌加注（记录到 action_history）
-        from pokerfate.core.game_state import Action, ActionType
         api._action_history.append((0, Action(ActionType.RAISE, 6.0), "preflop"))
 
         before = api._bot.opponent_model.get(1).three_bet_opportunities
@@ -463,10 +506,10 @@ class TestBugFixes:
             dealer_id=0,
         )
         api.deal_hole_cards(["Ac", "Kd"])
+        api._action_history.append((0, Action(ActionType.RAISE, 6.0), "preflop"))
         api.deal_board(["As", "7d", "2c"], street="flop")
 
         # Bot 在翻牌下注（模拟已记录到 history）
-        from pokerfate.core.game_state import Action, ActionType
         api._action_history.append((0, Action(ActionType.RAISE, 5.0), "flop"))
 
         before_opps = api._bot.opponent_model.get(1).fold_to_cbet_opps
@@ -494,6 +537,21 @@ class TestBugFixes:
         api.notify_action(ActionEvent(1, "raise", 5.0, "flop"))
         assert api._bot.opponent_model.get(1).fold_to_cbet_opps == before
 
+    def test_cbet_spot_not_inherited_from_old_street(self):
+        """只有旧街 hero 加注、当前街没有 hero 下注时，不应记录 cbet response。"""
+        api = PokerFateAPI(my_player_id=0, big_blind=2.0, autosave_path=None)
+        api.new_hand(
+            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "Opp", 200.0)],
+            dealer_id=0,
+        )
+        api.deal_hole_cards(["Ac", "Kd"])
+        api._action_history.append((0, Action(ActionType.RAISE, 6.0), "preflop"))
+        api.deal_board(["As", "7d", "2c"], street="flop")
+        api.deal_board(["2h"], street="turn")
+        before = api._bot.opponent_model.get(1).fold_to_cbet_opps
+        api.notify_action(ActionEvent(1, "fold", 0.0, "turn"))
+        assert api._bot.opponent_model.get(1).fold_to_cbet_opps == before
+
     def test_3bet_spot_not_triggered_on_open(self):
         """第一个开牌动作不是 3-bet 机会。"""
         api = PokerFateAPI(my_player_id=0, big_blind=2.0, autosave_path=None)
@@ -506,6 +564,42 @@ class TestBugFixes:
         # 对手第一个动作（open raise），没有前置加注，不是 3-bet spot
         api.notify_action(ActionEvent(1, "raise", 6.0, "preflop"))
         assert api._bot.opponent_model.get(1).three_bet_opportunities == before
+
+    def test_fold_to_3bet_records_opener_response(self):
+        api = PokerFateAPI(my_player_id=0, big_blind=2.0, autosave_path=None)
+        api.new_hand(
+            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "Opp", 200.0)],
+            dealer_id=0,
+        )
+        api.deal_hole_cards(["Ac", "Kd"])
+        api._action_history.append((1, Action(ActionType.RAISE, 6.0), "preflop"))
+        api._action_history.append((0, Action(ActionType.RAISE, 20.0), "preflop"))
+        before = api._bot.opponent_model.get(1).fold_to_3bet_opps
+        three_bet_before = api._bot.opponent_model.get(1).three_bet_opportunities
+        api.notify_action(ActionEvent(1, "fold", 0.0, "preflop"))
+        stats = api._bot.opponent_model.get(1)
+        assert stats.fold_to_3bet_opps == before + 1
+        assert stats.fold_to_3bet_count == 1
+        assert stats.three_bet_opportunities == three_bet_before
+
+    def test_river_fold_rate_uses_facing_bet_opportunities(self):
+        api = PokerFateAPI(my_player_id=0, big_blind=2.0, autosave_path=None)
+        api.new_hand(
+            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "Opp", 200.0)],
+            dealer_id=0,
+        )
+        api.deal_hole_cards(["Ac", "Kd"])
+        api.deal_board(["As", "7d", "2c"], street="flop")
+        api.deal_board(["3h"], street="turn")
+        api.deal_board(["4s"], street="river")
+        api.notify_action(ActionEvent(1, "check", 0.0, "river"))
+        stats = api._bot.opponent_model.get(1)
+        assert stats.river_facing_bet_opps == 0
+
+        api._action_history.append((0, Action(ActionType.RAISE, 10.0), "river"))
+        api.notify_action(ActionEvent(1, "fold", 0.0, "river"))
+        assert stats.river_facing_bet_opps == 1
+        assert stats.river_fold_rate == pytest.approx(1.0)
 
 
 class TestSeatManagement:

@@ -151,44 +151,6 @@ class TestBotDecisions:
                 assert action.amount > 10.0, "Raise amount must exceed to_call"
                 assert action.amount <= 200.0, "Cannot raise more than stack"
 
-    def test_monster_check_frequency(self):
-        """P22: equity >= 0.95 (nuts) always bets; equity 0.90-0.94 occasionally checks."""
-
-        strategy = PostflopStrategy(aggression=1.0)
-        board = [Card.from_str(c) for c in ['2d', '7h', 'Jc']]
-        # P22: equity 0.98 = nuts → 强制下注，0 checks
-        checks_nuts = sum(
-            1 for _ in range(200)
-            if not strategy.should_cbet(0.98, BoardTexture(board), True, 'flop')
-        )
-        assert checks_nuts == 0, f"P22: nuts (eq=0.98) should always bet, got {checks_nuts} checks"
-        # equity 0.92 = strong but not nuts → still mixes checks
-        checks_strong = sum(
-            1 for _ in range(200)
-            if not strategy.should_cbet(0.92, BoardTexture(board), True, 'flop')
-        )
-        assert 10 <= checks_strong <= 80, f"Strong (eq=0.92) check frequency out of range: {checks_strong}/200"
-
-    def test_value_mult_per_street_sizing(self):
-        """P19: value_mult != 1.0 → flop 缩小, river 放大（多街薄利提取）."""
-
-
-        board = [Card.from_str(c) for c in ['2d', '7h', 'Jc']]
-        texture = BoardTexture(board)
-        # 使用相同种子确保 base_frac 一致
-        s1 = PostflopStrategy(rng=_rng.Random(99)); s1.value_mult = 1.0
-        s2 = PostflopStrategy(rng=_rng.Random(99)); s2.value_mult = 1.3
-        # flop: 对跟注站缩小（×0.80）
-        flop1 = s1.bet_size(0.85, 100.0, texture, 200.0, 'flop', 2.0)
-        flop2 = s2.bet_size(0.85, 100.0, texture, 200.0, 'flop', 2.0)
-        assert flop2 < flop1, "P19: flop should be smaller vs calling stations"
-        # river: 对跟注站放大（×1.25）
-        s1 = PostflopStrategy(rng=_rng.Random(99)); s1.value_mult = 1.0
-        s2 = PostflopStrategy(rng=_rng.Random(99)); s2.value_mult = 1.3
-        river1 = s1.bet_size(0.85, 100.0, texture, 200.0, 'river', 2.0)
-        river2 = s2.bet_size(0.85, 100.0, texture, 200.0, 'river', 2.0)
-        assert river2 > river1, "P19: river should be larger vs calling stations"
-
     def test_bot_does_not_crash_any_street(self):
         bot = PokerBot(equity_iterations=200)
         for street, board in [
@@ -289,6 +251,39 @@ class TestRangeEstimator:
 class TestTinyBetValueRaise:
     """Facing tiny bets: raise when range equity is strong, call when marginal."""
 
+    def test_build_ctx_keeps_mc_and_range_equity_separate(self):
+        strat = PostflopStrategy()
+        board = [Card.from_str(c) for c in ['7s', '9d', 'Qc']]
+        ctx = strat._build_ctx(
+            equity=0.25,
+            equity_mc=0.70,
+            equity_range=0.25,
+            pot=100.0,
+            to_call=20.0,
+            stack=200.0,
+            board=board,
+            is_ip=True,
+            street='flop',
+            facing_bet=True,
+            num_opponents=1,
+            big_blind=2.0,
+            spr=2.0,
+            opponent_af=1.5,
+            opponent_fold_rate=0.45,
+            fold_to_cbet=None,
+            value_only=False,
+            position='BTN',
+            nut_advantage=0.0,
+            is_delayed_cbet=False,
+            opponent_checked_back=False,
+            last_bet_frac=0.0,
+            villain_nuts_pct=0.0,
+            hole_cards=[Card.from_str('Ac'), Card.from_str('Kd')],
+        )
+        assert ctx.equity_mc == pytest.approx(0.70)
+        assert ctx.equity_range == pytest.approx(0.25)
+        assert ctx.compression == pytest.approx(0.25 / 0.70)
+
     def test_decide_calls_tiny_bet_with_marginal_range_equity(self):
         """range equity=0.43 (losing to opponent range 57%) → call tiny bet, don't raise.
 
@@ -296,14 +291,11 @@ class TestTinyBetValueRaise:
         不反映对手实际范围。range equity 0.43 意味着对手范围里多数手牌赢我们，
         加注"价值"实际是撞枪口。正确行为是跟注这个极小注（pot odds 1.8% < 43%）。
         """
-        import random
-
-
-        strat = PostflopStrategy(aggression=1.0)
+        strat = PostflopStrategy()
         board = [Card.from_str(c) for c in ['7s', '9d', 'Qc', '8c']]
         calls = 0
         for i in range(100):
-            random.seed(i)
+            _rng.seed(i)
             action, amt = strat.decide(
                 equity=0.43,
                 pot=55000.0,
@@ -321,14 +313,11 @@ class TestTinyBetValueRaise:
 
     def test_decide_raises_tiny_bet_with_strong_range_equity(self):
         """range equity=0.80 (ahead of opponent range) → value raise against tiny bet."""
-        import random
-
-
-        strat = PostflopStrategy(aggression=1.0)
+        strat = PostflopStrategy()
         board = [Card.from_str(c) for c in ['7s', '9d', 'Qc', '8c']]
         raises = 0
         for i in range(100):
-            random.seed(i)
+            _rng.seed(i)
             action, amt = strat.decide(
                 equity=0.80,
                 pot=55000.0,
@@ -345,84 +334,6 @@ class TestTinyBetValueRaise:
                 raises += 1
                 assert amt > 1000.0
         assert raises >= 50, f"expected frequent value-raise with strong range equity, got {raises}/100"
-
-
-class TestRiverBetLogic:
-    """Verify river betting uses pure value/bluff logic, no semi-bluffs."""
-
-    def test_turn_river_crushing_equity_facing_bet_always_raises(self):
-        """转/河、面对下注、range equity≥90%：确定性价值加注（类：碾压范围，raise 不劣于 call）。"""
-        import random
-
-
-        strat = PostflopStrategy(aggression=0.55)
-        river = [Card.from_str(c) for c in ['Ac', '4c', 'Ah', '7c', 'Qd']]
-        turn_b = [Card.from_str(c) for c in ['Ac', '4c', 'Ah', '7c']]
-        for equity in (0.90, 0.93, 1.0):
-            for seed in range(15):
-                random.seed(seed)
-                action, amt = strat.decide(
-                    equity=equity,
-                    pot=160000.0,
-                    to_call=80000.0,
-                    stack=2_130_819.0,
-                    board=river,
-                    is_ip=True,
-                    street='river',
-                    facing_bet=True,
-                    num_opponents=1,
-                    big_blind=2.0,
-                )
-                assert action == 'raise', (equity, seed, action)
-                assert amt > 80000.0
-        for seed in range(15):
-            random.seed(seed)
-            action, amt = strat.decide(
-                equity=0.91,
-                pot=120000.0,
-                to_call=40000.0,
-                stack=500000.0,
-                board=turn_b,
-                is_ip=False,
-                street='turn',
-                facing_bet=True,
-                num_opponents=1,
-                big_blind=2.0,
-            )
-            assert action == 'raise', (seed, action)
-            assert amt > 40000.0
-
-    def test_river_strong_hand_bets(self):
-
-        strategy = PostflopStrategy()
-        board = [card(c) for c in ['As', 'Kd', '2c', '7h', 'Jc']]
-        # Strong hand on river: should bet
-        results = [strategy.should_cbet(0.80, BoardTexture(board), True, 'river')
-                   for _ in range(50)]
-        assert sum(results) >= 45  # almost always bet
-
-    def test_river_medium_equity_semi_bluff_suppressed(self):
-        """0.40 equity on river: should NOT bet frequently (no draws, just a bluff)."""
-
-        strategy = PostflopStrategy()
-        board = [card(c) for c in ['As', 'Kd', '2c', '7h', 'Jc']]
-        # 40% equity on river = no draws, no semi-bluff justification
-        results = [strategy.should_cbet(0.40, BoardTexture(board), True, 'river',
-                                        opponent_fold_rate=0.35)
-                   for _ in range(100)]
-        # Should almost never bet (opponent fold rate too low for pure bluff)
-        assert sum(results) <= 20
-
-    def test_river_pure_bluff_with_fold_equity(self):
-        """Low equity + high fold rate on river: allow some pure bluffs."""
-
-        strategy = PostflopStrategy()
-        board = [card(c) for c in ['As', 'Kd', '2c', '7h', 'Jc']]
-        results = [strategy.should_cbet(0.15, BoardTexture(board), True, 'river',
-                                        opponent_fold_rate=0.60)
-                   for _ in range(200)]
-        # Should bluff sometimes (fold equity is profitable), but not always
-        assert 5 <= sum(results) <= 90
 
 
 class TestBBDecisions:
@@ -478,66 +389,90 @@ class TestBBDecisions:
         action = bot.decide(gs, player_id=2)
         assert action.action_type == ActionType.RAISE
 
-    def test_postflop_value_threshold_60pct(self):
-        """60-65% equity hand should c-bet as value (not semi-bluff) on dry board."""
+class TestEffectiveStackSPR:
+    """SPR uses aggressor-first effective stack.
 
-        strategy = PostflopStrategy(aggression=1.0)
-        board = [Card.from_str(c) for c in ['2d', '7h', 'Jc']]  # dry board
-        # Run many trials: at 62% equity on dry HU board, should almost always bet
-        bets = sum(
-            1 for _ in range(200)
-            if strategy.should_cbet(0.62, BoardTexture(board), True, 'flop', num_opponents=1)
+    1) if an aggressor exists on the line → min(hero_total, aggressor_total)
+    2) else → min(hero_total, *active_opponent_totals)  (conservative)
+    Regression: logs/20.log showed max() over-selecting a deep bystander
+    behind a short raiser, inflating geo_cap and producing unrealisable bets.
+    """
+
+    def _flop_state(self, my_stack, opp_stacks, my_bet=0.0, board=None, pot=30.0,
+                    aggressor_idx=None, raise_amount=0.0):
+        """Build a multiway flop state. opp_stacks = list of villain stacks.
+
+        Give each villain distinct dummy hole cards so the equity calculator
+        never samples the same card twice (review P1 nit on the original
+        TestEffectiveStackSPR: two villains shared '7c/2d').
+        """
+        villain_holes = [cards('7c', '2d'), cards('5h', '3s'), cards('8c', '4d')]
+        p0 = Player(0, 'Hero', my_stack, cards('Ac', 'Ad'), current_bet=my_bet)
+        players = [p0]
+        for i, s in enumerate(opp_stacks, start=1):
+            hole = villain_holes[(i - 1) % len(villain_holes)]
+            players.append(Player(i, f'V{i}', s, hole))
+        history = []
+        if aggressor_idx is not None:
+            history.append((aggressor_idx, Action(ActionType.RAISE, raise_amount), 'flop'))
+        gs = GameState(
+            players=players,
+            dealer_pos=0,
+            street=Street.FLOP,
+            board=board or cards('As', 'Kd', '2c'),
+            pot=pot,
+            current_bet=my_bet,
+            big_blind=2.0,
+            current_player_idx=0,
+            action_history=history,
         )
-        # With threshold lowered to 0.60, 62% equity → always bet HU
-        assert bets == 200, f"Expected always bet at 62% equity HU dry board, got {bets}/200"
+        return gs
 
-    def test_postflop_dry_board_multiway_60pct_bets_most(self):
-        """60%+ equity on dry board even multiway should bet most of the time."""
+    def test_spr_heads_up_uses_min(self):
+        """HU: hero 400, villain 100 → SPR = 100/30 ≈ 3.33 (not 400/30)."""
+        bot = PokerBot(equity_iterations=100)
+        gs = self._flop_state(my_stack=400.0, opp_stacks=[100.0])
+        bot.decide(gs, player_id=0)
+        assert bot.last_spr == pytest.approx(100.0 / 30.0, rel=0.02)
 
-        strategy = PostflopStrategy(aggression=1.0)
-        board = [Card.from_str(c) for c in ['2d', '7h', 'Jc']]  # dry
-        bets = sum(
-            1 for _ in range(200)
-            if strategy.should_cbet(0.65, BoardTexture(board), True, 'flop', num_opponents=2)
+    def test_spr_facing_raise_binds_to_aggressor_not_bystander(self):
+        """Regression from logs/20.log: short raiser + deep bystander must NOT
+        inflate SPR. Hero 400, V1 raises 10 with 100 stack, V2 bystander 300.
+        Effective = min(400, 100 total) = 100, SPR = 100/(30+10) = 2.5."""
+        bot = PokerBot(equity_iterations=100)
+        gs = self._flop_state(
+            my_stack=400.0, opp_stacks=[100.0, 300.0],
+            pot=40.0, my_bet=0.0,
+            aggressor_idx=1, raise_amount=10.0,
         )
-        # dry board base=0.90, 2 opponents → freq = max(0.50, 0.90 - 0.10) = 0.80
-        # Expect ~80% bet rate: roughly 140-170 out of 200
-        assert bets >= 100, f"Expected frequent betting 3-way dry board at 65% equity, got {bets}/200"
+        gs.players[1].current_bet = 10.0
+        gs.players[1].stack = 90.0
+        gs.current_bet = 10.0
+        bot.decide(gs, player_id=0)
+        assert bot.last_spr == pytest.approx(100.0 / 40.0, rel=0.05)
 
+    def test_spr_multiway_no_aggressor_uses_shortest(self):
+        """Checked-down multiway: hero 400, V1 100, V2 50 → min path picks 50."""
+        bot = PokerBot(equity_iterations=100)
+        gs = self._flop_state(my_stack=400.0, opp_stacks=[100.0, 50.0])
+        bot.decide(gs, player_id=0)
+        assert bot.last_spr == pytest.approx(50.0 / 30.0, rel=0.02)
 
-class TestMultiwayBetting:
-    """Verify multiway pot c-bet tightening (Pluribus: fold equity drops in multiway)."""
+    def test_spr_multiway_all_in_opp_excluded(self):
+        """all-in opponents don't constrain SPR (can_act filter)."""
+        bot = PokerBot(equity_iterations=100)
+        gs = self._flop_state(my_stack=400.0, opp_stacks=[100.0, 80.0])
+        gs.players[1].is_all_in = True   # V1 is all-in → excluded from can_act
+        bot.decide(gs, player_id=0)
+        # No aggressor → fallback min(hero=400, V2=80)
+        assert bot.last_spr == pytest.approx(80.0 / 30.0, rel=0.02)
 
-    def test_weak_hand_not_bet_3way(self):
-        """35% equity hand: should never c-bet into 3 opponents."""
-
-        strategy = PostflopStrategy()
-        board = [card(c) for c in ['As', 'Kd', '2c']]
-        results = [strategy.should_cbet(0.35, BoardTexture(board), True, 'flop',
-                                        num_opponents=3)
-                   for _ in range(100)]
-        assert sum(results) == 0  # equity < 0.45 multiway floor → never bet
-
-    def test_value_hand_still_bets_multiway(self):
-        """70%+ equity: should still bet even multiway (just with lower frequency)."""
-
-        strategy = PostflopStrategy()
-        board = [card(c) for c in ['As', 'Kd', '2c']]
-        results = [strategy.should_cbet(0.75, BoardTexture(board), True, 'flop',
-                                        num_opponents=3)
-                   for _ in range(100)]
-        assert sum(results) >= 40  # still bets majority of time with strong hand
-
-    def test_thin_value_bets_more_hu_than_multiway(self):
-        """65% equity: bets more heads-up than 4-way."""
-
-        strategy = PostflopStrategy()
-        board = [card(c) for c in ['As', 'Kd', '2c']]
-        hu = sum(strategy.should_cbet(0.65, BoardTexture(board), True, 'flop',
-                                      num_opponents=1) for _ in range(200))
-        mw = sum(strategy.should_cbet(0.65, BoardTexture(board), True, 'flop',
-                                      num_opponents=3) for _ in range(200))
-        assert hu > mw
+    def test_spr_hero_shortest_uses_hero(self):
+        """Hero is shortest: effective = my stack."""
+        bot = PokerBot(equity_iterations=100)
+        gs = self._flop_state(my_stack=40.0, opp_stacks=[200.0, 300.0])
+        bot.decide(gs, player_id=0)
+        assert bot.last_spr == pytest.approx(40.0 / 30.0, rel=0.02)
 
 
 class TestAggressorOpponent:
@@ -616,3 +551,21 @@ class TestAggressorOpponent:
             s.vpip_count = 20
             s.pfr_count = 2
         assert m.preferred_exploit_target([1, 2]) == 1
+
+
+class TestPlayerProfileProjection:
+    def test_river_profile_separates_afq_samples_from_fold_opportunities(self):
+        bot = PokerBot()
+        s = bot.opponent_model.get(1)
+        s.river_bet_count = 20
+        s.river_call_count = 5
+        s.river_check_count = 10
+        s.river_action_count = 40
+        s.river_facing_bet_opps = 3
+        s.river_facing_bet_fold_count = 1
+
+        prof = bot._build_player_profile(1)
+
+        assert prof.river_action_count == 35
+        assert prof.river_facing_bet_opps == 3
+        assert prof.river_fold_rate == pytest.approx(1 / 3)

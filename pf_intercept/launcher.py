@@ -26,6 +26,7 @@ PokerFate 一键启动器
 from __future__ import annotations
 
 import asyncio
+import ctypes  # used only on Windows; stdlib, harmless on other platforms
 import logging
 import os
 import platform
@@ -38,6 +39,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+from pf_intercept.proxy import _parse_proxy_args, main as proxy_main
 
 log = logging.getLogger(__name__)
 
@@ -118,11 +121,29 @@ def _start_mitmweb() -> subprocess.Popen | None:
         "--no-web-open-browser",
     ]
     print(f"[launcher] 启动 mitmweb  port={_MITMWEB_PORT}")
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
+    # Redirect mitmweb output to a file under logs/. Review noted that the
+    # original PIPE/STDOUT combo leaked nothing to the user; but DEVNULL
+    # silenced it entirely, making force_domain.py exceptions invisible
+    # and hurting debuggability. A log file preserves diagnostics without
+    # cluttering the interactive launcher output.
+    logs_dir = _PROJECT_ROOT / "logs"
+    try:
+        logs_dir.mkdir(exist_ok=True)
+    except OSError:
+        logs_dir = None
+    if logs_dir is not None:
+        log_path = logs_dir / "mitmweb.log"
+        log_fh = open(log_path, "w", buffering=1)
+        proc = subprocess.Popen(
+            cmd,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
+        )
+        print(f"[launcher] mitmweb 日志 → {log_path}")
+    else:
+        # Fallback when logs/ isn't writable (rare): keep output visible so
+        # at least errors surface.
+        proc = subprocess.Popen(cmd)
     print(f"[launcher] mitmweb 已启动  pid={proc.pid}")
     return proc
 
@@ -134,11 +155,25 @@ def _start_dns_elevated() -> subprocess.Popen | None:
     """以 root/管理员权限启动 dns_server 子进程。
 
     主进程保持普通用户运行，只有 DNS 需要 root（端口 53）。
-    通过 PTY 给 sudo 分配伪终端，使 PAM 能触发 Touch ID（需系统已配置 pam_tid.so）。
-    停止时直接 kill sudo 进程即可，不需要二次授权。
+    macOS/Linux 走 PTY + sudo 路径（触发 Touch ID / 密码提示）。
+    Windows 走 UAC 提权，该分支**必须**在 sudo 路径之前检查 —
+    否则 Windows 会掉到 `os.geteuid()`（Unix 专属）直接抛 AttributeError。
+
+    已知局限：Windows UAC 路径 ShellExecuteW 启动的独立窗口进程不返回
+    Popen 句柄（`return None`）。launcher `_cleanup` 因此不会 kill 它，
+    Ctrl+C 退出后 DNS 服务窗口变成孤儿需要用户手动关闭。
     """
     python = sys.executable
     dns_cmd = [python, "-m", "pf_intercept.dns_server"]
+
+    if _IS_WIN:
+        print("[launcher] 启动 dns_server（UAC 提权）...")
+        ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", python, "-m pf_intercept.dns_server", None, 1,
+        )
+        print("[launcher] dns_server UAC 已请求（独立窗口运行）")
+        return None
+
     env_path = _venv_path()
 
     # sudo/root 下 cwd 与 PYTHONPATH 常与交互 shell 不一致，需显式带上项目根以便 -m 能解析包
@@ -187,19 +222,6 @@ def _start_dns_elevated() -> subprocess.Popen | None:
     proc.kill()
     return None
 
-    if _IS_WIN:
-        import ctypes
-        print("[launcher] 启动 dns_server（UAC 提权）...")
-        ctypes.windll.shell32.ShellExecuteW(
-            None, "runas", python, "-m pf_intercept.dns_server", None, 1,
-        )
-        print("[launcher] dns_server UAC 已请求（独立窗口运行）")
-        return None
-
-    print("[launcher] 无法提权启动 DNS 服务，请从终端手动运行：")
-    print(f"  sudo {python} -m pf_intercept.dns_server")
-    return None
-
 
 # ── 参数解析 ─────────────────────────────────────────────────────────────────
 
@@ -241,7 +263,6 @@ async def _run(skip_mitmweb: bool, skip_dns: bool, proxy_argv: list[str]) -> Non
     saved_argv = sys.argv
     sys.argv = ["proxy"] + proxy_argv
     try:
-        from pf_intercept.proxy import _parse_proxy_args, main as proxy_main
         args = _parse_proxy_args()
     finally:
         sys.argv = saved_argv
