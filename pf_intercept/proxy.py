@@ -36,6 +36,7 @@ from pf_intercept.config import (
 )
 from pf_intercept.framing import Frame, FrameBuffer, encode_frame
 from pf_intercept.bot import BotBridge
+from pf_entertainment import EntertainmentRuntime
 from pf_notify import notify, set_bark_key, load_bark_key_file
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -110,6 +111,7 @@ from pf_intercept import codec, config
 
 # ── Bot singleton (constructed in main() with CLI options) ────────────────────
 _bot: BotBridge | None = None
+_entertainment: EntertainmentRuntime | None = None
 
 # Set from pb.SelfUserInfoRSP.brief.uid so pb.EnterRoomRSP can patch table_status.seat[].player
 _spoof_account_uid: str | None = None
@@ -441,6 +443,18 @@ async def _do_inject(
         log.warning("[BOT→S] inject send failed: %s", exc)
 
 
+def _make_entertainment_sender(server_ws):
+    async def _send(type_name: str, fields: dict, room_id: int) -> None:
+        pb_body = codec.encode(type_name, fields)
+        if pb_body is None:
+            raise RuntimeError(f"{type_name} encode failed")
+        wire = encode_frame(type_name, int(room_id), pb_body)
+        log.info("[ENT→S] %s room_id=%s %s", type_name, room_id, fields)
+        await server_ws.send(wire)
+
+    return _send
+
+
 async def _c2s_analysis_worker(buf: FrameBuffer, queue: asyncio.Queue) -> None:
     """Consume raw C2S bytes and log watched message types (runs concurrently with forwarding)."""
     while True:
@@ -472,9 +486,16 @@ async def _s2c_analysis_worker(
             break
         for frame in buf.feed(raw):
             bridge.note_seen_room_id(frame.room_id)
+            ent_msg = None
+            if _entertainment is not None:
+                _entertainment.note_room_id(frame.room_id)
+                if frame.type_name in _entertainment.watched_s2c_types:
+                    ent_msg = codec.decode(frame.type_name, frame.pb_body)
+                    if ent_msg is not None:
+                        _entertainment.observe_s2c(frame.type_name, ent_msg)
             if frame.type_name not in WATCH_S2C:
                 continue
-            msg = codec.decode(frame.type_name, frame.pb_body)
+            msg = ent_msg if ent_msg is not None else codec.decode(frame.type_name, frame.pb_body)
             if msg is None:
                 log.warning("[S→C] %s  (decode failed — run gen_pb2.sh first)", frame.type_name)
                 continue
@@ -542,6 +563,22 @@ async def _pipe_s2c(client_ws, server_ws, buf: FrameBuffer) -> None:
         analysis_queue.put_nowait(None)   # signal worker to exit
         await analysis_task
         log.info("[WSS] pipe s2c ended; messages=%d", msg_count)
+
+
+async def _run_wss_pair(client_ws, server_ws) -> None:
+    ent_token = None
+    if _entertainment is not None:
+        ent_token = _entertainment.attach_session(
+            _make_entertainment_sender(server_ws)
+        )
+    try:
+        await asyncio.gather(
+            _pipe_c2s(client_ws, server_ws, FrameBuffer()),
+            _pipe_s2c(client_ws, server_ws, FrameBuffer()),
+        )
+    finally:
+        if _entertainment is not None and ent_token is not None:
+            _entertainment.detach_session(ent_token)
 
 
 async def _handle_wss(client_ws) -> None:
@@ -637,10 +674,7 @@ async def _handle_wss(client_ws) -> None:
                 _host_ok_ip_cache[upstream_host] = upstream_ip
                 _persist_ip_cache()
                 server_ws = upstream_ws
-                await asyncio.gather(
-                    _pipe_c2s(client_ws, server_ws, FrameBuffer()),
-                    _pipe_s2c(client_ws, server_ws, FrameBuffer()),
-                )
+                await _run_wss_pair(client_ws, server_ws)
         except (OSError, asyncio.TimeoutError) as net_err:
             # Network-level failure (TCP connect / TLS timeout): refresh DNS and retry once.
             log.warning(
@@ -655,10 +689,7 @@ async def _handle_wss(client_ws) -> None:
                     _host_ok_ip_cache[upstream_host] = fresh_ip
                     _persist_ip_cache()
                     server_ws = upstream_ws
-                    await asyncio.gather(
-                        _pipe_c2s(client_ws, server_ws, FrameBuffer()),
-                        _pipe_s2c(client_ws, server_ws, FrameBuffer()),
-                    )
+                    await _run_wss_pair(client_ws, server_ws)
             else:
                 raise
     except websockets.exceptions.ConnectionClosed as exc:
@@ -833,7 +864,7 @@ async def main(
     spoof_skin_id: int | None = None,
     use_range_equity: bool = True,
 ) -> None:
-    global _bot
+    global _bot, _entertainment
     _load_bark_key_from_file()
     if not Path(SERVER_CERT).exists():
         print("ERROR: certs not found. Run:  python -m pf_intercept.gen_cert")
@@ -848,6 +879,11 @@ async def main(
         config.SPOOF_USER_BRIEF_SKIN_ID = spoof_skin_id
 
     _bot = BotBridge(max_auto_rebuy=max_auto_rebuy, use_range_equity=use_range_equity)
+    _entertainment = EntertainmentRuntime(
+        host=config.ENTERTAINMENT_CMD_HOST,
+        port=config.ENTERTAINMENT_CMD_PORT,
+    )
+    await _entertainment.start()
     log.info(
         "[BOT] Waiting for SitDownRSP and EnterRoomRSP to detect seat / blinds "
         "(max_auto_rebuy=%d, profit_lock_bb=%d, spoof_role_id=%s, spoof_skin_id=%s)",
@@ -860,6 +896,11 @@ async def main(
         f"[proxy] Bot 初始化完成  max_rebuy={max_auto_rebuy}  "
         f"profit_lock={config.PROFIT_LOCK_BB_THRESHOLD}BB  "
         f"equity_mode={'range' if use_range_equity else 'eqr'}"
+    )
+    print(
+        "[proxy] 娱乐游戏指令端口 "
+        f"{config.ENTERTAINMENT_CMD_HOST}:{config.ENTERTAINMENT_CMD_PORT}；"
+        "示例：python3 -m pf_entertainment.cli color red=1000 lvl=1"
     )
 
     server_ssl = _make_server_ssl()
