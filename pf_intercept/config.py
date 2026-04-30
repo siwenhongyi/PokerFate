@@ -17,6 +17,12 @@ EXTERNAL_DNS_SERVERS = [
 PROXY_HOST   = "0.0.0.0"
 WSS_PORT     = 9012
 
+# Local command socket for entertainment side games.
+# Example while proxy is running:
+#   python3 -m pf_entertainment.cli color red=1000 lvl=1
+ENTERTAINMENT_CMD_HOST = "127.0.0.1"
+ENTERTAINMENT_CMD_PORT = 9021
+
 # Additional ports the game might hit on SERVER_HOST → TCP pass-through.
 PASSTHROUGH_PORTS: list[int] = [443, 80]
 
