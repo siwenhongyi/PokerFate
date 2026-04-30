@@ -29,6 +29,11 @@ _BASELINE_THRESH = float(os.environ.get('PF_BASELINE_THRESH', '0.6'))
 # guard but stops over-penalizing raw MC in profitable call/fold nodes.
 _FOLD_OVERRIDE_MARGIN = float(os.environ.get('PF_FOLD_OVERRIDE_MARGIN', '0.00'))
 _FOLD_OVERRIDE_MC_PENALTY = float(os.environ.get('PF_FOLD_OVERRIDE_MC_PENALTY', '0.10'))
+_MC_RANGE_DIVERGENCE_GUARD = os.environ.get('PF_MC_RANGE_DIVERGENCE_GUARD', '1') == '1'
+_MC_RANGE_DIVERGENCE_MIN = float(os.environ.get('PF_MC_RANGE_DIVERGENCE_MIN', '0.18'))
+_MC_RANGE_DIVERGENCE_EXTRA_PENALTY = float(os.environ.get('PF_MC_RANGE_DIVERGENCE_EXTRA_PENALTY', '0.15'))
+_MC_RANGE_DIVERGENCE_MIN_STREET = os.environ.get('PF_MC_RANGE_DIVERGENCE_MIN_STREET', 'turn')
+_MC_RANGE_DIVERGENCE_MIN_CALL_POT = float(os.environ.get('PF_MC_RANGE_DIVERGENCE_MIN_CALL_POT', '0.20'))
 _LEVERAGE_TOP_GAP = float(os.environ.get('PF_LEVERAGE_TOP_GAP', '0.18'))
 _LEVERAGE_MIN_TOP = float(os.environ.get('PF_LEVERAGE_MIN_TOP', '0.48'))
 _LEVERAGE_DETERMINISTIC = os.environ.get('PF_LEVERAGE_DETERMINISTIC', '1') != '0'
@@ -131,6 +136,19 @@ class V3Engine:
             deltas[p.id] = ex
             out.append((p, tr.weight * ex))
         return out, deltas
+
+    def _mc_range_divergence_penalty(self, ctx: DecisionCtx) -> float:
+        if not _MC_RANGE_DIVERGENCE_GUARD:
+            return _FOLD_OVERRIDE_MC_PENALTY
+        street_order = {'flop': 1, 'turn': 2, 'river': 3}
+        min_order = street_order.get(_MC_RANGE_DIVERGENCE_MIN_STREET, 2)
+        if street_order.get(ctx.street, 0) < min_order:
+            return _FOLD_OVERRIDE_MC_PENALTY
+        if ctx.pot <= 0 or ctx.to_call / ctx.pot < _MC_RANGE_DIVERGENCE_MIN_CALL_POT:
+            return _FOLD_OVERRIDE_MC_PENALTY
+        if ctx.equity_mc - ctx.equity_range < _MC_RANGE_DIVERGENCE_MIN:
+            return _FOLD_OVERRIDE_MC_PENALTY
+        return _FOLD_OVERRIDE_MC_PENALTY + _MC_RANGE_DIVERGENCE_EXTRA_PENALTY
 
     def _leverage_flags(self, ctx: DecisionCtx) -> List[str]:
         flags: List[str] = []
@@ -308,9 +326,10 @@ class V3Engine:
     def _decide_defense(self, ctx: DecisionCtx, seed: int) -> DecisionOutput:
         # All-in first
         if ctx.to_call >= ctx.stack:
+            mc_penalty = self._mc_range_divergence_penalty(ctx)
             blended_eq = max(
                 ctx.equity_range - (ctx.equity_uncertainty or 0.0),
-                ctx.equity_mc - _FOLD_OVERRIDE_MC_PENALTY,
+                ctx.equity_mc - mc_penalty,
             )
             if blended_eq >= ctx.pot_odds + _FOLD_OVERRIDE_MARGIN:
                 return DecisionOutput(
@@ -348,9 +367,10 @@ class V3Engine:
             # 系统性压低（log 反复出现 "胜率 27%(vs随机 53%)"），fold-only 候选
             # 实际上是 tracker 偏置而非真正弱牌。用 mc-blend 做兜底：若 raw mc
             # 减去保守余量后仍超 pot_odds，强制 call。env 可调。
+            mc_penalty = self._mc_range_divergence_penalty(ctx)
             blended_eq = max(
                 ctx.equity_range - (ctx.equity_uncertainty or 0.0),
-                ctx.equity_mc - _FOLD_OVERRIDE_MC_PENALTY,
+                ctx.equity_mc - mc_penalty,
             )
             if blended_eq >= ctx.pot_odds + _FOLD_OVERRIDE_MARGIN:
                 return DecisionOutput(

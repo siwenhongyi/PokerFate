@@ -46,7 +46,13 @@ api.hand_over(winner_ids=[0], pot=9.0, final_stacks={0: 207.0, 1: 193.0})
 
 ### 依赖
 
-无第三方依赖，仅需 Python 3.12+。
+Python 3.12+。建议在项目虚拟环境安装完整依赖：
+
+```bash
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+外部 API 路径会用到 `numpy`；`eval7` 用于加速牌力评估（未安装时评估器有纯 Python fallback）。代理模式还需要 `websockets`、`protobuf`、`certifi`、`cryptography`。HTTP 代理/登录响应过滤使用 `mitmproxy`，按 README 的对应步骤单独安装。
 
 ### 创建实例
 
@@ -56,15 +62,18 @@ api = PokerFateAPI(
     big_blind=2.0,           # 大盲注金额
     small_blind=1.0,         # 小盲注金额（默认 big_blind / 2）
     equity_iterations=800,   # 胜率计算精度（越高越准但越慢，建议 500-3000）
-    aggression=1.0,          # 翻牌后激进系数（1.0 = GTO 基准）
-    use_range_equity=True,   # True=两阶段 range equity 决策；False=纯蒙卡胜率
-    autosave_path=None,      # 对手数据持久化文件路径；None 时使用包内默认路径
-    log_file=None,           # JSONL 日志路径；None 时使用包内默认路径
     verbose=False,           # True 时打印调试级别的内部细节到控制台
+    use_range_equity=True,   # True=range_v2；False=旧 EQR/蒙卡压缩路径
+    enable_showdown_calibration=True,
+    decision_seed=None,      # 可选：固定决策随机种子，便于复盘/测试
 )
 ```
 
-**`autosave_path` 默认行为**：不传时自动写入包目录内的 `pokerfate/data/opponents.json`；传 `None` 则禁用自动保存。
+**默认路径行为**：
+
+- `autosave_path` 不传时，正常运行会写入包目录内的 `pokerfate/data/opponents.json`；传 `None` 则禁用自动保存。
+- `log_file` 不传时，正常运行会写入包目录内的 `pokerfate/logs/pokerfate.log`；传 `None` 则禁用文件日志。
+- 测试环境中默认禁用 autosave 和文件日志。
 
 ---
 
@@ -261,7 +270,7 @@ api.hand_over(
 
 ---
 
-### `hand_over(winner_ids, pot, final_stacks, showdown_hands, winner_hand_types)`
+### `hand_over(winner_ids, pot, final_stacks=None, showdown_hands=None, winner_hand_types=None, my_profit_delta=None)`
 
 每手结束时调用。调用后**自动保存对手数据**到磁盘。
 
@@ -269,9 +278,10 @@ api.hand_over(
 |------|------|------|
 | `winner_ids` | `List[int]` | 赢家的 player_id 列表（平局时多个） |
 | `pot` | `float` | 本手总底池 |
-| `final_stacks` | `Dict[int, float]` | **强烈建议传入**：手牌结束后各玩家筹码 |
-| `showdown_hands` | `Dict[int, List[str]]` | 可选：摊牌时亮出的手牌，用于对手建模校准 |
-| `winner_hand_types` | `Dict[int, int]` | 可选：服务端下发的赢家牌型整数（优先于本地评估） |
+| `final_stacks` | `Dict[int, float]` \| `None` | **强烈建议传入**：手牌结束后各玩家筹码 |
+| `showdown_hands` | `Dict[int, List[str]]` \| `None` | 可选：摊牌时亮出的手牌，用于对手建模校准 |
+| `winner_hand_types` | `Dict[int, int]` \| `None` | 可选：服务端下发的赢家牌型整数（优先于本地评估） |
+| `my_profit_delta` | `float` \| `None` | 可选：服务端下发的本手 hero 净盈亏；proxy 模式优先使用它，避免锁仓离桌/重进导致 stack diff 失真 |
 
 ---
 

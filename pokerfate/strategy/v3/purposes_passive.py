@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from pokerfate.strategy.v3.context import DecisionCtx
 from pokerfate.strategy.v3.purpose import Purpose, TriggerResult

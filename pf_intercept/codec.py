@@ -14,6 +14,7 @@ encode() returns None if the type is unknown or parsing fails; otherwise bytes (
 from __future__ import annotations
 
 import importlib
+import logging
 import pkgutil
 import sys
 from pathlib import Path
@@ -22,6 +23,7 @@ from google.protobuf import message as _msg
 from google.protobuf.json_format import MessageToDict, ParseDict
 
 _registry: dict[str, type] = {}   # "pb.ActionREQ" -> pb2 message class
+log = logging.getLogger("pf_codec")
 
 
 def _register_pb2_module(module) -> None:
@@ -56,7 +58,7 @@ def _load_pb2_modules() -> None:
             if added_pb_dir and pb_dir in sys.path:
                 sys.path.remove(pb_dir)
     except Exception:
-        pass   # pb2 not compiled yet – codec will work in raw mode
+        log.exception("[codec] failed to load compiled pb2 modules; raw mode only")
 
 
 _load_pb2_modules()
@@ -90,6 +92,11 @@ def decode(type_name: str, pb_body: bytes) -> dict | None:
         msg.ParseFromString(pb_body)
         return _message_to_dict_compat(msg)
     except Exception:
+        log.exception(
+            "[codec] decode failed type=%s bytes=%d",
+            type_name,
+            len(pb_body or b""),
+        )
         return None
 
 
@@ -108,4 +115,5 @@ def encode(type_name: str, fields: dict) -> bytes | None:
         msg = ParseDict(fields, cls())
         return msg.SerializeToString()
     except Exception:
+        log.exception("[codec] encode failed type=%s fields=%r", type_name, fields)
         return None

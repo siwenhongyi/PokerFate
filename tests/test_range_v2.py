@@ -11,7 +11,6 @@ Target bugs from the equity-branch review (see docs/reviews/2026-04-20-equity-br
 import itertools
 
 import numpy as np
-import pytest
 from pokerfate.api import ActionEvent, PlayerInfo, PokerFateAPI
 from pokerfate.core.card import Card
 from pokerfate.strategy.range_v2 import hand_categorizer as hcat

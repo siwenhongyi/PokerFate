@@ -15,7 +15,6 @@ Order (doc 03 §8):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from pokerfate.strategy.v3.context import DecisionCtx
 

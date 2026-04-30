@@ -44,9 +44,7 @@ Pluribus (Brown & Sandholm, 2019)
 """
 
 from __future__ import annotations
-import json
-import os
-from typing import Dict, List
+from typing import Dict
 
 from pokerfate.core.card import Card as _Card
 from pokerfate.core.equity import EquityCalculator
@@ -558,21 +556,3 @@ class HandRangeEstimator:
 
         self.showdown_calibrator.record(resolved_name, action_sequence, strength_by_street)
         return strength_by_street
-
-    def save_calibrator(self, filepath: str) -> None:
-        """将 showdown 校准数据持久化到 JSON 文件。"""
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(self.showdown_calibrator.to_dict(), f, indent=2)
-
-    def load_calibrator(self, filepath: str) -> None:
-        """从 JSON 文件加载 showdown 校准数据（文件不存在时静默跳过）。"""
-        if not os.path.exists(filepath):
-            return
-        with open(filepath, "r", encoding="utf-8") as f:
-            content = f.read().strip()
-        if not content:
-            return
-        try:
-            self.showdown_calibrator = ShowdownCalibrator.from_dict(json.loads(content))
-        except (json.JSONDecodeError, KeyError, ValueError):
-            pass  # 损坏的文件，保持空校准器

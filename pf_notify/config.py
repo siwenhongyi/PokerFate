@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import pathlib
 
 BARK_API_BASE = "https://api.day.app"
+log = logging.getLogger("pf_notify")
 
 _bark_key: str | None = None
 
@@ -26,7 +28,10 @@ def load_bark_key_file(path: str | pathlib.Path) -> str | None:
     p = pathlib.Path(path)
     try:
         text = p.read_text(encoding="utf-8")
-    except OSError:
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        log.warning("pf_notify: failed to read Bark key file %s: %s", p, exc)
         return None
     line = text.strip().splitlines()[0].strip() if text.strip() else ""
     return line or None

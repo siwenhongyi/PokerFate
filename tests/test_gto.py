@@ -1,6 +1,5 @@
 """Tests for GTO math module."""
 
-import pytest
 from pokerfate.strategy.gto import GTOMath
 
 

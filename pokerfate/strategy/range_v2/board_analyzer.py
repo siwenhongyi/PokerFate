@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from typing import Dict, List, Set
+from typing import List
 
 from pokerfate.core.card import Card
 
@@ -91,31 +91,3 @@ def analyze(board: List[Card]) -> BoardTexture:
         high_card_rank=max(c.rank for c in board),
         connectedness=connectedness,
     )
-
-
-def blocker_effects(my_hand: List[Card], board: List[Card]) -> Dict[str, bool]:
-    """Compute blocker effects of my hand on opponent's range.
-
-    Returns a dict of named blocker signals.
-    """
-    effects: Dict[str, bool] = {}
-    if not board:
-        return effects
-
-    tex = analyze(board)
-
-    # Nut flush blocker: I hold the Ace of the flush-draw suit
-    if tex.flush_draw:
-        for suit in tex.flush_draw_suits:
-            if any(c.suit == suit and c.rank == 14 for c in my_hand):
-                effects['nut_flush_blocker'] = True
-                break
-
-    # Set blocker: I hold one card matching a board rank
-    board_ranks = {c.rank for c in board}
-    for c in my_hand:
-        if c.rank in board_ranks:
-            effects['set_blocker'] = True
-            break
-
-    return effects

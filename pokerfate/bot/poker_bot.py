@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import hashlib
+import logging
 from typing import List, Optional, Dict
 
 from pokerfate.core.card import Card
@@ -26,6 +27,8 @@ from pokerfate.strategy.range_v2.hero_eq_calibrator import (
     classify_action_ctx_from_decision,
 )
 from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards as _hero_categorize
+
+log = logging.getLogger(__name__)
 
 
 class PokerBot:
@@ -505,6 +508,11 @@ class PokerBot:
                     primary_opp_id, board,
                 )
             except Exception:
+                log.exception(
+                    "range bucket distribution failed for opponent=%s board=%s",
+                    primary_opp_id,
+                    [str(c) for c in board],
+                )
                 v_bucket_dist = {}
         if v_bucket_dist:
             villain_strength = sum(
@@ -548,6 +556,11 @@ class PokerBot:
                 )
                 villain_nuts_pct = float(bucket_dist.get('nuts', 0.0) or 0.0)
             except Exception:
+                log.exception(
+                    "villain nuts bucket lookup failed for opponent=%s board=%s",
+                    primary_opp_id,
+                    [str(c) for c in board],
+                )
                 villain_nuts_pct = 0.0
 
         # Replace fixed equity bumps with dynamic pot-odds threshold adjustment.
@@ -824,10 +837,20 @@ class PokerBot:
                     try:
                         row['bucket'] = _hero_categorize([c1, c2], list(board))
                     except Exception:
-                        pass
+                        log.exception(
+                            "top villain combo bucket failed opponent=%s combo=%s board=%s",
+                            player_id,
+                            combo,
+                            [str(c) for c in board],
+                        )
                 out.append(row)
             return out
         except Exception:
+            log.exception(
+                "top villain combo extraction failed opponent=%s board=%s",
+                player_id,
+                [str(c) for c in board],
+            )
             return []
 
     def _build_postflop_diagnostics(
@@ -864,6 +887,7 @@ class PokerBot:
                 entropy = round(float(self._range_tracker.get_entropy(primary_opp_id)), 4)
                 range_summary = self._range_tracker.get_range_summary(primary_opp_id)
             except Exception:
+                log.exception("postflop diagnostics range summary failed opponent=%s", primary_opp_id)
                 entropy = None
                 range_summary = {}
         return {
@@ -1536,6 +1560,11 @@ class PokerBot:
                 "pekarstas": format_action(refs["pekarstas"]),
             }
         except Exception:
+            log.exception(
+                "preflop GTO refs lookup failed position=%s facing_action=%s",
+                position,
+                facing_action,
+            )
             return None
 
     def _normalize_pos(self, raw: str) -> str:

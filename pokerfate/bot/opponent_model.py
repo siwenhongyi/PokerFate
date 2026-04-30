@@ -30,11 +30,14 @@ unknown — 以上皆不满足。
 
 from __future__ import annotations
 import json
+import logging
 import os
 from dataclasses import dataclass, asdict, fields
 from typing import Dict, List, Optional
 
 from pokerfate.core.config import MIN_HANDS_FOR_CLASSIFICATION
+
+log = logging.getLogger(__name__)
 
 
 def _clip(x: float, lo: float, hi: float) -> float:
@@ -68,7 +71,6 @@ class OpponentStats:
     # 3bet / cbet 服务端数据已作废：
     #   - three_bet_rate：per-hand 语义，与本地 per-opportunity 不同，不再接入
     #   - c_bete_rate：cbet_pct 字段在决策层没有读取路径，彻底删除
-    # gamedata_fetcher 仍然解析这两个 JSON 字段（前向兼容），但不写入 stats。
     server_af_prior: float = 0.0      # AF ratio (converted from active_rate/10000)
     server_wtsd_prior: float = 0.0    # show_hand_rate/10000（showdowns per VPIP hand）
 
@@ -775,7 +777,8 @@ class OpponentModel:
             return model
         try:
             data = json.loads(content)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            log.warning("OpponentModel.load: invalid JSON in %s: %s", filepath, exc)
             return model
 
         valid_keys = {f.name for f in fields(OpponentStats)}

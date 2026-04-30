@@ -753,10 +753,6 @@ class PokerLogger:
         """写一行系统备注到控制台日志（pokerfate_console.log）。不触发 JSONL 记录。"""
         self._raw(msg)
 
-    # back-compat alias
-    def _con(self, msg: str, color: str = "", bold: bool = False, dim: bool = False):
-        self._raw(msg, color=color, bold=bold, dim=dim)
-
 
 def _strip_ansi(s: str) -> str:
     """Remove ANSI escape codes for length calculation and plain-text output."""

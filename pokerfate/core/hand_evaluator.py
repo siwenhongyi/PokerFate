@@ -188,10 +188,6 @@ class HandEvaluator:
         return HandEvaluator.evaluate(cards)
 
     @staticmethod
-    def hand_rank_name(score: HandScore) -> str:
-        return str(HandRank(score[0]))
-
-    @staticmethod
     def compare(score_a: HandScore, score_b: HandScore) -> int:
         """Return 1 if a wins, -1 if b wins, 0 if tie."""
         if score_a > score_b:

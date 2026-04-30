@@ -12,6 +12,7 @@ Why this file still exists:
 
 from __future__ import annotations
 
+import logging
 import math
 import os as _os
 import random as _random_module
@@ -24,7 +25,7 @@ _U_CAP = float(_os.environ.get('PF_U_CAP', '0.20'))
 
 from pokerfate.core.card import Card
 from pokerfate.strategy.v3 import (
-    BlockerSet, BoardSignals, DecisionCtx, DrawProfile, V3Engine, VillainStats,
+    BlockerSet, DecisionCtx, DrawProfile, V3Engine, VillainStats,
 )
 
 
@@ -78,8 +79,9 @@ def _compute_equity_uncertainty(
 
     return min(_U_CAP, u)
 from pokerfate.strategy.v3 import board as _v3_board
-from pokerfate.strategy.v3.context import DecisionCtx as _Ctx
 from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -157,10 +159,6 @@ class PostflopStrategy:
     # ------------------------------------------------------------------
     # Public API used by poker_bot / tests
     # ------------------------------------------------------------------
-
-    def seed_for_testing(self, seed: int) -> None:
-        self._rng.seed(seed)
-        self._last_decision_seed = seed
 
     def decide(
         self,
@@ -314,6 +312,11 @@ class PostflopStrategy:
             try:
                 hero_bucket = categorize_cards(hole, board_list)
             except Exception:
+                log.exception(
+                    "hero bucket categorization failed hole=%s board=%s",
+                    [str(c) for c in hole],
+                    [str(c) for c in board_list],
+                )
                 hero_bucket = 'medium'
         else:
             hero_bucket = 'medium'
@@ -432,73 +435,3 @@ class PostflopStrategy:
             seed=int(decision_seed or 0),
         )
         return ctx
-
-    # ------------------------------------------------------------------
-    # Back-compat: individual predicate methods used by some tests.
-    # Provide thin wrappers that call decide() and inspect the result.
-    # ------------------------------------------------------------------
-
-    def should_cbet(
-        self,
-        equity: float,
-        board,
-        is_ip: bool,
-        street: str,
-        num_opponents: int = 1,
-        opponent_fold_rate: float = 0.45,
-        **kwargs,
-    ) -> bool:
-        board_cards = getattr(board, 'board', board)
-        action, _ = self.decide(
-            equity=equity, pot=100.0, to_call=0.0, stack=1000.0,
-            board=board_cards, is_ip=is_ip, street=street, facing_bet=False,
-            num_opponents=num_opponents, big_blind=2.0,
-            opponent_fold_rate=opponent_fold_rate, spr=10.0,
-            position='BTN' if is_ip else 'BB',
-        )
-        return action == 'raise'
-
-    def bet_size(
-        self,
-        equity: float,
-        pot: float,
-        board,
-        stack: float,
-        street: str,
-        big_blind: float,
-        spr: float = 8.0,
-        **kwargs,
-    ) -> float:
-        board_cards = getattr(board, 'board', board)
-        action, amount = self.decide(
-            equity=equity, pot=pot, to_call=0.0, stack=stack,
-            board=board_cards, is_ip=True, street=street, facing_bet=False,
-            num_opponents=1, big_blind=big_blind, spr=spr,
-            position='BTN',
-        )
-        if action == 'raise':
-            return amount
-        # If engine chose to check, emulate legacy "bet anyway at a base size"
-        # by returning a representative sizer value.
-        return max(pot * 0.5, big_blind)
-
-    def should_call(
-        self,
-        equity: float,
-        pot_odds: float,
-        spr: float,
-        street: str,
-        *,
-        is_drawing_heavy: bool = False,
-        **kwargs,
-    ) -> bool:
-        """Pure pot-odds + implied-bonus gate (retained for test_bot.py)."""
-        from pokerfate.strategy.gto import GTOMath
-        bonus = GTOMath.implied_odds_bonus(spr, street) if is_drawing_heavy else 0.01
-        return equity + bonus >= pot_odds
-
-    def should_check_raise(self, equity: float, board, is_ip: bool) -> bool:
-        """Retained for legacy tests — trivial pass-through."""
-        if is_ip:
-            return False
-        return equity >= 0.60

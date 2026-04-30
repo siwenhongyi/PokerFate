@@ -16,12 +16,15 @@ aggregated bucket distribution — doc 03 §7.2.
 
 from __future__ import annotations
 
+import logging
 from typing import Dict, List, Optional
 
-from pokerfate.core.card import Card, Rank, Suit
+from pokerfate.core.card import Card, Suit
 from pokerfate.core.position import normalize_position
 from pokerfate.strategy import preflop as _pf
 from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards
+
+log = logging.getLogger(__name__)
 
 
 _BUCKETS = ('nuts', 'strong', 'medium', 'draw', 'weak_draw', 'air')
@@ -174,6 +177,11 @@ def _reach_prob(
         try:
             bucket = categorize_cards(list(combo), flop_board)
         except Exception:
+            log.exception(
+                "hero range reach bucket failed street=flop combo=%s board=%s",
+                [str(c) for c in combo],
+                [str(c) for c in flop_board],
+            )
             return 1.0
         action = my_prev_actions['flop']
         prob *= _action_prob(bucket, 'flop', action, is_pfr)
@@ -185,6 +193,11 @@ def _reach_prob(
         try:
             bucket = categorize_cards(list(combo), turn_board)
         except Exception:
+            log.exception(
+                "hero range reach bucket failed street=turn combo=%s board=%s",
+                [str(c) for c in combo],
+                [str(c) for c in turn_board],
+            )
             return prob
         action = my_prev_actions['turn']
         prob *= _action_prob(bucket, 'turn', action, is_pfr, had_flop_bet=had_flop_bet)
@@ -232,6 +245,11 @@ def distribution(
             try:
                 bucket = categorize_cards(combo, board)
             except Exception:
+                log.exception(
+                    "hero range distribution bucket failed combo=%s board=%s",
+                    [str(c) for c in combo],
+                    [str(c) for c in board],
+                )
                 continue
             weight = _reach_prob(combo, board, my_prev_actions or {}, is_pfr)
             if weight <= 1e-9:

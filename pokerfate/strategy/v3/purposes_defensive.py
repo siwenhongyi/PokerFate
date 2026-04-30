@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os as _os
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from pokerfate.strategy.gto import GTOMath
 from pokerfate.strategy.v3.context import DecisionCtx

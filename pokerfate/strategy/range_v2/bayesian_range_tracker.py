@@ -19,6 +19,7 @@ References:
 
 from __future__ import annotations
 
+import logging
 import os as _os
 from typing import Dict, List, Optional, Set
 
@@ -35,6 +36,8 @@ from pokerfate.strategy.range_v2.action_model import (
     GTO_VPIP,
     PlayerProfile,
 )
+
+log = logging.getLogger(__name__)
 
 _LP_SIGNAL_FACTOR = float(_os.environ.get('PF_LP_SIGNAL_FACTOR', '0.5'))
 _NEW_SIGNAL_FACTOR = float(_os.environ.get('PF_NEW_SIGNAL_FACTOR', '0.7'))
@@ -660,8 +663,13 @@ class BayesianRangeTracker:
                 active_weights=active_weights,
             )
         except Exception:
-            # Calibration hook 失败不应影响正常决策
-            pass
+            # Calibration hook 失败不应影响正常决策，但必须暴露出来。
+            log.exception(
+                "prediction calibration hook failed player_id=%s street=%s trigger=%s",
+                player_id,
+                street,
+                trigger,
+            )
 
     def get_distribution(self, player_id: int) -> np.ndarray:
         """Return current 1326-dim probability distribution."""

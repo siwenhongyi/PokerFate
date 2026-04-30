@@ -15,7 +15,6 @@ Requires:
 
 import datetime
 import ipaddress
-import os
 from pathlib import Path
 
 from cryptography import x509

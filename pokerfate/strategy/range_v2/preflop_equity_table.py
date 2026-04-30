@@ -1,6 +1,6 @@
 """169 preflop hand-class equities vs a random opponent (5 community cards).
 
-Replaces the old hand-coded `_preflop_strength` formula
+Replaces the old hand-coded preflop strength formula
 (``score = hi*13 + lo + 3·suited``) which had two known defects:
 
   - AKs vs AKo collapsed to the same clipped value (the `+3 if suited`

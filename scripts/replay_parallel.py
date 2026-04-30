@@ -32,7 +32,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections import Counter, defaultdict
+import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -89,8 +89,18 @@ def run_shard(task: tuple) -> dict:
                 if line:
                     try:
                         rows.append(json.loads(line))
-                    except Exception:
-                        pass
+                    except json.JSONDecodeError as exc:
+                        print(
+                            f"[replay_parallel] shard={shard_id} bad row JSON: {exc}",
+                            file=sys.stderr,
+                        )
+                    except Exception as exc:
+                        print(
+                            f"[replay_parallel] shard={shard_id} row parse failed: "
+                            f"{type(exc).__name__}: {exc}",
+                            file=sys.stderr,
+                        )
+                        traceback.print_exc(file=sys.stderr)
         try:
             rows_path.unlink()
         except OSError:

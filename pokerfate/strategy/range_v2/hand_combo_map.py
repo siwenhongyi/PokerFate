@@ -66,34 +66,10 @@ def _hand_category(c1_int: int, c2_int: int) -> str:
     return f"{hi_c}{lo_c}{suffix}"
 
 
-def _preflop_strength(c1_int: int, c2_int: int) -> float:
-    """Preflop hand strength percentile (0-1).  1.0 ≈ AA.
-
-    Backed by ``PREFLOP_EQUITY`` (169-class MC table) converted to
-    a tie-aware percentile rank over the full 1326-combo space.
-
-    Replaces the old linear formula `score = hi*13 + lo + 3*suited`
-    which had two bugs: AKs and AKo clipped to the same value at the
-    top of the range, and `score / 180.0` was a fake "percentile"
-    that had no relation to hand equity.
-
-    Exact percentile values are cached in `STRENGTH_PCT` at module
-    load time; this function exists for API compatibility — callers
-    that already have a combo index should use STRENGTH_PCT directly.
-    """
-    cls = _hand_category(c1_int, c2_int)
-    return _CLASS_PCT[cls]
-
-
 def cards_of(combo_idx: int) -> Tuple[Card, Card]:
     """Return the two Card objects for a given combo index."""
     c1, c2 = ALL_COMBOS[combo_idx]
     return int_to_card(c1), int_to_card(c2)
-
-
-def cards_of_int(combo_idx: int) -> Tuple[int, int]:
-    """Return the two card ints for a given combo index."""
-    return ALL_COMBOS[combo_idx]
 
 
 def blocked_by(known_cards: Set[int]) -> np.ndarray:
@@ -110,7 +86,6 @@ def blocked_by(known_cards: Set[int]) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 # Populated at init: {'AA': 0.998, 'KK': 0.993, ..., '42o': 0.004}.
-# Used by `_preflop_strength` for API back-compat.
 _CLASS_PCT: Dict[str, float] = {}
 
 

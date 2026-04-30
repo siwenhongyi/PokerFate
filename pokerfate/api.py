@@ -57,7 +57,6 @@ _init_data()
 
 _DEFAULT_LOG_FILE    = str(Path(__file__).resolve().parent / "logs" / "pokerfate.log")
 _DEFAULT_OPPONENTS   = str(Path(__file__).resolve().parent / "data" / "opponents.json")
-_DEFAULT_SHOWDOWN_CAL = str(Path(__file__).resolve().parent / "opponents_showdown.json")
 
 
 # ---------------------------------------------------------------------------
@@ -759,7 +758,7 @@ class PokerFateAPI:
         # 用实际需补差额，避免 BB 已 post 时 to_call 被误传为盲注金额
         effective_to_call = max(0.0, current_bet - my_current_bet_this_street)
         # 短码时 hero 跟不到对手满注，日志显示应按实际能付金额封顶
-        # （不影响决策 — should_call 内部已根据短码 effective pot_odds 自行判断；
+        # （不影响决策，决策内部已根据短码 effective pot_odds 自行判断；
         # 仅修日志误导：原来显示 "跟注 825000" 但 hero 只有 100000，实际 all-in）
         effective_to_call = min(effective_to_call, float(my_stack))
         if my_live:

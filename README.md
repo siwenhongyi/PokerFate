@@ -37,10 +37,11 @@ pokerfate/api.py             ← 对外接口：手牌管理、决策请求、�
 | `bot/poker_bot.py` | 主决策逻辑，整合 preflop/postflop/GTO/range |
 | `bot/opponent_model.py` | 对手建模：统计 VPIP/PFR/AF 等，输出可剥削调整 |
 | `strategy/preflop.py` | 翻前策略：基于手牌强度百分位 + 位置 |
-| `strategy/postflop.py` | 翻后策略：公牌纹理分析 + c-bet/bet sizing |
+| `strategy/postflop.py` | 翻后策略兼容层，封装 `strategy/v3/` 决策引擎 |
+| `strategy/v3/` | 翻后目的选择、下注尺度、攻防决策 |
 | `strategy/gto.py` | GTO 数学：pot odds、MDF、SPR、下注尺度 |
-| `strategy/range_estimator.py` | 两阶段 range equity 估算 + 摊牌校准 |
-| `strategy/range_hands.py` | Range 组合枚举 |
+| `strategy/range_v2/` | 默认 range equity：1326 组合建模、Bayesian range tracker、range equity |
+| `strategy/range_estimator.py` | EQR 模式的旧 range 压缩 + 摊牌校准 |
 | `core/hand_evaluator.py` | 7张牌最优5张评估 |
 | `core/equity.py` | 蒙特卡洛胜率计算 |
 | `core/game_state.py` | 游戏状态数据结构 |
@@ -50,9 +51,9 @@ pokerfate/api.py             ← 对外接口：手牌管理、决策请求、�
 ```
 request_action()
     ├── preflop → 手牌强度百分位 × 位置系数 × 对手类型调整
-    └── postflop → 两阶段 range equity
-                    ├── Stage 1: 对手 range 估算（基于行动历史 + 摊牌校准）
-                    └── Stage 2: 本手 vs range equity → GTO 下注/跟注决策
+    └── postflop → equity source → v3 engine
+                    ├── range 模式（默认）：Bayesian range tracker → range equity
+                    └── eqr 模式：蒙卡胜率 + 对手压缩校准
 ```
 
 ---
@@ -70,13 +71,13 @@ request_action()
 | `framing.py` | 游戏私有帧格式解析 |
 | `dns_server.py` | 伪 DNS 服务（Android 模式下将游戏域名解析到本机） |
 | `gen_cert.py` | 生成本地 CA + 服务端证书（一次性操作） |
-| `gamedata_fetcher.py` | 拉取游戏 REST API 的 30 天玩家统计数据，自动注入对手模型 |
+| `gamedata_fetcher.py` | 拉取游戏 REST API 的 30 天玩家统计数据，并提供合并到对手模型的 helper |
 | `pb/` | 逆向得到的 Protobuf 定义编译结果 |
 
 **关键自动行为（BotBridge）**：
 
-- **seat / blinds 自检测**：从 `SitDownRSP` / `EnterRoomRSP` 自动识别，无需手动配置
-- **盈利锁仓**：筹码达到阈值（默认 400BB）后自动离桌，以 100BB 重进，避免亏还回去
+- **seat / blinds 自检测**：从 `SitDownRSP` / `EnterRoomRSP` 自动识别；SNG/锦标赛房间从 `sngroom_info` 和 `BlindStatusBRC` 同步当前盲注
+- **盈利锁仓**：现金桌筹码达到阈值（默认 400BB）后自动离桌，以 100BB 重进，避免亏还回去；SNG/锦标赛房间不触发
 - **自动续入**：筹码清零后自动 rebuy（次数上限可配置，锁仓成功回桌后上限 +1）
 - **人类延迟模拟**：按 street/动作类型/底池大小随机注入思考延迟
 
@@ -89,14 +90,13 @@ request_action()
 | 事件 | 触发时机 |
 |------|---------|
 | `auto_rebuy` | 筹码清零，自动续入时 |
-| `profit_lock_trigger` | 盈利锁仓触发（离桌时） |
-| `chips_below_50bb` | 本次进桌后首次跌破 50BB |
-| `chips_milestone` | 首次突破 200/300/400…BB 整百里程碑 |
+| `profit_lock_trigger` | 现金桌盈利锁仓触发（准备离桌时） |
+| `hand_swing` | 单手盈亏超过 20BB 且超过开局筹码 30% |
 | `wss_disconnected` | WebSocket 异常断开 |
 | `gamedata_no_history` | 本次进程首次遇到无历史数据玩家（code=-2），每次启动最多一次 |
-| `token_captured` | （模板备用）mitmproxy 捕获到新 token |
+| `token_captured` | 模板支持；当前 `force_domain.py` 只写入 token 文件，不自动推送 |
 
-设备 Key 存放在 `data/bark_key.txt`（第一行）。
+设备 Key 存放在 `data/bark_key.txt`（第一行）。SNG/锦标赛房间会跳过 BotBridge 产生的 Bark 事件推送；proxy 级别的 `wss_disconnected` 仍按 Bark 配置发送。
 
 ---
 
@@ -122,7 +122,7 @@ request_action()
 ### 1. 生成证书（一次性）
 
 ```bash
-python -m pf_intercept.gen_cert
+.venv/bin/python -m pf_intercept.gen_cert
 ```
 
 输出到 `pf_intercept/certs/`，将 `ca.crt` 安装为系统受信任根 CA。
@@ -145,7 +145,7 @@ python -m pf_intercept.gen_cert
 2. 手机 Wi-Fi 设置 → 修改 DNS 为电脑的局域网 IP
 3. 电脑启动伪 DNS 服务：
    ```bash
-   sudo python -m pf_intercept.dns_server
+   sudo .venv/bin/python -m pf_intercept.dns_server
    ```
    伪 DNS 会将游戏域名解析到本机，其余域名转发上游正常解析。
 
@@ -156,7 +156,7 @@ python -m pf_intercept.gen_cert
 1. 手机 Wi-Fi 设置 → 代理 → 手动，填入电脑局域网 IP 和端口 `8080`
 2. 电脑安装 mitmproxy：
    ```bash
-   pip install mitmproxy
+   .venv/bin/python -m pip install mitmproxy
    ```
 3. 启动 mitmweb，挂载 `force_domain.py` 插件：
    ```bash
@@ -164,7 +164,7 @@ python -m pf_intercept.gen_cert
    ```
    插件会：
    - 自动从登录响应中提取 `authorization` token，写入 `data/auth_token.txt`（无需手动填写）
-   - 过滤服务器列表，只保留域名条目，将首选域名写入 `pf_intercept/discovered_server.json`
+   - 过滤服务器列表，只保留证书覆盖范围内的域名服务器，并将首选域名记录到 `pf_intercept/discovered_server.json`
 4. 手机首次使用需安装 mitmproxy 的 CA 证书（访问 `mitm.it` 下载后安装）。
 5. 游戏登录完成后（`force_domain.py` 打印出保留的服务器），再按方式一启动
    `pf_intercept.dns_server`，让后续 WSS 连接走到本机代理。
@@ -172,16 +172,24 @@ python -m pf_intercept.gen_cert
 ### 3. 启动代理
 
 ```bash
-python -m pf_intercept.proxy
+.venv/bin/python -m pf_intercept.proxy
 ```
 
 常用参数：
 
 ```bash
-python -m pf_intercept.proxy \
-  --rebuy 3 \          # 最大自动续入次数（默认 1）
-  --no-range-equity    # 禁用两阶段 range equity，使用纯蒙卡胜率
+.venv/bin/python -m pf_intercept.proxy \
+  --max-auto-rebuy 3 \
+  --profit-lock-bb 400 \
+  --equity-mode range
 ```
+
+参数含义：
+
+- `--max-auto-rebuy`：最大自动续入次数（默认 1）。
+- `--profit-lock-bb`：盈利锁仓阈值；不传则使用 `config.py`。
+- `--equity-mode`：`range` 为默认 range_v2，`eqr` 为旧 EQR/蒙卡压缩路径。
+- `--role-id` / `--skin-id`：本地展示层篡改本人角色和皮肤 ID。
 
 启动后打开游戏客户端正常进桌，proxy 自动检测 seat/blinds 并开始决策。
 
@@ -195,14 +203,14 @@ python -m pf_intercept.proxy \
 | `PROFIT_LOCK_REENTER_DELAY_SEC` | `4.0` | 离桌后等待多久再重进（秒） |
 | `PROFIT_LOCK_LEAVE_SEAT_RESERVE` | `True` | 离桌时是否留座 |
 | `ACTION_INJECT_DELAY_MAX_SEC` | `3.0` | 模拟人类思考的最长延迟（秒） |
-| `GAMEDATA_HTTP_HOST` | `awsb-entry.poker-fate.com` | 拉取玩家统计的 API 域名 |
+| `GAMEDATA_HTTP_HOST` | `ga-foreign.poker-fate.com` | 拉取玩家统计的 API 域名 |
 
 ---
 
 ## 依赖
 
 ```bash
-pip install websockets protobuf certifi cryptography
+.venv/bin/python -m pip install -r requirements.txt
 ```
 
-Python 3.12+。
+Python 3.12+。完整依赖以 `requirements.txt` 为准；其中包含 AI 决策运行依赖、WSS 代理依赖和测试工具。HTTP 代理模式需要的 `mitmproxy` 按上面的步骤单独安装。
