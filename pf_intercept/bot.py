@@ -3,8 +3,8 @@ Bot bridge: translates proxy events → PokerFateAPI calls → wire actions.
 
 Auto-detection:
   MY_SEAT_ID  ← pb.SitDownRSP.seatid
-  BIG_BLIND   ← pb.EnterRoomRSP.room_info.bb
-  SMALL_BLIND ← pb.EnterRoomRSP.room_info.sb
+  BIG_BLIND   ← pb.EnterRoomRSP.room_info.bb / sngroom_info.bb
+  SMALL_BLIND ← pb.EnterRoomRSP.room_info.sb / sngroom_info.sb
   (fallback to config values if messages aren't decoded yet)
 
 Card encoding (GFunctions.lua / config.lua):
@@ -115,7 +115,25 @@ def _chip_int(value, default: int = 0) -> int:
         if value is None:
             return default
         return int(value)
-    except Exception:
+    except (TypeError, ValueError, OverflowError) as exc:
+        log.warning(
+            "[BOT] bad chip int value=%r default=%r (%s: %s)",
+            value, default, type(exc).__name__, exc,
+        )
+        return default
+
+
+def _chip_float(value, default: float = 0.0) -> float:
+    """Parse protobuf numeric values that may arrive as int/float/str."""
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        log.warning(
+            "[BOT] bad chip float value=%r default=%r (%s: %s)",
+            value, default, type(exc).__name__, exc,
+        )
         return default
 
 
@@ -174,6 +192,11 @@ class BotBridge:
         # 从最近一次成功进房 RSP 缓存，供 QuickStart 兜底（与客户端大厅一致）
         self._session_game_type: int = 0
         self._session_lobby_coin: int = 0
+        # SNG/tournament rooms carry blinds in sngroom_info instead of room_info.
+        # Cache the schedule so pb.BlindStatusBRC can update table blinds on level-up.
+        self._sng_blind_schedule: dict[int, tuple[float, float]] = {}
+        self._sng_blind_level: int = 0
+        self._is_sng_room: bool = False
 
         # C2S 帧里的 room_id 须与客户端 Net.packNetData 一致（GameModel:getRoomId）。
         # 部分 S2C（如 WinnerRSP）wire 上 room_id 可能为 0，要用进房时或任意非 0 帧补全。
@@ -263,6 +286,13 @@ class BotBridge:
         """换桌匹配前清零统计，避免回到同房时立刻再次触发逃离。"""
         self._room_escape_bust_count = 0
 
+    def _notify(self, event: str, **fields) -> None:
+        """Room-aware notification wrapper. SNG/tournament rooms stay quiet."""
+        if self._is_sng_room:
+            log.debug("[BOT] SNG room: skip notify event=%s", event)
+            return
+        notify(event, **fields)
+
     def handle(self, type_name: str, msg: dict) -> tuple[str, dict] | tuple[str, dict, float] | None:
         """
         Process one decoded S2C frame.
@@ -290,6 +320,7 @@ class BotBridge:
         elif type_name == "pb.ActionNotifyBRC":  return self._on_action_notify(msg)
         elif type_name == "pb.ShowHandRSP":      self._on_show_hand(msg)
         elif type_name == "pb.ShowMyCardBRC":    self._on_show_my_card_brc(msg)
+        elif type_name == "pb.BlindStatusBRC":   self._on_blind_status(msg)
         elif type_name == "pb.WinnerRSP":        return self._on_winner(msg)
         elif type_name == "pb.LeaveRoomRSP":     return self._on_leave_room_rsp(msg)
         elif type_name == "pb.NoticeRebyRSP":    return self._on_notice_reby(msg)
@@ -328,6 +359,66 @@ class BotBridge:
             if self._my_seat is not None and seat == self._my_seat:
                 self._my_chips = chips
 
+    def _apply_table_blinds(
+        self,
+        *,
+        big_blind,
+        small_blind=None,
+        source: str,
+    ) -> bool:
+        """Update cached/API blinds from room metadata; returns True if changed."""
+        bb = _chip_float(big_blind, 0.0)
+        if bb <= 0:
+            return False
+
+        sb = _chip_float(small_blind, 0.0)
+        if sb <= 0:
+            sb = bb / 2.0
+
+        changed = False
+        if self._bb is None or abs(float(self._bb) - bb) > 1e-9:
+            self._bb = bb
+            changed = True
+            log.info("[BOT] Big blind detected (%s): %.1f", source, self._bb)
+        if self._sb is None or abs(float(self._sb) - sb) > 1e-9:
+            self._sb = sb
+            changed = True
+            log.info("[BOT] Small blind detected (%s): %.1f", source, self._sb)
+
+        # 换桌 / 升盲后 PokerFateAPI 只创建一次，必须同步否则 stack→bb 日志仍用旧 BB。
+        if changed and self._api is not None:
+            self._api.set_table_blinds(float(self._bb), float(self._sb))
+        return changed
+
+    def _remember_sng_blinds(self, sng_info: dict) -> tuple[float, float]:
+        """Cache SNG blind schedule and return the current blind pair, if known."""
+        if not sng_info:
+            self._sng_blind_schedule = {}
+            self._sng_blind_level = 0
+            return 0.0, 0.0
+
+        schedule: dict[int, tuple[float, float]] = {}
+        for item in sng_info.get("blind_list", []) or []:
+            level = _chip_int(item.get("blind_level"), 0)
+            bb = _chip_float(item.get("big_blind"), 0.0)
+            sb = _chip_float(item.get("small_blind"), 0.0)
+            if level > 0 and bb > 0:
+                schedule[level] = (bb, sb if sb > 0 else bb / 2.0)
+        if schedule:
+            self._sng_blind_schedule = schedule
+
+        level = _chip_int(sng_info.get("blind_level"), 0)
+        if level > 0:
+            self._sng_blind_level = level
+            if level in self._sng_blind_schedule:
+                return self._sng_blind_schedule[level]
+
+        bb = _chip_float(sng_info.get("bb"), 0.0)
+        sb = _chip_float(sng_info.get("sb"), 0.0)
+        if bb > 0:
+            return bb, sb if sb > 0 else bb / 2.0
+        return 0.0, 0.0
+
     def _on_enter_room(self, msg: dict) -> tuple[str, dict, float] | None:
         self._profit_lock_reenter = None
         self._profit_lock_deferred = None
@@ -335,6 +426,8 @@ class BotBridge:
 
         if "game_type" in msg:
             self._session_game_type = _chip_int(msg.get("game_type"), 0)
+        sng_info = msg.get("sngroom_info") or {}
+        self._is_sng_room = bool(sng_info)
         room_info_early = msg.get("room_info") or {}
         if "lobby_coin" in room_info_early:
             self._session_lobby_coin = _chip_int(room_info_early.get("lobby_coin"), 0)
@@ -343,7 +436,11 @@ class BotBridge:
         if code == 0:
             self._clear_room_escape_stats_for_rematch()
         fallback_inject: tuple[str, dict, float] | None = None
-        if self._profit_lock_award_rebuy_after_enter:
+        if self._is_sng_room and self._profit_lock_award_rebuy_after_enter:
+            log.warning("[BOT] SNG 房间：取消盈利锁仓重进奖励/通知。")
+            self._profit_lock_award_rebuy_after_enter = False
+            self._profit_lock_last_enter_fields = None
+        elif self._profit_lock_award_rebuy_after_enter:
             if code == 0:
                 reenter_buyin = _chip_int(
                     (self._profit_lock_last_enter_fields or {}).get("byin_chips", 0),
@@ -380,23 +477,28 @@ class BotBridge:
             if self._table_room_id:
                 log.info("[BOT] Table room_id=%d (EnterRoomRSP)", self._table_room_id)
 
-        # Blind detection
+        # Blind detection. Cash/friend rooms use room_info; SNG/tournament rooms
+        # leave room_info empty and carry the active blind level in sngroom_info.
         room_info = msg.get("room_info") or {}
-        bb = room_info.get("bb")
-        sb = room_info.get("sb")
-        if bb:
-            self._bb = float(bb)
-            log.info("[BOT] Big blind detected: %.1f", self._bb)
-        if sb:
-            self._sb = float(sb)
-            log.info("[BOT] Small blind detected: %.1f", self._sb)
-
-        # 换桌后 EnterRoomRSP 会带新盲注；PokerFateAPI 只创建一次，需同步否则 stack→bb 日志仍用旧 BB
-        if self._api is not None and (bb or sb):
-            self._api.set_table_blinds(
-                float(self._bb or self._api.big_blind),
-                float(self._sb or self._api.small_blind),
+        if room_info.get("bb"):
+            self._sng_blind_schedule = {}
+            self._sng_blind_level = 0
+            self._apply_table_blinds(
+                big_blind=room_info.get("bb"),
+                small_blind=room_info.get("sb"),
+                source="room_info",
             )
+        else:
+            bb_sng, sb_sng = self._remember_sng_blinds(sng_info)
+            if bb_sng > 0:
+                source = "sngroom_info"
+                if self._sng_blind_level > 0:
+                    source = f"{source}.level{self._sng_blind_level}"
+                self._apply_table_blinds(
+                    big_blind=bb_sng,
+                    small_blind=sb_sng,
+                    source=source,
+                )
 
         # Seed player names from current table snapshot + trigger server stats fetch
         table_status = msg.get("table_status") or {}
@@ -534,7 +636,7 @@ class BotBridge:
                 log.info("[gamedata] %s: 无历史数据 (code=-2)", pname)
                 if not self._gamedata_no_history_notified:
                     self._gamedata_no_history_notified = True
-                    notify("gamedata_no_history")
+                    self._notify("gamedata_no_history")
             else:
                 log.warning("[gamedata] %s: 服务端错误 code=%s msg=%s",
                             pname, code, result.get("msg") or result)
@@ -749,6 +851,22 @@ class BotBridge:
                     street=_STAGE_TO_STREET.get(stage, "flop"),
                     pot=self._pot,
                 )
+
+    def _on_blind_status(self, msg: dict) -> None:
+        level = _chip_int(msg.get("blind_level"), 0)
+        if level <= 0:
+            return
+        self._sng_blind_level = level
+        pair = self._sng_blind_schedule.get(level)
+        if pair is None:
+            log.debug("[BOT] BlindStatusBRC level=%d but no SNG blind schedule cached", level)
+            return
+        bb, sb = pair
+        self._apply_table_blinds(
+            big_blind=bb,
+            small_blind=sb,
+            source=f"BlindStatusBRC.level{level}",
+        )
 
     def _on_action_brc(self, msg: dict) -> None:
         seat        = _chip_int(msg.get("seatid", 0), 0)
@@ -1004,7 +1122,7 @@ class BotBridge:
             return
         if abs_delta * 100 <= 30 * start_chips:
             return
-        notify(
+        self._notify(
             "hand_swing",
             profit_delta=int(profit_delta),
             start_chips=start_chips,
@@ -1026,6 +1144,8 @@ class BotBridge:
             - 自动续入 -= 100 BB（NoticeRebyRSP → RebyREQ）
             - 盈利锁仓重进 -= 100 BB
         """
+        if self._is_sng_room:
+            return None
         if (
             self._my_seat is None
             or self._profit_lock_reenter is not None
@@ -1061,7 +1181,7 @@ class BotBridge:
         # 先把触发时桌上筹码计入展示口径，保证当次锁仓通知可见实时盈利。
         self._session_pnl_chips += float(my_final)
         pnl_chips = self._session_pnl_chips
-        notify(
+        self._notify(
             "profit_lock_trigger",
             stack_chips=my_final,
             threshold_chips=threshold,
@@ -1173,7 +1293,7 @@ class BotBridge:
         self._auto_rebuy_done += 1
         self._session_pnl_chips -= float(rebuy_chips)
         pnl_chips = self._session_pnl_chips
-        notify(
+        self._notify(
             "auto_rebuy",
             nth=self._auto_rebuy_done,
             max_n=self._max_auto_rebuy,

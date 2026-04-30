@@ -359,6 +359,160 @@ def test_enter_room_syncs_hand_start_chips_from_table() -> None:
     assert b._seat_chips[5] == 100000
 
 
+def test_enter_room_uses_sngroom_info_blinds_when_room_info_empty() -> None:
+    """SNG EnterRoomRSP has room_info={}, so blinds must come from sngroom_info."""
+    b = BotBridge(max_auto_rebuy=3)
+    b._my_seat = 0
+    b._bb = 10000.0
+    b._sb = 5000.0
+
+    b.handle(
+        "pb.EnterRoomRSP",
+        {
+            "code": 0,
+            "roomid": 20399792,
+            "game_type": 10050301,
+            "room_info": {},
+            "sngroom_info": {
+                "blind_level": 1,
+                "sb": "25",
+                "bb": "50",
+                "blind_list": [
+                    {"blind_level": 1, "small_blind": "25", "big_blind": "50"},
+                    {"blind_level": 2, "small_blind": "50", "big_blind": "100"},
+                ],
+            },
+            "table_status": {"seat": []},
+        },
+    )
+
+    assert b._bb == 50.0
+    assert b._sb == 25.0
+
+    b.handle(
+        "pb.DealerInfoRSP",
+        {
+            "dealer": 0,
+            "small_blind": 1,
+            "big_blind": 2,
+            "start_info": [{"chips": "1000"}, {"seatid": 1, "chips": "1000"}],
+            "gameid": "sng1",
+        },
+    )
+    assert b._api is not None
+    assert b._api.big_blind == 50.0
+    assert b._api.small_blind == 25.0
+
+
+def test_blind_status_updates_sng_blinds_from_cached_schedule() -> None:
+    b = BotBridge(max_auto_rebuy=3)
+    b._my_seat = 0
+    b.handle(
+        "pb.EnterRoomRSP",
+        {
+            "code": 0,
+            "roomid": 20399792,
+            "game_type": 10050301,
+            "room_info": {},
+            "sngroom_info": {
+                "blind_level": 1,
+                "blind_list": [
+                    {"blind_level": 1, "small_blind": "25", "big_blind": "50"},
+                    {"blind_level": 2, "small_blind": "50", "big_blind": "100"},
+                ],
+            },
+            "table_status": {"seat": []},
+        },
+    )
+    b.handle(
+        "pb.DealerInfoRSP",
+        {
+            "dealer": 0,
+            "small_blind": 1,
+            "big_blind": 2,
+            "start_info": [{"chips": "1000"}, {"seatid": 1, "chips": "1000"}],
+            "gameid": "sng1",
+        },
+    )
+
+    b.handle("pb.BlindStatusBRC", {"blind_level": 2, "upblind_time": 60})
+
+    assert b._bb == 100.0
+    assert b._sb == 50.0
+    assert b._api is not None
+    assert b._api.big_blind == 100.0
+    assert b._api.small_blind == 50.0
+
+
+def test_sng_disables_profit_lock_even_above_threshold(monkeypatch) -> None:
+    import pf_intercept.bot as bot_mod
+
+    notified = []
+    monkeypatch.setattr(bot_mod, "notify", lambda event, **fields: notified.append(event))
+
+    b = BotBridge(max_auto_rebuy=3)
+    b._my_uid = "99"
+    b._my_seat = 0
+    b._uid_to_seat["99"] = 0
+    b.handle(
+        "pb.EnterRoomRSP",
+        {
+            "code": 0,
+            "roomid": 20399792,
+            "game_type": 10050301,
+            "room_info": {},
+            "sngroom_info": {
+                "blind_level": 1,
+                "sb": "25",
+                "bb": "50",
+            },
+            "table_status": {"seat": []},
+        },
+    )
+    b.handle(
+        "pb.DealerInfoRSP",
+        {
+            "dealer": 0,
+            "small_blind": 1,
+            "big_blind": 2,
+            "start_info": [{"chips": "1000"}, {"seatid": 1, "chips": "1000"}],
+            "gameid": "sng1",
+        },
+    )
+
+    out = b.handle(
+        "pb.WinnerRSP",
+        {
+            "winner": [],
+            "profit": [{"uid": "99", "chips": "30000"}],
+        },
+    )
+
+    assert out is None
+    assert b._profit_lock_deferred is None
+    assert b._profit_lock_reenter is None
+    assert "profit_lock_trigger" not in notified
+
+
+def test_sng_suppresses_bot_notifications(monkeypatch) -> None:
+    import pf_intercept.bot as bot_mod
+
+    notified = []
+    monkeypatch.setattr(bot_mod, "notify", lambda event, **fields: notified.append(event))
+
+    b = BotBridge(max_auto_rebuy=3)
+    b._is_sng_room = True
+    b._my_seat = 0
+    b._bb = 50.0
+    b._hand_start_chips[0] = 1000
+
+    b._check_hand_swing(2000)
+    out = b.handle("pb.NoticeRebyRSP", {"seatid": 0, "reby_left_time": 30})
+
+    assert out is not None and out[0] == "pb.RebyREQ"
+    assert notified == []
+
+
 def test_profit_lock_threshold_in_config() -> None:
     assert isinstance(config.PROFIT_LOCK_BB_THRESHOLD, int)
     assert config.PROFIT_LOCK_BB_THRESHOLD >= 1

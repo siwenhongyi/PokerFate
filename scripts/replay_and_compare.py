@@ -28,6 +28,7 @@ import argparse
 import json
 import sys
 import os
+import traceback
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Optional
@@ -145,9 +146,13 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
                     amount=api_amount,
                     street=street,
                 ))
-            except Exception as e:
-                # Log but don't bail — bad event just means that hand's
-                # reconstruction will be off, but other hands are unaffected.
+            except Exception as exc:
+                print(
+                    f"[replay_and_compare] notify_action failed hand={hand.get('hand_id')} "
+                    f"player_id={pid} action={action}: {type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
+                traceback.print_exc(file=sys.stderr)
                 return comparisons
             if action == "fold":
                 active_opp_ids.discard(pid)
@@ -173,7 +178,13 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
                     num_active_opponents=max(1, num_active_opp),
                     my_current_bet_this_street=my_current_bet_this_street,
                 )
-            except Exception:
+            except Exception as exc:
+                print(
+                    f"[replay_and_compare] request_action failed hand={hand.get('hand_id')} "
+                    f"street={ev.get('street', current_street)}: {type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
+                traceback.print_exc(file=sys.stderr)
                 return comparisons
 
             hist_action = ev.get("action")
@@ -251,7 +262,13 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
             pot=int(result.get("pot", 0)),
             final_stacks={hero_id: int(hero_stack)},
         )
-    except Exception:
+    except Exception as exc:
+        print(
+            f"[replay_and_compare] hand_over failed hand={hand.get('hand_id')}: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        traceback.print_exc(file=sys.stderr)
         pass
 
     return comparisons

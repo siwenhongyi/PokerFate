@@ -6,8 +6,6 @@ selection, defense branch. For integration tests see test_bot.py.
 
 from __future__ import annotations
 
-import random as _rng
-
 import pytest
 
 from pokerfate.core.card import Card

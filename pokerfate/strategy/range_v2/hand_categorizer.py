@@ -9,7 +9,7 @@ Reference: PioSolver equity-bucket concept.
 from __future__ import annotations
 
 from collections import Counter
-from typing import List, Tuple
+from typing import List
 
 from pokerfate.core.card import Card
 from pokerfate.core.hand_evaluator import HandEvaluator, HandRank

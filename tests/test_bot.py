@@ -7,7 +7,7 @@ from pokerfate.core.card import Card
 from pokerfate.core.game_state import GameState, Player, Street, Action, ActionType
 from pokerfate.bot.poker_bot import PokerBot
 from pokerfate.bot.opponent_model import OpponentModel
-from pokerfate.strategy.postflop import PostflopStrategy, BoardTexture
+from pokerfate.strategy.postflop import PostflopStrategy
 from pokerfate.strategy.range_estimator import HandRangeEstimator
 
 def card(s):

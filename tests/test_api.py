@@ -5,8 +5,7 @@ import os
 import tempfile
 import pytest
 from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
-from pokerfate.bot.opponent_model import OpponentModel
-from pokerfate.core.game_state import Action, ActionType, GameState, Player, Street
+from pokerfate.core.game_state import Action, ActionType, GameState, Player
 
 
 def make_api(verbose=False) -> PokerFateAPI:

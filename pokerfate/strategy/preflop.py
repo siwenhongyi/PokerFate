@@ -9,15 +9,13 @@ Ranges are defined as sets of hand categories (strings):
 from __future__ import annotations
 import random
 from typing import List, Optional, Set, Tuple
-from pokerfate.core.card import Card, Rank
+from pokerfate.core.card import Card
 from pokerfate.core.position import (
-    POS_CANONICAL_6MAX as _POS_CANONICAL_6MAX,
     normalize_position as _normalize_position,
 )
 
-# _POS_CANONICAL_6MAX and _normalize_position are re-exported for
-# backward-compat with tests and any external imports that existed
-# before the core.position module was introduced.
+# _normalize_position is re-exported for backward-compat with tests and
+# external imports that existed before the core.position module was introduced.
 
 
 def _hand_category(hole_cards: List[Card]) -> str:
@@ -375,9 +373,6 @@ class PreflopStrategy:
         # Use an instance RNG so preflop decisions are reproducible alongside
         # the v3 engine (doc 03 §10).
         self._rng: random.Random = rng or random.Random()
-
-    def hand_category(self, hole_cards: List[Card]) -> str:
-        return _hand_category(hole_cards)
 
     def in_open_range(self, hole_cards: List[Card], position: str,
                       num_players: int = 6) -> bool:

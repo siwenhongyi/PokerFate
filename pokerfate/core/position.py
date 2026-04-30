@@ -13,7 +13,7 @@ Canonical set: {UTG, MP, CO, BTN, SB, BB}.
 
 Previously the mapping lived in two places with subtly different keys:
 `poker_bot._POS_NORMALIZE` (no BU, `.get(raw, raw)` passthrough) and
-`preflop._POS_CANONICAL_6MAX` (BU + more aliases, warn-on-unknown).
+`core.position.POS_CANONICAL_6MAX` (BU + more aliases, warn-on-unknown).
 Review 04_bot_api_preflop §S2 flagged the duplication — this module
 is the fix.
 """

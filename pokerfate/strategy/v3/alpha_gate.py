@@ -10,7 +10,6 @@ Runs AFTER the size calibrator on the final bet amount. Two-sided:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from pokerfate.strategy.v3 import exploit, hero_range
 from pokerfate.strategy.v3.context import DecisionCtx

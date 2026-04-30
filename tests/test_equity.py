@@ -1,6 +1,5 @@
 """Tests for the equity calculator."""
 
-import pytest
 from pokerfate.core.card import Card
 from pokerfate.core.equity import EquityCalculator
 

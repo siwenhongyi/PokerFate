@@ -1,6 +1,5 @@
 """Tests for the hand evaluator."""
 
-import pytest
 from pokerfate.core.card import Card
 from pokerfate.core.hand_evaluator import HandEvaluator, HandRank
 

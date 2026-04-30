@@ -6,7 +6,7 @@ A Purpose encapsulates one betting-decision motive (see doc 02 §2, doc 03 §4).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from pokerfate.strategy.v3.context import DecisionCtx
 
@@ -56,12 +56,6 @@ class Purpose:
         override by registering adjustments against purpose.id.
         """
         return 1.0
-
-    def bluff_eligible(self, ctx: DecisionCtx) -> bool:
-        return ctx.hero_bucket in ('air', 'weak_draw', 'draw')
-
-    def value_eligible(self, ctx: DecisionCtx) -> bool:
-        return ctx.hero_bucket in ('nuts', 'strong', 'medium')
 
 
 # ---------------------------------------------------------------------------

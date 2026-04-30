@@ -31,7 +31,6 @@ import logging
 import os
 import platform
 import pty
-import shlex
 import shutil
 import signal
 import socket
@@ -56,16 +55,6 @@ _FORCE_DOMAIN_SCRIPT = _PROJECT_ROOT / "pf_reverse" / "force_domain.py"
 # 子进程引用（模块级，供 cleanup 访问）
 _mitmweb_proc: subprocess.Popen | None = None
 _dns_proc: subprocess.Popen | None = None
-
-
-# ── 工具函数 ─────────────────────────────────────────────────────────────────
-
-
-def _has_tty() -> bool:
-    try:
-        return os.isatty(sys.stdin.fileno())
-    except Exception:
-        return False
 
 
 def _venv_path() -> str:
@@ -100,8 +89,9 @@ def _stop_subprocess(proc: subprocess.Popen | None, name: str) -> None:
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait(timeout=3)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.exception("[launcher] 停止 %s 失败", name)
+        print(f"[launcher] 停止 {name} 失败: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 # ── mitmweb 子进程 ───────────────────────────────────────────────────────────
@@ -129,7 +119,9 @@ def _start_mitmweb() -> subprocess.Popen | None:
     logs_dir = _PROJECT_ROOT / "logs"
     try:
         logs_dir.mkdir(exist_ok=True)
-    except OSError:
+    except OSError as exc:
+        log.warning("[launcher] 无法创建日志目录 %s: %s", logs_dir, exc)
+        print(f"[launcher] 无法创建日志目录 {logs_dir}: {exc}", file=sys.stderr)
         logs_dir = None
     if logs_dir is not None:
         log_path = logs_dir / "mitmweb.log"

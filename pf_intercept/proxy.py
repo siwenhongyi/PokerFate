@@ -21,6 +21,7 @@ import logging
 import socket
 import ssl
 import struct
+import sys
 from pathlib import Path
 
 import websockets
@@ -34,7 +35,6 @@ from pf_intercept.config import (
     PREFERRED_WSS_HOSTS,
 )
 from pf_intercept.framing import Frame, FrameBuffer, encode_frame
-from pf_intercept import codec, config
 from pf_intercept.bot import BotBridge
 from pf_notify import notify, set_bark_key, load_bark_key_file
 
@@ -57,7 +57,12 @@ _IP_CACHE_FILE = _DATA_DIR / "ip_cache.json"
 def _load_ip_cache() -> dict[str, str]:
     try:
         return json.loads(_IP_CACHE_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
     except Exception:
+        logging.getLogger("pf_proxy").exception(
+            "[IP cache] failed to load %s", _IP_CACHE_FILE
+        )
         return {}
 
 
@@ -68,7 +73,7 @@ def _persist_ip_cache() -> None:
             encoding="utf-8",
         )
     except Exception as exc:
-        log.debug("[IP cache] persist failed: %s", exc)
+        log.warning("[IP cache] persist failed for %s: %s", _IP_CACHE_FILE, exc)
 
 
 _LOG_FMT = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
@@ -79,19 +84,29 @@ def _fh(filename: str) -> logging.Handler:
     h.setFormatter(_LOG_FMT)
     return h
 
-# proxy.log only — no console output.
-# 控制台只保留决策层日志（pokerfate.logger），proxy 消息量太大会干扰观察决策。
+def _console_warnings_handler() -> logging.Handler:
+    h = logging.StreamHandler(sys.stderr)
+    h.setLevel(logging.WARNING)
+    h.setFormatter(_LOG_FMT)
+    return h
+
+# INFO still goes to proxy.log only; warnings/errors are mirrored to stderr so
+# recoverable exceptions are visible in the console.
 _root_logger = logging.getLogger()
 _root_logger.setLevel(logging.INFO)
 _root_logger.addHandler(_fh("proxy.log"))
+_root_logger.addHandler(_console_warnings_handler())
 
 # Dedicated TCP passthrough logger → tcp.log only (not mixed into proxy.log)
 tcp_log = logging.getLogger("pf_tcp")
 tcp_log.setLevel(logging.INFO)
 tcp_log.propagate = False          # don't bubble up to root → proxy.log stays clean
 tcp_log.addHandler(_fh("tcp.log"))
+tcp_log.addHandler(_console_warnings_handler())
 
 log = logging.getLogger("pf_proxy")
+
+from pf_intercept import codec, config
 
 # ── Bot singleton (constructed in main() with CLI options) ────────────────────
 _bot: BotBridge | None = None
@@ -214,6 +229,7 @@ def _extract_sni_hostname(data: bytes) -> str | None:
                     q += nlen
             p += elen
     except Exception:
+        log.exception("[TLS] failed to extract SNI from initial client bytes")
         return None
     return None
 
@@ -236,6 +252,7 @@ def _extract_http_host(data: bytes) -> str | None:
                 host = line.split(":", 1)[1].strip()
                 return host
     except Exception:
+        log.exception("[HTTP] failed to extract Host header")
         return None
     return None
 
@@ -250,7 +267,7 @@ def _extract_http_path(data: bytes) -> str | None:
         ):
             return parts[1]
     except Exception:
-        pass
+        log.exception("[HTTP] failed to extract request path")
     return None
 
 
@@ -275,8 +292,10 @@ def _resolve_host_candidates(hostname: str, force_refresh: bool = False) -> list
             ip = info[4][0]
             if ip not in candidates and not ip.startswith("127."):
                 candidates.append(ip)
+    except OSError as exc:
+        log.warning("[DNS] system resolver failed for %s: %s", hostname, exc)
     except Exception:
-        pass
+        log.exception("[DNS] unexpected resolver failure for %s", hostname)
 
     _host_dns_cache[hostname] = list(candidates)
     return candidates
@@ -542,7 +561,7 @@ async def _handle_wss(client_ws) -> None:
             if v is not None:
                 return str(v)
         except Exception:
-            pass
+            log.exception("[WSS] failed to read client header %s", name)
         return None
 
     # Mirror client headers to upstream as much as possible.
@@ -564,6 +583,7 @@ async def _handle_wss(client_ws) -> None:
                     continue
                 additional_headers.append((str(name), str(value)))
         except Exception:
+            log.exception("[WSS] failed to mirror client headers")
             additional_headers = []
 
     subprotocols: list[str] | None = None
@@ -697,6 +717,7 @@ async def _handle_passthrough(
     except TimeoutError:
         initial = b""
     except Exception:
+        log.exception("[TCP] failed to read initial client bytes from %s", peer)
         initial = b""
 
     target_host = _extract_sni_hostname(initial) or _extract_http_host(initial) or _real_server_sni or SERVER_HOST
@@ -714,8 +735,10 @@ async def _handle_passthrough(
             conn = asyncio.open_connection(cached, real_port)
             srv_reader, srv_writer = await asyncio.wait_for(conn, timeout=2.5)
             chosen_ip = cached
+        except (OSError, asyncio.TimeoutError) as exc:
+            tcp_log.warning("[TCP] cached upstream %s:%d failed: %s", cached, real_port, exc)
         except Exception:
-            pass
+            log.exception("[TCP] unexpected cached upstream failure %s:%d", cached, real_port)
 
     candidates: list[str] = []
 
@@ -730,8 +753,10 @@ async def _handle_passthrough(
                     conn = asyncio.open_connection(cached, real_port)
                     srv_reader, srv_writer = await asyncio.wait_for(conn, timeout=2.5)
                     chosen_ip = cached
+                except (OSError, asyncio.TimeoutError) as exc:
+                    tcp_log.warning("[TCP] cached upstream %s:%d failed: %s", cached, real_port, exc)
                 except Exception:
-                    pass
+                    log.exception("[TCP] unexpected cached upstream failure %s:%d", cached, real_port)
 
             if srv_writer is None:
                 if cached:
@@ -784,7 +809,7 @@ async def _handle_passthrough(
             _pipe_raw(srv_reader,    client_writer),
         )
     except Exception as exc:
-        log.debug("[TCP] pass-through error: %s", exc)
+        tcp_log.warning("[TCP] pass-through error: %s", exc)
     finally:
         elapsed = asyncio.get_event_loop().time() - t0
         tcp_log.info("[TCP] closed %s → %s:%d  (%.1fs)",

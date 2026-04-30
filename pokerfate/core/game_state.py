@@ -115,21 +115,9 @@ class GameState:
     def active_players(self) -> List[Player]:
         return [p for p in self.players if not p.is_folded]
 
-    @property
-    def acting_player(self) -> Player:
-        return self.players[self.current_player_idx]
-
     def to_call(self, player: Player) -> float:
         """Amount the player needs to add to call."""
         return max(0.0, self.current_bet - player.current_bet)
-
-    def pot_odds_fraction(self, player: Player) -> float:
-        """Required equity to break even on a call."""
-        call_amt = self.to_call(player)
-        if call_amt <= 0:
-            return 0.0
-        total_pot = self.pot + call_amt
-        return call_amt / total_pot
 
     def position_of(self, player: Player) -> str:
         """Return position label for the player."""

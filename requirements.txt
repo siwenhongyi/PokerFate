@@ -1,11 +1,13 @@
 # Testing
 pytest>=7.0
-pytest-cov>=4.0
 
-# Hand evaluation — C-accelerated 7-card eval. Optional: HandEvaluator.eval_int
-# falls back to the pure-Python evaluator if eval7 isn't installed.
-eval7>=0.1.10
+# Range/equity engine
 numpy>=1.20
+
+# Hand evaluation — C-accelerated 7-card eval. HandEvaluator.eval_int falls
+# back to the pure-Python evaluator if eval7 isn't installed, but the test
+# suite expects eval7 to be available.
+eval7>=0.1.10
 
 # WSS MITM proxy (pf_intercept)
 websockets>=14.0
@@ -14,9 +16,3 @@ certifi>=2024.0
 
 # Protobuf — install after compiling protos with pf_intercept/gen_pb2.sh
 protobuf>=4.0
-
-# Analysis tools — optional, run mitmweb alongside proxy to capture HTTP
-mitmproxy>=10.0
-
-# CLI progress UI for long-running auto tuning jobs
-rich>=13.7

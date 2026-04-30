@@ -21,11 +21,14 @@ Reference: Bayes' Bluff (UAI 2005) — Dirichlet posterior on action profiles.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Dict, List, Optional, Tuple
 
 from pokerfate.core.card import Card
 from pokerfate.strategy.range_v2 import hand_categorizer as hcat
+
+log = logging.getLogger(__name__)
 
 
 class ShowdownLearner:
@@ -186,8 +189,8 @@ class ShowdownLearner:
         try:
             loaded = self.__class__.from_dict(json.loads(content))
             self._freq = loaded._freq
-        except (json.JSONDecodeError, KeyError, ValueError):
-            pass
+        except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            log.warning("ShowdownLearner.load: failed to parse %s: %s", filepath, exc)
 
 
 # ---------------------------------------------------------------------------
