@@ -140,9 +140,9 @@ function P:invoke(funcName, argCount)
             elseif 6 == argCount then
                 obj[funcName](obj, self.arg1, self.arg2, self.arg3, self.arg4, self.arg5, self.arg6)
             elseif 7 == argCount then
-                obj[funcName](obj, self.arg1, self.arg2, self.arg3, self.arg4, self.arg5, self.arg7)
+                obj[funcName](obj, self.arg1, self.arg2, self.arg3, self.arg4, self.arg5, self.arg6, self.arg7)
             end
-            self.arg1, self.arg2, self.arg3, self.arg4, self.arg5, self.arg7 = nil, nil, nil, nil, nil, nil
+            self.arg1, self.arg2, self.arg3, self.arg4, self.arg5, self.arg6, self.arg7 = nil, nil, nil, nil, nil, nil, nil
         end
     end
 end
@@ -221,3 +221,4 @@ function bee.invokePool(funcName, argCount)
     end
 end
 
+return P

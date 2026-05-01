@@ -176,3 +176,4 @@ function P:evt_GetAllinGameTimeRSP(msg)
     end)
 end
 
+return P

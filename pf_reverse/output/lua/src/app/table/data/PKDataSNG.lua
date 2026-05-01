@@ -76,3 +76,4 @@ function P:setBlindStatus(msg)
 	end
 end
 
+return P

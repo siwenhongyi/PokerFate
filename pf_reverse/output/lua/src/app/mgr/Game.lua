@@ -199,6 +199,16 @@ function P:playIngameBGM()
     end
 end
 
+function P:pauseBGM()
+    CS.SoundManager.Instance:PauseMusic()
+    self._pausedBGM = true
+end
+
+function P:resumeBGM()
+    CS.SoundManager.Instance:UnPauseMusic()
+    self._pausedBGM = false
+end
+
 function P:start()
     bee.addUpdater(function(dt)
         self:onUpdate(dt)
@@ -217,7 +227,7 @@ function P:onUpdate(dt)
         end
     end
 
-    if self._time then
+    if self._time and not self._pausedBGM then
         self._time = self._time + dt
         if self._time > self._length then
             self:switchLobbyBGM()
@@ -271,3 +281,4 @@ function P:pauseLobbyMusicTween()
     end)
 end
 
+return P

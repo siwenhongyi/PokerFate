@@ -48,6 +48,9 @@ function P:getTimeLeftStr(dt, needSecond)
         isDay = true
     end
 	if dt > 3600 then
+        if LAN:getLanguage() == "en" and s ~= "" then
+            s = s .. " "
+        end
         if isDay then
             local h = math.ceil(dt / 3600)
             s = s .. _F("LAB_TIME_HOURS", h)
@@ -60,6 +63,9 @@ function P:getTimeLeftStr(dt, needSecond)
     end
     if not isDay then
         if dt > 60 then
+            if LAN:getLanguage() == "en" and s ~= "" then
+                s = s .. " "
+            end
             if needSecond then
                 local m = math.floor(dt / 60)
                 s = s .. _F("LAB_TIME_MINUTES", m)
@@ -70,10 +76,25 @@ function P:getTimeLeftStr(dt, needSecond)
             dt = dt % 60
         end
         if not isHour and dt > 0 and needSecond then
+            if LAN:getLanguage() == "en" and s ~= "" then
+                s = s .. " "
+            end
             s = s .. _F("LAB_TIME_SECONDS", dt)
         end
     end
     return s
+end
+
+-- 获取本机时区的当天剩余秒数，timeStr: 07:59:59
+function P:getDayLeftDt(timeStr)
+    local parts = string.split(timeStr, ":")
+    local hour = tonumber(parts[1]) or 0
+    local min = tonumber(parts[2]) or 0
+    local sec = tonumber(parts[3]) or 0
+    local now = os.time()
+    local t = os.date("*t", now)
+    local targetTime = os.time({year = t.year, month = t.month, day = t.day, hour = hour, min = min, sec = sec})
+    return targetTime - now + (self.targetZone - self:getTimeZone()) * 3600
 end
 
 -- 获取本机时区
@@ -118,3 +139,4 @@ function P:getLunarMonthAndDay(time)
     return m, d
 end
 
+return P

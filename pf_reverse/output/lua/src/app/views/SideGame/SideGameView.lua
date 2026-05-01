@@ -23,6 +23,7 @@ function P:onAwake()
 			self:refreshCenter()
 		end)
 	end
+	self.QuickByButton = self:find("Right/QuickByButton", AnimRoot)
 
 	bee.addClick(self:find("Mask"), function ()
 		self:hideUI()
@@ -38,6 +39,8 @@ function P:onStart()
 
 	self:refreshTab()
 	self:refreshCenter()
+
+	QuickByModel:addButtonItem(self.uiName, self.QuickByButton)
 end
 
 function P:onDestroy()
@@ -105,3 +108,13 @@ function P:evt_gameBlur(flag, name)
     self:onUiBlur(flag, name)
 end
 
+function P:evt_sideGameRecords(sw)
+	self.QuickByButton.transform.localPosition = bee.v3(sw and 680 or 0, 460, 0)
+end
+
+function P:hideUI()
+	P.super.hideUI(self)
+	QuickByModel:hideButton(self.QuickByButton)
+end
+
+return P

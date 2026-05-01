@@ -31,3 +31,4 @@ function P:onAwake()
     self:find("Panel/Legal2Button", self.Panel):SetActive("jp" == LAN:getLanguage())
 end
 
+return P

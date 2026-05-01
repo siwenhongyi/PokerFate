@@ -58,3 +58,4 @@ function P:evt_refreshEmailBindRw()
 	self:refreshButtonShow()
 end
 
+return P

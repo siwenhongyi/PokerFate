@@ -190,3 +190,4 @@ function P:flyChipsToPot(from, to, num, cb)
 	end
 end
 
+return P

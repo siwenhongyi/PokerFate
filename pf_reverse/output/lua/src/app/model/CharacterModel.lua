@@ -1004,3 +1004,4 @@ function P:getCharacterSound()
     return self._character_sound_list[self._sound_index]
 end
 
+return P

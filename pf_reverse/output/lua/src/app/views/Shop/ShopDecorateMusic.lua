@@ -64,7 +64,9 @@ function P:onStart()
 
 	self:initFilterCont()
 
-	ShopModel:refreshNewItemByShopType(self._params.shop_type)
+	ShopModel:refreshNewItemByShopType(self._params.shop_type, true)
+	ShopModel:refreshTimeLimitItemByShopType(self._params.shop_type, true)
+	ShopModel:refreshShopNewTag(self._params.shop_type)
 end
 
 function P:refreshUI()
@@ -84,7 +86,8 @@ function P:setShopItem(item, data, isInit, index)
 	local ShowImg = self:find("Mask/ShowImg", Ani_root)
 	local NameText = self:find("NameText", Ani_root)
 	local PreviewButton = self:find("PreviewButton", Ani_root)
-	local MusicPreviewButton = self:find("MusicPreviewButton", Ani_root)
+	local PreviewIcon = self:find("PreviewButton/PreviewIcon", Ani_root)
+	local MusicPreviewIcon = self:find("PreviewButton/MusicPreviewIcon", Ani_root)
 	local NewTag = self:find("NewTag", Ani_root)
 	local Pri = self:find("Pri", Ani_root)
 	local PriText = self:find("Pri/PriText", Ani_root)
@@ -92,7 +95,7 @@ function P:setShopItem(item, data, isInit, index)
 	local OwnTag = self:find("OwnTag", Ani_root)
 	local ButtonGo = self:find("ButtonGo", Ani_root)
 	local CountDown = self:find("CountDown", Ani_root)
-	local TimeText = self:find("CountDown/TimeText", Ani_root)
+	local CountDown1 = self:find("CountDown1", Ani_root)
 	local Discount = self:find("Discount", Ani_root)
 	local DiscountText = self:find("DiscountText", Discount)
 
@@ -110,11 +113,11 @@ function P:setShopItem(item, data, isInit, index)
     local cfg = data.cfg
     local propCfg = tpl_props[cfg.props[1]]
     if propCfg.type == GPropKind.MusicLobby or propCfg.type == GPropKind.MusicTable then
-    	MusicPreviewButton:SetActive(true)
-    	PreviewButton:SetActive(false)
+    	MusicPreviewIcon:SetActive(true)
+    	PreviewIcon:SetActive(false)
     else
-    	MusicPreviewButton:SetActive(false)
-    	PreviewButton:SetActive(true)
+    	MusicPreviewIcon:SetActive(false)
+    	PreviewIcon:SetActive(true)
     end
 	if ItemModel.DecorateCfg[propCfg.type] then
 		Mask:SetActive(true)
@@ -140,24 +143,19 @@ function P:setShopItem(item, data, isInit, index)
 	NewTag:SetActive(ShopModel:isShowNewTag(cfg))
 
 	if cfg.time_end then
-		CountDown:SetActive(true)
-
 		local leftTime = cfg.time_end - bee.getServerTime()
 		if leftTime > 0 then
-			bee.setText(TimeText, ShopModel:getShopTimeText(leftTime))
+			self:_setTimeShow(Ani_root, leftTime)
 			self._timeTags[item] = bee.schedule(1, function()
 				leftTime = leftTime - 1
-				if leftTime > 0 then
-					bee.setText(TimeText, ShopModel:getShopTimeText(leftTime))
-				else
-					bee.setText(TimeText, _T("LAB_BACKPACK_DES_21"))
-				end
+				self:_setTimeShow(Ani_root, leftTime)
 			end, item)
 		else
-			bee.setText(TimeText, _T("LAB_BACKPACK_DES_21"))
+			self:_setTimeShow(Ani_root, leftTime)
 		end
 	else
 		CountDown:SetActive(false)
+		CountDown1:SetActive(false)
 	end
 
 	if cfg.relation_gift and not data.isOwn then
@@ -218,26 +216,15 @@ function P:setShopItem(item, data, isInit, index)
 			UiManager:showUI(GameModel:getAllinUiName(propCfg.id), {role = CharacterModel:getRoleData(skinCfg.role), skin = skinCfg})
 		elseif propCfg.type == GPropKind.LobbyScene then
 			UiManager:showUI("BackpackLobbyPreview", {data = propCfg, list = {propCfg}})
+		elseif propCfg.type == GPropKind.MusicLobby or propCfg.type == GPropKind.MusicTable then
+			local list = {}
+			for k,v in pairs(self.dataList) do
+				table.insert(list, ItemModel:getItem(v.cfg.props[1], true))
+			end
+			UiManager:showUI("BackpackMusic", {data = ItemModel:getItem(cfg.props[1], true), list = list, isShop = true})
 		else
 			UiManager:showUI("BackpackPreview", {data = propCfg})
 		end
-	end)
-
-	-- 音乐预览
-	bee.removeAllClick(MusicPreviewButton)
-	bee.addClick(MusicPreviewButton, function()
-		bee.logEvent("shop-goods-preview", data.shop_type, data.id)
-		Game:playSound("ui_button_confirm")
-		if cfg.new_tag == 1 then
-			NewTag:SetActive(false)
-			ShopModel:setNewItem(cfg)
-		end
-
-		local list = {}
-		for k,v in pairs(self.dataList) do
-			table.insert(list, ItemModel:getItem(v.cfg.props[1], true))
-		end
-		UiManager:showUI("BackpackMusic", {data = ItemModel:getItem(cfg.props[1], true), list = list, isShop = true})
 	end)
 end
 
@@ -291,3 +278,23 @@ function P:closeFilterDropDown()
 	self.MusicDropDown:SetActive(false)
 end
 
+function P:_setTimeShow(item, leftTime)
+	local CountDown = self:find("CountDown", item)
+	local CountDown1 = self:find("CountDown1", item)
+	if leftTime > 259200 then
+		CountDown:SetActive(true)
+		CountDown1:SetActive(false)
+		bee.setText(self:find("TimeText", CountDown), ShopModel:getShopTimeText(leftTime))
+	elseif leftTime > 0 then
+		-- 小于3天
+		CountDown:SetActive(false)
+		CountDown1:SetActive(true)
+		bee.setText(self:find("TimeText", CountDown1), ShopModel:getShopTimeText(leftTime))
+	else
+		CountDown:SetActive(false)
+		CountDown1:SetActive(true)
+		bee.setText(self:find("TimeText", CountDown1), _T("LAB_BACKPACK_DES_21"))
+	end
+end
+
+return P

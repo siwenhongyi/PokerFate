@@ -120,10 +120,6 @@ function P:setExchangeItem(item, data, isInit, index)
 		bee.setIconInAtlas(CharacterImg, showSkin.table_avatar_pic, true)
 		bee.setText(ItemName, _T(exchangeCfg.name))
 		bee.setIconInAtlas(ItemBg, "Shop[shop_exchange_gold_character_bg]")
-
-		if bee.isIos or bee.isEditor then
-			bee.convertMaskToSoftMask(CharacterMask)
-		end
 	end
 
 	bee.setText(CountText, "x" .. _N(exchange.num))
@@ -246,3 +242,4 @@ function P:refreshUI()
 	self.exchangeList:setDatas(datas)
 end
 
+return P

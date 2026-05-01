@@ -27,3 +27,4 @@ function tpl_first_recharge_clone(key)
     return nil
 end
 
+return P

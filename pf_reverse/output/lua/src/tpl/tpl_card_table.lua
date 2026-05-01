@@ -34,3 +34,4 @@ function tpl_card_table_clone(key)
     return nil
 end
 
+return P

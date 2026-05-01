@@ -59,6 +59,17 @@ message SelfUserInfoRSP
     optional int32 vip_level = 18; // vip等级
     optional string using_decoration_scheme = 19; // 当前使用的装饰方案ID, 已废弃
     optional int32 rand_dc_scheme_flag = 20; // 是否随机装饰方案 0:不随机 1:随机, 已废弃
+    optional string client_def_str = 21;     //前端自身定义数据
+    optional int32 monthly_card_exp = 22; // 月卡过期时间戳
+}
+//请求自己用户信息，返回UserBrief
+message SetClientDefStrREQ
+{
+    optional string client_def_str = 1;     //前端自身定义数据
+}
+message SetClientDefStrRSP
+{
+    optional int32 code = 1;     
 }
 
 // 请求自己的战绩信息
@@ -75,6 +86,13 @@ message GetOtherDetailInfoREQ
 {
     optional int64 the_uid = 1; // 要查询的用户id
 }
+
+message AchievementCount
+{
+    optional int32 level = 1;//成就等级
+    optional int32 num = 2;//成就数量
+}
+
 message GetOtherDetailInfoRSP
 {
     optional int32 code = 1;
@@ -87,6 +105,7 @@ message GetOtherDetailInfoRSP
     optional string auth_cert_url = 8;
     optional int64 register_time = 9; // 注册时间，秒级时间戳
     optional int64 auth_cert_time = 10; // 七日任务的认证时间，秒级时间戳
+    repeated AchievementCount counts = 11;//成就统计
 }
 
 message HeartBeatREQ
@@ -607,6 +626,7 @@ message SngListItem
     optional string setid = 14; // 用于查询已结束的比赛
     optional int64 byin_chips = 15; // 报名消耗的筹码价值
     optional int32 level = 16;      //限制等级
+    optional int32 sort_value = 17; // 排序值
 }
 
 // 请求赛事列表
@@ -710,6 +730,7 @@ message UserSngOverRSP
     repeated ItemIdUnit sign_item_list = 7; // 报名道具列表
     repeated TextItem tour_name = 8; // 赛事名称
     optional int32 skin_id = 9; // 比赛中使用的皮肤ID
+    optional int32 shop_id = 10;//后台配置的快速补码id
 }
 
 // sng房间游戏开始广播

@@ -94,7 +94,7 @@ function P:setCharacterShow()
 		self._role = CharacterModel:getRole(skinCfg.role)
 		local roleCfg = tpl_character[skinCfg.role]
 		bee.setText(self.NameText, _T(roleCfg.name))
-		bee.setText(self.CVNameText, "CV:" .. _T(roleCfg.cv))
+		bee.setText(self.CVNameText, "CV: " .. _T(roleCfg.cv))
 		bee.setIcon(self.CampIcon, "Character[character_analysis_bg_camp_" .. self._role.info.campInt .. "]")
 	end
     self._characterCls:setSkin(skinCfg)
@@ -111,3 +111,4 @@ function P:onClickClose()
 	self:hideUI()
 end
 
+return P

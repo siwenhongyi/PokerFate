@@ -27,7 +27,7 @@ function P:onShow()
     self:evt_refreshPrizePool()
     self:evt_TourRoomRankRefreshBRC()
 
-    bee.setText(self.TextTitle, GameModel.data:getGameName())
+    bee.setText(self.TextTitle, GameModel.data:getRoomName())
 end
 
 function P:getBlindText(sb, bb, ante)
@@ -111,6 +111,13 @@ end
 function P:evt_lan_mod()
     self:evt_refreshBlind()
     self:evt_refreshPrizePool()
-    bee.setText(self.TextTitle, GameModel.data:getGameName())
+    bee.setText(self.TextTitle, GameModel.data:getRoomName())
 end
 
+-- function P:evt_uiBlur(flag, name)
+--     if name == "BackpackPreview" then
+--         self:onUiBlur(flag, name)
+--     end
+-- end
+
+return P

@@ -50,7 +50,14 @@ local function _initData()
 {43,5,"shop_activity_gifts",1003},
 {44,5,"shop_activity_gifts",1004},
 {45,5,"shop_activity_gifts",1005},
-{46,5,"shop_activity_gifts",1006}
+{46,5,"shop_activity_gifts",1006},
+{47,5,"shop_activity_gifts",1007},
+{48,5,"shop_activity_gifts",1008},
+{49,5,"shop_activity_gifts",1009},
+{50,5,"shop_activity_gifts",1010},
+{51,5,"shop_activity_gifts",1011},
+{52,5,"shop_activity_gifts",1012},
+{53,5,"shop_activity_gifts",1013}
 }
     for _, v in pairs(bodys) do
         local m = {}
@@ -72,3 +79,4 @@ function tpl_vip_exp_path_clone(key)
     return nil
 end
 
+return P

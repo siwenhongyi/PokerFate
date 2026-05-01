@@ -6,7 +6,12 @@ message ItemIdUnit
     optional int32 item_id = 1; // 道具id(也可以是金币)
     optional int64 item_num = 2; // 道具数量
 }
-
+message ItemIdUnitExpire
+{
+    optional int32 item_id = 1; // 道具id(也可以是金币)
+    optional int64 item_num = 2; // 道具数量
+    optional int64 expire_time = 3;//过期时间
+}
 //动效信息
 message AnimationInfo 
 {

@@ -130,3 +130,4 @@ function P:evt_GetUserBondInfoRSP(msg)
     end
 end
 
+return P

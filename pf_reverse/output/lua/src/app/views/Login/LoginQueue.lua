@@ -66,3 +66,4 @@ function P:evt_onApplicationPause(paused)
     end
 end
 
+return P

@@ -138,7 +138,7 @@ function P:onShow()
         end
     end
     bee.setText(self.TextChip, _N(self._params.chips))
-    bee.setTextCut(self.TextName, player.name, 460)
+    bee.setTextCut(self.TextName, player.name, 420)
     bee.setText(self.TextLevel, player.level)
     GF.setTitleImage(self.ImageTitle, player.title, true, true)
     if player.level > 0 then
@@ -231,3 +231,4 @@ function P:showTitleNormal(name)
     end
 end
 
+return P

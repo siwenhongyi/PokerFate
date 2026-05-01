@@ -30,3 +30,4 @@ function tpl_hall_scene_clone(key)
     return nil
 end
 
+return P

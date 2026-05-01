@@ -6,3 +6,4 @@ function P:ctor(id, node, data)
     self.data = data
 end
 
+return P

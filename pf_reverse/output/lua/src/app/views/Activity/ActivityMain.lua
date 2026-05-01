@@ -9,6 +9,7 @@ local SubView = {
 		[1] = {view = "views/Activitynewman/ActivityNewmanCheckin"},
 		[2] = {view = "views/ActivityGalaSeasonCheckin/ActivityGalaSeasonCheckin"},	-- 礼服季
 		[3] = {view = "views/ActivitySchoolCheckin/ActivitySchoolCheckin"},	-- 开学季
+		[4] = {view = "views/ActivityBunnyGirlCheckin/ActivityBunnyGirlCheckin"},	-- 兔女郎
 	}
 }
 
@@ -164,3 +165,4 @@ function P:evt_activity_over(e)
     end
 end
 
+return P

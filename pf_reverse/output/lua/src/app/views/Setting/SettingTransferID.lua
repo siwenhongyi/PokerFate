@@ -164,3 +164,4 @@ function P:onBtBind()
     end, nil, true)
 end
 
+return P

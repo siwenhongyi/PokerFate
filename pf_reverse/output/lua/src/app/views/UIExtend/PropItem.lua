@@ -66,7 +66,7 @@ function P:refreshUI()
 	local cfg = tpl_props[self.id]
 
 	if not cfg or not self.data then
-		printError("[ItemModel] add item with no cfg id " .. self.id)
+		printError("[ItemModel] add item with no cfg id " .. self.id .. " " .. debug.traceback())
 		return
 	end
 
@@ -104,10 +104,7 @@ function P:refreshUI()
 	end
 
 	-- 限时
-	if self._timeCountDown then
-		scheduler:removeTag(self._timeCountDown)
-		self._timeCountDown = nil
-	end
+	scheduler:removeTarget(self.node)
 	if cfg.duration or cfg.expirationTime then
 		self:setTimeText(self.data.deadline)
 	else
@@ -225,3 +222,4 @@ function P:hideBg()
 	end
 end
 
+return P

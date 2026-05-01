@@ -221,3 +221,4 @@ function P:evt_ItemChangeRSP()
 	bee.setText(self.InputFieldCount, self._selectedCount, "InputField")
 end
 
+return P

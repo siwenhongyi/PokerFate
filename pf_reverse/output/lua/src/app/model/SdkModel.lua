@@ -45,3 +45,4 @@ function P:tryGetAdjust()
     return self.saveData.cloud.adjustId
 end
 
+return P

@@ -29,3 +29,4 @@ function P:setClickCallback(cb)
     self._cb = cb
 end
 
+return P

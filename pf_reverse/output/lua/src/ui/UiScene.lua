@@ -12,3 +12,4 @@ function P:onExit()
     self:removeAutoEvent()
 end
 
+return P

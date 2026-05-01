@@ -23,6 +23,7 @@ function P:onAwake()
     self.ImageFrame = self:find("ImageFrame", self.SelectedInfo)
     self.ImageTitle = self:find("ImageTitle", self.SelectedInfo)
     self.TextName = self:find("TextName", self.SelectedInfo)
+    self.ImageNew = self:find("ImageNew", self.SelectedInfo)
     self.Filter = self:find("Filter", self.Center)
     self.CheckToggle = self:find("CheckToggle", self.Center)
     self.Tab = self:find("Tab", self.Center)
@@ -100,7 +101,12 @@ function P:onAwake()
         self:refreshEmpty()
     end)
 
+    RedManager:bind(self:find("Reddot", self.Toggles[1]), RedTag.InformationAvatar)
+    RedManager:bind(self:find("Reddot", self.Toggles[2]), RedTag.InformationFrame)
+    RedManager:bind(self:find("Reddot", self.Toggles[3]), RedTag.InformationTitle)
+
     self._Lists = {}
+    self._reds = {}
 end
 
 function P:onShow()
@@ -117,18 +123,21 @@ function P:showList(index)
     self._showIndex = index
     self.PreviewButton:SetActive(false)
     if 1 == index then
+        self._reds = ItemModel:removeNewFrame(GPropKind.Avatar)
         self.AvatarList:SetActive(true)
         self.AvatarFrameList:SetActive(false)
         self.TitleList:SetActive(false)
         self:showAvatarList()
         self:setCurSelectItem(self._selectAvatar)
     elseif 2 == index then
+        self._reds = ItemModel:removeNewFrame(GPropKind.FrameAvatar)
         self.AvatarList:SetActive(false)
         self.AvatarFrameList:SetActive(true)
         self.TitleList:SetActive(false)
         self:showFrameList()
         self:setCurSelectItem(self._selectFrame)
     else
+        self._reds = ItemModel:removeNewFrame(GPropKind.Title)
         self.AvatarList:SetActive(false)
         self.AvatarFrameList:SetActive(false)
         self.TitleList:SetActive(true)
@@ -173,6 +182,8 @@ function P:showAvatarList()
         end)
 
         self:refreshAvatar()
+    else
+        self.ListAvatar:refreshShowingUi()
     end
 end
 
@@ -207,6 +218,8 @@ function P:showFrameList()
             self:refreshFrameItem(data, item)
         end)
         self:refreshFrame()
+    else
+        self.ListFrame:refreshShowingUi()
     end
 end
 
@@ -242,6 +255,8 @@ function P:showTitleList()
         end)
 
         self:refreshTitle()
+    else
+        self.ListTitle:refreshShowingUi()
     end
 end
 
@@ -283,14 +298,15 @@ function P:refreshAvatarItem(data, item)
     self:find("Locked", item):SetActive(data:isLocked())
     self:find("ImageSelect", item):SetActive(self._selectAvatar == data)
     self:find("tag", item):SetActive(PlayerModel:getAvatar() == data.id)
+    self:find("Reddot", item):SetActive(table.indexof(self._reds, data.id) ~= -1 and data ~= self._selectAvatar and ItemModel:getItemNumById(data.id, true) > 0)
     bee.setIcon(self:find("Avatar/Mask/ImageIcon", item), data.icon)
     bee.addClick(item, function()
         Game:playSound("ui_button_confirm")
         if self._selectAvatar ~= data then
             local oldData = self._selectAvatar
             self._selectAvatar = data
-            self:refreshAvatarItem(data, item)
             self:setCurSelectItem(data)
+            self:refreshAvatarItem(data, item)
             if oldData then
                 self:refreshAvatarItem(oldData, self.ListAvatar:getDataNode(oldData))
             end
@@ -303,13 +319,14 @@ function P:refreshFrameItem(data, item)
     self:find("Locked", item):SetActive(data:isLocked())
     self:find("ImageSelect", item):SetActive(self._selectFrame == data)
     self:find("tag", item):SetActive(PlayerModel:getFrame() == data.id)
+    self:find("Reddot", item):SetActive(table.indexof(self._reds, data.id) ~= -1 and data ~= self._selectFrame and ItemModel:getItemNumById(data.id, true) > 0)
     bee.setIcon(self:find("ImageIcon", item), data.icon)
     bee.addClick(item, function()
         if self._selectFrame ~= data then
             local oldData = self._selectFrame
             self._selectFrame = data
-            self:refreshFrameItem(data, item)
             self:setCurSelectItem(data)
+            self:refreshFrameItem(data, item)
             if oldData then
                 self:refreshFrameItem(oldData, self.ListFrame:getDataNode(oldData))
             end
@@ -322,13 +339,14 @@ function P:refreshTitleItem(data, item)
     self:find("Locked", item):SetActive(data:isLocked())
     self:find("ImageSelect", item):SetActive(self._selectTitle == data)
     self:find("tag", item):SetActive(PlayerModel:getTitle() == data.id)
+    self:find("Reddot", item):SetActive(table.indexof(self._reds, data.id) ~= -1 and data ~= self._selectTitle and ItemModel:getItemNumById(data.id, true) > 0)
     bee.setIcon(self:find("ImageIcon", item), data.icon, true)
     bee.addClick(item, function()
         if self._selectTitle ~= data then
             local oldData = self._selectTitle
             self._selectTitle = data
-            self:refreshTitleItem(data, item)
             self:setCurSelectItem(data)
+            self:refreshTitleItem(data, item)
             if oldData then
                 self:refreshTitleItem(oldData, self.ListTitle:getDataNode(oldData))
             end
@@ -343,14 +361,21 @@ function P:setCurSelectItem(data)
     bee.setText(self.TextDec, _T(data.des))
     self.PreviewButton:SetActive(data.preview == 1)
 
-    self.Avatar:SetActive(self._showIndex == 1)
+    self.Avatar:SetActive(self._showIndex == 1 or self._showIndex == 2)
     self.ImageFrame:SetActive(self._showIndex == 2)
     self.ImageTitle:SetActive(self._showIndex == 3)
+    if table.indexof(self._reds, self._curSelectItem.id) ~= -1 and ItemModel:getItemNumById(self._curSelectItem.id, true) > 0 then
+        self.ImageNew:SetActive(true)
+        table.removebyvalue(self._reds, self._curSelectItem.id)
+    else
+        self.ImageNew:SetActive(false)
+    end
     local isInUse = false
     if 1 == self._showIndex then
         bee.setIcon(self:find("Mask/ImageIcon", self.Avatar), data.icon)
         isInUse = PlayerModel:getAvatar() == self._curSelectItem.id
     elseif 2 == self._showIndex then
+        bee.setIcon(self:find("Mask/ImageIcon", self.Avatar), PlayerModel:getAvatarIcon())
         bee.setIcon(self.ImageFrame, data.icon)
         isInUse = PlayerModel:getFrame() == self._curSelectItem.id
     else
@@ -496,3 +521,4 @@ function P:evt_ItemChangeRSP(msg)
     end
 end
 
+return P

@@ -20,6 +20,7 @@ GPropKind = {
     Cumulative = 110,   -- 累计数量值
     Show = 111,         -- 展示类道具
     ExpCard = 112,      -- 经验卡
+    TournamentTicket = 113,    -- 赛事门票
 
     Avatar = 201,       -- 头像
     FrameAvatar = 202,  -- 头像框
@@ -54,6 +55,7 @@ GPropId = {
     BondSNG = 11000031,        -- 好感度 SNG
     ActivePoint = 11000040, -- 日常活跃点
     WeeklyPoint = 11000041, -- 周常活跃点
+    ChallengePoint = 11000042,  -- 挑战活跃点
     GiftFragment = 10500001,    -- 礼物碎片
 
     DrawCoin = 10200001,    -- 轮盘彩晶
@@ -134,6 +136,11 @@ GAME_GAME_TYPE = {
 
     LOBBY_OMAHA_GAME    = 10020101, -- 大厅常规奥马哈玩法
     SNG_OMAHA_GAME      = 10060301,
+    MTT_OMAHA_GAME      = 10070401,
+
+    TRAINING_HOLDEM_GAME    = 40010101, -- 训练房德州德州玩法
+    TRAINING_OMAHA_GAME     = 40020101, -- 训练房奥马哈玩法
+    SNG_TRAIN_GAME      = 40050301, -- sng 训练场
 
     LOBBY_SLOTS_GAME        = 10030101, -- 大厅slots
     SIDE_GAME_COLOR_GAME    = 30030101, -- color game
@@ -362,6 +369,12 @@ RETRIEVE_TYPE = {
     NICKNAME = 3,   -- 昵称
 }
 
+-- 注册登录类型
+REGISTER_LOGIN__TYPE = {
+    REGISTER = "register",
+    LOGIN = "log",
+}
+
 ------------------ 抽卡 ------------------
 CARD_POOL_TYPE = {
     RESIDENT = 1,   -- 常驻
@@ -381,6 +394,7 @@ LOBBY_POP_PRIORITY = {
     Bankrupt = 980, -- 破产保护
     BondUp = 970,   -- 好感度提升
     FestivalGift = 968, --活动礼包
+    ActivityGift = 967,     -- 主题活动礼包
     ShopPush = 965,     -- 商店-新人优惠
 
     MonthlyCardEffect = 962,    -- 月卡获得特效
@@ -425,6 +439,7 @@ SHOP_TYPE = {
     gift_exchange = 16,     -- 兑换商城-礼物碎片
     rank_exchange = 17,     -- 兑换商城-扑克总会奖章
     shop_effect = 18,
+    activity_gifts = 19,    -- 礼包商城-活动礼包
     hot_spring = 10001,    -- 温泉季商店
     gala_season = 10002,   -- 礼服季商店
 }
@@ -546,6 +561,7 @@ TaskCate = {
     HotSpring = 4,      -- 温泉季任务
     GalaSeason = 4,     -- 礼服季任务
     Festival = 5,       -- 节日任务
+    Challenge = 6,      -- 挑战任务
 }
 
 TaskType = {
@@ -570,9 +586,12 @@ TaskTargetId = {
     HotSpring = 10001,      -- 温泉季界面
     GalaSeason = 10002,     -- 礼服季界面
     School = 10003,         -- 开学季界面
+    BunnyGirl = 10004,      -- 兔女郎界面
 
     SpringFestivalMain = 20001, -- 春节活动主界面
     SpringFestivalShop = 20002, -- 春节活动礼包界面
+
+    ThemeActivity = 20001,  -- 主题活动
     
 }
 
@@ -622,6 +641,7 @@ ActivityId = {
     HotSpring = 10001,    -- 温泉季活动
     GalaSeason = 10002,     -- 礼服季活动
     School = 10003,         --开学季活动
+    BunnyGirl = 10004,      --兔女郎活动
 
     SpringFestival = 3001,  --春节活动
 }
@@ -675,3 +695,4 @@ TOUR_STATUS = {
     Inprocess = 2,  -- 比赛进行中
     Finished = 3,   -- 比赛结束
     Losed = 4,      -- 比赛中途被淘汰
+}

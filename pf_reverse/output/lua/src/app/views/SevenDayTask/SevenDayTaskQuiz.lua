@@ -234,3 +234,4 @@ function P:onClickPageNextButton()
 	self:setTopicShow()
 end
 
+return P

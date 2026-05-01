@@ -29,3 +29,4 @@ function tpl_total_rewards_clone(key)
     return nil
 end
 
+return P

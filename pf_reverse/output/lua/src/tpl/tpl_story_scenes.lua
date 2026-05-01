@@ -25,7 +25,8 @@ local function _initData()
 {4002,"BackGround/Story/bg_story_s_2_2.png",nil},
 {4003,"BackGround/Story/bg_story_s_2_3.png",nil},
 {5001,"BackGround/Story/bg_story_b_1_1.png",nil},
-{5002,"BackGround/Story/bg_story_b_1_2.png",nil}
+{5002,"BackGround/Story/bg_story_b_1_2.png",nil},
+{6001,"BackGround/Story/bg_story_s_4_1.png",nil}
 }
     for _, v in pairs(bodys) do
         local m = {}
@@ -47,3 +48,4 @@ function tpl_story_scenes_clone(key)
     return nil
 end
 
+return P

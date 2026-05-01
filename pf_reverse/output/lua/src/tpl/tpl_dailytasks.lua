@@ -60,3 +60,4 @@ function tpl_dailytasks_clone(key)
     return nil
 end
 
+return P

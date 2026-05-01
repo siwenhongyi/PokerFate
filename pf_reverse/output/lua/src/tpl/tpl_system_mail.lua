@@ -17,7 +17,12 @@ local function _initData()
 {5012,"LAB_LEADERBOARD_MAIL_TITLE_2","LAB_MAIL_SENDER_1",nil,"LAB_LEADERBOARD_MAIL_DEC_202",nil,nil,nil,nil,nil},
 {51001,"LAB_LEADERBOARD_MAIL_TITLE_3","LAB_MAIL_SENDER_1",nil,"LAB_LEADERBOARD_MAIL_DEC_1",nil,nil,nil,nil,nil},
 {51002,"LAB_LEADERBOARD_MAIL_TITLE_3","LAB_MAIL_SENDER_1",nil,"LAB_LEADERBOARD_MAIL_DEC_2",nil,nil,nil,nil,nil},
-{61001,"LAB_MAIL_030","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_031",nil,nil,nil,nil,nil}
+{61001,"LAB_MAIL_030","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_031",nil,nil,nil,nil,nil},
+{71001,"LAB_TOURNAMENT_MTT_INFO6","LAB_MAIL_SENDER_1",nil,"LAB_TOURNAMENT_MTT_INFO7",nil,nil,nil,nil,nil},
+{71002,"LAB_TOURNAMENT_MTT_INFO6","LAB_MAIL_SENDER_1",nil,"LAB_TOURNAMENT_MTT_INFO8",nil,nil,nil,nil,nil},
+{71003,"LAB_TOURNAMENT_MTT_INFO6","LAB_MAIL_SENDER_1",nil,"LAB_TOURNAMENT_MTT_INFO9",nil,nil,nil,nil,nil},
+{71004,"LAB_TOURNAMENT_MTT_INFO6","LAB_MAIL_SENDER_1",nil,"LAB_TOURNAMENT_MTT_INFO9",nil,nil,nil,nil,nil},
+{81001,"LAB_MAIL_034","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_035",nil,nil,nil,nil,nil}
 }
     for _, v in pairs(bodys) do
         local m = {}
@@ -39,3 +44,4 @@ function tpl_system_mail_clone(key)
     return nil
 end
 
+return P

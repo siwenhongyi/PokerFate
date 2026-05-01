@@ -128,8 +128,8 @@ function bee.v3Scale(a, b)
     return CU.Vector3.v3Scale(a, b)
 end
 
-function bee.v3SignedAngle(a, b)
-    return CU.Vector3.SignedAngle(a, b)
+function bee.v3SignedAngle(dir, a, forward)
+    return CU.Vector3.SignedAngle(dir, a, forward)
 end
 
 function bee.v3Normalize(a)
@@ -152,3 +152,4 @@ function bee.colorHex(hex)
         tonumber(string.sub(hex, 6, 7), 16) / 255,
         len == 9 and tonumber(string.sub(hex, 8, 9), 16) or 1
     )
+end

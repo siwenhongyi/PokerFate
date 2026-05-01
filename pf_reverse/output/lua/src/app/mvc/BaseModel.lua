@@ -7,6 +7,9 @@ function P:ctor(name)
 	if self.saveData and self.saveData.cloud then
 		self.__cloud = clone(self.saveData.cloud)
 	end
+	if self.saveData then
+		self.__original = clone(self.saveData)
+	end
     self:loadLocalData()
 	self:initListeners()
 end
@@ -102,22 +105,40 @@ end
 
 --永久清掉本地数据 慎用
 function P:clearData()
-	if bee.isPc then
-		print(self._model_name.."清除本地数据，本接口会将 saveData 的内容置空，慎用")
-	end
-	LocalStore:setStringForKey(self._model_name, "")
+	LocalStore:deleteValueForKey(self._model_name)
 	if self.saveData then
 		for k, v in pairs(self.saveData) do
 			if k == "cloud" then
-			elseif type(v)=="table" then
-				self.saveData[k]={}
 			else
-				self.saveData[k]=nil
+				self.saveData[k] = nil
+			end
+		end
+		for k, v in pairs(self.__original) do
+			if k == "cloud" then
+			elseif type(v)=="table" then
+				self.saveData[k] = clone(v)
+			else
+				self.saveData[k] = v
 			end		
 		end
 	end
-	--self.multifileData={}
+	if self.cloud then
+		for k, v in pairs(self.cloud) do
+			self.cloud[k] = nil
+		end
+		for k, v in pairs(self.__cloud) do
+			if type(v)=="table" then
+				self.cloud[k] = clone(v)
+			else
+				self.cloud[k] = v
+			end		
+		end
+	end
 	self:updateCloudData()
+
+	if PlayerModel and PlayerModel:isLogin() then
+		self:afterLogin()
+	end
 end
 
 

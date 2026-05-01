@@ -28,3 +28,4 @@ function P:getRenderTexture()
     return self._blurRT
 end
 
+return P

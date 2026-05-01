@@ -50,3 +50,4 @@ function P:bindDetail()
 	end)
 end
 
+return P

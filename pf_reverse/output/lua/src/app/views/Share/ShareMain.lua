@@ -219,3 +219,4 @@ function P:_getFileName()
 	return self._fileName
 end
 
+return P

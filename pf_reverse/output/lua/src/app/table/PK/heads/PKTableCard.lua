@@ -177,3 +177,4 @@ function P:isMe()
 	return info and info.uid == PlayerModel:getUid()
 end
 
+return P

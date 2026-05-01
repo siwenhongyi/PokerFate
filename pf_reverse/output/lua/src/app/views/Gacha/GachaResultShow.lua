@@ -125,7 +125,7 @@ function P:setCharacterShow()
 
 		bee.setIconInAtlas(self.CampIcon, roleCfg.camp, true)
 		bee.setText(self.RoleNameText, _T(roleCfg.name))
-		bee.setText(self.CVNameText, "CV:" .. _T(roleCfg.cv))
+		bee.setText(self.CVNameText, "CV: " .. _T(roleCfg.cv))
 		bee.setText(self.TipsText, "")
 
 		self._showText = _T(roleCfg.salute)
@@ -362,6 +362,8 @@ function P:onClickClose()
 		end
 		self:hideUI(nil, true)
 	end)
+
+	bee.emit("evt_gachaOver")
 end
 
 function P:evt_shareShot()
@@ -470,3 +472,4 @@ function P:getShowTextList(text)
     return retList
 end
 
+return P

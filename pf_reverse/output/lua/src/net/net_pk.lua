@@ -146,6 +146,12 @@ end
 
 -- 筹码从桌子返回到手里
 function net:ChipsBackBRC(msg)
+	if GameModel.data then 
+		local player = GameModel.data:getPlayer(msg.seatid + 1)
+		if player then
+			player.chips = player.chips + msg.chips
+		end
+	end
 end
 
 -- 少于2人牌局中断
@@ -300,3 +306,4 @@ end
 function net:BlindStatusBRC(msg)
 	if not GameModel.data then return end
 	GameModel.data:setBlindStatus(msg)
+end

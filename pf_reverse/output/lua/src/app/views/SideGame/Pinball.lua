@@ -166,12 +166,16 @@ function P:onAwake()
 
 	self.HistoricalRecords = self:find("HistoricalRecords", Left)
 	self.HistoricalRecords:SetActive(false)
+	bee.emit("evt_sideGameRecords", false)
 
 	self.TipMask = self:find("TipMask", Left)
 	self.TipMask:SetActive(false)
 
 	self.BallRecord = self:find("BallRecord", Left)
 	self.BallRecord:SetActive(false)
+
+	self.BallRecordScrollList = self:find("BallRecordScrollList", Left)
+	self.BallRecordScrollList:SetActive(false)
 
 	self.RulesTip = self:find("RulesTip", Left)
 	self.OptionList = self:find("OptionList", Left)
@@ -195,6 +199,7 @@ function P:onAwake()
         if self.HistoricalRecords.activeSelf then
         	Game:playSound("ui_button_disabled")
             self.HistoricalRecords:SetActive(false)
+			bee.emit("evt_sideGameRecords", false)
             return
         end
         bee.emit("evt_hideSideGame")
@@ -203,11 +208,12 @@ function P:onAwake()
     bee.addClick(self.TipMask, function()
     	Game:playSound("ui_button_disabled")
         self.TipMask:SetActive(false)
-        if self.BallRecord.activeSelf then
+        if self.BallRecord.activeSelf or self.BallRecordScrollList.activeSelf then
             self._selectedRecord = nil
              self.ListRecord:refreshShowingUi()
         end
         self.BallRecord:SetActive(false)
+        self.BallRecordScrollList:SetActive(false)
         self.RulesTip:SetActive(false)
         self.OptionList:SetActive(false)
     end)
@@ -264,7 +270,9 @@ end
 
 function P:onShow()
 	self.HistoricalRecords:SetActive(false)
+	bee.emit("evt_sideGameRecords", false)
 	self.BallRecord:SetActive(false)
+	self.BallRecordScrollList:SetActive(false)
     self._recordDatas = {}
 end
 
@@ -400,8 +408,9 @@ end
 
 function P:initQuantityCont()
 	self._quantityItemList = {}
-	self._selectQuantity = tpl_constdata.Pinball_Balls[1]
-	for i, v in ipairs(tpl_constdata.Pinball_Balls) do
+	local balls = SideGameModel:getPinballBalls()
+	self._selectQuantity = balls[1]
+	for i, v in ipairs(balls) do
 		local copyQuantityItem = CU.GameObject.Instantiate(self.QuantityFilterItem)
 		copyQuantityItem.transform:SetParent(self.QuantityFilter.transform)
 		copyQuantityItem.transform.localPosition = bee.v3(0, 0, 0)
@@ -470,7 +479,7 @@ function P:onClickLottery()
 		return
 	end
 
-	if not bee.checkCd("pinball_lottery", 1) then
+	if not bee.checkCd("pinball_lottery", 2) then
         return
     end
 
@@ -480,6 +489,7 @@ function P:onClickLottery()
 	if self._selectChip * self._selectQuantity > PlayerModel:getGold() then
 		UiManager:showToast(_T("LAB_PINBALL_14"))
 		self._beatTotalGold = 0
+		QuickByModel:checkShowView(GAME_GAME_TYPE.SIDE_GAME_PINBALL_GAME)
 		return
 	end
 
@@ -491,14 +501,36 @@ function P:onClickLottery()
 	params.per_bet = self._selectChip
 	params.ball_num = self._selectQuantity
 	Net:sendReq("pb.PinballActionREQ", params)
-end
 
-function P:evt_PinballActionRSP(msg)
 	self._isPlaying = true
 	self:find("pinball_lottery_button_on", self.LotteryButton):SetActive(false)
 	self.LotteryButton.transform:GetComponent("Button").enabled = false
 	self.LotteryButton.transform:GetComponent("ButtonZoom").enabled = false
 	self.LotteryTips:SetActive(false)
+end
+
+-- 断线重连
+function P:evt_UserLoginRSP()
+	if self._beginAnim then
+		return
+	end
+
+	self._isPlaying = false
+	self:find("pinball_lottery_button_on", self.LotteryButton):SetActive(true)
+	self.LotteryButton.transform:GetComponent("Button").enabled = true
+	self.LotteryButton.transform:GetComponent("ButtonZoom").enabled = true
+	self.LotteryTips:SetActive(true)
+end
+
+function P:evt_PinballActionRSP(msg)
+	if msg.code ~= 0 then
+		self._isPlaying = false
+		self:find("pinball_lottery_button_on", self.LotteryButton):SetActive(true)
+		self.LotteryButton.transform:GetComponent("Button").enabled = true
+		self.LotteryButton.transform:GetComponent("ButtonZoom").enabled = true
+		self.LotteryTips:SetActive(true)
+		return
+	end
 
 	self.Sign = true
 
@@ -525,6 +557,7 @@ function P:evt_PinballActionRSP(msg)
 		effName = "Prefab/Pinball/Eff_poker_Ui_pinball_chouma01"
 	end
 
+	self._beginAnim = true
 	self._waitBallCount = 0
 	self._beginProfit = 0
 	self._ballCount = #balls
@@ -840,7 +873,9 @@ function P:endDropAnim(goldParams)
 						self._balanceTween = nil
 					end
 				end)
+				bee.vibrate(tpl_vibrate["shock_pinball"])
 				self._isPlaying = false
+				self._beginAnim = false
 			end)
 
 			self:find("pinball_lottery_button_on", self.LotteryButton):SetActive(true)
@@ -852,6 +887,10 @@ function P:endDropAnim(goldParams)
 			SettingModel:setIsStopRefreshGold(nil)
 			--判定礼包推送
 			self:checkPushGift(self._cacheLvlId)
+			--盈利事件
+			if self._beginProfit > self._totalBetting then
+				bee.emit("evt_PinballWin")
+			end
 		end)
 	end
 end
@@ -987,7 +1026,7 @@ end
 
 function P:checkPushGift(lvlId)
 	local sum = self:getGameProfit()
-	SideGameModel:checkPushGift(self.Sign, sum, GAME_GAME_TYPE.SIDE_GAME_PINBALL_GAME, lvlId)
+	QuickByModel:checkSideGame(self.Sign, sum, GAME_GAME_TYPE.SIDE_GAME_PINBALL_GAME, lvlId)
 	self.Sign = false
 end
 
@@ -1005,6 +1044,7 @@ end
 -------------- 历史记录 start --------------
 function P:showRecords()
     self.HistoricalRecords:SetActive(true)
+	bee.emit("evt_sideGameRecords", true)
 
     if not self._initRecords then
         self._initRecords = true
@@ -1015,6 +1055,7 @@ function P:showRecords()
 
         bee.addClick(self:find("CloseButton", AnimRoot), function()
             self.HistoricalRecords:SetActive(false)
+			bee.emit("evt_sideGameRecords", false)
         end)
 
         bee.setText(self:find("RecordsTipText", AnimRoot), _F("LAB_PINBALL_13", tpl_constdata.Pinball_History_Limit))
@@ -1048,58 +1089,73 @@ function P:showRecords()
     end
 
     self.BallRecord:SetActive(false)
+    self.BallRecordScrollList:SetActive(false)
 
     Net:sendReq("pb.GetSideGameHisRecordREQ", {game_type = GAME_GAME_TYPE.SIDE_GAME_PINBALL_GAME})
 end
 
 function P:showRecordTips(data, item)
     self.TipMask:SetActive(true)
-    self.BallRecord:SetActive(true)
-
     self._selectedRecord = data
 
-	if not self.RecordItem then
-		self.RecordItem = self:find("RecordItem", self.BallRecord)
-		self.RecordItem:SetActive(false)
+    local recordCont
 
-		self._RecordItems = {}
-	end
+    if #data.bet_result > 10 then
+    	self.BallRecordScrollList:SetActive(true)
+    	if not self._recordList then
+    		self:initBallRecordScrollList()
+    	end
+    	for i,v in ipairs(data.bet_result) do
+    		v.index = i
+    	end
+    	self._recordList:setDatas(data.bet_result)
+    	self._recordList:moveToYItem(1)
+    	recordCont = self.BallRecordScrollList
+    else
+    	self.BallRecord:SetActive(true)
 
-	for _, v in pairs(self._RecordItems) do
-		v:SetActive(false)
-	end
+    	if not self.RecordItem then
+			self.RecordItem = self:find("RecordItem", self.BallRecord)
+			self.RecordItem:SetActive(false)
 
-	for k, v in ipairs(data.bet_result) do
-		local color = PINBALL_COLORS[v.export_id] or PINBALL_COLORS[1]
-		local item = self._RecordItems[k]
-		if not item then
-			item = CU.GameObject.Instantiate(self.RecordItem, self.BallRecord.transform, false)
-			self._RecordItems[k] = item
+			self._RecordItems = {}
 		end
-		item:SetActive(true)
-		self:find("SingleBg", item):SetActive(k % 2 == 1)
-		self:find("SingleBg2", item):SetActive(k % 2 == 0)
-		bee.setText(self:find("IndexText", item), k)
-		bee.setText(self:find("ExportText", item), "" .. v.rate .. "x")
-		bee.setIconInAtlas(self:find("Cube", item), color)
-	end
 
-    CS.Utils.ForceRebuildLayoutImmediate(self.BallRecord)
-	local h = self.BallRecord:GetComponent("RectTransform").rect.height
+		for _, v in pairs(self._RecordItems) do
+			v:SetActive(false)
+		end
+
+		for k, v in ipairs(data.bet_result) do
+			local color = PINBALL_COLORS[v.export_id] or PINBALL_COLORS[1]
+			local item = self._RecordItems[k]
+			if not item then
+				item = CU.GameObject.Instantiate(self.RecordItem, self.BallRecord.transform, false)
+				self._RecordItems[k] = item
+			end
+			item:SetActive(true)
+			v.index = k
+			self:setBallRecordItem(item, v)
+		end
+
+	    CS.Utils.ForceRebuildLayoutImmediate(self.BallRecord)
+	    recordCont = self.BallRecord
+    end
+
+	local h = recordCont:GetComponent("RectTransform").rect.height
 	local arrowTop = 40
-    local pos = self.BallRecord.transform.position
+    local pos = recordCont.transform.position
     pos.y = item.transform.position.y
-    self.BallRecord.transform.position = pos
-    pos = self.BallRecord.transform.localPosition
+    recordCont.transform.position = pos
+    pos = recordCont.transform.localPosition
     pos.y = pos.y + 40
     local flag = false
     if pos.y - h < -529 then
         pos.y = -529 + h
         flag = true
     end
-    self.BallRecord.transform.localPosition = pos
+    recordCont.transform.localPosition = pos
 
-    local TipsArrow = self:find("TipsArrow", self.BallRecord)
+    local TipsArrow = self:find("TipsArrow", recordCont)
     if flag or true then
         if not self._tipArrowUpPos then
             self._tipArrowUpPos = TipsArrow.transform.localPosition
@@ -1110,6 +1166,28 @@ function P:showRecordTips(data, item)
     elseif self._tipArrowUpPos then
         TipsArrow.transform.localPosition = bee.v3(self._tipArrowUpPos.x, - arrowTop)
     end
+end
+
+function P:initBallRecordScrollList()
+	self._recordList = UiListEx:create(self:find("RecordScrollList", self.BallRecordScrollList))
+	self._recordList:setCreateFunc(function()
+		return CU.GameObject.Instantiate(self:find("RecordItem", self.BallRecord))
+	end)
+	self._recordList:setRefreshFunc(function(data, item)
+		self:setBallRecordItem(item, data)
+	end)
+	self._recordList:setWidth(58.5)
+	self._recordList:setTopBottom(2, 0)
+end
+
+function P:setBallRecordItem(item, data)
+	local index = data.index
+	local color = PINBALL_COLORS[data.export_id] or PINBALL_COLORS[1]
+	self:find("SingleBg", item):SetActive(index % 2 == 1)
+	self:find("SingleBg2", item):SetActive(index % 2 == 0)
+	bee.setText(self:find("IndexText", item), index)
+	bee.setText(self:find("ExportText", item), "" .. data.rate .. "x")
+	bee.setIconInAtlas(self:find("Cube", item), color)
 end
 
 function P:evt_GetSideGameHisRecordRSP(msg)
@@ -1152,3 +1230,4 @@ function P:clearEff()
 	end
 end
 
+return P

@@ -185,3 +185,4 @@ function P:setNormalItem(item, data)
 	end)
 end
 
+return P

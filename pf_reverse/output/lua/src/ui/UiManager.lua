@@ -74,8 +74,11 @@ end
 function P:onAwake()
 	if self.curUi then
 		local c = ObjectPool:getCls(self.curUi)
-		if c and c.onAdapt then c:onAdapt() end
-		if c and c.onAwake then  c:onAwake() end
+		if c and not c.__awake then
+			if c.onAdapt then c:onAdapt() end
+			if c.onAwake then c:onAwake() end
+			c.__awake = true
+		end
 	end
 end
 
@@ -83,6 +86,9 @@ function P:onStart()
 	if self.curUi then
 		local c = ObjectPool:getCls(self.curUi)
 		if c and not bee.isNull(c.node) then
+			if not c.__awake then
+				self:onAwake()
+			end
 			c._watiStart = false
 			if c.addAutoEvent then c:addAutoEvent() end
 			if c.onStart then c:onStart() end
@@ -558,3 +564,4 @@ function bee.invokeUi(funcName)
 	P:invoke(funcName)
 end
 
+return P

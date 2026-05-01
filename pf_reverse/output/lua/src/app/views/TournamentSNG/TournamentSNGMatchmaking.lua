@@ -40,12 +40,7 @@ function P:onShow()
         self.ColorButton:SetActive(SettingModel:isColorGameUnlock())
     end
 
-    for _, v in ipairs(GameModel.data.room_info.room_name) do
-        if v.lang == LAN:getLanguage() then
-            bee.setText(self.TextName, v.text)
-            break
-        end
-    end
+    bee.setText(self.TextName, GameModel.data:getRoomName())
 
     local player = GameModel.data:getMyPlayerInfo()
     if player then
@@ -158,3 +153,8 @@ function P:evt_StandUpBRC(msg)
     self:refreshUI()
 end
 
+function P:evt_ActionBRC(msg)
+    self:hideUIForce()
+end
+
+return P

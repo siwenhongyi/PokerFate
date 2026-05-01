@@ -244,3 +244,4 @@ function P:getProductInfo(productId)
 	return nil
 end
 
+return P

@@ -355,3 +355,4 @@ function P:CheckNotificationIntentData()
 	end
 end
 
+return P

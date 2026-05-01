@@ -27,3 +27,4 @@ function tpl_guide_user_clone(key)
     return nil
 end
 
+return P

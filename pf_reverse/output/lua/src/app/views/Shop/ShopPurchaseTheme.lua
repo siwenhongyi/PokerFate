@@ -101,3 +101,4 @@ function P:onClickPurchase()
 	self:hideUI()
 end
 
+return P

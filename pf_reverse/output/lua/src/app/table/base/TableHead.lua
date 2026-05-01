@@ -539,3 +539,4 @@ function P:playSitdownEffect(only_one)
 	return false
 end
 
+return P

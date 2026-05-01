@@ -5,3 +5,4 @@ function net:ColorGameActionRSP(msg)
     else
         SettingModel:setIsStopRefreshGold(nil)
     end
+end

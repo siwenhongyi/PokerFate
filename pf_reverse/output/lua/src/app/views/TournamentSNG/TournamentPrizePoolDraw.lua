@@ -118,3 +118,4 @@ function P:refreshItem(item, nums)
     end
 end
 
+return P

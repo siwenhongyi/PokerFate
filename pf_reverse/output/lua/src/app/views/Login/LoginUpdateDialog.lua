@@ -13,3 +13,4 @@ function P:onAwake()
     bee.setText(self:find("TextTip", Panel), _F("LAB_UPDATE_TIP", "100M"))
 end
 
+return P

@@ -39,6 +39,13 @@ function P:schedule(dt, cb, target)
     return d.tag
 end
 
+-- 添加循环定时器 loopDt: 循环间隔时间，第一次执行时间为 dt，之后每次执行时间为 loopDt
+function P:loopTimer(dt, loopDt, cb, target)
+    local d = {tag = self:tag(), dt = dt, loopDt = loopDt, et = dt or -1, cb = cb, t = target}
+    self:_addTimer(d)
+    return d.tag
+end
+
 function P:removeTag(tag)
     for _, v in pairs(self._timers) do
         if v.tag == tag then
@@ -101,7 +108,11 @@ function P:onUpdate(dt)
                     v.cb(dt, v)
                 end
                 if not v.remove then
-                    v.et = v.et + v.dt
+                    if v.loopDt then
+                        v.et = v.et + v.loopDt
+                    else
+                        v.et = v.et + v.dt
+                    end
                 end
             end
         end
@@ -170,6 +181,11 @@ bee.schedule = function(dt, cb, target)
     return P:schedule(dt, cb, target)
 end
 
+-- 添加循环定时器
+bee.loopTimer = function(dt, loopDt, cb, target)
+    return P:loopTimer(dt, loopDt, cb, target)
+end
+
 bee.addUpdater = function(cb)
     P._updater[#P._updater + 1] = cb
 end
@@ -196,3 +212,4 @@ bee.removeFixedUpdater = function(cb)
     end
 end
 
+return P

@@ -39,3 +39,4 @@ function P:onDestroy()
     P.super.onDestroy(self)
 end
 
+return P

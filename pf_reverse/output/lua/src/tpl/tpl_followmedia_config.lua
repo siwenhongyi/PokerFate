@@ -30,3 +30,4 @@ function tpl_followmedia_config_clone(key)
     return nil
 end
 
+return P

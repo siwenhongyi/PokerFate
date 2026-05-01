@@ -40,3 +40,4 @@ function P:evt_gameBlur(flag, name)
     self:onUiBlur(flag, name)
 end
 
+return P

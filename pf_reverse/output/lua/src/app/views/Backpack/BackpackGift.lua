@@ -252,9 +252,17 @@ function P:autoSetCharacterGift(data)
 	local needExp = 0
 	for i = curLv, (Config.AWAKEN_LEVEL - 1) do
 		if i == curLv then
-			needExp = needExp + tpl_character_level[i].point - curExp
+			if tpl_character_level[i]["point_" .. role.role_id] then
+				needExp = needExp + tpl_character_level[i]["point_" .. role.role_id] - curExp
+			else
+				needExp = needExp + tpl_character_level[i].point - curExp
+			end
 		else
-			needExp = needExp + tpl_character_level[i].point
+			if tpl_character_level[i]["point_" .. role.role_id] then
+				needExp = needExp + tpl_character_level[i]["point_" .. role.role_id]
+			else
+				needExp = needExp + tpl_character_level[i].point
+			end
 		end
 	end
 
@@ -276,6 +284,8 @@ function P:autoSetCharacterGift(data)
 
 	local needCount = math.floor(needExp / addExp)
 	local curCount = ItemModel:getItemNumById(data.item_id)
-	self._selectedList[data.id].num = math.min((needCount - curCount), self._maxCount)
+	needCount = math.max((needCount - curCount), 0)
+	self._selectedList[data.id].num = math.min(needCount, self._maxCount)
 end
 
+return P

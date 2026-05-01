@@ -103,3 +103,4 @@ function P:refreshAddingChips(is_adding, chips, type)
 	end
 end
 
+return P

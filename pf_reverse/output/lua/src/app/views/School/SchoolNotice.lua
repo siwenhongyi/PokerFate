@@ -84,3 +84,4 @@ function P:onBtCancel()
     self:hideUI()
 end
 
+return P

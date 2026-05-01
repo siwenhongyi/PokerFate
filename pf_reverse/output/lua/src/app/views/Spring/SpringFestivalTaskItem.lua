@@ -56,3 +56,4 @@ function P:refreshItem(data, isInit, index, playAnimator)
     end)
 end
 
+return P

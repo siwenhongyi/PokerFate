@@ -122,8 +122,8 @@ end
 
 function P:setShowItem(item, data)
 	local RoleBg = self:find("RoleBg", item)
-	local Character = self:find("RoleBg/Character", item)
-	local CharacterImage = self:find("RoleBg/Character/CharacterImage", item)
+	local Character = self:find("RoleBg/Character/Character", item)
+	local CharacterImage = self:find("RoleBg/Character/Character/CharacterImage", item)
 	local ItemBg = self:find("ItemBg", item)
 	local ItemIcon = self:find("ItemBg/ItemIcon", item)
 	local NameText = self:find("ItemBg/NameText", item)
@@ -453,3 +453,4 @@ function P:setShareCont()
     ShareModel:setShareCont(self.ShareReward, Icon, CountText, 3)
 end
 
+return P

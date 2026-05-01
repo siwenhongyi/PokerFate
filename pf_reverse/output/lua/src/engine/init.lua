@@ -40,6 +40,7 @@ require "sdk.SdkHelper"
 require "sdk.PayHelper"
 require "sdk.GoogleMgr"
 require "sdk.AdHelper"
+require "sdk.YiDunHelper"
 
 require "manager.LocalStore"
 require "manager.LanguageManager"
@@ -834,6 +835,28 @@ bee.setGrey = function(gameObject, bool, notTex)
 end
 
 
+bee.getDownloadImage = function (obj, url)
+    if not bee.checkVersion("1.4.6") then
+        obj:GetComponent("LoadImage"):DownloadImage(url)
+    else
+        local pathPart = string.match(url, "^https?://[^/]+(/.+)$")
+        local nurl = ""
+        if pathPart then
+            local parts = {}
+            for segment in string.gmatch(pathPart:sub(2), "([^/]+)") do
+                table.insert(parts, segment)
+            end
+            
+            local remoteIndex = LocalStore:getIntegerForKey("remote_host_index", 1)
+            nurl = _G["G_RES_BASE_HOST" .. remoteIndex] or G_RES_BASE_HOST
+            for _,v in ipairs(parts) do
+                nurl = nurl .. "/" .. v
+            end
+        end
+        obj:GetComponent("LoadImage"):DownloadImages({nurl, url})
+    end
+end
+
 -- bee.setHollow = function(gameObject, bool, pos, size)
 --     if bee.isNull(gameObject) then
 --         return
@@ -855,3 +878,4 @@ end
 --         local image = gameObject.transform:GetComponent("Image")
 --         image.material = nil
 --     end
+-- end

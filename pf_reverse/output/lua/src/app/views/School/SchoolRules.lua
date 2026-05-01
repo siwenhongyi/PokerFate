@@ -18,3 +18,4 @@ function P:onShow()
 
 end
 
+return P

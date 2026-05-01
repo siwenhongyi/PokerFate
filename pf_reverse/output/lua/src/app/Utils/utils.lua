@@ -138,6 +138,10 @@ function bee.getShortNumber2(num, show_sigh)
 	return ret
 end
 
+function bee.getColorText(text, color)
+	return string.format("<color=%s>%s</color>", color or "#60616E", text or "")
+end
+
 -- 对比两个版本号 ver1 > ver2 返回 1, ver1 < ver2 返回 -1, ver1 == ver2 返回 0
 bee.compareVer = function(ver1, ver2)
 	local ver1s= string.split(ver1,".")
@@ -183,3 +187,4 @@ end
 
 _N = bee.getShortNumber
 _N1 = bee.getShortNumber1
+_N2 = bee.getShortNumber2

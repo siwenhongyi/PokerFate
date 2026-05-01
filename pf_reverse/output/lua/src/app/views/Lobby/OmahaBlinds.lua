@@ -1,12 +1,18 @@
 local P = class("OmahaBlinds", UiFullView)
 
+local SYS_GUIDES = {
+    [GAME_GAME_TYPE.LOBBY_HOLDEM_GAME] = 12001,
+    [GAME_GAME_TYPE.LOBBY_OMAHA_GAME] = 13001,
+}
+
 function P:onAwake()
 	self._openAnim, self._closeAnim = "UI_1_" .. self.__cname .. "_into", "UI_1_" .. self.__cname .. "_back"
     self.Center = self:find("AnimRoot/Center")
     self.LeftTop = self:find("AnimRoot/LeftTop")
     self.RightTop = self:find("AnimRoot/RightTop")
     self.LeftBottom = self:find("AnimRoot/LeftBottom")
-    self.TextGold = self:find("Ticket/TextGold", self.RightTop)
+    self.TextGold = self:find("Ticket/CountText", self.RightTop)
+    self.QuickByButton = self:find("QuickByButton", self.RightTop)
 
     self.blinds_title_omaha = self:find("blinds_title_poker/blinds_title_omaha", self.Center)
     self.blinds_title_poker = self:find("blinds_title_poker/blinds_title_poker", self.Center)
@@ -14,13 +20,14 @@ function P:onAwake()
     self.RoomList = self:find("RoomList", self.Center)
     self.RoomView = self:find("RoomView", self.Center)
     self.Items = {
+        [0] = self:find("Item0", self.Center),
         self:find("Item1", self.Center),
         self:find("Item2", self.Center),
         self:find("Item3", self.Center),
         self:find("Item4", self.Center),
         self:find("Item5", self.Center),
     }
-    for _, v in ipairs(self.Items) do
+    for _, v in pairs(self.Items) do
         v:SetActive(false)
     end
     bee.addClick(self:find("Ticket", self.RightTop), function()
@@ -37,6 +44,10 @@ function P:onAwake()
         bee.logEvent("ingame-table-rules", self._gameType)
     end)
     bee.addClick(self:find("CloseButton", self.LeftTop), function()
+        local View = self:find("Viewport/Content", self.RoomList)
+        self.animator.enabled = true
+        View:GetComponent("HorizontalLayoutGroup").enabled = true
+        View:GetComponent("ContentSizeFitter").enabled = true
         self:hideUI()
     end)
     self.BgImgs = {
@@ -66,6 +77,9 @@ function P:onShow()
         end
     end
     self._datas = GF.getTableDatas(self._gameType)
+    for k, v in ipairs(self._datas) do
+        v.index = k
+    end
     local w = #self._datas * self.Items[1].transform.sizeDelta.x + (#self._datas - 1) * 30
 
     local View = self.RoomView
@@ -116,6 +130,15 @@ function P:onShow()
             View:GetComponent("HorizontalLayoutGroup").enabled = false
             View:GetComponent("ContentSizeFitter").enabled = false
         end)
+    elseif GF.isTrainingGame(self._datas[1].gameType) and not GuideManager:isInGuide() and GuideManager:isSysGuideValid(SYS_GUIDES[self._gameType]) ~= 0 then
+        self:once(1, function()
+            self.animator.enabled = false
+            View:GetComponent("HorizontalLayoutGroup").enabled = false
+            View:GetComponent("ContentSizeFitter").enabled = false
+        end)
+        if SCREEN_WIDTH < w then
+            self._horizontalNormalizedPosition = 1
+        end
     else
         if SCREEN_WIDTH < w then
             if not isMoved then
@@ -133,25 +156,40 @@ function P:onShow()
     Net:sendReq("pb.RoomWinnerRewardsInfoREQ", {
         game_type = self._gameType,
     })
+    if self._datas[1].gameType ~= self._gameType then
+        Net:sendReq("pb.RoomWinnerRewardsInfoREQ", {
+            game_type = self._datas[1].gameType,
+        })
+    end
     self:repeatN(#self._datas - 1, 0.08, function(dt, t)
         self:find("Root", self.CurItems[#self._datas - t.num]):SetActive(true)
     end)
 
     if ThemeModel:isHaveAddtion(self._gameType) and not self:find("HotSpringAddition", self.LeftBottom) and bee.isNull(self.HotSpringAddition) then
         local obj = ThemeModel:createAddtionButton()
-        obj.transform:SetParent(self.LeftBottom.transform, false)
-        obj.transform.localPosition = bee.v3(-78, -122)
-        self.HotSpringAddition = obj
-        if View then
-            local pos = View.transform.localPosition
-            pos.y = pos.y + 63
-            View.transform.localPosition = pos
+        if not bee.isNull(obj) then
+            obj.transform:SetParent(self.LeftBottom.transform, false)
+            obj.transform.localPosition = bee.v3(-78, -122)
+            self.HotSpringAddition = obj
+            if View then
+                local pos = View.transform.localPosition
+                pos.y = pos.y + 63
+                View.transform.localPosition = pos
 
-            if self.blinds_title_poker then
-                self.blinds_title_omaha.transform.localPosition = bee.v3(0, 25)
-                self.blinds_title_poker.transform.localPosition = bee.v3(0, 25)
+                if self.blinds_title_poker then
+                    self.blinds_title_omaha.transform.localPosition = bee.v3(0, 25)
+                    self.blinds_title_poker.transform.localPosition = bee.v3(0, 25)
+                end
             end
         end
+    end
+
+    QuickByModel:addButtonItem(self.uiName, self.QuickByButton)
+end
+
+function P:afterShow()
+    if not GuideManager:isInGuide() then
+        GuideManager:startSystemGuide(SYS_GUIDES[self._gameType], 0.65)
     end
 end
 
@@ -165,10 +203,10 @@ function P:refreshItem(data, item)
         bee.setText(self:find("TextMMBuyin", Root), "" .. _N(data.byin))
     end
     if self:find("blinds_tab_recommend", Root) then
-        self:find("blinds_tab_recommend", Root):SetActive(self._lastSelectIndex == data.id)
+        self:find("blinds_tab_recommend", Root):SetActive(self._lastSelectIndex == data.index)
     end
     if self:find("blinds_selected", Root) then
-        self:find("blinds_selected", Root):SetActive(self._lastSelectIndex == data.id)
+        self:find("blinds_selected", Root):SetActive(self._lastSelectIndex == data.index)
     end
     local Locked = self:find("Locked", Root)
     if Locked then
@@ -199,12 +237,12 @@ function P:refreshItem(data, item)
             self:once(1, function()
                 Locked:SetActive(false)
                 if self:find("blinds_tab_recommend", Root) then
-                    self:find("blinds_tab_recommend", Root):SetActive(self._lastSelectIndex == data.id)
+                    self:find("blinds_tab_recommend", Root):SetActive(self._lastSelectIndex == data.index)
                 end
                 if self:find("blinds_selected", Root) then
-                    self:find("blinds_selected", Root):SetActive(self._lastSelectIndex == data.id)
+                    self:find("blinds_selected", Root):SetActive(self._lastSelectIndex == data.index)
                 end
-                if self._lastSelectIndex == data.id then
+                if self._lastSelectIndex == data.index then
                     Root.transform.localScale = bee.v3(1.04, 1.04, 1.04)
                 else
                     Root.transform.localScale = bee.v3one
@@ -212,7 +250,7 @@ function P:refreshItem(data, item)
             end)
         end)
     else
-        if self._lastSelectIndex == data.id then
+        if self._lastSelectIndex == data.index then
             Root.transform.localScale = bee.v3(1.04, 1.04, 1.04)
         else
             Root.transform.localScale = bee.v3one
@@ -242,6 +280,7 @@ function P:refreshItem(data, item)
             else
                 UiManager:showToast(_T("LAB_SMALL_THAN_BUYIN"))
             end
+            QuickByModel:checkShowView(self._gameType)
         else
             local byinFunc = function()
                 if self._gameType == GAME_GAME_TYPE.LOBBY_HOLDEM_ALLIN then
@@ -283,73 +322,83 @@ function P:refreshItem(data, item)
     end)
 end
 
-function P:refreshRewardItems()
-    if self.reward_list then
-        for k, v in ipairs(self.reward_list) do
-            local Room = self.CurItems[k]
-            if Room then
-                local items = {}
-                if v.fire_power > 0 then
-                    table.insert(items, {item_id = GPropId.FirePower, num = v.fire_power})
-                end
-                if v.win_exp > 0 then
-                    table.insert(items, {item_id = GPropId.Exp, num = v.win_exp, format = {VipModel:getExpHands()}})
-                end
-                if v.bond_add > 0 then
-                    table.insert(items, {item_id = GPropId.Bond, num = v.bond_add, format = {VipModel:getFriendshipHands()}})
-                end
-                if ThemeModel:isActivityOpen() then
-                    local num = 0
-                    local d = ThemeModel:getConfData()
-                    if d then
-                        for kk, vv in ipairs(d.mod) do
-                            if vv == self._gameType then
-                                if d.mod_add and d.mod_add[kk] and d.mod_add[kk][k] then
-                                    num = d.mod_add[kk][k]
-                                end
-                                break
-                            end
-                        end
+function P:_refreshRewardItem(Room, k, v, game_type)
+    local items = {}
+    if v.fire_power > 0 then
+        table.insert(items, {item_id = GPropId.FirePower, num = v.fire_power})
+    end
+    if v.win_exp > 0 then
+        table.insert(items, {item_id = GPropId.Exp, num = v.win_exp, format = {VipModel:getExpHands()}})
+    end
+    if v.bond_add > 0 then
+        table.insert(items, {item_id = GPropId.Bond, num = v.bond_add, format = {VipModel:getFriendshipHands()}})
+    end
+    if ThemeModel:isActivityOpen() and not GF.isTrainingGame(game_type) then
+        local num = 0
+        local d = ThemeModel:getConfData()
+        if d then
+            for kk, vv in ipairs(d.mod) do
+                if vv == self._gameType then
+                    if d.mod_add and d.mod_add[kk] and d.mod_add[kk][k] then
+                        num = d.mod_add[kk][k]
                     end
-                    table.insert(items, {item_id = ThemeModel:getItemId(), num = num})
+                    break
                 end
+            end
+        end
+        if num > 0 then
+            table.insert(items, {item_id = ThemeModel:getItemId(), num = num})
+        end
+    end
 
-                local ItemRoot = self:find("Root/Item3", Room)
-                if 4 <= #items then
-                    ItemRoot = self:find("Root/Item4", Room)
-                end
-                ItemRoot:SetActive(true)
-                local Items = {}
-                for k, v in ipairs(items) do
-                    local item01 = self:find("item0" .. k, ItemRoot)
-                    item01:SetActive(true)
-                    local item = clone(ItemModel:getItem(v.item_id, true))
-                    item.num = v.num
-                    PropItem:create(item01):setData(item)
-                    bee.addClick(item01, function()
-                        UiManager:showUI("CommonItemTip", {data = item, format = v.format, target = item01})
-                    end)
-                    table.insert(Items, item01)
-                end
-                for i = #items + 1, 5 do
-                    local item01 = self:find("item0" .. i, ItemRoot)
-                    if item01 then
-                        item01:SetActive(false)
-                    end
-                end
-                
-                local aligns = {}
-                for _, v in ipairs(Items) do
-                    if v.activeSelf then
-                        table.insert(aligns, v)
-                    end
-                end
-                if #aligns == 1 then
-                    aligns[1].transform.localPosition = bee.v3zero
-                elseif #aligns == 2 then
-                    aligns[1].transform.localPosition = bee.v3(-90, 0)
-                    aligns[2].transform.localPosition = bee.v3(90, 0)
-                end
+    local ItemRoot = self:find("Root/Item3", Room)
+    if 4 <= #items then
+        ItemRoot = self:find("Root/Item4", Room)
+    end
+    ItemRoot:SetActive(true)
+    local Items = {}
+    for k, v in ipairs(items) do
+        local item01 = self:find("item0" .. k, ItemRoot)
+        item01:SetActive(true)
+        PropItem:create(item01):setData(v)
+        bee.addClick(item01, function()
+            UiManager:showUI("CommonItemTip", {data = v, format = v.format, target = item01})
+        end)
+        table.insert(Items, item01)
+    end
+    for i = #items + 1, 5 do
+        local item01 = self:find("item0" .. i, ItemRoot)
+        if item01 then
+            item01:SetActive(false)
+        end
+    end
+    
+    local aligns = {}
+    for _, v in ipairs(Items) do
+        if v.activeSelf then
+            table.insert(aligns, v)
+        end
+    end
+    if #aligns == 1 then
+        aligns[1].transform.localPosition = bee.v3zero
+    elseif #aligns == 2 then
+        aligns[1].transform.localPosition = bee.v3(-90, 0)
+        aligns[2].transform.localPosition = bee.v3(90, 0)
+    end
+end
+
+function P:refreshRewardItems(game_type)
+    if self.reward_list then
+        local items = {}
+        for k, v in ipairs(self._datas) do
+            if v.gameType == game_type then
+                table.insert(items, self.CurItems[k])
+            end
+        end
+        for k, v in ipairs(self.reward_list) do
+            local Room = items[k]
+            if Room then
+                self:_refreshRewardItem(Room, k, v, game_type)
             end
         end
     end
@@ -357,6 +406,63 @@ end
 
 function P:evt_RoomWinnerRewardsInfoRSP(msg)
     self.reward_list = msg.reward_list
-    self:refreshRewardItems()
+    self:refreshRewardItems(msg.game_type)
 end
 
+function P:evt_refreshTopInfo()
+    bee.setTextGold(self.TextGold, _N(PlayerModel:getGold()))
+    self._curStep = 0
+    for i = #self._datas, 1, -1 do
+        if PlayerModel:getGold() >= self._datas[i].recommend and (not self._datas[i].level_limit or self._datas[i].level_limit <= PlayerModel:getCurLevel()) then
+            self._curStep = i
+            break
+        end
+    end
+    self._lastSelectIndex = self._curStep
+
+    for k, v in ipairs(self._datas) do
+        local item = self.CurItems[k]
+        local Root = self:find("Root", item)
+        if self:find("blinds_tab_recommend", Root) then
+            self:find("blinds_tab_recommend", Root):SetActive(self._lastSelectIndex == v.index)
+        end
+        if self:find("blinds_selected", Root) then
+            self:find("blinds_selected", Root):SetActive(self._lastSelectIndex == v.index)
+        end
+        if self._gameType ~= GAME_GAME_TYPE.LOBBY_HOLDEM_ALLIN then
+            if v.min_byin > PlayerModel:getGold() then
+                if v.id <= 4 then
+                    bee.setColor(self:find("TextMMBuyin", Root), bee.colorHex("#dc2c2c"), "Text")
+                else
+                    bee.setColor(self:find("TextMMBuyin", Root), bee.colorHex("#ff4747"), "Text")
+                end
+            else
+                bee.setColor(self:find("TextMMBuyin", Root), bee.colorHex("#262626"), "Text")
+            end
+        end
+        if self._lastSelectIndex == v.index then
+            Root.transform.localScale = bee.v3(1.04, 1.04, 1.04)
+        else
+            Root.transform.localScale = bee.v3one
+        end
+    end
+end
+
+function P:evt_sys_guide_end(guide)
+    if guide.id == SYS_GUIDES[self._gameType] then
+        if self._horizontalNormalizedPosition then
+            bee.Tween.toFloat(0, self._horizontalNormalizedPosition, 0.5, function(value)
+                if not bee.isNull(self.node) and not self:isHiding() then
+                    self.RoomList:GetComponent("ScrollRect").horizontalNormalizedPosition = value
+                end
+            end)
+        end
+    end
+end
+
+function P:hideUI()
+	P.super.hideUI(self)
+	QuickByModel:hideButton(self.QuickByButton)
+end
+
+return P

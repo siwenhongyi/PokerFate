@@ -46,3 +46,4 @@ function tpl_shop_recharge_clone(key)
     return nil
 end
 
+return P

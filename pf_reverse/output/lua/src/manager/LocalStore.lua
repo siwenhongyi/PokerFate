@@ -168,3 +168,4 @@ function P:deleteValueForKey(key)
 	self._datas[key] = nil
 end
 
+return P

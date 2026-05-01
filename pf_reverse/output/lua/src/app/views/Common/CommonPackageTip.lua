@@ -100,3 +100,10 @@ function P:setContentPos()
 
 end
 
+
+--引导
+function P:evt_guide_turn_challenge()
+	self:hideUI()
+end
+
+return P

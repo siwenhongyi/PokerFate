@@ -24,6 +24,7 @@ local SHOP_TYPE_CFG = {
     [10001] = tpl_shop_exchange,
     [10002] = tpl_shop_activity,
     [10003] = tpl_shop_activity,
+    [20001] = tpl_shop_activity,
 }
 P.SHOP_TYPE_CFG = SHOP_TYPE_CFG
 
@@ -36,6 +37,7 @@ function P:ctor()
 
     self._shopLimitList = {}
     self._newitems = {}
+    self._timeLimitItems = {}
 
     P.super.ctor(self)
 end
@@ -45,13 +47,11 @@ function P:afterLogin()
 	self._monthly_card_exp = nil
     self._shopLimitList = {}
     self._initShopLimitList = nil
-    self._newitems = {}
 
     self._newitems = {}
     if not self.cloud["newitems" .. PlayerModel:getUid()] then
         self.cloud["newitems" .. PlayerModel:getUid()] = {}
     end
-    
     for k,v in pairs(self.cloud["newitems" .. PlayerModel:getUid()]) do
         if not self._newitems[v[1]] then
             self._newitems[v[1]] = {}
@@ -59,15 +59,29 @@ function P:afterLogin()
         table.insert(self._newitems[v[1]], v[2])
     end
 
+    self._timeLimitItems = {}
+    if not self.cloud["timeLimitItems" .. PlayerModel:getUid()] then
+        self.cloud["timeLimitItems" .. PlayerModel:getUid()] = {}
+    end
+    for k, v in pairs(self.cloud["timeLimitItems" .. PlayerModel:getUid()]) do
+        if not self._timeLimitItems[v[1]] then
+            self._timeLimitItems[v[1]] = {}
+        end
+        self._timeLimitItems[v[1]][v[2]] = 1
+    end
+
     self:refreshShopNewTag()
 end
 
 function P:initInfo()
-    if not self._monthly_card_exp then
-        self:requestPayInfo()
-    end
+    -- if not self._monthly_card_exp then
+    --     self:requestPayInfo()
+    -- end
     if not self._initShopLimitList then
         self:requestShopLimitList()
+    end
+    if not self._initShopPid then
+        self:requestShopPid()
     end
     self:refreshShopNewTag()
 end
@@ -143,17 +157,6 @@ function P:setTextPrice(text, buy_id)
     local data = self:getPidData(buy_id)
     if data then
         bee.setText(text, self:getPriText(data))
-    end
-end
-
-function P:setTextPriceOld(text, buy_id)
-    local data = self:getPidData(buy_id)
-    if data then
-        if data.original_pri then
-            bee.setText(text, string.format("USD %.2f", data.original_pri / 100))
-        else
-            bee.setText(text, self:getPriText(data))
-        end
     end
 end
 
@@ -398,6 +401,22 @@ function P:requestShopLimitList()
     end)
 end
 
+-- 获取商品价格
+function P:requestShopPid()
+    Net:post("shop/pid", {avenue_id = G_CHNL_ID}, function(data)
+        if data.code ~= 0 then
+            return
+        end
+
+        self._initShopPid = true
+        self._shopPidList = {}
+        for k, v in pairs(data.list) do
+            self._shopPidList[v.id] = v
+        end
+        bee.emit("evt_updateShopPid")
+    end)
+end
+
 -- 获取限购商品已购买次数
 function P:getLimitGoodsBoughtCount(shop_type, id)
     if not self._shopLimitList[shop_type] then
@@ -472,7 +491,14 @@ function P:getShopSubTabs(id)
         if v == 101 and self:isClaimedFirstRecharge() then
         elseif v == 103 and self:isBoughtIceBreak() then
         elseif tpl_shop_page[v].is_hide ~= 1 then
-            table.insert(list, tpl_shop_page[v])
+            if v == 303 then
+                local data = self:getShopPackageList(SHOP_TYPE.activity_gifts)
+                if next(data) then
+                    table.insert(list, tpl_shop_page[v])
+                end
+            else
+                table.insert(list, tpl_shop_page[v])
+            end
         end
     end
     table.sort( list, function(a, b) return a.order < b.order end)
@@ -603,7 +629,11 @@ end
 function P:getShopPackageList(shop_type)
     local curTime = bee.getServerTime()
     local list = {}
-    for k, v in pairs(tpl_shop_gifts) do
+    local cfg = tpl_shop_gifts
+    if shop_type == SHOP_TYPE.activity_gifts then
+        cfg = tpl_shop_activity_gifts
+    end
+    for k, v in pairs(cfg) do
         if self:getPidData(v.buy_id) then
             if v.shop_type == shop_type and self:productIsCanShow(v) then
                 local buyCount = self:getLimitGoodsBoughtCount(shop_type, v.id)
@@ -639,7 +669,6 @@ end
 
 -- 兑换商城
 function P:getShopExchangeList(shop_type)
-    local curTime = bee.getServerTime()
     local list = {}
     local ownList = {}
     for k, v in pairs(SHOP_TYPE_CFG[shop_type] or tpl_shop_exchange) do
@@ -761,6 +790,16 @@ function P:getShopTimeText(dt)
     end
 end
 
+function P:getShopTimeText2(dt)
+    if dt > 60 then
+        local m = math.floor((dt % 3600) / 60)
+        local s = math.ceil((dt % 3600) % 60)
+        return _F("LAB_SHOP_COMMON_40", m, s)
+    else
+        return _F("LAB_SHOP_COMMON_41", math.ceil(dt))
+    end
+end
+
 -- 是否可领取首充奖励
 function P:isCanGetFirstRechargeReward()
     if not self._shopLimitList[SHOP_TYPE.first_recharge] then
@@ -855,10 +894,15 @@ function P:refreshShopNewOutTag()
     -- 主界面商城红点，优先显示圆点，再显示上新
     if RedManager:isTag(RedTag.Shop) then
         RedManager:removeTag(RedTag.ShopNewOut)
+        RedManager:removeTag(RedTag.ShopTimeLimitOut)
     elseif RedManager:isTag(RedTag.ShopNew) then
         RedManager:addTag(RedTag.ShopNewOut)
+        RedManager:removeTag(RedTag.ShopTimeLimitOut)
+    elseif RedManager:isTag(RedTag.ShopTimeLimit) then
+        RedManager:addTag(RedTag.ShopTimeLimitOut)
     else
         RedManager:removeTag(RedTag.ShopNewOut)
+        RedManager:removeTag(RedTag.ShopTimeLimitOut)
     end
 end
 
@@ -884,64 +928,110 @@ end
 
 -- 装饰上新红点
 function P:refreshShopDecorationRedTag()
+    local curTime = bee.getServerTime()
     -- 主题商店
     local themeTag = false
-    for k, v in pairs(tpl_shop_theme) do
-        if v.new_tag == 1 and self:productIsCanShow(v) then
+    local themeTimeLimitTag = false
+    for k, v in pairs(self:getThemeList(true)) do
+        local isOwn = self:getThemeIsOwn(v.id)
+        -- 上新红点
+        if isOwn then
+            if not self:isInNewItems(v) then
+                self:setNewItem(v)
+            end
+        elseif v.new_tag == 1 then
             if not self._newitems[SHOP_TYPE.shop_theme] then
                 themeTag = true
             else
-                local isIn = false
-                for _, checkId in pairs(self._newitems[SHOP_TYPE.shop_theme]) do
-                    if v.id == checkId then
-                        isIn = true
-                        break
-                    end
-                end
+                local isIn = self:isInNewItems(v)
                 if not isIn then
                     themeTag = true
-                    break
                 end
             end
+        end
+        -- 限时红点
+        if not self._timeLimitItems[v.shop_type] then
+            self._timeLimitItems[v.shop_type] = {}
+        end
+        if v.time_end and not isOwn then
+            if v.time_end - curTime <= 259200 then
+                if self._timeLimitItems[v.shop_type][v.id] ~= 1 then
+                    themeTimeLimitTag = true
+                end
+            else
+                self._timeLimitItems[v.shop_type][v.id] = 0
+            end
+        else
+            self._timeLimitItems[v.shop_type][v.id] = 0
         end
     end
     if themeTag then
         RedManager:addTag(RedTag.DecorateNew, SHOP_TYPE.shop_theme)
+        RedManager:removeTag(RedTag.DecorateTimeLimit, SHOP_TYPE.shop_theme)
+    elseif themeTimeLimitTag then
+        RedManager:removeTag(RedTag.DecorateNew, SHOP_TYPE.shop_theme)
+        RedManager:addTag(RedTag.DecorateTimeLimit, SHOP_TYPE.shop_theme)
     else
         RedManager:removeTag(RedTag.DecorateNew, SHOP_TYPE.shop_theme)
+        RedManager:removeTag(RedTag.DecorateTimeLimit, SHOP_TYPE.shop_theme)
     end
 
     -- 装饰商店
     local decorateTag = {}
+    local decorateTimeLimitTag = {}
     for k,v in pairs(tpl_shop_decoration) do
-        if v.new_tag == 1 and self:productIsCanShow(v) then
-            if not decorateTag[v.shop_type] then
-                decorateTag[v.shop_type] = false
-            end
-            if not self._newitems[v.shop_type] then
-                decorateTag[v.shop_type] = true
-            elseif not decorateTag[v.shop_type] then
-                local isIn = false
-                for _, checkId in pairs(self._newitems[v.shop_type]) do
-                    if v.id == checkId then
-                        isIn = true
-                        break
+        if decorateTag[v.shop_type] == nil then
+            decorateTag[v.shop_type] = false
+        end
+        local isCanShow = self:productIsCanShow(v)
+        if isCanShow then
+            -- 上新红点
+            local isOwn = ItemModel:getItem(v.props[1])
+            if isOwn then
+                if not self:isInNewItems(v) then
+                    self:setNewItem(v)
+                end
+            elseif v.new_tag == 1 then
+                if not self._newitems[v.shop_type] then
+                    decorateTag[v.shop_type] = true
+                elseif not decorateTag[v.shop_type] then
+                    local isIn = self:isInNewItems(v)
+                    if not isIn then
+                        decorateTag[v.shop_type] = true
                     end
                 end
-                if not isIn then
-                    decorateTag[v.shop_type] = true
-                    break
+            end
+            -- 限时红点
+            if not self._timeLimitItems[v.shop_type] then
+                self._timeLimitItems[v.shop_type] = {}
+            end
+            if v.time_end and isCanShow then
+                if v.time_end - curTime <= 259200 then
+                    if self._timeLimitItems[v.shop_type][v.id] ~= 1 then
+                        decorateTimeLimitTag[v.shop_type] = true
+                    end
+                else
+                    self._timeLimitItems[v.shop_type][v.id] = 1
                 end
+            else
+                self._timeLimitItems[v.shop_type][v.id] = 0
             end
         end
     end
     for k, v in pairs(decorateTag) do
         if v then
             RedManager:addTag(RedTag.DecorateNew, k)
+            RedManager:removeTag(RedTag.DecorateTimeLimit, k)
+        elseif decorateTimeLimitTag[k] then
+            RedManager:removeTag(RedTag.DecorateNew, k)
+            RedManager:addTag(RedTag.DecorateTimeLimit, k)
         else
             RedManager:removeTag(RedTag.DecorateNew, k)
+            RedManager:removeTag(RedTag.DecorateTimeLimit, k)
         end
     end
+
+    self:_refreshTimeLimitItems()
 end
 
 -- 服饰上新红点
@@ -952,30 +1042,66 @@ function P:refreshShopSkinRedTag()
     end
     -- 服饰商店
     local skinRedTag = false
+    local skinTimeLimitTag = false
+    local curTime = bee.getServerTime()
     for k,v in pairs(self:getShopSkinList()) do
-        if v.cfg.new_tag == 1 then
+        local isOwn = CharacterModel:isOwnedSkin(v.cfg.role_skin)
+        -- 新标签
+        if isOwn then
+            if not self:isInNewItems(v.cfg) then
+                self:setNewItem(v.cfg, true)
+            end
+        elseif v.cfg.new_tag == 1 then
             if not self._newitems[SHOP_TYPE.shop_role_skin] then
                 skinRedTag = true
                 break
             end
-            local isIn = false
-            for _, checkId in pairs(self._newitems[v.cfg.shop_type]) do
-                if v.cfg.id == checkId then
-                    isIn = true
-                    break
-                end
-            end
+            local isIn = self:isInNewItems(v.cfg)
             if not isIn then
                 skinRedTag = true
-                break
             end
+        end
+        -- 限时标签
+        if not self._timeLimitItems[v.cfg.shop_type] then
+            self._timeLimitItems[v.cfg.shop_type] = {}
+        end
+        if v.cfg.time_end and not isOwn then
+            if v.cfg.time_end - curTime <= 259200 then
+                if self._timeLimitItems[v.cfg.shop_type][v.cfg.id] ~= 1 then
+                    skinTimeLimitTag = true
+                end
+            else
+                self._timeLimitItems[v.cfg.shop_type][v.cfg.id] = 0
+            end
+        else
+            self._timeLimitItems[v.cfg.shop_type][v.cfg.id] = 0
         end
     end
     if skinRedTag then
         RedManager:addTag(RedTag.SkinNew)
+        RedManager:removeTag(RedTag.SkinTimeLimit)
+    elseif skinTimeLimitTag then
+        RedManager:removeTag(RedTag.SkinNew)
+        RedManager:addTag(RedTag.SkinTimeLimit)
     else
         RedManager:removeTag(RedTag.SkinNew)
+        RedManager:removeTag(RedTag.SkinTimeLimit)
     end
+
+    self:_refreshTimeLimitItems()
+end
+
+function P:_refreshTimeLimitItems()
+    local list = {}
+    for shop_type, v in pairs(self._timeLimitItems) do
+        for id, tag in pairs(v) do
+            if tag == 1 then
+                table.insert(list, {shop_type, id})
+            end
+        end
+    end
+    self.cloud["timeLimitItems" .. PlayerModel:getUid()] = list
+    self:onSave()
 end
 
 function P:isShowNewTag(cfg)
@@ -985,6 +1111,14 @@ function P:isShowNewTag(cfg)
     if not self._newitems[cfg.shop_type] then
         return true
     end
+    local isIn = self:isInNewItems(cfg)
+    return not isIn
+end
+
+function P:isInNewItems(cfg)
+    if not self._newitems[cfg.shop_type] then
+        self._newitems[cfg.shop_type] = {}
+    end
     local isIn = false
     for _, checkId in pairs(self._newitems[cfg.shop_type]) do
         if cfg.id == checkId then
@@ -992,10 +1126,10 @@ function P:isShowNewTag(cfg)
             break
         end
     end
-    return not isIn
+    return isIn
 end
 
-function P:setNewItem(cfg)
+function P:setNewItem(cfg, notRefresh)
     if not self._newitems[cfg.shop_type] then
         self._newitems[cfg.shop_type] = {}
     end
@@ -1011,13 +1145,31 @@ function P:setNewItem(cfg)
         table.insert(self.cloud["newitems" .. PlayerModel:getUid()], {cfg.shop_type, cfg.id})
     end
     self:onSave()
-    self:refreshShopNewTag(cfg.shop_type)
+    if not notRefresh then
+        self:refreshShopNewTag(cfg.shop_type)
+    end
 end
 
-function P:refreshNewItemByShopType(shop_type)
-    for k,v in pairs(SHOP_TYPE_CFG[shop_type]) do
-        if v.shop_type == shop_type and v.new_tag == 1 then
-            self:setNewItem(v)
+function P:refreshTimeLimitItemByShopType(shop_type, notRefresh)
+    for k, v in pairs(SHOP_TYPE_CFG[shop_type]) do
+        if self:productIsCanShow(v) and v.shop_type == shop_type then
+            if not self._timeLimitItems[shop_type] then
+                self._timeLimitItems[shop_type] = {}
+            end
+            self._timeLimitItems[shop_type][v.id] = 1
+        end
+    end
+
+    self:_refreshTimeLimitItems()
+    if not notRefresh then
+        self:refreshShopNewTag(shop_type)
+    end
+end
+
+function P:refreshNewItemByShopType(shop_type, notRefresh)
+    for k, v in pairs(SHOP_TYPE_CFG[shop_type]) do
+        if self:productIsCanShow(v) and v.shop_type == shop_type and v.new_tag == 1 then
+            self:setNewItem(v, notRefresh)
         end
     end
 end
@@ -1045,6 +1197,10 @@ end
 
 -- =========================== 月卡 ===========================
 
+function P:setMonthlyCardLeftTime(t)
+    self._monthly_card_exp = t
+end
+
 -- 获取月卡过期时间
 function P:getMonthlyCardLeftTime()
     if not self._monthly_card_exp then
@@ -1066,7 +1222,7 @@ end
 -- =========================== 装饰商城 ===========================
 
 -- 主题列表
-function P:getThemeList()
+function P:getThemeList(notSort)
     local curTime = bee.getServerTime()
     local list = {}
     for k, v in pairs(tpl_shop_theme) do
@@ -1094,29 +1250,31 @@ function P:getThemeList()
             table.insert(list, temp)
         end
     end
-    table.sort( list, function(a, b)
-        local sumA = 1000
-        local sumB = 1000
-        if a.isOwn then
-            sumB = sumB + 100
-        end
-        if b.isOwn then
-            sumA = sumA + 100
-        end
-        if a.index < b.index then
-            sumA = sumA + 10
-        end
-        if a.index > b.index then
-            sumB = sumB + 10
-        end
-        if a.id < b.id then
-            sumA = sumA + 1
-        end
-        if b.id < a.id then
-            sumB = sumB + 1
-        end
-        return sumA > sumB
-    end)
+    if not notSort then
+        table.sort( list, function(a, b)
+            local sumA = 1000
+            local sumB = 1000
+            if a.isOwn then
+                sumB = sumB + 100
+            end
+            if b.isOwn then
+                sumA = sumA + 100
+            end
+            if a.index < b.index then
+                sumA = sumA + 10
+            end
+            if a.index > b.index then
+                sumB = sumB + 10
+            end
+            if a.id < b.id then
+                sumA = sumA + 1
+            end
+            if b.id < a.id then
+                sumB = sumB + 1
+            end
+            return sumA > sumB
+        end)
+    end
     return list
 end
 
@@ -1293,7 +1451,12 @@ function P:getPriText(pidCfg)
         local priStr = pidCfg.pri_1
         return info and info.pri or ("USD " .. pidCfg.pri_1)
     else
-        return tpl_shop_cur_type[PlayerModel:getCurId()].code .. " " .. pidCfg["pri_" .. PlayerModel:getCurId()]
+        if not self._shopPidList then
+            self:initInfo()
+            return tpl_shop_cur_type[PlayerModel:getCurId()].code .. " " .. pidCfg["pri_" .. PlayerModel:getCurId()]
+        else
+            return tpl_shop_cur_type[PlayerModel:getCurId()].code .. " " .. self._shopPidList[pidCfg.id]["pri_" .. PlayerModel:getCurId()]
+        end
     end
 end
 
@@ -1324,8 +1487,37 @@ function P:productIsCanShow(cfg)
     elseif cfg.activity and cfg.activity > 0 then
         if cfg.activity == 20001 then
             isCanShow = SpringFestivalModel:isActivityOpen()
+        else
+            isCanShow = ActivityManager:isActivityOpen(ActivityId.Theme, cfg.activity)
         end
     end
     return isCanShow
 end
 
+function P:tryAutoPop()
+    -- 活动礼包
+    local data = ShopModel:getShopPackageList(SHOP_TYPE.activity_gifts)
+    for k, v in pairs(data) do
+        if not v.soldOut then
+            local activityId = ThemeModel:getConfId()
+            if activityId == ActivityId.BunnyGirl then
+                if LocalStore:isDailyTagValidCrossDay("activity_packet_push" .. PlayerModel:getUid()) then
+                    bee.showUiTask("BunnyGirlPackage", nil, nil, LOBBY_POP_PRIORITY.ActivityGift)
+                    return
+                end
+            end
+        end
+    end
+end
+
+-- 是否为复刻皮肤
+function P:isRerunSkin(skinId)
+    for k, v in pairs(self:getShopSkinList()) do
+        if v.cfg.role_skin == skinId then
+            return v.cfg.is_rerun == 1
+        end
+    end
+    return false
+end
+
+return P

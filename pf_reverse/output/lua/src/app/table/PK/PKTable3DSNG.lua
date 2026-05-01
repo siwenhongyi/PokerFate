@@ -33,3 +33,4 @@ function P:evt_UserSngOverRSP(msg)
     end
 end
 
+return P

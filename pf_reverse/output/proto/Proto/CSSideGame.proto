@@ -39,8 +39,8 @@ message GetColorGameConfRSP
 message PushGiftREQ
 {
 	optional int32 from_game_type = 1; // 在什么地方玩color game；0大厅，非0则是具体玩法
-	optional int32 lvl = 2; // 买入等级
-	optional int32 game_type = 3;//游戏类型 30030101 color game
+	optional int32 lvl = 2; // 买入等级 如果不是休闲游戏则直接推礼包id
+	optional int32 game_type = 3;//游戏类型 30030101 color game 0获取当前礼包信息 1是已购买补码礼包
 }
 //推送礼包
 message PushGiftRSP
@@ -48,6 +48,7 @@ message PushGiftRSP
 	optional int32 code = 1;
 	optional int32 gift_id = 2;//推送礼包id
 	optional int32 game_type = 3;
+    optional int64 end_time = 4;
 }
 //小游戏获取历史记录
 message GetSideGameHisRecordREQ

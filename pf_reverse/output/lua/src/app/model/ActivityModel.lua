@@ -158,3 +158,4 @@ function P:isShowLinkEmail()
 	return true
 end
 
+return P

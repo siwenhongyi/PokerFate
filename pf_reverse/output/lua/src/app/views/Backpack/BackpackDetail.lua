@@ -90,3 +90,4 @@ function P:refreshUseItem(data, item)
     end, true)
 end
 
+return P

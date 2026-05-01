@@ -526,6 +526,9 @@ function P:showOmahaWinHands()
 end
 
 function P:refreshWinRate()
+	if not GameModel.layer then
+		return
+	end
     local info = self.data:getPlayer(self.seatid)
 	if not self.data:isAllAllin() or not info or info.is_fold or not self.data:isCanShowWinRate() then
 		if not bee.isNull(self._PKWinRate) then
@@ -608,3 +611,4 @@ function P:recyclingCards()
 	end
 end
 
+return P

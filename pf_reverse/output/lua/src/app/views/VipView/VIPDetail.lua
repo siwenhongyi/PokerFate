@@ -84,3 +84,4 @@ function P:refreshItem(data, item)
     bee.setIcon(self:find("icon_item_01", item), d.icon)
 end
 
+return P

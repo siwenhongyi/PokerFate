@@ -121,3 +121,4 @@ function P:setInputSeek(input, isSeek)
     field.text = text
 end
 
+return P

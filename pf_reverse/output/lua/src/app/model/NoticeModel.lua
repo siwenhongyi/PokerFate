@@ -187,3 +187,4 @@ function P:reqNoticeList(cb)
 	end)
 end
 
+return P

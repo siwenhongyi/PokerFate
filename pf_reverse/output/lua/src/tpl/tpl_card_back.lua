@@ -19,9 +19,11 @@ local function _initData()
 {1012,"Card[card_back_activity_01_01]","BackGround/Card/card_back_activity_01_01.png"},
 {1013,"Card[card_back_activity_02_02]","BackGround/Card/card_back_activity_02_02.png"},
 {1014,"Card[card_back_activity_03_02]","BackGround/Card/card_back_activity_03_02.png"},
+{1015,"Card[card_back_activity_04_02]","BackGround/Card/card_back_activity_04_02.png"},
 {2001,"Card[card_back_activity_01_02]","BackGround/Card/card_back_activity_01_02.png"},
 {2002,"Card[card_back_activity_02_01]","BackGround/Card/card_back_activity_02_01.png"},
 {2003,"Card[card_back_activity_03_01]","BackGround/Card/card_back_activity_03_01.png"},
+{2004,"Card[card_back_activity_04_01]","BackGround/Card/card_back_activity_04_01.png"},
 {3001,"Card[card_back_ranking_01]","BackGround/Card/card_back_ranking_01.png"}
 }
     for _, v in pairs(bodys) do
@@ -44,3 +46,4 @@ function tpl_card_back_clone(key)
     return nil
 end
 
+return P

@@ -470,3 +470,4 @@ function P:doResp(name, data)
     bee.emit("evt_" .. name, data)
 end
 
+return P

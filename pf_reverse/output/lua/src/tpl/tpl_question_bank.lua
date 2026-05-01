@@ -59,3 +59,4 @@ function tpl_question_bank_clone(key)
     return nil
 end
 
+return P

@@ -211,3 +211,4 @@ function P:evt_pay_sucess()
     self:hideUI()
 end
 
+return P

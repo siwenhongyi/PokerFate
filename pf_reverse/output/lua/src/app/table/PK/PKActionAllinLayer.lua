@@ -72,3 +72,4 @@ function P:refreshContent(fast)
 	self:showActionBnts(true)
 end
 
+return P

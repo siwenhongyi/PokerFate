@@ -73,3 +73,4 @@ function P:setShareCont(rewardCont, Icon, CountText, id)
     end
 end
 
+return P

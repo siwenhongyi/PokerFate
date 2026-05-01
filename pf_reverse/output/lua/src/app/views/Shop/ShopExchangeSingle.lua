@@ -132,3 +132,4 @@ function P:evt_ItemChangeRSP()
 	self:refreshCont()
 end
 
+return P

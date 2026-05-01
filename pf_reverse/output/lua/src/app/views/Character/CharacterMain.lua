@@ -419,6 +419,7 @@ function P:evt_role_back_to_main(name)
             if UiManager:isTopUI(self.node) then
                 self:refreshRole()
                 self:playAnimator(self._openAnim)
+                CharacterModel:refreshReddot(self._role.role_id)
             end
         end)
     end
@@ -462,3 +463,4 @@ function P:evt_role_awaken_red(role_id)
     self:_refreshItemByRoleId(role_id)
 end
 
+return P

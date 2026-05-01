@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10\x43SSideGame.proto\x12\x02pb\")\n\x0c\x43olorGameBet\x12\n\n\x02id\x18\x01 \x01(\x05\x12\r\n\x05value\x18\x02 \x01(\x03\"-\n\x0f\x43olorGameProfit\x12\n\n\x02id\x18\x01 \x01(\x05\x12\x0e\n\x06profit\x18\x02 \x01(\x03\"Y\n\x12\x43olorGameActionREQ\x12\x16\n\x0e\x66rom_game_type\x18\x01 \x01(\x05\x12\x1e\n\x04\x62\x65ts\x18\x02 \x03(\x0b\x32\x10.pb.ColorGameBet\x12\x0b\n\x03lvl\x18\x03 \x01(\x05\"u\n\x12\x43olorGameActionRSP\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x1e\n\x04\x62\x65ts\x18\x02 \x03(\x0b\x32\x10.pb.ColorGameBet\x12$\n\x07profits\x18\x03 \x03(\x0b\x32\x13.pb.ColorGameProfit\x12\x0b\n\x03ids\x18\x04 \x03(\x05\"\x15\n\x13GetColorGameConfREQ\"1\n\x13GetColorGameConfRSP\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0c\n\x04\x63onf\x18\x02 \x01(\t\"E\n\x0bPushGiftREQ\x12\x16\n\x0e\x66rom_game_type\x18\x01 \x01(\x05\x12\x0b\n\x03lvl\x18\x02 \x01(\x05\x12\x11\n\tgame_type\x18\x03 \x01(\x05\"?\n\x0bPushGiftRSP\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0f\n\x07gift_id\x18\x02 \x01(\x05\x12\x11\n\tgame_type\x18\x03 \x01(\x05\",\n\x17GetSideGameHisRecordREQ\x12\x11\n\tgame_type\x18\x01 \x01(\x05\"\\\n\x17GetSideGameHisRecordRSP\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x11\n\tgame_type\x18\x02 \x01(\x05\x12\x10\n\x08\x62\x65t_data\x18\x03 \x01(\t\x12\x0e\n\x06result\x18\x04 \x01(\t\"\'\n\x12GetSideGameConfREQ\x12\x11\n\tgame_type\x18\x01 \x01(\x05\"C\n\x12GetSideGameConfRSP\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x11\n\tgame_type\x18\x02 \x01(\x05\x12\x0c\n\x04\x63onf\x18\x03 \x01(\t\"U\n\x0fPinballBallInfo\x12\x0f\n\x07\x62\x61ll_id\x18\x01 \x01(\x05\x12\x11\n\texport_id\x18\x02 \x01(\x05\x12\x0e\n\x06reward\x18\x03 \x01(\x03\x12\x0e\n\x06profit\x18\x04 \x01(\x03\"\x9d\x01\n\x13PinballActionResult\x12\x12\n\nstart_time\x18\x01 \x01(\x05\x12\"\n\x05\x62\x61lls\x18\x02 \x03(\x0b\x32\x13.pb.PinballBallInfo\x12\x1a\n\x12\x62\x61ll_fire_interval\x18\x03 \x01(\x05\x12\x1a\n\x12per_ball_move_time\x18\x04 \x01(\x05\x12\x16\n\x0e\x66rom_game_type\x18\x05 \x01(\x05\"Z\n\x10PinballActionREQ\x12\x16\n\x0e\x66rom_game_type\x18\x01 \x01(\x05\x12\x0b\n\x03lvl\x18\x02 \x01(\x05\x12\x0f\n\x07per_bet\x18\x03 \x01(\x03\x12\x10\n\x08\x62\x61ll_num\x18\x04 \x01(\x05\"P\n\x10PinballActionRSP\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12.\n\raction_result\x18\x02 \x01(\x0b\x32\x17.pb.PinballActionResult')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10\x43SSideGame.proto\x12\x02pb\")\n\x0c\x43olorGameBet\x12\n\n\x02id\x18\x01 \x01(\x05\x12\r\n\x05value\x18\x02 \x01(\x03\"-\n\x0f\x43olorGameProfit\x12\n\n\x02id\x18\x01 \x01(\x05\x12\x0e\n\x06profit\x18\x02 \x01(\x03\"Y\n\x12\x43olorGameActionREQ\x12\x16\n\x0e\x66rom_game_type\x18\x01 \x01(\x05\x12\x1e\n\x04\x62\x65ts\x18\x02 \x03(\x0b\x32\x10.pb.ColorGameBet\x12\x0b\n\x03lvl\x18\x03 \x01(\x05\"u\n\x12\x43olorGameActionRSP\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x1e\n\x04\x62\x65ts\x18\x02 \x03(\x0b\x32\x10.pb.ColorGameBet\x12$\n\x07profits\x18\x03 \x03(\x0b\x32\x13.pb.ColorGameProfit\x12\x0b\n\x03ids\x18\x04 \x03(\x05\"\x15\n\x13GetColorGameConfREQ\"1\n\x13GetColorGameConfRSP\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0c\n\x04\x63onf\x18\x02 \x01(\t\"E\n\x0bPushGiftREQ\x12\x16\n\x0e\x66rom_game_type\x18\x01 \x01(\x05\x12\x0b\n\x03lvl\x18\x02 \x01(\x05\x12\x11\n\tgame_type\x18\x03 \x01(\x05\"Q\n\x0bPushGiftRSP\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x0f\n\x07gift_id\x18\x02 \x01(\x05\x12\x11\n\tgame_type\x18\x03 \x01(\x05\x12\x10\n\x08\x65nd_time\x18\x04 \x01(\x03\",\n\x17GetSideGameHisRecordREQ\x12\x11\n\tgame_type\x18\x01 \x01(\x05\"\\\n\x17GetSideGameHisRecordRSP\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x11\n\tgame_type\x18\x02 \x01(\x05\x12\x10\n\x08\x62\x65t_data\x18\x03 \x01(\t\x12\x0e\n\x06result\x18\x04 \x01(\t\"\'\n\x12GetSideGameConfREQ\x12\x11\n\tgame_type\x18\x01 \x01(\x05\"C\n\x12GetSideGameConfRSP\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12\x11\n\tgame_type\x18\x02 \x01(\x05\x12\x0c\n\x04\x63onf\x18\x03 \x01(\t\"U\n\x0fPinballBallInfo\x12\x0f\n\x07\x62\x61ll_id\x18\x01 \x01(\x05\x12\x11\n\texport_id\x18\x02 \x01(\x05\x12\x0e\n\x06reward\x18\x03 \x01(\x03\x12\x0e\n\x06profit\x18\x04 \x01(\x03\"\x9d\x01\n\x13PinballActionResult\x12\x12\n\nstart_time\x18\x01 \x01(\x05\x12\"\n\x05\x62\x61lls\x18\x02 \x03(\x0b\x32\x13.pb.PinballBallInfo\x12\x1a\n\x12\x62\x61ll_fire_interval\x18\x03 \x01(\x05\x12\x1a\n\x12per_ball_move_time\x18\x04 \x01(\x05\x12\x16\n\x0e\x66rom_game_type\x18\x05 \x01(\x05\"Z\n\x10PinballActionREQ\x12\x16\n\x0e\x66rom_game_type\x18\x01 \x01(\x05\x12\x0b\n\x03lvl\x18\x02 \x01(\x05\x12\x0f\n\x07per_bet\x18\x03 \x01(\x03\x12\x10\n\x08\x62\x61ll_num\x18\x04 \x01(\x05\"P\n\x10PinballActionRSP\x12\x0c\n\x04\x63ode\x18\x01 \x01(\x05\x12.\n\raction_result\x18\x02 \x01(\x0b\x32\x17.pb.PinballActionResult')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -46,21 +46,21 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_PUSHGIFTREQ']._serialized_start=398
   _globals['_PUSHGIFTREQ']._serialized_end=467
   _globals['_PUSHGIFTRSP']._serialized_start=469
-  _globals['_PUSHGIFTRSP']._serialized_end=532
-  _globals['_GETSIDEGAMEHISRECORDREQ']._serialized_start=534
-  _globals['_GETSIDEGAMEHISRECORDREQ']._serialized_end=578
-  _globals['_GETSIDEGAMEHISRECORDRSP']._serialized_start=580
-  _globals['_GETSIDEGAMEHISRECORDRSP']._serialized_end=672
-  _globals['_GETSIDEGAMECONFREQ']._serialized_start=674
-  _globals['_GETSIDEGAMECONFREQ']._serialized_end=713
-  _globals['_GETSIDEGAMECONFRSP']._serialized_start=715
-  _globals['_GETSIDEGAMECONFRSP']._serialized_end=782
-  _globals['_PINBALLBALLINFO']._serialized_start=784
-  _globals['_PINBALLBALLINFO']._serialized_end=869
-  _globals['_PINBALLACTIONRESULT']._serialized_start=872
-  _globals['_PINBALLACTIONRESULT']._serialized_end=1029
-  _globals['_PINBALLACTIONREQ']._serialized_start=1031
-  _globals['_PINBALLACTIONREQ']._serialized_end=1121
-  _globals['_PINBALLACTIONRSP']._serialized_start=1123
-  _globals['_PINBALLACTIONRSP']._serialized_end=1203
+  _globals['_PUSHGIFTRSP']._serialized_end=550
+  _globals['_GETSIDEGAMEHISRECORDREQ']._serialized_start=552
+  _globals['_GETSIDEGAMEHISRECORDREQ']._serialized_end=596
+  _globals['_GETSIDEGAMEHISRECORDRSP']._serialized_start=598
+  _globals['_GETSIDEGAMEHISRECORDRSP']._serialized_end=690
+  _globals['_GETSIDEGAMECONFREQ']._serialized_start=692
+  _globals['_GETSIDEGAMECONFREQ']._serialized_end=731
+  _globals['_GETSIDEGAMECONFRSP']._serialized_start=733
+  _globals['_GETSIDEGAMECONFRSP']._serialized_end=800
+  _globals['_PINBALLBALLINFO']._serialized_start=802
+  _globals['_PINBALLBALLINFO']._serialized_end=887
+  _globals['_PINBALLACTIONRESULT']._serialized_start=890
+  _globals['_PINBALLACTIONRESULT']._serialized_end=1047
+  _globals['_PINBALLACTIONREQ']._serialized_start=1049
+  _globals['_PINBALLACTIONREQ']._serialized_end=1139
+  _globals['_PINBALLACTIONRSP']._serialized_start=1141
+  _globals['_PINBALLACTIONRSP']._serialized_end=1221
 # @@protoc_insertion_point(module_scope)

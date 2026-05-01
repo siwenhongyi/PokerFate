@@ -24,3 +24,4 @@ function P:onAwake()
     bee.setText(self:find("TextCap", self.Panel), "<color=#000000>" .. _F("LAB_SAVE_LIMIT", "</color>" .. PlayerModel:getCurRecord() .. " / " .. PlayerModel:getRecordNum()))
 end
 
+return P

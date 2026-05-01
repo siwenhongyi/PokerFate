@@ -51,3 +51,4 @@ function P:reqChangeName(name)
     end, nil, true)
 end
 
+return P

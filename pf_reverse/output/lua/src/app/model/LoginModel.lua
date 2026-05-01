@@ -26,6 +26,8 @@ function P:doLogin(params)
     end
     params.lang = LanguageManager:getLanguage()
     params.adjust_id = SdkModel:getAdjustCache()
+    params.yidun_risk_check = YiDunHelper:getReportData(params.type, REGISTER_LOGIN__TYPE.LOGIN)
+
     Net:post("login", self:addLoginArgs(params), function (data) self:_onLoginSuccess(data, params) end, function() self:_onLoginFail() end)
 end
 
@@ -47,6 +49,8 @@ function P:guestLoginTest(id)
         lang = LanguageManager:getLanguage(),
     }
     args.verify = self:getCheckMd5(args.os .. args.imei)
+    args.yidun_risk_check = YiDunHelper:getReportData(args.type, REGISTER_LOGIN__TYPE.LOGIN)
+    
 
     local _onSuccess = function (data)
         self:_onLoginSuccess(data, args)
@@ -66,6 +70,7 @@ function P:guestLogin()
         lang = LanguageManager:getLanguage(),
     }
     args.verify = self:getCheckMd5(args.os .. args.imei)
+    args.yidun_risk_check = YiDunHelper:getReportData(args.type, REGISTER_LOGIN__TYPE.LOGIN)
 
     local _onSuccess = function (data)
         self:_onLoginSuccess(data, args)
@@ -85,6 +90,7 @@ function P:emailLogin(email, password, cb)
         lang = LanguageManager:getLanguage(),
         verify = password,
     }
+    args.yidun_risk_check = YiDunHelper:getReportData(args.type, REGISTER_LOGIN__TYPE.LOGIN)
 
     local _onSuccess = function (data)
         if data.code == 0 then
@@ -127,6 +133,7 @@ function P:emailRegister(email, captcha, password, step, cb, noTipError)
         imei = SdkHelper:getDeviceID(),
         adjust_id = SdkModel:getAdjustCache(),
     }
+    args.yidun_risk_check = YiDunHelper:getReportData(LOGIN_TYPE.EMAIL, REGISTER_LOGIN__TYPE.REGISTER)
 
     local _onSuccess = function (data)
         if data.code == 0 and step == EMAIL_REGISTER_STEP.PASSWORD then
@@ -139,7 +146,7 @@ function P:emailRegister(email, captcha, password, step, cb, noTipError)
         end
     end
 
-    Net:post("register/email", self:addLoginArgs(args), _onSuccess, nil, noTipError) 
+    Net:post("register/email", self:addLoginArgs(args), _onSuccess, nil, noTipError)
 end
 
 function P:initStove()
@@ -185,6 +192,7 @@ function P:XLogin()
             token = token,
             verify = secret,
         }
+        args.yidun_risk_check = YiDunHelper:getReportData(args.type, REGISTER_LOGIN__TYPE.LOGIN)
 
         local _onSuccess = function(data)
             self:_onLoginSuccess(data, args)
@@ -204,6 +212,7 @@ function P:evt_XLogin(params)
         token = params.token,
         verify = params.verifier,
     }
+    args.yidun_risk_check = YiDunHelper:getReportData(args.type, REGISTER_LOGIN__TYPE.LOGIN)
 
     local _onSuccess = function (data)
         self:_onLoginSuccess(data, args)
@@ -221,7 +230,11 @@ function P:_onLoginSuccess(data, params)
     PlayerModel:clearDatas()
     if data.code and data.code < 0 then
         UiManager:hideLoadingMask("Login")
-        bee.emit(EventDef.evt_login_fail)
+        bee.emit(EventDef.evt_login_fail, data)
+
+        if data.code == -5 then
+            UiManager:showError(_T("LOGIN_ERR_KEY_ERR"))
+        end
         
         if self.login_type == LOGIN_TYPE.GUEST then
             bee.logEvent("login-guest-failure", data.code)
@@ -259,6 +272,7 @@ function P:_onLoginSuccess(data, params)
     PlayerModel:onSave()
 
     UrlManager:setHosts(data.server.server)
+    PlayerModel:setIsLogin(true)
 
     if PlayerModel:isDeleted() then
         UiManager:hideLoadingMask("Login")
@@ -339,6 +353,14 @@ function P:reConnectWithCheck(cb, tip)
             onSure = function()
                 self._reConnectSt = nil
                 self._stopAutoReConnect = nil
+                local key = UrlManager:getSelectKey()
+                if key then
+                    local url = UrlManager:getServerUrl()
+                    UrlManager:setSelectKey(nil)
+                    if url == UrlManager:getServerUrl() then
+                        UrlManager:nextServerUrl()
+                    end
+                end
                 if not Net:isConnected() then
                     self:checkLoginValid(function()
                         self:reConnectWithCheck(cb, _T("LAB_NET_LINK_ING"))
@@ -373,9 +395,10 @@ function P:reConnectWithCheck(cb, tip)
                         bee.enterScene("StartScene")
                     end
                 elseif ct >= data.data.show_time then
-                    GF.showServerMaintain(data.data, function()
-                        self:reConnect(cb)
-                    end)
+                    -- GF.showServerMaintain(data.data, function()
+                    --     self:reConnect(cb)
+                    -- end)
+                    self:reConnect(cb)
                 else
                     self:reConnect(cb)
                 end
@@ -395,14 +418,14 @@ function P:reConnect(cb)
         self._stopAutoReConnect = nil
         if cb then
             cb(self._connectRet)
-        else
-            Net:sendReq("pb.UserLoginREQ", {
-                uid = PlayerModel:getUid(),
-                key = PlayerModel:getRdkey(),
-                ver = G_UPDATE_VERSION,
-                chnl = G_CHNL_ID,
-            })
         end
+        Net:sendReq("pb.UserLoginREQ", {
+            uid = PlayerModel:getUid(),
+            key = PlayerModel:getRdkey(),
+            ver = G_UPDATE_VERSION,
+            chnl = G_CHNL_ID,
+        })
+        
         return
     end
     self._connectRet = false
@@ -414,22 +437,26 @@ function P:reConnect(cb)
         UiManager:hideLoadingMask("Connect")
         self._connectRet = ret  --连接成功
         self._reConnectSt = nil
-        self._stopAutoReConnect = nil
-        if bee.isEditor then
-            print("[LoginMode] 网络重新连接...", ret, self:getServerUrl())
-        end
-        if cb then
-            cb(ret)
-        else
+        if ret then
+            self._stopAutoReConnect = nil
+            if bee.isEditor then
+                print("[LoginMode] 网络重新连接...", ret, self:getServerUrl())
+            end
+            if cb then
+                cb(ret)
+            end
             Net:sendReq("pb.UserLoginREQ", {
                 uid = PlayerModel:getUid(),
                 key = PlayerModel:getRdkey(),
                 ver = G_UPDATE_VERSION,
                 chnl = G_CHNL_ID,
             })
-        end
-        if ret then
+            
             bee.logEvent("connect_server")
+        else
+            if cb then
+                cb(ret)
+            end
         end
     end)
 end
@@ -469,6 +496,7 @@ function P:evt_faceBookLogin(token)
         imei = SdkHelper:getDeviceID(),
         lang = LanguageManager:getLanguage(),
     }
+    args.yidun_risk_check = YiDunHelper:getReportData(args.type, REGISTER_LOGIN__TYPE.LOGIN)
 
     local _onSuccess = function (data)
         self:_onLoginSuccess(data, args)
@@ -495,6 +523,7 @@ function P:evt_appleLogin(info)
         imei = SdkHelper:getDeviceID(),
         lang = LanguageManager:getLanguage(),
     }
+    args.yidun_risk_check = YiDunHelper:getReportData(args.type, REGISTER_LOGIN__TYPE.LOGIN)
 
     local _onSuccess = function (data)
         self:_onLoginSuccess(data, args)
@@ -511,7 +540,7 @@ function P:evt_stoveLogin(info)
         print("==== gggggg evt_stoveLogin", json.encode(info))
         if 0 ~= info.resultCode then
             UiManager:hideLoadingMask("Login")
-            bee.emit(EventDef.evt_login_fail)
+            bee.emit(EventDef.evt_login_fail, info)
             return
         end
         UiManager:showLoadingMask("Login")

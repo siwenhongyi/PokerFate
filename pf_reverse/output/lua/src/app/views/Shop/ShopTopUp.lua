@@ -16,17 +16,19 @@ local ROW_COUNT = 4
 function P:onStart()
 	self.shop_type = self._params.shop_type
 
-	-- 任务-查看商城福利
-	if self.shop_type == SHOP_TYPE.shop_recharge3 then
+	if self.shop_type == SHOP_TYPE.shop_recharge then
+		self:shopGuide()
+	elseif self.shop_type == SHOP_TYPE.shop_recharge3 then
+		-- 任务-查看商城福利
 		TaskModel:reportTask(TaskType.CheckView, TaskTargetId.ShopChip)
 	end
 
 	local rowPos = {}
 	for i = 1, ROW_COUNT do
 		if i == 1 then
-			table.insert(rowPos, 190)
+			table.insert(rowPos, 200)
 		else
-			table.insert(rowPos, 380 * i - 190)
+			table.insert(rowPos, 380 * i - 180)
 		end
 	end
 
@@ -43,6 +45,8 @@ function P:onStart()
 
 	local datas = ShopModel:getShopTopUpList(self.shop_type)
 	self.topUpList:setDatas(datas)
+
+	
 end
 
 function P:setTopUpItem(item, data, isInit, index)
@@ -137,3 +141,9 @@ function P:refreshUI()
 	self.topUpList:setDatas(datas)
 end
 
+--引导
+function P:shopGuide()
+	GuideManager:startSystemGuide(10001, 0.65)
+end
+
+return P

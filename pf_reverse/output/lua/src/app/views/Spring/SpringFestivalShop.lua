@@ -105,3 +105,4 @@ end
 --     self.tag = nil
 -- end
 
+return P

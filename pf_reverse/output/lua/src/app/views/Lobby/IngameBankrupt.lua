@@ -5,7 +5,7 @@ function P:onAwake()
 
     self.TitleRoot = self:find("Protect/Title", self.Center)
     self.ClaimButton = self:find("Protect/ClaimButton", self.Center)
-    self.TextChip = self:find("TextChip", self.Center)
+    self.TextChip = self:find("ingame_bankrupt_chip_bg/TextChip", self.Center)
     self.TextTip = self:find("Protect/Tips/TextTip", self.Center)
 
     local lan = LanguageManager:getLanguage()
@@ -47,3 +47,4 @@ function P:evt_BustProtectRewardRSP(msg)
     self:hideUI()
 end
 
+return P

@@ -28,3 +28,4 @@ function P:onShow()
     bee.setTextGold(self.TextCount, _N(PlayerModel:getGold()))
 end
 
+return P

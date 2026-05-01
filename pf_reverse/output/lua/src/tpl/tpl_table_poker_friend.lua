@@ -31,3 +31,4 @@ function tpl_table_poker_friend_clone(key)
     return nil
 end
 
+return P

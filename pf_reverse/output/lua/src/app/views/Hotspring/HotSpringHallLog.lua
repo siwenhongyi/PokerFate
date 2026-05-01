@@ -49,3 +49,4 @@ function P:onShow()
     self.Empty:SetActive(count == 0)
 end
 
+return P

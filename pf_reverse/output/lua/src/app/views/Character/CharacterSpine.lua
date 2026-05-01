@@ -20,6 +20,8 @@ local FACES = {
     "standby", "smile", "happy", "shy", "silence", "sad", "shame"
 }
 
+local SCRAP_FACE = "shame"
+
 function P:ctor(node, data)
 end
 
@@ -36,11 +38,9 @@ function P:onAwake()
 end
 
 function P:onStart()
-    self:playAnim("idle", self._skin or "skin1", "standby", nil, true)
-
-    -- self:once(3, function()
-    --     self:playScrap()
-    -- end)
+    if not self._anim then
+        self:playAnim("idle", self._skin or "skin1", self._face or "standby", nil, true)
+    end
 end
 
 -- "None-无", "待机standby", "微笑smile", "开心happy", "害羞shy", "无奈silence", "难过sad", "爆衣羞耻shame"
@@ -94,34 +94,20 @@ end
 
 function P:setScrap(flag)
     if flag then
-        self._skin = "skin2"
-        local sp = bee.spine(self.Spine)
-        if sp:getSkin(self._skin) then
-            sp:setSkin(self._skin)
-        end
-        if self._face then
-            sp:attachSkin(self._face)
-        end
+        self:playAnim("idle", "skin2", SCRAP_FACE, nil, true)
     else
-        self._skin = "skin1"
-        local sp = bee.spine(self.Spine)
-        if sp:getSkin(self._skin) then
-            sp:setSkin(self._skin)
-        end
-        if self._face then
-            sp:attachSkin(self._face)
-        end
+        self:playAnim("idle", "skin1", "standby", nil, true)
     end
 end
 
 function P:playScrap()
     self._isInScrap = true
     self:playAnim("scrap_switch", "skin2", nil, function()
-        self:playAnim("idle", nil, self._face or "standby", nil, true)
+        self:playAnim("idle", nil, SCRAP_FACE, nil, true)
         self:once(0.5, function()
             self:playAnim(nil, nil, self._face or "standby")
+            self._isInScrap = nil
         end)
-        self._isInScrap = nil
 
         if self._isWaitPause then
             self:once(0.1, function()
@@ -140,12 +126,18 @@ function P:tryPlayIdle()
     end
 end
 
+function P:switchIdle()
+    local anim = "idle"
+    if anim == self._anim then anim = nil end
+    self:playAnim(anim, nil, self._skin == "skin2" and SCRAP_FACE or "standby", nil, true)
+end
+
 function P:stopScrap()
     if self._isInScrap then
-        self:playAnim("idle", "skin1", self._face or "standby")
+        self:playAnim("idle", "skin1", "standby")
         self._isInScrap = nil
     else
-        self:playAnim(nil, "skin1", self._face or "standby")
+        self:playAnim(nil, "skin1", "standby")
     end
 end
 
@@ -171,6 +163,9 @@ end
 -- 播放角色动作
 function P:playAnim(anim, skin, face, onComplete, loop)
     if not bee.isNull(self.Spine) then
+        if not skin and not self._skin then
+            skin = "skin1"
+        end
         local sp = bee.spine(self.Spine)
         if skin and sp:getSkin(skin) then
             sp:setSkin(skin)
@@ -258,3 +253,4 @@ function P:evt_onApplicationPause(paused)
     end
 end
 
+return P

@@ -136,3 +136,4 @@ function P:initInfos()
     end
 end
 
+return P

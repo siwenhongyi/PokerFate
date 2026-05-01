@@ -76,7 +76,13 @@ local function _initData()
 {69,1013,"watermelon","Emoji101301[emoji101301_watermelon]",0},
 {70,1013,"work","Emoji101301[emoji101301_work]",0},
 {71,1013,"bomb","Emoji101301[emoji101301_bomb]",6},
-{72,1013,"dumb","Emoji101301[emoji101301_dumb]",6}
+{72,1013,"dumb","Emoji101301[emoji101301_dumb]",6},
+{73,1014,"chill","Emoji101401[emoji101401_chill]",0},
+{74,1014,"confuse","Emoji101401[emoji101401_confuse]",0},
+{75,1014,"cute","Emoji101401[emoji101401_cute]",0},
+{76,1014,"rain","Emoji101401[emoji101401_rain]",0},
+{77,1014,"yawn","Emoji101401[emoji101401_yawn]",6},
+{78,1014,"mock","Emoji101401[emoji101401_mock]",6}
 }
     for _, v in pairs(bodys) do
         local m = {}
@@ -98,3 +104,4 @@ function tpl_emoji_clone(key)
     return nil
 end
 
+return P

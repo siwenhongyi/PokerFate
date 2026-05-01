@@ -15,10 +15,12 @@ function P:onAwake()
     self.TouchStart = self:find("TouchStart", self.AnimRoot)
 
     self.RightTop = self:find("RightTop", self.AnimRoot)
-    self.ButtonLanguage = self:find("ButtonLanguage", self.RightTop)
-    self.ButtonAccount = self:find("ButtonAccount", self.RightTop)
-    self.ButtonFeedback = self:find("ButtonFeedback", self.RightTop)
-    self.ButtonFeedback = self:find("ButtonFeedback", self.RightTop)
+    local Layer = self:find("Layer", self.RightTop)
+    self.ButtonLanguage = self:find("ButtonLanguage", Layer)
+    self.ButtonAccount = self:find("ButtonAccount", Layer)
+    self.ButtonNetwork = self:find("ButtonNetwork", Layer)
+    self.ButtonMusic = self:find("ButtonMusic", Layer)
+    self.ButtonRepair = self:find("ButtonRepair", Layer)
 
     bee.addClick(self.TouchStart, function()
         Game:playSound("ui_button_confirm")
@@ -57,14 +59,46 @@ function P:onAwake()
         bee.logEvent("login-account")
     end)
 
-    bee.addClick(self.ButtonFeedback, function()
+    bee.addClick(self.ButtonNetwork, function()
         Game:playSound("ui_button_confirm")
-        bee.logEvent("login-feedback")
+        bee.logEvent("login-route-access")
+
+        UiManager:showUI("Loginline")
+    end)
+
+    bee.addClick(self.ButtonMusic, function()
+        Game:playSound("ui_button_confirm")
+
+        SettingModel.saveData.lobbyBGMOn = not self:isBGMisOn()
+        if SettingModel.saveData.lobbyBGMOn then
+            SettingModel.saveData.globalVolumeOn = true
+            if SettingModel.saveData.globalVolume <= 0 then
+                SettingModel.saveData.globalVolume = 0.5
+            end
+            if SettingModel.saveData.lobbyBGM <= 0 then
+                SettingModel.saveData.lobbyBGM = 0.5
+            end
+        end
+        SettingModel:onSave()
+        bee.logEvent("login-music-switch", SettingModel.saveData.lobbyBGMOn and 1 or 0)
+        
+        self:find("ON", self.ButtonMusic):SetActive(SettingModel.saveData.lobbyBGMOn)
+        self:find("OFF", self.ButtonMusic):SetActive(not SettingModel.saveData.lobbyBGMOn)
+
+        if SettingModel.saveData.lobbyBGMOn then
+            self:playStartBGM()
+	        LAN:refreshLan(self:find("ON", self.ButtonMusic))
+        else
+            Game:stopMusic()
+	        LAN:refreshLan(self:find("OFF", self.ButtonMusic))
+        end
     end)
 
     bee.addClick(self.ButtonRepair, function()
         Game:playSound("ui_button_confirm")
-        bee.logEvent("login-repair")
+        bee.logEvent("login-repair-access")
+
+        UiManager:showUI("Loginrepair")
     end)
 
     self.ButtonAccount:SetActive(false)
@@ -73,7 +107,7 @@ end
 function P:onShow()
     self.TouchStart:SetActive(false)
 	self.LoginLayer = UiManager:showUI("LoginLayer")
-    self.LoginLayer.transform.localPosition = bee.v3(0, -9999)
+    self:hideLoginLayer()
 
     if G_DOWNLOAD_REMOTE then
         G_DOWNLOAD_REMOTE = false
@@ -81,14 +115,32 @@ function P:onShow()
         PlayerModel:setNotAutoLogin(true)
         ItemModel:clearItems()
         Net:closeSocket()
+        self.ButtonRepair:SetActive(false)
         AppLoadRes:startDownload()
     elseif not G_CHECK_DL_RES then
         G_CHECK_DL_RES = true
+        self.ButtonRepair:SetActive(false)
         self:checkDownload()
     else
         self:onDownloadComplete()
     end
     bee.logEvent("login-ui-access")
+
+    local isOn = self:isBGMisOn()
+    self:find("ON", self.ButtonMusic):SetActive(isOn)
+    self:find("OFF", self.ButtonMusic):SetActive(not isOn)
+    
+    self:playStartBGM()
+end
+
+function P:isBGMisOn()
+    return SettingModel.saveData.lobbyBGMOn and SettingModel.saveData.lobbyBGM > 0 and SettingModel.saveData.globalVolumeOn and SettingModel.saveData.globalVolume > 0
+end
+
+function P:playStartBGM()
+    if SettingModel.saveData.lobbyBGMOn and SettingModel:getLobbyBGMVolume() > 0 then
+        Game:playMusic("10001", SettingModel:getLobbyBGMVolume())
+    end
 end
 
 function P:checkServer()
@@ -111,9 +163,31 @@ function P:checkServer()
             PlayerModel:setNotAutoLogin(true)
         end
     end, function()
-        self:once(5, function()
-            self:checkServer()
-        end)
+        self._checkFailCount = (self._checkFailCount or 0) + 1
+        if self._checkFailCount >= 3 then
+            self._checkFailCount = nil
+            UiManager:showTip({
+                text = _T("LAB_NET_ERR_TIPS1"),
+                noClose = true,
+                sureStr = _T("LAB_NET_LINK_AGAIN"),
+                -- cancelStr = _T("LAB_SETTINGS_030"),
+                onSure = function()
+                    if UrlManager:getSelectKey() == UrlManager:getHttpUrl() then
+                        UrlManager:nextHttpUrl()
+                    end
+                    UrlManager:setSelectKey(nil)
+                    self:checkServer()
+                end,
+                onCancel = function()
+                    -- Game:quit()
+                    self:showLoginLayer()
+                end,
+            })
+        else
+            self:once(5, function()
+                self:checkServer()
+            end)
+        end
     end)
 end
 
@@ -154,13 +228,20 @@ end
 
 function P:onDownloadComplete()
     -- self:tryAutoLogin()
+    self.ButtonRepair:SetActive(true)
     self:checkServer()
 end
 
 function P:showLoginLayer()
     self.Bottom:SetActive(false)
-    self.LoginLayer.transform.localPosition = bee.v3()
+    self.LoginLayer.transform.localPosition = bee.v3zero
+    self.LoginLayer.transform.localScale = bee.v3one
     self.ButtonAccount:SetActive(false)
+end
+
+function P:hideLoginLayer()
+    self.LoginLayer.transform.localPosition = bee.v3(0, -9999)
+    self.LoginLayer.transform.localScale = bee.v3zero
 end
 
 function P:evt_onApplicationPause(paused)
@@ -219,7 +300,7 @@ function P:evt_SelfUserInfoRSP(msg)
     if not self._isInAutoLogin and GameModel.roomid == 0 then
         bee.enterScene("MainScene", {from = "StartScene"})
     else
-        self.LoginLayer.transform.localPosition = bee.v3(0, -9999)
+        self:hideLoginLayer()
         self.TouchStart:SetActive(true)
         self.ButtonAccount:SetActive(G_CHNL_ID ~= 8)
     end
@@ -234,6 +315,13 @@ function P:evt_UserLogoutRSP()
     if G_CHNL_ID == 5 or G_CHNL_ID == 6 then
         CS.ThirdManager.Instance:login()
     end
+end
+
+function P:evt_netClosed()
+    UiManager:hideLoadingMask("Login")
+    self:showLoginLayer()
+
+    LoginModel:checkReConnect()
 end
 
 function P:evt_start_stove_login()
@@ -251,8 +339,16 @@ function P:evt_lan_mod()
 end
 
 function P:evt_start_white_update()
-    self.LoginLayer.transform.localPosition = bee.v3(0, -9999)
+    self:hideLoginLayer()
     self.ButtonAccount:SetActive(false)
     self._isInWhiteUpdate = true
 end
 
+function P:evt_try_resume_bgm()
+    self:playStartBGM()
+
+    self:find("ON", self.ButtonMusic):SetActive(SettingModel.saveData.lobbyBGMOn)
+    self:find("OFF", self.ButtonMusic):SetActive(not SettingModel.saveData.lobbyBGMOn)
+end
+
+return P

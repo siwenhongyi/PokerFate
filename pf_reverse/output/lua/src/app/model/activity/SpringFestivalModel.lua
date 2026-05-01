@@ -193,3 +193,4 @@ function P:evt_serverTimeCrossDay()
 end
 
 
+return P

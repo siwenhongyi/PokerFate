@@ -93,3 +93,4 @@ function P:showItems()
     end
 end
 
+return P

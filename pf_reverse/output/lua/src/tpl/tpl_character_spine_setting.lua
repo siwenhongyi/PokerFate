@@ -17,7 +17,9 @@ local function _initData()
 {101004,{"sizijia2","suolian_3","suolian_2","sizijia","tielian1","tielian2"}},
 {100605,{"chair"}},
 {101205,{"jiazi","shuyedai","yizi_yy2","yizi_yy","yizi","yijiao3","yijiao2","yijiao1","dengzi","hushou","xiezi"}},
-{101204,{"shuijinqiu"}}
+{101204,{"shuijinqiu"}},
+{101401,{"umbrella bow","umbrella handle","umbrella wind bell","umbrella_hou","umbrella_qian"}},
+{101404,{"A23","A47","A38","A39","A40","A42","A62","A6","A8","A11"}}
 }
     for _, v in pairs(bodys) do
         local m = {}
@@ -39,3 +41,4 @@ function tpl_character_spine_setting_clone(key)
     return nil
 end
 
+return P

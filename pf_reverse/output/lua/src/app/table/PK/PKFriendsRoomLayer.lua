@@ -35,3 +35,4 @@ function P:evt_lan_mod()
     self:refreshFriendRoomInfo()
 end
 
+return P

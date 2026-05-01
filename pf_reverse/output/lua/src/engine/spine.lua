@@ -81,6 +81,11 @@ bee._spineMeta = {
         o.name = name
         return o.anim:SetAnimation(0, name, loop or false)
     end,
+
+    playAtTrack = function(o, trackIndex, name, loop)
+        o.name = name
+        return o.anim:SetAnimation(trackIndex, name, loop or false)
+    end,
 	
     --停止播放spine动画
 	stopAnim = function(o)
@@ -227,3 +232,4 @@ bee._spineMeta = {
         bee.Spine.objs[o.obj] = nil
         return o
     end,
+}

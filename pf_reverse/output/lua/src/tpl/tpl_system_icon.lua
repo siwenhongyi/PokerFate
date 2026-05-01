@@ -33,3 +33,4 @@ function tpl_system_icon_clone(key)
     return nil
 end
 
+return P

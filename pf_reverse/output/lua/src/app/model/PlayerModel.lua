@@ -344,6 +344,7 @@ function P:setInfo(msg)
     self._register_time = msg.register_time
     self._auth_cert_url = msg.auth_cert_url
     self._auth_cert_time = msg.auth_cert_time
+    ShopModel:setMonthlyCardLeftTime(msg.monthly_card_exp)
     -- 动特效
     if msg.brief.animations then
         for k, v in pairs(msg.brief.animations) do

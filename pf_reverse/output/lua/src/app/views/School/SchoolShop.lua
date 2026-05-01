@@ -145,3 +145,4 @@ function P:hideUI()
     self:hideTopUI()
 end
 
+return P

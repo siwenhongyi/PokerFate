@@ -108,3 +108,4 @@ _F = function(...) return P:formatParamString(...) end
 _FS = function(...) return P:formatString(...) end
 _I = function(...) return P:getImage(...) end
 
+return P

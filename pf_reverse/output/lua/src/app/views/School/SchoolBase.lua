@@ -120,3 +120,4 @@ function P:hideTopUI()
     self.RightTop:SetActive(false)
 end
 
+return P

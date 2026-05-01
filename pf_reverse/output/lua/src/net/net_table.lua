@@ -35,7 +35,7 @@ function net:EnterRoomRSP(msg)
 	if code == 0 then
 		GameModel.stopGameMsg = nil
         local data
-		if msg.game_type == GAME_GAME_TYPE.SNG_HOLDEM_GAME or msg.game_type == GAME_GAME_TYPE.SNG_OMAHA_GAME then
+		if GF.isSNG(msg.game_type) then
 			data = require("app.table.data.PKDataSNG"):create(msg)
 		else
 			data = require("app.table.data.PKData"):create(msg)
@@ -507,3 +507,4 @@ end
 function net:TourRoomRankRefreshBRC(msg)
 	if not GameModel.data then return end
 	GameModel.data.rank_list = msg.rank_list
+end

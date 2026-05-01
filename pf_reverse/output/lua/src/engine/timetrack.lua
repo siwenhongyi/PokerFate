@@ -52,3 +52,4 @@ function P:update(dt, ctx)
             end
         end
     end
+end

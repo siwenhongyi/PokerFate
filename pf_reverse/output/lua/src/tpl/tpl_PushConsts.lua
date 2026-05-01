@@ -13,6 +13,8 @@ local function _initData()
 {"SEVEN_TASK_REFRESH",10031,nil},
 {"THEME_ACTIVITY_TASK_REFRESH",10032,nil},
 {"FESTIVAL_ACTIVITY_TASK_REFRESH",10033,nil},
+{"CHALLENGE_TASK_REFRESH",10034,nil},
+{"ACHIEVEMENT_TASK_REFRESH",10035,nil},
 {"MAIL_REFRESH",10040,nil},
 {"VIP_LEVEL_UP",10050,nil},
 {"SERVER_MAINTAIN_NORMAL",10060,nil},
@@ -21,6 +23,7 @@ local function _initData()
 {"STOVE_BUY_SUC",10070,nil},
 {"THEME_ACTIVITY_START",10080,nil},
 {"FESTIVAL_ACTIVITY_START",10081,nil},
+{"GAME_REBATE_SETTLE",10082,nil},
 {"PAYPAL_BUY_SUC",10091,nil},
 {"XSOLLA_BUY_SUC",10092,nil},
 {"STEAM_BUY_SUC",10093,nil},
@@ -46,3 +49,4 @@ function tpl_PushConsts_clone(key)
     return nil
 end
 
+return P

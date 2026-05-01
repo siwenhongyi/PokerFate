@@ -259,8 +259,10 @@ function P:collectBetToPot(dt)
 		self.playerCls:collectBetToPot(dt)
 	else
 		local info = self.data:getPlayer(self.seatid)
-		if info and info.bet_chip > 0 and info.is_fold then
+		if info and info.bet_chip > 0 then
 			self._tableInfo:collectBetToPot(dt)
+		else
+			self._tableInfo:showTag()
 		end
 	end
 end
@@ -308,3 +310,4 @@ function P:refreshAddingChips(is_adding, chips, type)
 	end
 end
 
+return P

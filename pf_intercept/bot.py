@@ -105,6 +105,11 @@ def _card_str(code: int) -> str | None:
 # ── Constants ──────────────────────────────────────────────────────────────────
 
 _STAGE_TO_STREET = {1: "preflop", 2: "flop", 3: "turn", 4: "river"}
+_SNG_GAME_TYPES = {10050301, 10060301, 40050301}
+
+
+def _is_sng_game_type(game_type) -> bool:
+    return _chip_int(game_type, 0) in _SNG_GAME_TYPES
 
 
 def _chip_int(value, default: int = 0) -> int:
@@ -427,7 +432,7 @@ class BotBridge:
         if "game_type" in msg:
             self._session_game_type = _chip_int(msg.get("game_type"), 0)
         sng_info = msg.get("sngroom_info") or {}
-        self._is_sng_room = bool(sng_info)
+        self._is_sng_room = _is_sng_game_type(self._session_game_type)
         room_info_early = msg.get("room_info") or {}
         if "lobby_coin" in room_info_early:
             self._session_lobby_coin = _chip_int(room_info_early.get("lobby_coin"), 0)
@@ -477,18 +482,10 @@ class BotBridge:
             if self._table_room_id:
                 log.info("[BOT] Table room_id=%d (EnterRoomRSP)", self._table_room_id)
 
-        # Blind detection. Cash/friend rooms use room_info; SNG/tournament rooms
-        # leave room_info empty and carry the active blind level in sngroom_info.
+        # Blind detection. Cash/friend rooms use room_info; SNG rooms use
+        # sngroom_info and BlindStatusBRC levels, matching the client GF.isSNG path.
         room_info = msg.get("room_info") or {}
-        if room_info.get("bb"):
-            self._sng_blind_schedule = {}
-            self._sng_blind_level = 0
-            self._apply_table_blinds(
-                big_blind=room_info.get("bb"),
-                small_blind=room_info.get("sb"),
-                source="room_info",
-            )
-        else:
+        if self._is_sng_room:
             bb_sng, sb_sng = self._remember_sng_blinds(sng_info)
             if bb_sng > 0:
                 source = "sngroom_info"
@@ -499,6 +496,14 @@ class BotBridge:
                     small_blind=sb_sng,
                     source=source,
                 )
+        elif room_info.get("bb"):
+            self._sng_blind_schedule = {}
+            self._sng_blind_level = 0
+            self._apply_table_blinds(
+                big_blind=room_info.get("bb"),
+                small_blind=room_info.get("sb"),
+                source="room_info",
+            )
 
         # Seed player names from current table snapshot + trigger server stats fetch
         table_status = msg.get("table_status") or {}
@@ -853,6 +858,8 @@ class BotBridge:
                 )
 
     def _on_blind_status(self, msg: dict) -> None:
+        if not self._is_sng_room:
+            return
         level = _chip_int(msg.get("blind_level"), 0)
         if level <= 0:
             return

@@ -178,6 +178,11 @@ function P:onPreAction()
     if act1 and act1._lastInfo then
         local player1 = GameModel.data:getPlayer(act1.seatid + 1)
         player1:setPlayData(act1._lastInfo)
+    elseif act1 and act1._evt == "WinnerRSP" then
+        for _, v in ipairs(act1.winner) do
+            local player1 = GameModel.data:getPlayer(v.seatid + 1)
+            player1.chips = player1.chips - v.chips
+        end
     end
     
     self.respIndex = self.respIndex - 1
@@ -191,9 +196,11 @@ function P:onPreAction()
                 else
                     self.respIndex = i
                 end
-                act1 = self.resps[self.respIndex]
-                round = act1._round
-                break
+                if self.resps[self.respIndex]._evt ~= "ChipsBackBRC" then
+                    act1 = self.resps[self.respIndex]
+                    round = act1._round
+                    break
+                end
             end
         end
         if not round then
@@ -301,7 +308,7 @@ function P:initResps()
         }
         self:addResp(startRound)
 
-        local count, counts = 0, {}
+        local count, counts, totalBet = 0, {}, 0
         for _, act in ipairs(round.action) do
             local msg = {
                 seatid = act.seatid,
@@ -314,6 +321,7 @@ function P:initResps()
                 _round = round,
                 _et = 3,
             }
+            totalBet = totalBet + act.action_chips
             self:addResp(msg)
             if not act.is_allin and not GF.isFoldAction(act.action_type) then
                 counts[act.seatid] = 1
@@ -342,6 +350,27 @@ function P:initResps()
         for _, v in ipairs(round.pool) do
             overRound.pool[#overRound.pool + 1] = v.pot
             totalPot = totalPot + v.pot
+        end
+        if isAllAllin then
+            if totalBet > totalPot - round._totalPot then
+                local backChips = totalBet - (totalPot - round._totalPot)
+                local seatid, maxActionChips = -1, 0
+                for _, act in ipairs(round.action) do
+                    if act.action_chips > maxActionChips then
+                        maxActionChips = act.action_chips
+                        seatid = act.seatid
+                    end
+                end
+                if seatid >= 0 and backChips > 0 then
+                    self:addResp({
+                        seatid = seatid,
+                        chips = backChips,
+
+                        _evt = "ChipsBackBRC",
+                        _et = 0,
+                    })
+                end
+            end
         end
         self:addResp(overRound)
 
@@ -548,3 +577,4 @@ function P:onUpdate(dt)
     end
 end
 
+return P

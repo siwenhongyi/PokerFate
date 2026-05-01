@@ -89,7 +89,7 @@ function P:onAwake()
 		self:SaveScheme()
 	end)
 
-	CS.SoundManager.Instance:PauseMusic()
+	Game:pauseBGM()
 end
 
 function P:onStart()
@@ -396,8 +396,9 @@ end
 function P:cloeUI()
 	if self._isPlaying then
 		bee.stopSound("")
-		CS.SoundManager.Instance:UnPauseMusic()
+        Game:resumeBGM()
 	end
 	self:hideUI()
 end
 
+return P

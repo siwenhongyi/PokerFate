@@ -84,6 +84,8 @@ function P:onShow()
 
     bee.setText(self.TextVer, _F("LAB_SETTINGS_018", G_UPDATE_VERSION))
     bee.setText(self.TextFullVer, _F("LAB_SETTINGS_122", G_APP_VERSION))
+
+    self:bindingGuide()
 end
 
 function P:onDestroy()
@@ -158,6 +160,7 @@ function P:onShowTabIngame()
         elseif GameModel.data:isFriendsRoom() then
             self.ButtonAutoSwitch.transform.parent.gameObject:SetActive(false)
         end
+        self.ButtonShowBB.transform.parent.gameObject:SetActive(not GameModel.data:isTrainingGame())
     end
     
     bee.setCheck(self.ButtonPreAction, false, SettingModel:isPreAction())
@@ -381,7 +384,13 @@ function P:initTabAudioList()
 
     self.AudioItem1 = self:find("Item01", AudioItem4)
     self.AvatarList = self:find("AvatarList", AudioItem4)
-    for _, v in ipairs(tpl_character_list) do
+
+    local characterList = {}
+    for k,v in pairs(tpl_character_list) do
+        table.insert(characterList, v)
+    end
+    table.sort( characterList, function(a, b) return a.sort < b.sort end)
+    for _, v in ipairs(characterList) do
         if not v.display_time or v.display_time <= bee.getServerTime() or PlayerModel:isEventWhite() then
             local item = CU.GameObject.Instantiate(self.AudioItem1, self.AvatarList.transform, false)
             local flag = SettingModel:isRoleVolumeOn(v.id)
@@ -412,6 +421,7 @@ end
 
 function P:bindAudioSwitch(name, slider, switch, onChange)
     bee.setCheck(switch, nil, SettingModel.saveData[name .. "On"])
+    bee.setSliderValue(slider, SettingModel.saveData[name], true)
     bee.addValueChanged(switch, function(isOn)
         SettingModel.saveData[name .. "On"] = isOn
         self:refreshAutioSwitch(name, slider, switch)
@@ -434,8 +444,9 @@ function P:bindAudioSwitch(name, slider, switch, onChange)
             onChange(nil, val)
         end
     end, "Slider")
-    self:refreshAutioSwitch(name, slider, switch)
-    bee.setSliderValue(slider, SettingModel.saveData[name], true)
+    self:once(-1, function()
+        self:refreshAutioSwitch(name, slider, switch)
+    end)
 end
 
 function P:refreshAutioSwitch(name, slider, switch)
@@ -1023,3 +1034,24 @@ function P:evt_hideUiWhenAction(isVisible)
     self:onUiBlur(not isVisible, "evt_hideUiWhenAction", true)
 end
 
+--引导
+function P:bindingGuide()
+    if bee.isInGame() then
+        return
+    end
+
+    local email = PlayerModel:getBindEmail()
+    if not email or "" == email then
+        local gid = 11001
+        if table.keyof(GuideManager.sysGuideIds, gid) then
+            return false
+        end
+
+        self.Tabs[3]:GetComponent("Toggle") .isOn = true
+        self:doShowView(3)
+
+        GuideManager:startSystemGuide(gid, 0.65)
+    end
+end
+
+return P

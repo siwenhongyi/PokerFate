@@ -123,12 +123,12 @@ end
 
 function P:onDestroy()
 	bee.stopSound("")
-    CS.SoundManager.Instance:UnPauseMusic()
+    Game:resumeBGM()
 end
 
 function P:onStart()
-	CS.SoundManager.Instance:PauseMusic()
-
+	Game:pauseBGM()
+	
 	self.data = self._params.data
 	self._curPreviewType = PreviewType.Lobby
 	self._isPlaying = true
@@ -472,3 +472,4 @@ function P:onClickPurchase()
 	UiManager:showUI("ShopPurchaseTheme", {data = self.data})
 end
 
+return P

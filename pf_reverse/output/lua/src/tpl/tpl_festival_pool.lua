@@ -36,3 +36,4 @@ function tpl_festival_pool_clone(key)
     return nil
 end
 
+return P

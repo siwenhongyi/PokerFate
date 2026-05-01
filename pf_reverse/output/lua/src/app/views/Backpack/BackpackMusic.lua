@@ -40,15 +40,15 @@ function P:onAwake()
     bee.addClick(self:find("CloseButton", Center), function()
         if self._isPlaying then
             bee.stopSoundByIndex(self._playIndex)
-            CS.SoundManager.Instance:UnPauseMusic()
         end
+        Game:resumeBGM()
         self:hideUI()
     end)
     bee.addClick2(self:find("common_panel_mask_70", AnimRoot), function()
         if self._isPlaying then
             bee.stopSoundByIndex(self._playIndex)
-            CS.SoundManager.Instance:UnPauseMusic()
         end
+        Game:resumeBGM()
         self:hideUI()
     end)
 
@@ -126,8 +126,8 @@ function P:onAwake()
         end
         if self._isPlaying then
             bee.stopSoundByIndex(self._playIndex)
-            CS.SoundManager.Instance:UnPauseMusic()
         end
+        Game:resumeBGM()
         self:hideUI()
     end)
 
@@ -157,7 +157,7 @@ function P:onAwake()
         UiManager:showToast(_T("TAB_SHOP_THEME_11"))
     end)
 
-    CS.SoundManager.Instance:PauseMusic()
+    Game:pauseBGM()
 end
 
 function P:onShow()
@@ -197,8 +197,8 @@ end
 function P:onBtClose()
     if self._isPlaying then
         bee.stopSoundByIndex(self._playIndex)
-        CS.SoundManager.Instance:UnPauseMusic()
     end
+    Game:resumeBGM()
     P.super.onBtClose(self)
 end
 
@@ -500,3 +500,4 @@ function P:onUpdate(dt)
     end
 end
 
+return P

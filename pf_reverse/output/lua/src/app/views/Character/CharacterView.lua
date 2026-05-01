@@ -91,3 +91,4 @@ function P:onDrag(e)
     self.CharacterImage.transform.localPosition = pos
 end
 
+return P

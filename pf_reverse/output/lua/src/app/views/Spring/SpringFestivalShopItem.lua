@@ -42,3 +42,4 @@ function P:refreshItem(cfg, mask, index)
     end
 end
 
+return P

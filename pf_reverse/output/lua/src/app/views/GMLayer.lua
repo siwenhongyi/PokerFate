@@ -86,3 +86,4 @@ function P:onUpdate()
     end
 end
 
+return P

@@ -33,3 +33,4 @@ end
 function P:reqActivityData()
 end
 
+return P

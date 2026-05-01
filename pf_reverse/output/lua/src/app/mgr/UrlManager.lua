@@ -1,12 +1,27 @@
 local P = {
     _httpIndex = 1,
     _serverIndex = 1,
+    _selectKey = nil,   -- 选择的线路key
 }
 UrlManager = P
 
 function P:init()
     self._httpIndex = LocalStore:getIntegerForKey("http_index", 1)
     self._serverIndex = LocalStore:getIntegerForKey("server_index", 1)
+    self._selectKey = LocalStore:getStringForKey("net_select_key", nil)
+end
+
+function P:setSelectKey(key)
+    self._selectKey = key
+    if not key then
+        LocalStore:deleteValueForKey("net_select_key")
+    else
+        LocalStore:setStringForKey("net_select_key", key)
+    end
+end
+
+function P:getSelectKey()
+    return self._selectKey
 end
 
 function P:nextHttpUrl()
@@ -21,6 +36,13 @@ end
 
 function P:getHttpUrl()
     if self._htts and #self._htts > 0 then
+        if self._selectKey then
+            for _, v in ipairs(self._urls) do
+                if v.http_host == self._selectKey then
+                    return v.http_host
+                end
+            end
+        end
         if self._httpIndex > #self._htts then
             self._httpIndex = 1
         end
@@ -51,6 +73,14 @@ function P:getServerUrl()
         return G_SERVER_URL
     end
     if self._websockets and #self._websockets > 0 then
+        if self._selectKey then
+            for _, v in ipairs(self._urls) do
+                if v.http_host == self._selectKey then
+                    return v.server_host
+                end
+            end
+        end
+
         if self._serverIndex > #self._websockets then
             self._serverIndex = 1
         end
@@ -62,49 +92,30 @@ end
 function P:setHosts(servers)
     self._htts = {}
     self._websockets = {}
+    self._urls = servers
     for _, v in ipairs(servers) do
         table.insert(self._htts, v.http_host)
         table.insert(self._websockets, v.server_host)
     end
 end
 
--- "server":{"http":[{"host":"dev-login.poker-fate.com","port":0}],"websocket":[{"host":"dev-entry.poker-fate.com","port":9012}]}
-function P:setServerUrls(https, websockets)
-    self._htts = https
-    local h = "https://"
-    if not string.find(G_HTTP_URL, "https") then
-        h = "http://"
+function P:getHosts()
+    if self._urls then
+        return self._urls
     end
-    for _, v in ipairs(https) do
-        if string.find(v.host, "http") then
-            if v.port > 0 then
-                v.http = v.host .. ":" .. v.port .. "/"
-            else
-                v.http = v.host .. "/"
-            end
-        else
-            if v.port > 0 then
-                v.http = h .. v.host .. ":" .. v.port .. "/"
-            else
-                v.http = h .. v.host .. "/"
-            end
-        end
+    local ret = {
+        {http_host = G_HTTP_URL},
+    }
+    if G_HTTP_URL_2 then
+        table.insert(ret, {http_host = G_HTTP_URL_2})
     end
-    self._websockets = websockets
-    for _, v in ipairs(websockets) do
-        if string.find(v.host, "ws://") or string.find(v.host, "wss://") then
-            if v.port > 0 then
-                v.ws = v.host .. ":" .. v.port .. "/"
-            else
-                v.ws = v.host .. "/"
-            end
-        else
-            if v.port > 0 then
-                v.ws = "ws://" .. v.host .. ":" .. v.port .. "/"
-            else
-                v.ws = "ws://" .. v.host .. "/"
-            end
-        end
+    if G_HTTP_URL_3 then
+        table.insert(ret, {http_host = G_HTTP_URL_3})
     end
+    if G_HTTP_URL_4 then
+        table.insert(ret, {http_host = G_HTTP_URL_4})
+    end
+    return ret
 end
 
+return P

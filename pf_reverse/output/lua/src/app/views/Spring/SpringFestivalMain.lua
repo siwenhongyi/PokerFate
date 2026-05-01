@@ -269,3 +269,4 @@ function P:changeTip()
 	bee.setText(self.RedPacketTipText, tip)
 end
 
+return P

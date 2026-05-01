@@ -30,3 +30,4 @@ function tpl_table_poker_allin_clone(key)
     return nil
 end
 
+return P

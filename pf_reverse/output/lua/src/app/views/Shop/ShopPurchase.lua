@@ -90,3 +90,4 @@ function P:onClickPurchase()
 	end
 end
 
+return P

@@ -104,3 +104,4 @@ function P:evt_TableGameOverRSP()
 end
 
 
+return P

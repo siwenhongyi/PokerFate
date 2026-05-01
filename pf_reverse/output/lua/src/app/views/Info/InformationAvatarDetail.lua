@@ -232,3 +232,4 @@ function P:evt_EditFavoriteRoleRSP(msg)
     end
 end
 
+return P

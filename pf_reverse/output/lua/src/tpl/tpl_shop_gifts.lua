@@ -39,3 +39,4 @@ function tpl_shop_gifts_clone(key)
     return nil
 end
 
+return P

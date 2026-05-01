@@ -291,3 +291,4 @@ bee.checkAddDelayTask = function(delay, cb, TAG, priority)
 			end
 		end)
 	end
+end

@@ -57,3 +57,4 @@ function P:refreshBlindItem(data, item)
     self:find("tournament_sng_details_blind_list_frame_02", item):SetActive(data.blind_level % 2 == 0)
 end
 
+return P

@@ -52,3 +52,4 @@ function P:onClickConfirm()
     self:hideUI()
 end
 
+return P

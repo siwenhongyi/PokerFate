@@ -52,3 +52,4 @@ function P:onClickRecoverButton()
 	end)
 end
 
+return P

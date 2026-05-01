@@ -44,3 +44,4 @@ function P:invokeSpine(...)
     bee.invoke(self.CharacterImage, ...)
 end
 
+return P

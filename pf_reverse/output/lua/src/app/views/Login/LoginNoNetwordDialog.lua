@@ -28,3 +28,4 @@ function P:onShow()
     end
 end
 
+return P

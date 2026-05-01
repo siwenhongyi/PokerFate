@@ -31,3 +31,4 @@ function P:onBtClose()
     self:hideUI()
 end
 
+return P

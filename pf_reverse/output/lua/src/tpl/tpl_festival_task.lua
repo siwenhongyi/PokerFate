@@ -38,3 +38,4 @@ function tpl_festival_task_clone(key)
     return nil
 end
 
+return P

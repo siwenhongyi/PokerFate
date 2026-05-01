@@ -296,3 +296,4 @@ function P:evt_hideUiWhenAction(isVisible)
     self:onUiBlur(not isVisible, "evt_hideUiWhenAction", true)
 end
 
+return P

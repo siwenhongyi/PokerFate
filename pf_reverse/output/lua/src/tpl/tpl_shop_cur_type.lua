@@ -30,3 +30,4 @@ function tpl_shop_cur_type_clone(key)
     return nil
 end
 
+return P

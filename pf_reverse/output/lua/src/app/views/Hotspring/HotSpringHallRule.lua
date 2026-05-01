@@ -15,3 +15,4 @@ function P:onShow()
     bee.logEvent("onsen-rules")
 end
 
+return P

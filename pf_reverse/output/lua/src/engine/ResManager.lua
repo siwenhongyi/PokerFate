@@ -19,3 +19,4 @@ end
 bee.addressableSynLoad = function(type_, path)
     local fn = _getLoader(type_, "AddressableSynLoad")
     return realFunc(ResManager, path)
+end

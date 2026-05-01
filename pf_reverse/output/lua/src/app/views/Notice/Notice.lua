@@ -149,7 +149,8 @@ function P:refreshContent()
                 if url then
                     local item = CU.GameObject.Instantiate(self.ImageBanner, self.Content.transform, false)
                     item:SetActive(true)
-                    item:GetComponent("LoadImage"):DownloadImage(url)
+                    -- item:GetComponent("LoadImage"):DownloadImage(url)
+                    bee.getDownloadImage(item, url)
                     if href then
                         bee.addClick2(item, function()
                             GF.onClickLink(href)
@@ -193,3 +194,4 @@ function P:evt_noticeRefresh()
     self:showNotice(self._notice_type, self._select_data and self._select_data.id)
 end
 
+return P

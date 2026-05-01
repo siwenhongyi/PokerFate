@@ -29,3 +29,4 @@ function tpl_nameplate_anim_clone(key)
     return nil
 end
 
+return P

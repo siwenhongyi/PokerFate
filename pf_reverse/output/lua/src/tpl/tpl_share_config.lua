@@ -32,3 +32,4 @@ function tpl_share_config_clone(key)
     return nil
 end
 
+return P

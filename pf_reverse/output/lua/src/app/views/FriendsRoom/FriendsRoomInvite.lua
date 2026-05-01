@@ -72,3 +72,4 @@ end
 function P:evt_InvitePlayBRC(msg)
 end
 
+return P

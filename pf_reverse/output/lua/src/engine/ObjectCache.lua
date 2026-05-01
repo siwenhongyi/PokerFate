@@ -158,3 +158,4 @@ function P:onUpdate(dt)
     end
 end
 
+return P

@@ -34,3 +34,4 @@ function tpl_quick_purchase_clone(key)
     return nil
 end
 
+return P

@@ -92,8 +92,6 @@ function P:onAwake()
         self.BgLogin:SetActive(false)
         LAN:refreshLan(self.BgMain)
     end)
-
-     Game:playMusic("10001", SettingModel:getLobbyBGMVolume())
 end
 
 function P:evt_hideRegister()
@@ -187,6 +185,8 @@ end
 
 -- 游客登录
 function P:onBtGuest()
+    self._loginBt = LOGIN_TYPE.GUEST
+
     local params = {}
     params.text = _T("LAB_GUEST_LOGIN_TIPS")
     params.noClose = true
@@ -199,18 +199,22 @@ function P:onBtGuest()
 end
 
 function P:onBtFacebook()
+    self._loginBt = LOGIN_TYPE.FACEBOOK
     CS.SdkHelper.FBLogin()
 end
 
 function P:onBtApple()
+    self._loginBt = LOGIN_TYPE.iOS
     CS.SdkHelper.LoginApple()
 end
 
 function P:onBtX()
+    self._loginBt = LOGIN_TYPE.TWITTER
     LoginModel:XLogin()
 end
 
 function P:onBtStove()
+    self._loginBt = LOGIN_TYPE.STOVE
     if not bee.checkCd("stove_login_click", 2) then
         return
     end
@@ -226,6 +230,7 @@ function P:onBtStove()
 end
 
 function P:onBtSteam()
+    self._loginBt = LOGIN_TYPE.STEAM
     UiManager:showLoadingMask("Login")
     CS.ThirdManager.Instance:login()
 end
@@ -240,6 +245,7 @@ end
 
 -- 邮箱登录
 function P:onBtLogin()
+    self._loginBt = LOGIN_TYPE.EMAIL
     local email = bee.getText(self.InputFieldName, "InputField")
     local pwd = bee.getText(self.InputFieldPwd, "InputField")
 
@@ -260,8 +266,10 @@ function P:onBtLogin()
     LoginModel:emailLogin(email, pwd, function(data)
         if data and data.code < 0 then
             local e = tpl_errorCode[data.code]
-            if e then
+            if e and data.code ~= -52 and data.code ~= -53 and data.code ~= -54 then
                 bee.setText(self.TipsText, _T(e.id))
+            else
+                bee.setText(self.TipsText, "")
             end
         end
     end, true)
@@ -326,7 +334,45 @@ function P:evt_faceBookLogin(token)
     end
 end
 
-function P:evt_login_fail()
+function P:evt_login_fail(data)
     self:setLoginCont()
+    if not data then
+        UiManager:showToast(_T("LAB_UPDATE_TIPS_4"))
+        
+        self._loginFailCount = (self._loginFailCount or 0) + 1
+        if self._loginFailCount >= 3 then
+            self._loginFailCount = nil
+
+            UiManager:showTip({
+                text = _T("LAB_NET_ERR_TIPS1"),
+                noClose = true,
+                sureStr = _T("LAB_NET_LINK_AGAIN"),
+                onSure = function()
+                    if UrlManager:getSelectKey() == UrlManager:getHttpUrl() then
+                        UrlManager:nextHttpUrl()
+                    end
+                    UrlManager:setSelectKey(nil)
+                    if self._loginBt == LOGIN_TYPE.STOVE then
+                        self:onBtStove()
+                    elseif self._loginBt == LOGIN_TYPE.STEAM then
+                        self:onBtSteam()
+                    elseif self._loginBt == LOGIN_TYPE.FACEBOOK then
+                        self:onBtFacebook()
+                    elseif self._loginBt == LOGIN_TYPE.TWITTER then
+                        self:onBtX()
+                    elseif self._loginBt == LOGIN_TYPE.iOS then
+                        self:onBtApple()
+                    elseif self._loginBt == LOGIN_TYPE.EMAIL then
+                        self:onBtLogin()
+                    elseif self._loginBt == LOGIN_TYPE.GUEST then
+                        LoginModel:guestLogin()
+                    end
+                end,
+                onCancel = function()
+                end,
+            })
+        end
+    end
 end
 
+return P

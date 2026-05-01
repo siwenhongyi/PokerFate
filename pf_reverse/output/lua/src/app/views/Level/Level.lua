@@ -181,3 +181,4 @@ function P:levelGuide()
     GuideManager:startSystemGuide(8001, 0.65)
 end
 
+return P

@@ -20,7 +20,10 @@ local function _initData()
 {100904,"LAB_CHAR_NAME_1009",1,"RoleSpine/1009_5/Role1009_5",nil},
 {101005,"LAB_CHAR_NAME_1010",1,"RoleSpine/1010_5/Role1010_5",nil},
 {101205,"LAB_CHAR_NAME_1012",1,"RoleSpine/1012_5/Role1012_5",nil},
-{101305,"LAB_CHAR_NAME_1013",1,"RoleSpine/1013_5/Role1013_5",nil}
+{101305,"LAB_CHAR_NAME_1013",1,"RoleSpine/1013_5/Role1013_5",nil},
+{100205,"LAB_CHAR_NAME_1002",1,"RoleSpine/1002_5/Role1002_5",nil},
+{100105,"LAB_CHAR_NAME_1001",1,"RoleSpine/1001_6/Role1001_6",nil},
+{101405,"LAB_CHAR_NAME_1014",1,"RoleSpine/1014_5/Role1014_5",nil}
 }
     for _, v in pairs(bodys) do
         local m = {}
@@ -42,3 +45,4 @@ function tpl_story_characters_clone(key)
     return nil
 end
 
+return P

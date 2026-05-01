@@ -59,8 +59,10 @@ function P:onShow()
 
     Net:post("/open/newVersionPicture", {lang = LanguageManager:getLanguage()}, function(d)
         if d and d.code == 0 and d.image_url and "" ~= d.image_url then
-            self.Update_img_pic_01:GetComponent("LoadImage"):DownloadImage(d.image_url)
+            -- self.Update_img_pic_01:GetComponent("LoadImage"):DownloadImage(d.image_url)
+            bee.getDownloadImage(self.Update_img_pic_01, d.image_url)
         end
     end)
 end
 
+return P

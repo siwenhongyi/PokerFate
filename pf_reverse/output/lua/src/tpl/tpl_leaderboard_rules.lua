@@ -3,14 +3,14 @@
 local P = {}
 local PL = {}
 local function _initData()
-    local keys = {'id','leaderboard_type','tab_name','rules_dec','index','change_time',}
+    local keys = {'id','leaderboard_type','tab_name','rules_dec','index','change_time','rule_rewards_title',}
     local bodys = {
-{1,2,"LAB_LEADERBOARD_RULES_TAB_2","LAB_LEADERBOARD_RULES_DEC_2",1,1769972400},
-{2,3,"LAB_LEADERBOARD_RULES_TAB_4","LAB_LEADERBOARD_RULES_DEC_6",2,nil},
-{3,4,"LAB_LEADERBOARD_RULES_TAB_5","LAB_LEADERBOARD_RULES_DEC_4",3,nil},
-{4,5,"LAB_LEADERBOARD_RULES_TAB_6","LAB_LEADERBOARD_RULES_DEC_5",4,nil},
-{5,1,"LAB_LEADERBOARD_RULES_TAB_1","LAB_LEADERBOARD_RULES_DEC_1",5,nil},
-{6,nil,"LAB_LEADERBOARD_RULES_TAB_3","LAB_LEADERBOARD_RULES_DEC_3",6,nil}
+{1,2,"LAB_LEADERBOARD_RULES_TAB_2","LAB_LEADERBOARD_RULES_DEC_2",1,1769972400,1},
+{2,3,"LAB_LEADERBOARD_RULES_TAB_4","LAB_LEADERBOARD_RULES_DEC_6",2,nil,1},
+{3,4,"LAB_LEADERBOARD_RULES_TAB_5","LAB_LEADERBOARD_RULES_DEC_4",3,nil,2},
+{4,5,"LAB_LEADERBOARD_RULES_TAB_6","LAB_LEADERBOARD_RULES_DEC_5",4,nil,2},
+{5,1,"LAB_LEADERBOARD_RULES_TAB_1","LAB_LEADERBOARD_RULES_DEC_1",5,nil,2},
+{6,nil,"LAB_LEADERBOARD_RULES_TAB_3","LAB_LEADERBOARD_RULES_DEC_3",6,nil,nil}
 }
     for _, v in pairs(bodys) do
         local m = {}
@@ -32,3 +32,4 @@ function tpl_leaderboard_rules_clone(key)
     return nil
 end
 
+return P

@@ -47,3 +47,4 @@ function P:showPropItem()
     end
 end
 
+return P

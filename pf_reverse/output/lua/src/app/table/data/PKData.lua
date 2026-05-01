@@ -421,6 +421,7 @@ function P:resetPlayerInfo(player_info)
 		player.action_type = POKER_ACTION.WAIT
 		player.last_action_type = POKER_ACTION.NONE
 		player.chips = info.chips
+		player.bet_chip = 0
 		player.begin_chips = info.begin_chips or player.chips
 		player.win_rate = 0
     	player.last_win_rate = 0
@@ -704,3 +705,11 @@ function P:isHaveSurelyWinner()
 	return false
 end
 
+function P:isCanScrop(chips)
+	if self:isTournament() then
+		return chips >= self.room_info.bust_threshold
+	end
+	return chips >= tpl_constdata.ScrapRecoverBlindRate * self:getBigBlind()
+end
+
+return P

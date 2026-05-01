@@ -33,3 +33,4 @@ function tpl_seven_day_tasks_stage_clone(key)
     return nil
 end
 
+return P
