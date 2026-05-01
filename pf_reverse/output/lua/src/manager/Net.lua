@@ -57,6 +57,7 @@ WebSocket:SetConnectCb(function(ret)
 	Net._connecting = nil
     if Net.connectCb then
         Net.connectCb(ret)
+		Net.connectCb = nil
     end
 end)
 
@@ -87,7 +88,7 @@ WebSocket:SetRecvCb(function(body)
 		if msg then
 			bee.protoDefault(szPackType, msg)
 			if not bee.isRelease and "pb.HeartBeatRSP" ~= szPackType and "pb.HBPingRSP" ~= szPackType then
-				print("[Net] onRecv", szPackType, json.encode(msg))
+				print("[Net] onRecv", scheduler.timeSpend, szPackType, json.encode(msg))
 			else
 			end
 
@@ -161,6 +162,10 @@ WebSocket:SetErrorCb(function(code, msg)
 	if Net._connecting then
 		UrlManager:nextServerUrl()
 		Net._connecting = nil
+		if Net.connectCb then
+			Net.connectCb(false)
+			Net.connectCb = nil
+		end
 	end
     if Net.errorCb then
         Net.errorCb(code, msg)
@@ -213,6 +218,11 @@ function P:onErrorCode(msg)
 					text = _T("LAB_UPDATE_INFO_4"),
 					button = 1,
 				})
+			elseif e.id == "HTTP_IP_BLOCKED" or e.id == "HTTP_IMEI_BLOCKED" or e.id == "HTTP_ACCOUNT_BLOCKED" then
+				UiManager:showUI("LoginBanTipDialog", {
+					msg = msg,
+					err = e,
+				})
 			else
 				UiManager:showError(_T(e.id))
 			end
@@ -249,7 +259,7 @@ end
 
 function P:sendReq(name, req, cb)
 	if not bee.isRelease and name ~= "pb.HeartBeatREQ" then
-    	print("[Net] send", name, json.encode(req))
+    	print("[Net] send", scheduler.timeSpend, name, json.encode(req))
 	end
 	if self.recver and self.recver:onRecv(name, req) then
 		return
@@ -263,8 +273,8 @@ function P:sendReq(name, req, cb)
 	self._sendMap[reqName] = scheduler.timeSpend
 end
 
-function P:get(url, onSuc, onFail, noTipError)
-	if not bee.checkCd(url, 0.5) then
+function P:get(url, onSuc, onFail, noTipError, immediately)
+	if not immediately and not bee.checkCd(url, 0.5) then
 		return
 	end
 	if bee.isDev or bee.isEditor then
@@ -339,7 +349,7 @@ function P:post(url, req, onSuc, onFail, noTipError)
 		if onSuc then
 			-- onSuc(d and d.tars_ret or nil)
 			onSuc(d)
-			if not noTipError then
+			if not noTipError or d.code == -52 or d.code == -53 or d.code == -54 then
 				self:onErrorCode(d)
 			end
 		end
@@ -427,3 +437,4 @@ function P:showWaitNet()
 	UiManager:showLoadingMask("WaitNet")
 end
 
+return P

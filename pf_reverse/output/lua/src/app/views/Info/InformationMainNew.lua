@@ -1,44 +1,43 @@
-local P = class("InformationMain", UiFullView)
+local P = class("InformationMainNew", UiFullView)
 
 function P:onAwake()
     self.AnimRoot = self:find("AnimRoot")
     self.Center = self:find("Center", self.AnimRoot)
+    self.Panel = self:find("Panel", self.Center)
     self.RightTop = self:find("RightTop", self.AnimRoot)
     self.LeftTop = self:find("LeftTop", self.AnimRoot)
 
     self.CharacterImage = self:find("CharacterImage", self.Center)
 
     self.Tips = self:find("Tips", self.Center)
-    self.Info1 = self:find("Info1", self.Center)
-    self.Info2 = self:find("Info2", self.Center)
-    self.Info3 = self:find("Info3", self.Center)
-    self.Info4 = self:find("Info4", self.Center)
-    self.Info5 = self:find("Info5", self.Center)
+    self.Info1 = self:find("Info1", self.Panel)
+    self.Info2 = self:find("Info2", self.Panel)
+    self.Info3 = self:find("Info3", self.Panel)
 
-    self.Edit_01_Button = self:find("EditButton", self.Info1)
+    self.Edit_01_Button = self:find("Edit_01_Button", self.Info1)
     self.Edit_02_Button = self:find("Edit_02_Button", self.Info1)
-    self.CopyButton = self:find("CopyButton", self.Info1)
-    self.TextName = self:find("TextName", self.Info1)
-    self.TextUID = self:find("TextUID", self.CopyButton)
+    self.CopyButton = self:find("Uid", self.Info1)
+    self.Avatar = self:find("Avatar", self.Info1)
+    self.TextName = self:find("Name/TextName", self.Info1)
+    self.TextUID = self:find("Uid/TextUID", self.Info1)
     self.ImageTitle = self:find("ImageTitle", self.Info1)
     self.TextLevel = self:find("Rank/TextLevel", self.Info1)
-    self.Avatar = self:find("Avatar", self.Info1)
     self.ImageFrame = self:find("ImageFrame", self.Info1)
     self.CertificationIcon = self:find("Certification/CertificationIcon", self.Info1)
     self.CertificationText = self:find("Certification/CertificationText", self.Info1)
 
-    self.Edit_03_Button = self:find("EditButton", self.Info2)
-    self.TextDec = self:find("TextDec", self.Info2)
+    self.Edit_03_Button = self:find("Comment/EditButton", self.Info2)
+    self.TextDec = self:find("Comment/TextDec", self.Info2)
 
-    self.Edit_04_Button = self:find("Edit_04_Button", self.Info3)
-    self.TextEmpty = self:find("TextEmpty", self.Info3)
+    self.Edit_04_Button = self:find("Character/Edit_04_Button", self.Info2)
+    self.TextEmpty = self:find("Character/TextEmpty", self.Info2)
     self.BgAvatars = {
-        self:find("BgAvatar1", self.Info3),
-        self:find("BgAvatar2", self.Info3),
-        self:find("BgAvatar3", self.Info3),
-        self:find("BgAvatar4", self.Info3),
+        self:find("Character/BgAvatar1", self.Info2),
+        self:find("Character/BgAvatar2", self.Info2),
+        self:find("Character/BgAvatar3", self.Info2),
+        self:find("Character/BgAvatar4", self.Info2),
     }
-    self.Item1 = self:find("Item1", self.Info3)
+    self.Item1 = self:find("Character/Item1", self.Info2)
     self.Item1:SetActive(false)
 
     self.ZoomButton = self:find("ZoomButton", self.Center)
@@ -50,18 +49,71 @@ function P:onAwake()
     self.ShareCont:SetActive(false)
 
     self.TextCollects = {
-        self:find("Item1/TextNum", self.Info4),
-        self:find("Item2/TextNum", self.Info4),
-        self:find("Item3/TextNum", self.Info4),
-        self:find("Item4/TextNum", self.Info4),
+        self:find("Collection/TextNum1", self.Info2),
+        self:find("Collection/TextNum2", self.Info2),
+        self:find("Collection/TextNum3", self.Info2),
+        self:find("Collection/TextNum4", self.Info2),
     }
 
-    self.TextRecords = {
-        self:find("Item1/TextNum", self.Info5),
-        self:find("Item2/TextNum", self.Info5),
-        self:find("Item3/TextNum", self.Info5),
-        self:find("Item4/TextNum", self.Info5),
+    self.TextAchievements = {
+        self:find("Achievement/01/TextNum", self.Info2),
+        self:find("Achievement/02/TextNum", self.Info2),
+        self:find("Achievement/03/TextNum", self.Info2),
+
     }
+
+    self.GameFilter = self:find("GameFilter", self.Info3)
+    local Content = self:find("RecordList/Viewport/Content", self.Info3)
+    self.Statistics = self:find("Statistics", Content)
+    self.MaxCardtype = self:find("MaxCardtype", Content)
+    self.MaxWinCardtype = self:find("MaxWinCardtype", Content)
+    self.Trend = self:find("Trend", Content)
+
+    self.TextGameType = self:find("Info/TextGameType", self.Statistics)
+    self.ItemGameNum = self:find("Info/ItemGameNum", self.Statistics)
+    self.TextGameNum = self:find("TextGameNum", self.ItemGameNum)
+    self.InfoView = self:find("Info/InfoView", self.Statistics)
+    self.InfoViewPos = self.InfoView.transform.localPosition
+    self.InfoItem1 = self:find("Info/Item1", self.Statistics)
+    self.InfoItem1:SetActive(false)
+    self.InfoLock = self:find("Lock", self.Statistics)
+    self.InfoUnlock = self:find("Unlock", self.Statistics)
+    self.InfoUnlock:SetActive(false)
+
+    self.Rates = {
+        self:find("Rate1", self.Statistics),
+        self:find("Rate2", self.Statistics),
+        self:find("Rate3", self.Statistics),
+        self:find("Unlock/Rate4", self.Statistics),
+        self:find("Unlock/Rate5", self.Statistics),
+        self:find("Unlock/Rate6", self.Statistics),
+    }
+    
+    self.TrendView = self:find("View", self.Trend)
+    self.TrendPoint = self:find("Point", self.Trend)
+    self.TrendLine = self:find("Line", self.Trend)
+    self.TrendPoint:SetActive(false)
+    self.TrendLine:SetActive(false)
+
+    self.Tabs = {
+        self:find("Tab/Tab1Toggle", self.Panel),
+        self:find("Tab/Tab2Toggle", self.Panel),
+    }
+
+    bee.onCheck(self.Tabs[1], function(isOn)
+        if isOn then
+            self.Info2:SetActive(true)
+            self.Info3:SetActive(false)
+		    Game:playSound("ui_tab_switch_1")
+        end
+    end)
+    bee.onCheck(self.Tabs[2], function(isOn)
+        if isOn then
+            self.Info2:SetActive(false)
+            self.Info3:SetActive(true)
+		    Game:playSound("ui_tab_switch_1")
+        end
+    end)
 
     bee.addClick(self.CopyButton, function()
         CS.SdkHelper.copyText("" .. (self._uid or PlayerModel:getUid()))
@@ -160,6 +212,43 @@ function P:onAwake()
         self:hideUI()
     end)
 
+    bee.addClick(self:find("common_button_info_07", self.TextGameType), function()
+        Game:playSound("ui_button_confirm")
+        UiManager:showUI("CommonRules", {text = _T("LAB_INFO_064"), title = _T("LAB_INFO_068")})
+    end)
+
+    bee.addClick(self:find("UnlockButton", self.InfoLock), function()
+        Game:playSound("ui_button_confirm")
+        UiManager:showUI("ShopMonthlyCardPurchase")
+    end)
+
+    bee.addClick(self:find("level_button_info", self.InfoLock), function()
+		Game:playSound("ui_button_confirm")
+		UiManager:showUI("ShopMonthlyCardRules")
+    end)
+
+    self._sng_count_list = {10, 20, 50}
+    self._sng_count_index = 1
+    self._sng_count = self._sng_count_list[self._sng_count_index]
+    bee.addClick(self:find("Session/common_slider_02_button_plus", self.Trend), function()
+        Game:playSound("ui_button_confirm")
+        self._sng_count_index = self._sng_count_index + 1
+        if self._sng_count_index > #self._sng_count_list then
+            self._sng_count_index = #self._sng_count_list
+        end
+        self._sng_count = self._sng_count_list[self._sng_count_index]
+        self:refreshTrend()
+    end)
+    bee.addClick(self:find("Session/common_slider_02_button_minus", self.Trend), function()
+        Game:playSound("ui_button_confirm")
+        self._sng_count_index = self._sng_count_index - 1
+        if self._sng_count_index < 1 then
+            self._sng_count_index = 1
+        end
+        self._sng_count = self._sng_count_list[self._sng_count_index]
+        self:refreshTrend()
+    end)
+
     for _, v in ipairs(self.BgAvatars) do
         bee.addClick(v, function()
             if self._uid == PlayerModel:getUid() and not self._hideOperate then
@@ -175,9 +264,22 @@ function P:onAwake()
         -- 牌局内查看玩家信息
         TaskModel:reportTask(TaskType.CheckView, TaskTargetId.InfoInGame)
     end
+
+    self._filter_game_types = {GAME_GAME_TYPE.LOBBY_HOLDEM_GAME, GAME_GAME_TYPE.LOBBY_OMAHA_GAME, GAME_GAME_TYPE.SNG_HOLDEM_GAME, GAME_GAME_TYPE.FRIEND_HOLDEM_GAME}
+    self.Filter = UiFilterBox:create(self.GameFilter, self:find("MusicFilteItem", self.GameFilter), self.node)
+    self.Filter:setDatas({
+        _T("LAB_POKER_GAME"),
+        _T("LAB_OMAHA"),
+        _T("LAB_SNG"),
+        _T("LAB_FRIROOM_001"),
+    })
+    self.Filter:setSelectFunc(function(idx, data)
+        self:reqGameData(self._filter_game_types[idx])
+    end)
 end
 
 function P:onShow()
+    self.Filter:setDisabled(true)
     self.transform.localPosition = bee.v3zero
     self._uid = self._params and self._params.uid or PlayerModel:getUid()
     if self._uid ~= PlayerModel:getUid() then
@@ -201,6 +303,7 @@ function P:onShow()
 
         PlayerModel:sortFavoriteRoles()
         self:setFavoriteSkins(PlayerModel:getFavoriteRoles())
+        self:refreshAchievement()
 
         for _, v in ipairs(self.TextCollects) do
             bee.setText(v, 0)
@@ -241,9 +344,6 @@ function P:onShow()
                 self.CertificationIcon:GetComponent("ButtonZoom").enabled = false
             end
         end
-        
-        self:evt_SelfAchievementsRSP(PlayerModel:getAchievements())
-        Net:sendReq("pb.SelfAchievementsREQ", {})
 
         self.AddFriendButton:SetActive(false)
         self.ReportButton:SetActive(false)
@@ -302,6 +402,220 @@ function P:onShow()
     if self._params.from == "lobby" then
         self:infoGuide()
     end
+
+    self._data = {
+        game_type = self._filter_game_types[1], -- 游戏类型
+        fire_power= 0,  -- 王座积分
+        champion_points= 0,  -- 冠军积分
+        play_times= 0, -- 已玩手牌数
+        win_play_times= 0,  -- 获胜手牌数
+        round = 0, -- 总场次
+        win_round= 0, -- 获胜场次
+        tour_round = 1,
+        tour_win_round = 0,
+        tour_max_profit = 0,
+        tour_profit = 0,
+        max_profit= 0, -- 单次最高奖池
+        profit= 0, -- 累计获胜奖池
+        pool_entry_rate= 0, -- 入池率
+        add_before_flipping_rate= 0, -- 翻牌前加注率
+        three_bet_rate= 0, -- 3bet率
+        show_hand_rate= 0, -- 摊牌率
+        active_rate= 0, -- 激进系数
+        c_bete_rate= 0, -- c-bet率
+        best_cards = nil, -- 最佳牌型
+        max_profit_cards= nil -- 获胜最大奖池牌型
+    }
+    
+    self:refreshGameData(self._data)
+
+    local flag = true
+    if GameModel.data then
+        for k, v in ipairs(self._filter_game_types) do
+            if GameModel.data:getGameType() == v then
+                self.Filter:setSelectIdx(k)
+                flag = false
+                break
+            end
+        end
+        
+        bee.setCheck(self.Tabs[2], true)
+        self.Info2:SetActive(false)
+        self.Info3:SetActive(true)
+    else
+        self:reqGameData(self._filter_game_types[self.Filter:getSelectIdx()])
+    end
+end
+
+function P:afterShow()
+    self.Filter:setDisabled(false)
+end
+
+function P:reqGameData(game_type)
+    self._game_type = game_type
+    Net:post("/player/gameData", {game_type = game_type, player_uid = self._uid, lang = LAN:getLanguage()}, function(data)
+        if not bee.isNull(self.node) and 0 == data.code and data.data.game_type == self._game_type then
+            self:refreshGameData(data.data)
+        end
+    end)
+end
+
+function P:refreshGameData(data)
+    self.InfoUnlock:SetActive(ShopModel:isMonthlyCard())
+    self.InfoLock:SetActive(not ShopModel:isMonthlyCard())
+
+    self:removeAllChildren(self.InfoView)
+    -- bee.setText(self.TextGameType, GF.getGameTypeName(data.game_type, true))
+    if data.game_type == GAME_GAME_TYPE.LOBBY_HOLDEM_GAME or data.game_type == GAME_GAME_TYPE.LOBBY_OMAHA_GAME or data.game_type == GAME_GAME_TYPE.LOBBY_HOLDEM_ALLIN then
+        self:_addInfoItem(_T("LAB_INFO_046"), data.play_times)
+        self:_addInfoItem(_T("LAB_INFO_047"), data.win_play_times)
+        self:_addInfoItem(_T("LAB_INFO_048"), _N(data.profit))
+        self.ItemGameNum:SetActive(true)
+        self:find("information_icon_title_01", self.ItemGameNum):SetActive(true)
+        self:find("information_icon_title_02", self.ItemGameNum):SetActive(false)
+        self.InfoView.transform.localPosition = self.InfoViewPos
+
+        bee.setText(self.TextGameNum, data.fire_power)
+        self.MaxWinCardtype:SetActive(true)
+        self:refreshCardType(data.max_profit_cards, self.MaxWinCardtype)
+        self.Trend:SetActive(false)
+    elseif GF.isFriendsRoom(data.game_type) then
+        self:_addInfoItem(_T("LAB_INFO_046"), data.play_times)
+        self:_addInfoItem(_T("LAB_INFO_047"), data.win_play_times)
+        self:_addInfoItem(_T("LAB_INFO_048"), _N(data.profit))
+        self.ItemGameNum:SetActive(false)
+        self.InfoView.transform.localPosition = bee.v3(self.InfoViewPos.x, self.InfoViewPos.y + 40)
+
+        self.MaxWinCardtype:SetActive(true)
+        self:refreshCardType(data.max_profit_cards, self.MaxWinCardtype)
+        self.Trend:SetActive(false)
+    elseif GF.isSNG(data.game_type) then
+        self:_addInfoItem(_T("LAB_INFO_049"), data.tour_round)
+        self:_addInfoItem(_T("LAB_INFO_050"), data.tour_win_round)
+        self:_addInfoItem(_T("LAB_INFO_051"), _N(data.tour_max_profit))
+        self:_addInfoItem(_T("LAB_INFO_052"), _N(data.tour_profit))
+        self.ItemGameNum:SetActive(true)
+        self:find("information_icon_title_01", self.ItemGameNum):SetActive(false)
+        self:find("information_icon_title_02", self.ItemGameNum):SetActive(true)
+        self.InfoView.transform.localPosition = self.InfoViewPos
+
+        bee.setText(self.TextGameNum, data.champion_points)
+
+        self.MaxWinCardtype:SetActive(false)
+
+        self.Trend:SetActive(true)
+        self:refreshTrend()
+        Net:post("/player/sngRecord", {player_uid = self._uid}, function(resp)
+            if not bee.isNull(self.node) and 0 == resp.code then
+                self._sng_list = resp.list
+                self:refreshTrend()
+            end
+        end)
+    end
+    self:refreshCardType(data.best_cards, self.MaxCardtype)
+
+    self:_refreshRate(data.pool_entry_rate, self.Rates[1], 20, 28)
+    self:_refreshRate(data.add_before_flipping_rate, self.Rates[2], 15, 25)
+    self:_refreshRate(data.three_bet_rate, self.Rates[3], 7, 13)
+    self:_refreshRate(data.show_hand_rate, self.Rates[4], 20, 30)
+    self:_refreshRate(data.active_rate, self.Rates[5], 30, 50)
+    self:_refreshRate(data.c_bete_rate, self.Rates[6], 40, 75)
+end
+
+function P:_addInfoItem(name, value)
+    local item = CU.GameObject.Instantiate(self.InfoItem1, self.InfoView.transform, false)
+    item:SetActive(true)
+    bee.setText(self:find("TextName", item), name)
+    bee.setText(self:find("TextNum", item), value)
+end
+
+function P:_refreshRate(rate, item, low, hight)
+    bee.setText(self:find("TextNum", item), "" .. math.round((rate or 0) / 10) / 10 .. "%")
+    local fill = self:find("CircleSlider/information_new_slider_fill_01", item)
+    bee.setFillAmount(fill, rate / 10000)
+end
+
+function P:refreshCardType(data, item)
+    if not data or data.profit <= 0 then
+        self:find("TextEmpty", item):SetActive(true)
+        self:find("Win", item):SetActive(false)
+    else
+        self:find("TextEmpty", item):SetActive(false)
+        self:find("Win", item):SetActive(true)
+
+        bee.setText(self:find("Win/TextTitle", item), GameModel:getReplayTitle({
+            game_type = self._game_type, tour_name = data.tour_name, small_blind = data.sb, big_blind = data.bb, game_start_time = data.time}))
+        bee.setText(self:find("Win/TextWin", item), _N(data.profit))
+        
+        if data.cards and (self._uid == PlayerModel:getUid() or #data.cards >= 5) then
+            for i = 1, 5 do
+                bee.setIcon(self:find("Win/card" .. i, item), GF.getCardImageByCode(data.cards[i] or 0))
+            end
+            if #data.cards == 4 then
+                local _, cardType, _ = PKHelper.getOmahaType(data.cards, nil)
+                bee.setText(self:find("Win/TextCardType", item), _T(cardType))
+            else
+                local public_cards = {}
+                for i = 3, 5 do
+                    if data.cards[i] and data.cards[i] ~= 0 then
+                        table.insert(public_cards, data.cards[i])
+                    end
+                end
+                local _, cardType, _ = PKHelper.getHoldemType({data.cards[1], data.cards[2]}, public_cards)
+                bee.setText(self:find("Win/TextCardType", item), _T(cardType))
+            end
+            self:find("Win/ingame_replay_card_type_01", item):SetActive(true)
+        else
+            for i = 1, 5 do
+                local code = data.board and data.board[i] or 0
+                bee.setIcon(self:find("Win/card" .. i, item), GF.getCardImageByCode(code))
+            end
+            self:find("Win/ingame_replay_card_type_01", item):SetActive(false)
+            bee.setText(self:find("Win/TextCardType", item), "")
+        end
+    end
+end
+
+function P:refreshTrend()
+    bee.setText(self:find("Session/TextCount", self.Trend), _F("LAB_INFO_066", self._sng_count))
+    self:find("Session/common_slider_02_button_plus", self.Trend):SetActive(self._sng_count_index < #self._sng_count_list)
+    self:find("Session/common_slider_02_button_minus", self.Trend):SetActive(self._sng_count_index > 1)
+
+    self:removeAllChildren(self.TrendView)
+    if not self._sng_list then
+        return
+    end
+    local index = #self._sng_list - self._sng_count + 1
+    local num = self._sng_count
+    if index < 1 then
+        index = 1
+        num = #self._sng_list
+    end
+
+    local s = self.TrendView.transform.sizeDelta
+    local w = s.x / (self._sng_count - 1)
+    local pointPoses = {}
+    for i = index, #self._sng_list do
+        local v = self._sng_list[i]
+        local point = CU.GameObject.Instantiate(self.TrendPoint, self.TrendView.transform, false)
+        point:SetActive(true)
+        local pos = bee.v3(-s.x/2 + (i - index) * w, (2 - v) * s.y / 2)
+        point.transform.localPosition = pos
+        table.insert(pointPoses, pos)
+        if i > index then
+            local line = CU.GameObject.Instantiate(self.TrendLine, self.TrendView.transform, false)
+            line:SetActive(true)
+            local p1 = pointPoses[#pointPoses - 1]
+            line.transform.localPosition = bee.v3((p1.x + pos.x) / 2, (p1.y + pos.y) / 2)
+            
+            local angle = bee.v3SignedAngle(CU.Vector3.right, bee.v3(pos.x - p1.x, pos.y - p1.y), CU.Vector3.forward)
+            line.transform.localEulerAngles = bee.v3(0, 0, angle)
+            local length = bee.v3Distance(p1, pos)
+            local lineSize = line.transform.sizeDelta
+            lineSize.x = length
+            line.transform.sizeDelta = lineSize
+        end
+    end
 end
 
 function P:setFavoriteSkins(skins)
@@ -340,6 +654,20 @@ function P:setFavoriteSkins(skins)
     end
 end
 
+function P:refreshAchievement(data)
+    if data then
+        for _, v in ipairs(data.counts) do
+            if self.TextAchievements[v.level] then
+                bee.setText(self.TextAchievements[v.level], v.num)
+            end
+        end
+    else
+        for k, v in ipairs(self.TextAchievements) do
+            bee.setText(v, AchievementModel:getTotalNum(k))
+        end
+    end
+end
+
 function P:evt_EditFavoriteRoleRSP(msg)
     -- self:removeAllChildren(self.BgAvatar)
     for _, v in ipairs(self.BgAvatars) do
@@ -347,14 +675,6 @@ function P:evt_EditFavoriteRoleRSP(msg)
     end
     PlayerModel:sortFavoriteRoles()
     self:setFavoriteSkins(PlayerModel:getFavoriteRoles())
-end
-
-function P:evt_SelfAchievementsRSP(msg)
-    msg = msg.achievements or msg
-    bee.setText(self.TextRecords[1], msg.holdem_firepower > 0 and msg.holdem_firepower or "-")
-    bee.setText(self.TextRecords[2], msg.sng_champion > 0 and msg.sng_champion or "-")
-    bee.setText(self.TextRecords[3], msg.mtt_champion > 0 and msg.mtt_champion or "-")
-    bee.setText(self.TextRecords[4], msg.omaha_firepower > 0 and msg.omaha_firepower or "-")
 end
 
 function P:evt_GetOtherDetailInfoRSP(msg)
@@ -367,7 +687,7 @@ function P:evt_GetOtherDetailInfoRSP(msg)
         GF.setFrameImage(self.ImageFrame, msg.brief.frame)
         bee.setText(self.TextDec, msg.declaration)
         self:setFavoriteSkins(msg.favorite_roles)
-        self:evt_SelfAchievementsRSP(msg.achievements)
+        self:refreshAchievement(msg)
 
         bee.setText(self.TextCollects[1], msg.collections.characters)
         bee.setText(self.TextCollects[2], msg.collections.outfits)
@@ -493,6 +813,11 @@ function P:evt_updateSharedPage()
     self:setShareCont()
 end
 
+function P:evt_updateMonthlyCard()
+    self.InfoUnlock:SetActive(ShopModel:isMonthlyCard())
+    self.InfoLock:SetActive(not ShopModel:isMonthlyCard())
+end
+
 function P:setShareCont()
     local ShareReward = self:find("ShareReward", self.ShareCont)
     local Icon = self:find("Icon", ShareReward)
@@ -507,3 +832,4 @@ function P:infoGuide()
     end
 end
 
+return P

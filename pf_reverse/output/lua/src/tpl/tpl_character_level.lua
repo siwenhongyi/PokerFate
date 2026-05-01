@@ -31,3 +31,4 @@ function tpl_character_level_clone(key)
     return nil
 end
 
+return P

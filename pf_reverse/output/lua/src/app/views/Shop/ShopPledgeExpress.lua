@@ -97,3 +97,4 @@ function P:setRewardItem(item, data)
 	PropItem:create(PropItemObj, data):bindTips()
 end
 
+return P

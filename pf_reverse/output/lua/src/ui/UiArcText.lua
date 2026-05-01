@@ -108,3 +108,4 @@ function P:_updateText()
     end
 end
 
+return P

@@ -33,3 +33,4 @@ function tpl_sng_odds_clone(key)
     return nil
 end
 
+return P

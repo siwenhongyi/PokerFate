@@ -61,3 +61,4 @@ function P:evt_beginDraw()
 	self.ClickText:SetActive(false)
 end
 
+return P

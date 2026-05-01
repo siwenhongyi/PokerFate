@@ -38,3 +38,4 @@ function P:refreshRole()
     end
 end
 
+return P

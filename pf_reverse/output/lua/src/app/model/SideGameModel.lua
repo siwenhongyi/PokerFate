@@ -49,6 +49,7 @@ function P:evt_GetSideGameConfRSP(msg)
 		self._exportConf[v.export_id] = v.rate
 	end
 	self._pinball_conf = conf.tpl_conf
+	self._pinball_balls = conf.balls
 
 	bee.emit("evt_setPinballConf")
 end
@@ -61,43 +62,8 @@ function P:getPinballConf()
 	return self._pinball_conf
 end
 
---推送礼包
-function P:checkPushGift(sign, sum, gameType, lvlId)
-	if not sign then
-		return
-	end
-
-    if sum <= 0 then
-        if bee.isInHome() then
-            if PlayerModel:getGold() < tpl_constdata.Bankruptcy_Protection_Balance then
-                Net:sendReq("pb.BustProtectInfoREQ", {}, function(d)
-                    if d.reward_chips == 0 then
-                        self:getPushGift(gameType, lvlId)
-                    end
-                end)
-            else
-                self:getPushGift(gameType, lvlId)
-            end
-        end
-    end
-end
-
-function P:getPushGift(gameType, lvlId)
-    local cfg
-	if gameType == GAME_GAME_TYPE.SIDE_GAME_COLOR_GAME then
-		cfg = tpl_color_game[lvlId]
-	elseif gameType == GAME_GAME_TYPE.SIDE_GAME_PINBALL_GAME then
-		cfg = tpl_pinball[lvlId]
-	end
-	if cfg then
-		if PlayerModel:getGold() < cfg.push_balance then
-			Net:sendReq("pb.PushGiftREQ", {
-				from_game_type = bee.isInHome() and 0 or 1,
-				lvl = lvlId,
-				game_type = gameType,
-			})
-		end
-	end
+function P:getPinballBalls()
+	return self._pinball_balls
 end
 
 function P:isShowPinball()

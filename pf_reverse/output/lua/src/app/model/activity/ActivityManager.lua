@@ -27,9 +27,17 @@ function P:isActivityOpen(actId, subId)
     return false
 end
 
+function P:getActivityEndTime(actId, subId)
+    if actId and self._actMap[actId] then
+        return self._actMap[actId]:getEndTime(subId)
+    end
+    return 0
+end
+
 function P:reqActivityData()
     for _, v in pairs(self._actMap) do
         v:reqActivityData()
     end
 end
 
+return P

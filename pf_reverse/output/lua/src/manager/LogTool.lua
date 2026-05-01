@@ -166,3 +166,4 @@ function bee.log(name, ...)
     LogTool:logEvent(name, ...)
 end
 
+return P

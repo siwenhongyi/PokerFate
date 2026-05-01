@@ -20,7 +20,8 @@ local function _initData()
 {402,"LAB_SYSTEM_NAME_302","LAB_LEVEL_SYSTEM_NAME_402","Level[level_unlock_icon_4]","LAB_UNLOCK_DEC_402","LAB_LOCK_DEC_402",5,nil},
 {403,"LAB_SYSTEM_NAME_303","LAB_LEVEL_SYSTEM_NAME_403","Level[level_unlock_icon_4]","LAB_UNLOCK_DEC_403","LAB_LOCK_DEC_403",11,nil},
 {404,"LAB_SYSTEM_NAME_304","LAB_LEVEL_SYSTEM_NAME_404","Level[level_unlock_icon_4]","LAB_UNLOCK_DEC_404","LAB_LOCK_DEC_404",18,nil},
-{405,"LAB_SYSTEM_NAME_305","LAB_LEVEL_SYSTEM_NAME_405","Level[level_unlock_icon_4]","LAB_UNLOCK_DEC_405","LAB_LOCK_DEC_405",26,nil}
+{405,"LAB_SYSTEM_NAME_305","LAB_LEVEL_SYSTEM_NAME_405","Level[level_unlock_icon_4]","LAB_UNLOCK_DEC_405","LAB_LOCK_DEC_405",26,nil},
+{1001,"LAB_PLAY_REBATE_1","LAB_PLAY_REBATE_1","Level[level_unlock_icon_5]","LAB_UNLOCK_DEC_1","LAB_LOCK_DEC_1",7,nil}
 }
     for _, v in pairs(bodys) do
         local m = {}
@@ -42,3 +43,4 @@ function tpl_system_info_clone(key)
     return nil
 end
 
+return P

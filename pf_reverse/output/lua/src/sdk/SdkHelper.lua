@@ -210,3 +210,4 @@ function P:startAppReview()
 	end)
 end
 
+return P

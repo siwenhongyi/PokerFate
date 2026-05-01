@@ -164,3 +164,4 @@ function P:evt_FriendRoomListRSP(msg)
     self:refreshList()
 end
 
+return P

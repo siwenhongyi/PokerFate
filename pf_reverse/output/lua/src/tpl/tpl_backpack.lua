@@ -46,3 +46,4 @@ function tpl_backpack_clone(key)
     return nil
 end
 
+return P

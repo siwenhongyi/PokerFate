@@ -28,16 +28,17 @@ function P:onAwake()
     self.SevenDayTaskButton = self:find("Left/SevenDayTaskButton", LeftTop)
     self.UpdateButton = self:find("Top/UpdateButton", LeftTop)
     self.ActivityButton = self:find("Left/ActivityButton", LeftTop)
-    self.SideGameTips = self:find("SideGameTips", LeftTop)
     self.TaskButton = self:find("Left/TaskButton", LeftTop)
     self.ActButton = self:find("Left/ActButton", LeftTop)
+
+    self.Developmentfund = self:find("Left2/Developmentfund", LeftTop)
     self.HotspringButton = self:find("Left2/HotspringButton", LeftTop)
     self.GalaSeasonButton = self:find("Left2/GalaSeasonButton", LeftTop)
     self.SchoolButton = self:find("Left2/SchoolButton", LeftTop)
+    self.BunnyGirlButton = self:find("Left2/BunnyGirlButton", LeftTop)
     self.SpringFestivalButton = self:find("Left2/SpringFestivalButton", LeftTop)
 
-    RedManager:bind(self:find("RedPoint", self.ActivityButton), RedTag.Pinball)
-    RedManager:bind(self.SideGameTips, RedTag.Pinball)
+    self.QuickByButton = self:find("Left2/QuickByButton", LeftTop)
 
     self.Character = self:find("Character", LeftTop)
     self.TextLevel = self:find("TextLevel", self.Character)
@@ -53,6 +54,7 @@ function P:onAwake()
     self.SettingButton = self:find("SettingButton", RightTop)
     self.MailButton = self:find("MailButton", RightTop)
     self.NoticeButton = self:find("NoticeButton", RightTop)
+    self.FriendsButton = self:find("FriendsButton", RightTop)
     self.Gold = self:find("Currency/Gold", RightTop)
     self.Ticket1 = self:find("Currency/Ticket1", RightTop)
 
@@ -69,6 +71,8 @@ function P:onAwake()
     self.ExplosionButton = self:find("ExplosionButton", LeftBottomList)
     self.ClickMask = self:find("ClickMask")
     self.ClickMask:SetActive(false)
+    self.RaycastMask = self:find("RaycastMask")
+    self.RaycastMask:SetActive(true)
 
     bee.addClick(self.ClickMask, function()
         self:onClickMask()
@@ -86,7 +90,7 @@ function P:onAwake()
     bee.addClick(self.Character, function()
         self:stopRoleInteraction()
         Game:playSound("ui_button_confirm")
-        UiManager:showUI("InformationMain", {from = "lobby"})
+        UiManager:showUI("InformationMainNew", {from = "lobby"})
     	bee.logEvent("profile-lobby")
     end)
 
@@ -138,6 +142,13 @@ function P:onAwake()
         bee.logEvent("notice-lobby")
     end)
 
+    bee.addClick(self.FriendsButton, function ()
+        self:stopRoleInteraction()
+        Game:playSound("ui_button_confirm")
+        UiManager:showUI("Friend")
+        bee.logEvent("friends-lobby")
+    end)
+
     bee.addClick(self.SettingButton, function()
         self:stopRoleInteraction()
         Game:playSound("ui_button_confirm")
@@ -182,6 +193,13 @@ function P:onAwake()
         self:onClickUIVisibleButton()
     end)
 
+    bee.addClick(self.Developmentfund, function()
+        Game:playSound("ui_button_confirm")
+        bee.logEvent("developmentfund-lobby")
+        self:stopRoleInteraction()
+        UiManager:showUI("DevelopmentFund")
+    end)
+
     bee.addClick(self.HotspringButton, function()
         Game:playSound("ui_button_confirm")
         bee.logEvent("onsen-lobby")
@@ -216,6 +234,17 @@ function P:onAwake()
         end
         self:stopRoleInteraction()
         UiManager:showUI("SchoolMain")
+    end)
+
+    bee.addClick(self.BunnyGirlButton, function()
+        Game:playSound("ui_button_confirm")
+        if not ThemeModel:isActivityOpen() then
+            UiManager:showToast(_T("LAB_EVENT_CHECK_IN_1"))
+            self.BunnyGirlButton:SetActive(false)
+            return
+        end
+        self:stopRoleInteraction()
+        UiManager:showUI("BunnyGirl")
     end)
 
     bee.addClick(self.SpringFestivalButton, function()
@@ -264,11 +293,10 @@ function P:onAwake()
         bee.logEvent("leaderboard-lobby")
         UiManager:showUI("RankingMain")
     end)
-    bee.addClick(self:find("FriendsToggle", BottomToggle), function()
+    bee.addClick(self:find("AchievementToggle", BottomToggle), function()
         self:stopRoleInteraction()
         Game:playSound("ui_button_confirm")
-        UiManager:showUI("Friend")
-        bee.logEvent("friends-lobby")
+        UiManager:showUI("AchievementMain")
     end)
     bee.addClick(self:find("ShopToggle", BottomToggle), function()
         self:stopRoleInteraction()
@@ -290,24 +318,28 @@ function P:onAwake()
         bee.logEvent("lobby-activity")
     end)
 
-    local FriendRedPoint = self:find("FriendsToggle/RedPoint", BottomToggle)
-    RedManager:bind(FriendRedPoint, RedTag.Friends)
-
     local ShopRedPoint = self:find("ShopToggle/RedPoint", BottomToggle)
     RedManager:bind(ShopRedPoint, RedTag.Shop)
     local ShopNewTag = self:find("ShopToggle/NewTag", BottomToggle)
     RedManager:bind(ShopNewTag, RedTag.ShopNewOut)
+    local ShopTimeLeftTag = self:find("ShopToggle/TimeLeftTag", BottomToggle)
+    RedManager:bind(ShopTimeLeftTag, RedTag.ShopTimeLimitOut)
     
     RedManager:bind(self:find("BackpackToggle/RedPoint", BottomToggle), RedTag.Backpack)
+    RedManager:bind(self:find("AchievementToggle/RedPoint", BottomToggle), RedTag.Achievement)
 
     RedManager:bind(self:find("Reddot", self.MailButton), RedTag.Email)
     RedManager:bind(self:find("Reddot", self.NoticeButton), RedTag.Notice)
+    RedManager:bind(self:find("Reddot", self.FriendsButton), RedTag.Friends)
     RedManager:bind(self:find("RedPoint", self.SevenDayTaskButton), RedTag.SevenDayTask)
     RedManager:bind(self:find("RedPoint", self.ActButton), RedTag.Activity)
     RedManager:bind(self:find("Reddot", self.CharacterButton), RedTag.Character)
+
+    RedManager:bind(self:find("Reddot", self.Developmentfund), RedTag.DevelopmentFund)
     RedManager:bind(self:find("Reddot", self.HotspringButton), RedTag.HotSpring)
     RedManager:bind(self:find("Reddot", self.GalaSeasonButton), RedTag.GalaSeason)
     RedManager:bind(self:find("Reddot", self.SchoolButton), RedTag.School)
+    RedManager:bind(self:find("Reddot", self.BunnyGirlButton), RedTag.BunnyGirl)
     RedManager:bind(self:find("Reddot", self.SpringFestivalButton), RedTag.SpringFestival)
     RedManager:bind(self:find("RedPoint", self.UpdateButton), RedTag.UpdateTag)
 
@@ -315,6 +347,7 @@ function P:onAwake()
     self.HotspringButton:SetActive(false)
     self.GalaSeasonButton:SetActive(false)
     self.SchoolButton:SetActive(false)
+    self.BunnyGirlButton:SetActive(false)
     self.SpringFestivalButton:SetActive(false)
 
     self.ShopPushButton:SetActive(#ShopModel:getShopPushList() > 0)
@@ -338,6 +371,8 @@ function P:onStart()
         [self.HotspringButton] = ActivityId.HotSpring,
         [self.GalaSeasonButton] = ActivityId.GalaSeason,
         [self.SchoolButton] = ActivityId.School,
+        [self.BunnyGirlButton] = ActivityId.BunnyGirl,
+
     }
     self:schedule(1, function()
         self:checkActivityButtons()
@@ -375,6 +410,7 @@ function P:onShow()
     GameModel:setData(nil, nil)
 
     self:refreshColorGame()
+    self:refreshDevelopmentfund()
     self:checkActivityButtons()
 
 	if GuideManager:isInGuide() then
@@ -383,6 +419,8 @@ function P:onShow()
         GuideManager:startGuide()
         return
     end
+
+    QuickByModel:addButtonItem(self.uiName, self.QuickByButton)
 
     -- 进入大厅后请求角色数据
     CharacterModel:requestGetSkinGameDetail()
@@ -411,6 +449,7 @@ end
 
 function P:afterShow()
     if GuideManager:isInGuide() then
+        self.RaycastMask:SetActive(false)
         return
     end
 
@@ -428,6 +467,8 @@ function P:afterShow()
     if not self._params or self._params.from ~= "StartScene" then
         self:evt_requestUpdateInfo()
     end
+
+    ClientDataModel:reqData()
 end
 
 function P:tryAutoPop()
@@ -453,6 +494,7 @@ function P:tryAutoPop()
 
     PayHelper:checkPurchase()
     
+    ShopModel:tryAutoPop()
     ActivityNewmanCheckinModel:checkAutoPop()
     SignInModel:checkSignIn()
     NoticeModel:tryAutoPop()
@@ -465,6 +507,8 @@ function P:tryAutoPop()
         end
     end
     bee.runTask()
+
+    self.RaycastMask:SetActive(false)
 end
 
 --活动礼包弹窗
@@ -493,6 +537,10 @@ function P:refreshColorGame()
     self.ActivityButton:SetActive(SettingModel:isColorGameUnlock())
 end
 
+function P:refreshDevelopmentfund() 
+    self.Developmentfund:SetActive(SettingModel:isDevelopmentfundUnlock())
+end
+
 function P:evt_updateShopLimit()
     self.ShopPushButton:SetActive(#ShopModel:getShopPushList() > 0)
 end
@@ -506,6 +554,7 @@ end
 function P:evt_ExpChangeRSP()
     self:evt_refreshLevel()
     self:refreshColorGame()
+    self:refreshDevelopmentfund()
 end
 
 function P:evt_refreshTopInfo()
@@ -658,16 +707,18 @@ function P:setCharacterImage()
     local role = CharacterModel:getRole(skinCfg.role)
     if role then
         self.characterCls = ObjectPool:getCls(self.CharacterImage)
-        self.characterCls:setRole(role)
-        self.characterCls:setSkin(skinCfg)
-        self.characterCls:setBubbleItem(self.BubbleItem)
-        self.characterCls:initSpecialInteraction(function()
-            TaskModel:reportTask(TaskType.RoleInteraction)
-        end)
-        self.characterCls:initLobbyClickVoice(function()
-            TaskModel:reportTask(TaskType.RoleInteraction)
-        end)
-        self.characterCls:initAccessoriesInteraction()
+        if self.characterCls then
+            self.characterCls:setRole(role)
+            self.characterCls:setSkin(skinCfg)
+            self.characterCls:setBubbleItem(self.BubbleItem)
+            self.characterCls:initSpecialInteraction(function()
+                TaskModel:reportTask(TaskType.RoleInteraction)
+            end)
+            self.characterCls:initLobbyClickVoice(function()
+                TaskModel:reportTask(TaskType.RoleInteraction)
+            end)
+            self.characterCls:initAccessoriesInteraction()
+        end
 
         self:stopRoleInteraction()
         if self._bubbleTag then
@@ -799,13 +850,6 @@ function P:evt_refreshSysunlock()
     -- end
 end
 
-function P:evt_PushGiftRSP(msg)
-    if msg.code == 0 then
-        local data = {quick_buy = msg.gift_id, gameType = msg.game_type}
-        UiManager:showUI("IngameQuickBy", {data = data})
-    end
-end
-
 function P:onClickExplosionButton()
     local schemeInfo = PlayerModel:getCurScheme()
     if not schemeInfo then
@@ -857,3 +901,4 @@ end
 
 
 
+return P

@@ -100,3 +100,4 @@ function P:_isUnlockPlod(data)
     return data.unlock_time > 0 and ThemeModel:getCurPlotId() < data.id - 1
 end
 
+return P

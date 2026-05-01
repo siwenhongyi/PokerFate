@@ -81,3 +81,4 @@ function P:setContentPos()
 	self.ItemTips.transform:SetParent(self.Ani_root.transform, true)
 end
 
+return P

@@ -59,3 +59,4 @@ function P:createRoleCanvas()
     end
 end
 
+return P

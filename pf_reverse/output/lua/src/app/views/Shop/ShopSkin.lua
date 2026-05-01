@@ -97,6 +97,19 @@ function P:initSkinLit()
 	self._itemsTras, self._positions = {}, {}
 	self._curPos, self._maxPos = 0, 0
 
+	-- 不是跳转且当前有限时红点，跳到第一个剩余时间最少的皮肤上
+	if not self._jumpId then
+		if RedManager:isTag(RedTag.SkinTimeLimit) then
+			local lessTime = -1
+			for i,v in ipairs(self._skins) do
+				if lessTime < 0 or (v.cfg.time_end and v.cfg.time_end < lessTime) then
+					lessTime = v.cfg.time_end
+					self._jumpId = v.cfg.role_skin
+				end
+			end
+		end
+	end
+
 	for i, v in ipairs(self._skins) do
 		local item = self._nodeCache:getItem("SkinItem", self.SkinItem, self.GarmentsList.transform)
 		item:SetActive(true)
@@ -117,6 +130,8 @@ function P:initSkinLit()
 
 	self._maxPos = -(#self._itemsTras - 1) * Space
 	self:refreshItems(self._curPos)
+
+	ShopModel:refreshTimeLimitItemByShopType(SHOP_TYPE.shop_role_skin)
 end
 
 function P:refreshSkinItem(item, data)
@@ -126,8 +141,9 @@ function P:refreshSkinItem(item, data)
 	local Mask = self:find("Mask", item)
 	local TagEvent = self:find("TagEvent", item)
 	local TimeBg = self:find("TimeBg", item)
-	local TimeText = self:find("TimeBg/TimeText", item)
+	local TimeBg1 = self:find("TimeBg1", item)
 	local NewTag = self:find("NewTag", item)
+	local RerunTag = self:find("RerunTag", item)
 
 	local skinId = cfg.role_skin
 	local skinCfg = tpl_character_skin[skinId]
@@ -138,26 +154,22 @@ function P:refreshSkinItem(item, data)
     end
 
     NewTag:SetActive(ShopModel:isShowNewTag(cfg))
+    RerunTag:SetActive(cfg.is_rerun == 1)
 
 	if cfg.time_end then
-		TimeBg:SetActive(true)
-
 		local leftTime = cfg.time_end - bee.getServerTime()
 		if leftTime > 0 then
-			bee.setText(TimeText, ShopModel:getShopTimeText(leftTime))
+			self:_setTimeShow(item, leftTime)
 			self:schedule(1, function()
 				leftTime = leftTime - 1
-				if leftTime > 0 then
-					bee.setText(TimeText, ShopModel:getShopTimeText(leftTime))
-				else
-					bee.setText(TimeText, _T("LAB_BACKPACK_DES_21"))
-				end
+				self:_setTimeShow(item, leftTime)
 			end)
 		else
-			bee.setText(TimeText, _T("LAB_BACKPACK_DES_21"))
+			self:_setTimeShow(item, leftTime)
 		end
 	else
 		TimeBg:SetActive(false)
+		TimeBg1:SetActive(false)
 	end
 
 	bee.addClick(item, function()
@@ -176,6 +188,25 @@ function P:refreshSkinItem(item, data)
 			end
 		end
 	end)
+end
+
+function P:_setTimeShow(item, leftTime)
+	local TimeBg = self:find("TimeBg", item)
+	local TimeBg1 = self:find("TimeBg1", item)
+	if leftTime > 259200 then
+		TimeBg:SetActive(true)
+		TimeBg1:SetActive(false)
+		bee.setText(self:find("TimeText", TimeBg), ShopModel:getShopTimeText(leftTime))
+	elseif leftTime > 0 then
+		-- 小于3天
+		TimeBg:SetActive(false)
+		TimeBg1:SetActive(true)
+		bee.setText(self:find("TimeText", TimeBg1), ShopModel:getShopTimeText(leftTime))
+	else
+		TimeBg:SetActive(false)
+		TimeBg1:SetActive(true)
+		bee.setText(self:find("TimeText", TimeBg1), _T("LAB_BACKPACK_DES_21"))
+	end
 end
 
 function P:refreshItems(offsetX)
@@ -483,3 +514,4 @@ function P:onClickSpecialInteraction()
 	end)
 end
 
+return P

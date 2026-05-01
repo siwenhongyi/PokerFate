@@ -6,3 +6,4 @@ function P:onAwake()
 	end)
 end
 
+return P

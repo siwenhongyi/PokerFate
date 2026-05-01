@@ -31,3 +31,4 @@ function P:onStart()
 	bee.setText(self.TimeText, _T(stageCfg.plot_time))
 end
 
+return P

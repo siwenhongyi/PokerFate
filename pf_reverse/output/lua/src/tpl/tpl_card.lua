@@ -29,3 +29,4 @@ function tpl_card_clone(key)
     return nil
 end
 
+return P

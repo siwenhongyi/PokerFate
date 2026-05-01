@@ -143,22 +143,41 @@ function P:setItem(item, data)
 		else
 			bee.setText(TimeText, _T("LAB_BACKPACK_DES_21"))
 		end
+	elseif cfg.activity then
+		local endTime = ActivityManager:getActivityEndTime(ActivityId.Theme, cfg.activity)
+		if endTime > 0 then
+			TimeBg:SetActive(true)
+			local leftTime = endTime - bee.getServerTime()
+			if leftTime > 0 then
+				bee.setText(TimeText, ShopModel:getShopTimeText(leftTime))
+				self._timeTags[item] = bee.schedule(1, function()
+					leftTime = leftTime - 1
+					if leftTime > 0 then
+						bee.setText(TimeText, ShopModel:getShopTimeText(leftTime))
+					else
+						bee.setText(TimeText, _T("LAB_BACKPACK_DES_21"))
+					end
+				end, item)
+			end
+		else
+			TimeBg:SetActive(false)
+		end
 	else
 		TimeBg:SetActive(false)
 	end
 
 	if cfg.limit_type == SHOP_LIMIT_TYPE.DAILY then
 		LimitText:SetActive(true)
-		bee.setText(LimitText, _T("LAB_SHOP_COMMON_11") .. ":" .. data.buyCount .. "/" .. cfg.limit_count)
+		bee.setText(LimitText, _F("LAB_SHOP_COMMON_42", data.buyCount, cfg.limit_count))
 	elseif cfg.limit_type == SHOP_LIMIT_TYPE.WEEKLY then
 		LimitText:SetActive(true)
-		bee.setText(LimitText, _T("LAB_SHOP_COMMON_12") .. ":" .. data.buyCount .. "/" .. cfg.limit_count)
+		bee.setText(LimitText, _F("LAB_SHOP_COMMON_43", data.buyCount, cfg.limit_count))
 	elseif cfg.limit_type == SHOP_LIMIT_TYPE.MONTHLY then
 		LimitText:SetActive(true)
-		bee.setText(LimitText, _T("LAB_SHOP_COMMON_13") .. ":" .. data.buyCount .. "/" .. cfg.limit_count)
+		bee.setText(LimitText, _F("LAB_SHOP_COMMON_44", data.buyCount, cfg.limit_count))
 	elseif cfg.limit_type == SHOP_LIMIT_TYPE.PERMANENT then
 		LimitText:SetActive(true)
-		bee.setText(LimitText, _T("LAB_SHOP_COMMON_14") .. ":" .. data.buyCount .. "/" .. cfg.limit_count)
+		bee.setText(LimitText, _F("LAB_SHOP_COMMON_45", data.buyCount, cfg.limit_count))
 	else
 		LimitText:SetActive(false)
 	end
@@ -178,3 +197,4 @@ function P:refreshUI()
 	self.packageList:setDatas(data)
 end
 
+return P

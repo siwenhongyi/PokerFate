@@ -54,12 +54,13 @@ function P:onShow()
             bee.addClick(self:find("Avatar", self.Items[k]), function()
                 Game:playSound("ui_button_confirm")
                 if v.brief.uid == PlayerModel:getUid() then
-                    UiManager:showUI("InformationMain", {from = "Ranking"})
+                    UiManager:showUI("InformationMainNew", {from = "Ranking"})
                 else
-                    UiManager:showUI("InformationMain", {uid = v.brief.uid, from = "Ranking"})
+                    UiManager:showUI("InformationMainNew", {uid = v.brief.uid, from = "Ranking"})
                 end
             end)
         end
     end
 end
 
+return P

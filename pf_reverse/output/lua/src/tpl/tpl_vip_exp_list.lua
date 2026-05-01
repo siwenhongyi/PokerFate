@@ -31,3 +31,4 @@ function tpl_vip_exp_list_clone(key)
     return nil
 end
 
+return P

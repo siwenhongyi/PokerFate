@@ -93,3 +93,4 @@ function P:refreshInput()
     self.TextInputTip:SetActive(#self._curRoomId == 0)
 end
 
+return P

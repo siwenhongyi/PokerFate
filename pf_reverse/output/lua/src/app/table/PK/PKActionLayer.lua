@@ -341,8 +341,8 @@ function P:refreshUI()
 		if self.data:getActionIndex() == self.data:getMyPosition() then
 			self:refreshContent()
 		elseif self.data:getActionIndex() > 0 then
+			self:hide(true, true)
 			self:refreshAutoBnts(true)
-			-- self:hide(true, true)
 		else
 			self:hide(true, true)
 		end
@@ -775,3 +775,4 @@ end
 function P:setUnSelectCbox()
 end
 
+return P

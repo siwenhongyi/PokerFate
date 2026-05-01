@@ -156,18 +156,22 @@ GMContent=
 	{examples="#showUI CommonNotice", notes="显示UI(ui名)", cb = function(args)
 		UiManager:showUI(args[1])
 	end},
-	{examples="#showAndroidInfo path", notes="显示Android特征(系统文件名)", cb = function(args)
-		print("CS.SdkHelper.getBrand: ", CS.SdkHelper.getBrand())
-		print("CS.SdkHelper.getModel: ", CS.SdkHelper.getModel())
-		print("CS.SdkHelper.getFingerprint: ", CS.SdkHelper.getFingerprint())
-		print("CS.SdkHelper.getManufacturer: ", CS.SdkHelper.getManufacturer())
-		print("CS.SdkHelper.getBoard: ", CS.SdkHelper.getBoard())
-		print("CS.SdkHelper.getProduct: ", CS.SdkHelper.getProduct())
-		print("CS.SdkHelper.getOs: ", CS.SdkHelper.getOs())
-		print("CU.SystemInfo.operatingSystem: ", CU.SystemInfo.operatingSystem)
-		print("CU.SystemInfo.deviceModel: ", CU.SystemInfo.deviceModel)
-		if args[1] ~= "path" then
-			print("CS.SdkHelper.isSysFileExist: ", tostring(CS.SdkHelper.isSysFileExist(args[1])))
-		end
+	{examples="#fastScrap", notes="1BB爆衣", cb = function(args)
+		tpl_constdata.ScrapBlindRate = 1
+		tpl_constdata.ScrapRecoverBlindRate = 1
 	end},
+	-- {examples="#showAndroidInfo path", notes="显示Android特征(系统文件名)", cb = function(args)
+	-- 	print("CS.SdkHelper.getBrand: ", CS.SdkHelper.getBrand())
+	-- 	print("CS.SdkHelper.getModel: ", CS.SdkHelper.getModel())
+	-- 	print("CS.SdkHelper.getFingerprint: ", CS.SdkHelper.getFingerprint())
+	-- 	print("CS.SdkHelper.getManufacturer: ", CS.SdkHelper.getManufacturer())
+	-- 	print("CS.SdkHelper.getBoard: ", CS.SdkHelper.getBoard())
+	-- 	print("CS.SdkHelper.getProduct: ", CS.SdkHelper.getProduct())
+	-- 	print("CS.SdkHelper.getOs: ", CS.SdkHelper.getOs())
+	-- 	print("CU.SystemInfo.operatingSystem: ", CU.SystemInfo.operatingSystem)
+	-- 	print("CU.SystemInfo.deviceModel: ", CU.SystemInfo.deviceModel)
+	-- 	if args[1] ~= "path" then
+	-- 		print("CS.SdkHelper.isSysFileExist: ", tostring(CS.SdkHelper.isSysFileExist(args[1])))
+	-- 	end
+	-- end},
 }

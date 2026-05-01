@@ -46,3 +46,4 @@ function tpl_task_type_info_clone(key)
     return nil
 end
 
+return P

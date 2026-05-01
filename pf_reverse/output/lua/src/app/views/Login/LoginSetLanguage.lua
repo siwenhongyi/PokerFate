@@ -47,3 +47,4 @@ function P:onAwake()
     end, true)
 end
 
+return P

@@ -7,7 +7,7 @@ function P:onAwake()
     self.PurchaseButton = self:find("PurchaseButton", self.Center)
     self.TextPrice = self:find("TextPrice", self.PurchaseButton)
     -- self.TextPriceOld = self:find("TextPriceOld", self.PurchaseButton)
-    self.TextChip = self:find("TextChip", self.Center)
+    self.TextChip = self:find("ingame_bankrupt_chip_bg/TextChip", self.Center)
     self.TextTime = self:find("TextTime", self.Center)
     self.ingame_bankrupt_chip_01 = self:find("Box/icon_chip_2", self.Center)
     self.GreatValueFrame = self:find("Chips/ingame_bankrupt_frame_value", self.Center)
@@ -29,14 +29,13 @@ function P:onAwake()
         self.TipView = UiManager:showTip({
             text = _T("LAB_SIDEGAME_PUSH_TIPS_1"),
             onSure = function()
-                self:hideUI()
+                self:checkBankrupt()
             end,
             onCancel = function()
                 self.TipView = nil
             end
         })
-        self.TipView:refreshTimeText(_F("LAB_GAME_002", math.ceil(self._dt)))
-        -- self:hideUI()
+        self.TipView:refreshTimeText(_F("LAB_GAME_002", ShopModel:getShopTimeText2(self._dt)))
     end)
     
     bee.addClick(self.PurchaseButton, function()
@@ -82,18 +81,18 @@ function P:onShow()
 end
 
 function P:refreshTime()
-    bee.setText(self.TextTime, _F("LAB_GAME_002", math.ceil(self._dt)))
+    bee.setText(self.TextTime, _F("LAB_GAME_002", ShopModel:getShopTimeText2(self._dt)))
     scheduler:removeTarget(self.node)
     self:schedule(1, function()
         self._dt = self._dt - 1
         if self._dt <= 0 then
             self._dt = 0
-            self:hideUI()
+            self:checkBankrupt()
             if self.TipView then
                 self.TipView:timeOut()
             end
         end
-        local str = _F("LAB_GAME_002", math.ceil(self._dt))
+        local str = _F("LAB_GAME_002", ShopModel:getShopTimeText2(self._dt))
         bee.setText(self.TextTime, str)
 
         if self.TipView then
@@ -105,13 +104,22 @@ end
 function P:evt_pay_sucess(data)
     if GameModel.data then
         local player = GameModel.data:getMyPlayerInfo()
-        if player then
+        if player and player.chips <= 0 then
             Net:sendReq("pb.RebyREQ", {
                 is_reby = true,
                 chips = player.default_byin,
             })
         end
     end
+    QuickByModel:clearGift()
     self:hideUI()
 end
 
+function P:checkBankrupt()
+    if PlayerModel:getGold() < tpl_constdata.Bankruptcy_Protection_Balance then
+        Net:sendReq("pb.BustProtectInfoREQ", {}, function(d) end)
+    end
+    self:hideUI()
+end
+
+return P

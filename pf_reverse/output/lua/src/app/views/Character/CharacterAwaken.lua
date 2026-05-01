@@ -101,7 +101,7 @@ end
 
 function P:onDestroy()
     if self._isPauseLobbyMusic then
-        CS.SoundManager.Instance:UnPauseMusic()
+        Game:resumeBGM()
         self._isPauseLobbyMusic = nil
     end
 end
@@ -279,3 +279,4 @@ function P:evt_item_refresh()
     end
 end
 
+return P

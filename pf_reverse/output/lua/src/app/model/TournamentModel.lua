@@ -59,6 +59,19 @@ function P:setByinText(Text, sign_item, showRed)
     end
 end
 
+function P:isCanSign(sign_item_list)
+    if #sign_item_list > 0 then
+        for k, v in ipairs(sign_item_list) do
+            local itemData = ItemModel:getItem(v.item_id, true)
+            if itemData.num >= v.item_num then
+                return true
+            end
+        end
+        return false
+    end
+    return true
+end
+
 function P:reqTourList(listType, cb)
     self._reqCb = cb
     self._reqType = listType
@@ -124,3 +137,28 @@ function P:reqSngSign(data, sign_item_id, cb)
     end)
 end
 
+function P:reqMttSign(data, sign_item_id, cb)
+    if not bee.checkCd("TOURNAMENT_MODEL_REQ_MTT_SIGN_" .. data.tour_id, 1) then
+        return
+    end
+    Net:sendReq("pb.MttSignREQ", {
+        tour_id = data.tour_id, 
+        sign_item_id = sign_item_id, 
+        -- game_type = data.game_type, 
+        ip = PlayerModel:getIP()
+    }, function(ret)
+        if ret.code ~= 0 then
+            if ret.code == tpl_RetCode.ERR_SNG_NOT_AVAILABLE.code then
+                bee.emit(EventDef.evt_sng_not_available)
+            end
+            return
+        end
+        data.tour_status = TOUR_STATUS.Register
+        if cb then
+            cb(ret)
+        end
+        -- UiManager:showToast(_T("LAB_TOURNAMENT_SNG_INFO18"))
+    end)
+end
+
+return P

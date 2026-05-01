@@ -429,3 +429,4 @@ function P:evt_refreshEmailList(info)
 	end
 end
 
+return P

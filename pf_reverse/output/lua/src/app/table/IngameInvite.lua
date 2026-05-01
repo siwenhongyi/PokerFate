@@ -81,6 +81,7 @@ function P:refreshItem(data, item)
             })
 
             self:startInviteCD(InviteButton, InviteButton, InvitedButton, 30, item)
+            bee.logEvent("friendsroom-invite", GameModel.data:getRoomId(), PlayerModel:getUid(), data.uid)
         end
     end)
 end
@@ -114,3 +115,4 @@ function P:evt_InvitePlayRSP(msg)
     SettingModel:setKeyCD("invite_" .. msg.to_uid, 30)
 end
 
+return P

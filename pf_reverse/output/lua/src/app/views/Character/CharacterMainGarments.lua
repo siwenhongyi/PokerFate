@@ -234,7 +234,7 @@ function P:refreshName()
     if self._role then
         local d = tpl_character[self._role.role_id]
         bee.setText(self.TextName2, self._role:getName())
-        bee.setText(self.TextCV2, "CV:" .. _T(self._role.info.cv))
+        bee.setText(self.TextCV2, "CV: " .. _T(self._role.info.cv))
 
         if self._skins then
             local skin = self._skins[self._selectIndex]
@@ -279,6 +279,8 @@ function P:refreshSkinItem(data, item)
         end
     end
 
+    self:find("RerunTag", item):SetActive(ShopModel:isRerunSkin(data.id) and (not isOwned))
+
     local BgSr = nil
     if data.id == self._skins[self._selectIndex].id then
         self:find("On", item):SetActive(true)
@@ -287,6 +289,7 @@ function P:refreshSkinItem(data, item)
         self:find("character_garment_selected_on", item):SetActive(true)
         self:find("character_garment_selected_off", item):SetActive(false)
         BgSr = self:find("On/BgSR", item)
+        BgSsr = self:find("On/BgSSR", item)
     else
         self:find("On", item):SetActive(false)
         self:find("Off", item):SetActive(true)
@@ -294,19 +297,24 @@ function P:refreshSkinItem(data, item)
         self:find("character_garment_selected_on", item):SetActive(false)
         self:find("character_garment_selected_off", item):SetActive(true)
         BgSr = self:find("Off/BgSR", item)
+        BgSsr = self:find("Off/BgSSR", item)
     end
     local srName = nil
+    local srParent = nil
     if data.rank == SKIN_RANK.SR then
+        srParent = BgSr
         srName = "Prefab/Character/Eff_poker_Ui_Sr"
     elseif data.rank == SKIN_RANK.SSR then
+        srParent = BgSsr
         srName = "Prefab/Character/Eff_poker_Ui_Ssr"
     else
     end
     self:removeAllChildren(BgSr)
+    self:removeAllChildren(BgSsr)
     if srName then
         local eft = bee.createObj(srName)
         if eft then
-            eft.transform:SetParent(BgSr.transform, false)
+            eft.transform:SetParent(srParent.transform, false)
             eft.transform.localPosition = bee.v3zero
         end
     end

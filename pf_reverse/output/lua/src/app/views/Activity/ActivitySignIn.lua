@@ -234,3 +234,4 @@ function P:evt_updateMonthlyCard()
 	self:setMonthlyCardShow()
 end
 
+return P

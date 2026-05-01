@@ -156,3 +156,4 @@ function P:refreshByinText()
     bee.setText(self.TextByin, "" .. _N(d.min_byin + idx1 * d.bb * BLIND_STEP) .. "/" .. _N(d.min_byin + idx2 * d.bb * BLIND_STEP))
 end
 
+return P

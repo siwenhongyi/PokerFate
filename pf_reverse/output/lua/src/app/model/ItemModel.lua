@@ -37,6 +37,7 @@ function P:ctor(logic)
 	}
 
 	self._newitems = nil
+	self._newframes = nil	-- 新的头像、头像框、称号
 end
 
 function P:afterLogin()
@@ -44,6 +45,7 @@ function P:afterLogin()
         self.cloud["newitems" .. PlayerModel:getUid()] = {}
     end
     self._newitems = self.cloud["newitems" .. PlayerModel:getUid()]
+	self._newframes = self:getCloudKeyData("newframes")
 
 	self:clearItems()
 end
@@ -119,6 +121,10 @@ function P:refreshItems(items)
 			end
 		elseif (v.num and v.num > 0) then
 			d = self:addItem(v)
+			if table.indexof(self._newframes, v.item_id) == -1 then
+				table.insert(self._newframes, v.item_id)
+				self:onSave()
+			end
 		end
 		if d then
 			bee.emit(EventDef.evt_item_refresh, d)
@@ -132,7 +138,7 @@ function P:getItem(conf_id, def)
 		return self:getItemData(GPropId.Gold, PlayerModel:getGold())
 	end
 	for _, v in ipairs(self._items) do
-		if v.item_id == conf_id then
+		if v.item_id == conf_id and not v:isDead() then
 			return v
 		end
 	end
@@ -151,13 +157,21 @@ function P:getItem(conf_id, def)
 end
 
 -- 获取普通道具数量
-function P:getItemNumById(conf_id)
-	local item = self:getItem(conf_id)
-	if not item then
-		return 0
+function P:getItemNumById(conf_id, single)
+	if conf_id == GPropId.Gold then
+		return PlayerModel:getGold()
 	end
 
-	return item.num or 0
+	local count = 0
+	for k, v in pairs(self._items) do
+		if v.item_id == conf_id and not v:isDead() then
+			count = count + v.num
+			if single then
+				break
+			end
+		end
+	end
+	return count
 end
 
 -- 获取 kind 类型的物品总数
@@ -174,7 +188,7 @@ end
 function P:getItemDecorationNum()
 	local ret = 0
 	for _, v in ipairs(self._items) do
-		if v.type ~= GPropKind.Title and v.type >= GPropKind.Avatar and v.type <= GPropKind.LobbyScene then
+		if table.indexof(tpl_constdata.PlayerAccessories, v.type) > 0 then
 			ret = ret + v.num
 		end
 	end
@@ -235,6 +249,19 @@ function P:_isInList(val, list)
 
 	for k, v in pairs(list) do
 		if v == val then
+			return true
+		end
+	end
+	return false
+end
+
+function P:_isItemInList(cfg, list)
+	if not list then
+		return false
+	end
+
+	for k, v in pairs(list) do
+		if v.item_id == cfg.id then
 			return true
 		end
 	end
@@ -331,6 +358,21 @@ function P:getPropItems()
 	-- 金币
 	if PlayerModel:getGold() > 0 then
 		table.insert(list, {item_id = GPropId.Gold, num = PlayerModel:getGold(), cfg = tpl_props[GPropId.Gold], typeSort = self:_getTypeSort(GPropKind.Gold)})
+	end
+
+	self:_sortItemList(list)
+	return list
+end
+
+function P:getPropItemsByType(propType, list)
+	local list = list or {}
+	local datas = get_tpl_subKey(tpl_props_list, "type", propType)
+	if datas then
+		for _, v in ipairs(datas) do
+			if self:isCanShow(v) and not self:_isItemInList(v, list) then
+				table.insert(list, {item_id = v.id, num = 0, cfg = v, typeSort = self:_getTypeSort(v.type)})
+			end
+		end
 	end
 
 	self:_sortItemList(list)
@@ -472,6 +514,38 @@ function P:checkIsNewItem(id, isRefresh)
 	return isNew
 end
 
+function P:isNewFrame(id)
+	if self._newframes then
+		for _, v in ipairs(self._newframes) do
+			if v == id then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+-- 移除新头像、头像框、称号标记，并还回被移除的id列表
+function P:removeNewFrame(kind)
+	local rets = {}
+	if self._newframes then
+		local flag = false
+		for i = #self._newframes, 1, -1 do
+			local cfg = tpl_props[self._newframes[i]]
+			if cfg and cfg.type == kind then
+				table.remove(self._newframes, i)
+				table.insert(rets, cfg.id)
+				flag = true
+			end
+		end
+		if flag then
+			self:onSave()
+			self:refreshReddot()
+		end
+	end
+	return rets
+end
+
 -- 获取当前背包页签包含的道具类型
 function P:_getTabTogglePropTypes(id)
 	local cfg = tpl_backpack[id]
@@ -493,6 +567,26 @@ function P:_getTabTogglePropTypes(id)
 end
 
 function P:refreshReddot()
+	if self._newframes then
+		local red1, red2, red3 = 0, 0, 0
+		for _, v in ipairs(self._newframes) do
+			local cfg = tpl_props[v]
+			if cfg then
+				if cfg.type == GPropKind.Avatar then
+					red1 = red1 + 1
+				elseif cfg.type == GPropKind.FrameAvatar then
+					red2 = red2 + 1
+				elseif cfg.type == GPropKind.Title then
+					red3 = red3 + 1
+				end
+			end
+		end
+		
+		RedManager:addTagWithNum(red1, RedTag.InformationAvatar)
+		RedManager:addTagWithNum(red2, RedTag.InformationFrame)
+		RedManager:addTagWithNum(red3, RedTag.InformationTitle)
+	end
+
 	if not next(self._newitems) then
 		for k,v in pairs(tpl_backpack) do
 			if v.red_name then
@@ -879,3 +973,4 @@ function P:evt_SelfUserInfoRSP()
 	end
 end
 
+return P

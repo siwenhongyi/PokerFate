@@ -23,7 +23,7 @@ function P:refreshName()
     if self._role and self.TextName then
         local d = tpl_character[self._role.role_id]
         bee.setTextCut(self.TextName, self._role:getName(), self._nameLen or 386)
-        bee.setText(self.TextCV, "CV:" .. _T(d.cv))
+        bee.setText(self.TextCV, "CV: " .. _T(d.cv))
 
         if self.character_name_card_edit then
             self.character_name_card_edit:SetActive(not self._role.locked)
@@ -35,3 +35,4 @@ function P:evt_RoleRenameRSP(msg)
     self:refreshName()
 end
 
+return P

@@ -336,7 +336,7 @@ end
 function P:refreshName()
     P.super.refreshName(self)
     bee.setText(self.TextName2, self._role:getName())
-    local nameCV = "CV:" .. _T(self._role.info.cv)
+    local nameCV = "CV: " .. _T(self._role.info.cv)
     bee.setText(self.TextCVInfo, nameCV)
     bee.setText(self.TextCVVoice, nameCV)
     bee.setText(self.TextCVFile, nameCV)
@@ -491,3 +491,4 @@ function P:evt_guide_profile_file()
     toggle.onValueChanged:Invoke(true)
 end
 
+return P

@@ -5,3 +5,4 @@ function P:onTriggerEnter2D(other)
         bee.emit(EventDef.evt_onBallBound, other.gameObject)
     end
 end
+return P

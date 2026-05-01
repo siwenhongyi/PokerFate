@@ -89,3 +89,4 @@ function P:showContent()
 	self._closeAnim = "UI_1_" .. self.__cname .. "_back2"
 end
 
+return P

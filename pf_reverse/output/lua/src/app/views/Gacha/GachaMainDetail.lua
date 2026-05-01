@@ -279,3 +279,4 @@ function P:setItemProp(item, data)
 	bee.setText(RateTips, data.totalRate * 100 .. "%")
 end
 
+return P

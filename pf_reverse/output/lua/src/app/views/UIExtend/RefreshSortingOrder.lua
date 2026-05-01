@@ -29,3 +29,4 @@ function P:refreshSortingOrder()
 	end
 end
 
+return P

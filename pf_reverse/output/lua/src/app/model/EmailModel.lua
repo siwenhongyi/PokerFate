@@ -132,6 +132,13 @@ function P:getEamilContent(data)
                         if string.sub(v, 1, 1) == "{" then
                             local td = json.decode(v)
                             args[k] = td[LAN:getLanguage()] or ""
+                        elseif string.find(v, "time_") then
+                            local n = tonumber(string.sub(v, 6))
+                            if n then
+                                args[k] = TimeHelp:getDateTimeStrM(tonumber(string.sub(v, 6)), "/")
+                            else
+                                args[k] = _T(v)
+                            end
                         else
                             local n = tonumber(v)
                             if n and tonumber(n) == v then
@@ -389,3 +396,4 @@ function P:reqCollEamil(id_arr, cancel, cb)
     end)
 end
 
+return P

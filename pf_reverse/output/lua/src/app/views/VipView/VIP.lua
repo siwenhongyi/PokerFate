@@ -236,3 +236,4 @@ function P:evt_vipLevelUp()
     self:refreshUI()
 end
 
+return P

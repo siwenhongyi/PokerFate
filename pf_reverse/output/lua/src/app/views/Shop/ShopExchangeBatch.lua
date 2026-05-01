@@ -246,6 +246,7 @@ function P:refreshButtonShow(consumeCount)
 	end
 
 	bee.setText(self.PriText, consumeCount * self._selectedCount)
+	self:refreshText()
 end
 
 function P:setButtonShow(button, isOn)
@@ -270,7 +271,12 @@ function P:onClickExchange()
 	self:hideUI()
 end
 
+function P:refreshText()
+	
+end
+
 function P:evt_ItemChangeRSP()
 	self:refreshCont()
 end
 
+return P

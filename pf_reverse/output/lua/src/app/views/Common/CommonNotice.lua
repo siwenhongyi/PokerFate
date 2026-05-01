@@ -22,7 +22,7 @@ end
 
 function P:onStart()
     bee.addClick(self.CloseButton, function ()
-        self:onBtCancel()
+        self:onBtCancel(true)
     end)
     bee.addClick(self.ConfirmButton1, function ()
         self:onBtSure()
@@ -78,9 +78,9 @@ function P:onBtSure()
     self:hideUI()
 end
 
-function P:onBtCancel()
+function P:onBtCancel(isClose)
     if self._params.onCancel then
-        if self._params.onCancel() then return end
+        if self._params.onCancel(isClose) then return end
     end
     self:hideUI()
 end

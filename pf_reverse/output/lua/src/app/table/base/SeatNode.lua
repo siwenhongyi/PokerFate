@@ -170,3 +170,4 @@ function P:emitFunc(funcName, ...)
 	end
 end
 
+return P

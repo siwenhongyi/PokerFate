@@ -162,3 +162,4 @@ function P:refreshSlide()
     bee.setSliderValue(self.Slider, (self._curStep - 1) / (self._stepNum - 1), true)
 end
 
+return P

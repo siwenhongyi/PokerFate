@@ -178,3 +178,4 @@ end
 base64 = {
     encode = base64encode,
     decode = base64decode,
+}

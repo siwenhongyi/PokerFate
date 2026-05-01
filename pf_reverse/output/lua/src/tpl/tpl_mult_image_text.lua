@@ -83,3 +83,4 @@ function tpl_mult_image_text_clone(key)
     return nil
 end
 
+return P

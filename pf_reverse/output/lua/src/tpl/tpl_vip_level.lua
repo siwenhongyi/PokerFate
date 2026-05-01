@@ -34,3 +34,4 @@ function tpl_vip_level_clone(key)
     return nil
 end
 
+return P

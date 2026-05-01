@@ -251,3 +251,4 @@ function P:excludebindMapFun()
 	return nil
 end
 
+return P

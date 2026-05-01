@@ -33,3 +33,4 @@ function tpl_daily_rewards_clone(key)
     return nil
 end
 
+return P

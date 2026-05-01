@@ -195,3 +195,4 @@ function tpl_poker_card_value_clone(key)
     return nil
 end
 
+return P

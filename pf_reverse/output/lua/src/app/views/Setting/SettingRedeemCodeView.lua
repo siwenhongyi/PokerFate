@@ -55,3 +55,4 @@ function P:onClickCommit()
 	PlayerModel:requestRedeemCodeExchange(inputCode, succCb, errCb, limitCb)
 end
 
+return P

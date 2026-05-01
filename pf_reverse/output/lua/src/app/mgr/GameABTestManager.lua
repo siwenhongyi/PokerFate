@@ -29,3 +29,4 @@ function P:refreshConfigs()
 	end
 end
 
+return P

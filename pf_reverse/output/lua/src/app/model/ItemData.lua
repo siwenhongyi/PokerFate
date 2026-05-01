@@ -42,3 +42,12 @@ function P:getDeadLeftTime()
     return 0
 end
 
+function P:isDead()
+    if self.deadline and self.deadline > 0 then
+        local left = self.deadline - bee.getServerTime()
+        return left <= 0
+    end
+    return false
+end
+
+return P

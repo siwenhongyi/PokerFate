@@ -32,3 +32,4 @@ function P:evt_ActivitySignIn()
 	self:hideUI()
 end
 
+return P

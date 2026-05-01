@@ -80,3 +80,4 @@ function P:onClickClose()
 	self:hideUI()
 end
 
+return P

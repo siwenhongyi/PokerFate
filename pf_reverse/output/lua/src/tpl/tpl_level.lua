@@ -126,3 +126,4 @@ function tpl_level_clone(key)
     return nil
 end
 
+return P

@@ -56,3 +56,4 @@ function P:reqChangeName(name)
     end)
 end
 
+return P

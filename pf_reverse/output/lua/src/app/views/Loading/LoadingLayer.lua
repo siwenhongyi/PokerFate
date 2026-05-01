@@ -48,3 +48,4 @@ function P:setProgress(val)
     self.LoadingEft.transform.localPosition = pos
 end
 
+return P

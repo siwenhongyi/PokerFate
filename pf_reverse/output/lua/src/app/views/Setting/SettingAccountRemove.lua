@@ -129,3 +129,4 @@ function P:onShow()
     self.Step3:SetActive(false)
 end
 
+return P

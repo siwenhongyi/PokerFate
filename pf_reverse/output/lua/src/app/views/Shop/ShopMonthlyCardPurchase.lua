@@ -52,7 +52,6 @@ function P:onStart()
 	local cfg = tpl_monthly_card[self._selectedId]
 	bee.setText(self.TitleText, _F("LAB_MONTHLY_CARD_26", cfg.days))
 	local pidCfg = ShopModel:getPidData(cfg.buy_id)
-	bee.setText(self.PriceText, tpl_shop_cur_type[PlayerModel:getCurId()].code .. " " .. pidCfg["pri_" .. PlayerModel:getCurId()])
 	bee.setText(self.PriceText, ShopModel:getPriText(pidCfg))
 end
 
@@ -79,7 +78,7 @@ function P:setItem(item, data)
 
 			bee.setText(self.TitleText, _F("LAB_MONTHLY_CARD_26", data.days))
 			local pidCfg = ShopModel:getPidData(data.buy_id)
-			bee.setText(self.PriceText, tpl_shop_cur_type[PlayerModel:getCurId()].code .. " " .. pidCfg["pri_" .. PlayerModel:getCurId()])
+			bee.setText(self.PriceText, ShopModel:getPriText(pidCfg))
 		end
 	end)
 
@@ -107,3 +106,4 @@ function P:evt_pay_sucess()
 	self:hideUI()
 end
 
+return P

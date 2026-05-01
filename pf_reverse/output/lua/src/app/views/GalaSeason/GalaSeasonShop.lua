@@ -141,3 +141,4 @@ function P:evt_ItemChangeRSP(msg)
     end
 end
 
+return P

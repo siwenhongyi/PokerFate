@@ -59,23 +59,24 @@ end
 -- http 服务地址
 if bee.isDev then
     G_HTTP_URL = "https://dev-login.poker-fate.com/"
+    -- G_HTTP_URL = "http://10.100.1.237:8888/"
 elseif bee.isDmod then
     G_HTTP_URL = "http://10.100.0.197/"
 elseif bee.isPre then
     G_HTTP_URL = "https://pre-login.poker-fate.com/"
 elseif bee.isRelease then
     if G_CHNL_ID == 9 or G_CHNL_ID == 10 then
-        G_HTTP_URL = "https://zga-entry.allinmoe.com/"
-        G_HTTP_URL_2 = "https://zga-entry.poker-fate.net/"
+        G_HTTP_URL = "http://8.163.49.33:8888/"
+        G_HTTP_URL_2 = "http://121.196.174.32:8888/"
         G_HTTP_URL_3 = "https://ga-foreign.poker-fate.com/"
         G_HTTP_URL_4 = "https://awsb-entry.poker-fate.com/"
-        G_HTTP_URL_5 = "http://106.15.91.81/"
+        -- _HTTP_URL_5 = "http://106.15.91.81/"
     else
         G_HTTP_URL = "https://ga-foreign.poker-fate.com/"
         G_HTTP_URL_2 = "https://awsb-entry.poker-fate.com/"
-        G_HTTP_URL_3 = "https://zga-entry.allinmoe.com/"
-        G_HTTP_URL_4 = "https://zga-entry.poker-fate.net/"
-        G_HTTP_URL_5 = "http://106.15.91.81/"
+        -- G_HTTP_URL_3 = "https://zga-entry.allinmoe.com/"
+        -- G_HTTP_URL_4 = "https://zga-entry.poker-fate.net/"
+        -- G_HTTP_URL_5 = "http://106.15.91.81/"
     end
 end
 
@@ -106,6 +107,24 @@ elseif bee.isRelease then
 	    G_REMOTE_RES_HOST = "https://aws.poker-fate.com/res/"
 	    G_REMOTE_RES_HOST_2 = "https://cdn.poker-fate.com/client/remote_res/release/"
         G_REMOTE_RES_HOST_3 = "https://bh-cn.oss-cn-shanghai.aliyuncs.com/res/"
+    end
+end
+
+if bee.isDev then
+    G_RES_BASE_HOST = "https://dev-cdn.poker-fate.com"
+elseif bee.isDmod then
+    G_RES_BASE_HOST = "https://dev-cdn.poker-fate.com"
+elseif bee.isPre then
+	G_RES_BASE_HOST = "https://dev-cdn.poker-fate.com"
+elseif bee.isRelease then
+    if G_CHNL_ID == 9 or G_CHNL_ID == 10 then
+        G_RES_BASE_HOST = "https://bh-cn.oss-cn-shanghai.aliyuncs.com"
+        G_RES_BASE_HOST_2 = "https://djc1p2apfo64w.cloudfront.net"
+        G_RES_BASE_HOST_3 = "https://cdn.poker-fate.com"
+    else
+        G_RES_BASE_HOST = "https://djc1p2apfo64w.cloudfront.net"
+        G_RES_BASE_HOST_2 = "https://cdn.poker-fate.com"
+        G_RES_BASE_HOST_3 = "https://bh-cn.oss-cn-shanghai.aliyuncs.com"
     end
 end
 
@@ -155,3 +174,4 @@ if G_CHNL_ID == 5 then
     CS.StoveMobileHelper.InitProviders("")
 elseif G_CHNL_ID == 6 then
     CS.StoveMobileHelper.InitProviders("")
+end

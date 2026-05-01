@@ -57,3 +57,4 @@ function tpl_shop_pm_type_clone(key)
     return nil
 end
 
+return P

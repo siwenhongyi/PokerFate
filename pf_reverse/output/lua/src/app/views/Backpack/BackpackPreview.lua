@@ -221,3 +221,8 @@ function P:setRoleImg(ImageRole, showRoleSkin, isMe)
     end
 end
 
+function P:evt_hideUiWhenAction(isVisible)
+    self:onUiBlur(not isVisible, "evt_hideUiWhenAction", true)
+end
+
+return P

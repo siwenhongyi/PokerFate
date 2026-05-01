@@ -49,6 +49,11 @@ function P:onAwake()
     bee.addClick(self:find("LeftTop/BackButton", self.AnimRoot), function()
         self:hideUI()
     end)
+    bee.addClick(self:find("LeftTop/InfoButton", self.AnimRoot), function()
+        Game:playSound("ui_button_confirm")
+        UiManager:showUI("TournamentSNGRules", {data = self._data})
+        bee.logEvent("tournament-sng-rule")
+    end)
     bee.addClick(self:find("title1/Blind Structure/InfoButton", tournament_sng_details_bg), function()
         UiManager:showUI("TournamentBlindStructure", {data = self._data.blind_list})
     end)
@@ -178,7 +183,7 @@ function P:refreshUI()
             else
                 bee.setText(self.TextReward, _F("LAB_TOURNAMENT_SNG_INFO6", _N1(self._data.total_reward)))
             end
-        elseif self._data.rank_list and #self._data.rank_list > 0 then
+        elseif self._data.rank_list and #self._data.rank_list > 0 and #self._data.rank_list[1].reward_item_list > 0 then
             self.TextReward:SetActive(false)
             for _, v in ipairs(self._data.rank_list[1].reward_item_list) do
                 local item = nil
@@ -195,9 +200,14 @@ function P:refreshUI()
         end
         bee.setText(self.TextStartClips, _N(self._data.begin_chips))
         -- bee.setText(self.TextPoint, _N(self._data.champion_points))
-        self.TextPoint:SetActive(false)
-        self.ItemPoint:SetActive(true)
-        PropItem:create(self.ItemPoint, {id = GPropId.ChampionPoints, num = self._data.champion_points}): bindTips()
+        if self._data.champion_points > 0 then
+            self.TextPoint:SetActive(false)
+            self.ItemPoint:SetActive(true)
+            PropItem:create(self.ItemPoint, {id = GPropId.ChampionPoints, num = self._data.champion_points}): bindTips()
+        else
+            self.TextPoint:SetActive(true)
+            self.ItemPoint:SetActive(false)
+        end
     else
         self.TextPoint:SetActive(true)
         self.ItemPoint:SetActive(false)
@@ -208,7 +218,7 @@ function P:refreshUI()
         bee.setText(self.TextPlayerCount, "" .. self._data.cur_sign_num)
     end
 
-    for i = 1, 5 do
+    for i = 0, 5 do
         if i == self._data.style_id then
             local LabelItem = self:find("Item" .. i, self.Item)
             LabelItem:SetActive(true)
@@ -242,9 +252,11 @@ function P:refreshUI()
         self:removeAllChildren(self.BgRewardTag)
         if self._data.event_id and ThemeModel:isActivityOpen(self._data.event_id) then
             local obj = ThemeModel:createRewardTag(self._data.event_id)
-            obj.transform:SetParent(self.BgRewardTag.transform, false)
-            obj.transform.localPosition = bee.v3zero
-            bee.setText(self:find("TextCount", obj), _N(self._data.event_reward_list[1].item_num))
+            if not bee.isNull(obj) then
+                obj.transform:SetParent(self.BgRewardTag.transform, false)
+                obj.transform.localPosition = bee.v3zero
+                bee.setText(self:find("TextCount", obj), _N(self._data.event_reward_list[1].item_num))
+            end
         end
     else
         self.BgRewardTag:SetActive(false)
@@ -252,9 +264,11 @@ function P:refreshUI()
 end
 
 function P:evt_TourDetailInfoRSP(msg)
+    local byin_chips = self._data.byin_chips
     self._data = msg.sng_info
     self._detailData = msg
     self._data.level = msg.level
+    self._data.byin_chips = byin_chips
     self:refreshUI()
 end
 
@@ -273,3 +287,4 @@ function P:evt_sng_not_available()
     self:hideUIForce()
 end
 
+return P

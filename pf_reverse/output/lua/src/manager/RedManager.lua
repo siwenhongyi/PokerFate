@@ -306,3 +306,4 @@ function P:hideTag(tag, isHide)
     self:_notify(args)
 end
 
+return P

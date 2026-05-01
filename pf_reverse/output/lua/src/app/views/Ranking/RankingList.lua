@@ -329,9 +329,9 @@ function P:setRankItem(item, data, isInit, index)
 		end
 		Game:playSound("ui_button_confirm")
 		if data.uid == 0 or data.uid == PlayerModel:getUid() then
-			UiManager:showUI("InformationMain", {from = "Ranking"})
+			UiManager:showUI("InformationMainNew", {from = "Ranking"})
 		else
-			UiManager:showUI("InformationMain", {uid = data.uid, from = "Ranking"})
+			UiManager:showUI("InformationMainNew", {uid = data.uid, from = "Ranking"})
 		end
 	end)
 
@@ -428,3 +428,4 @@ function P:onClickLeftButton()
 	self:switchRankings()
 end
 
+return P

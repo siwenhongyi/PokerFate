@@ -32,6 +32,7 @@ function P:onAwake()
     self.ItemPrizePool = self:find("Iteam2/Item1", self.Views[1])
     self.ItemTitle = self:find("Iteam2/ItemTitle", self.Views[1])
     self.BgItemReward = self:find("Iteam2/BgItemReward", self.Views[1])
+    self.TextPoint = self:find("Iteam3/TextPoint", self.Views[1])
     self.ItemPoint = self:find("Iteam3/Item1", self.Views[1])
     self.ItemTitle:SetActive(false)
 
@@ -80,7 +81,7 @@ function P:onShow()
     self.ListBlind:setDatas(GameModel.data:getBlindList())
 
     bee.setText(self.TextPlayerCount, "" .. GameModel.data:getOnSeatNum() .. "/" .. GameModel.data:getSeatNum())
-    bee.setText(self.TextTitle, GameModel.data:getGameName())
+    bee.setText(self.TextTitle, GameModel.data:getRoomName())
     
     self:removeAllChildren( self.BgItemReward)
     if GameModel.data.room_info.total_reward > 0 then
@@ -89,7 +90,14 @@ function P:onShow()
     else
         self.ItemPrizePool:SetActive(false)
     end
-    PropItem:create(self.ItemPoint, {id = GPropId.ChampionPoints, num = GameModel.data.room_info.champion_points}): bindTips(self.node)
+    if GameModel.data.room_info.champion_points > 0 then
+        PropItem:create(self.ItemPoint, {id = GPropId.ChampionPoints, num = GameModel.data.room_info.champion_points}): bindTips(self.node)
+        self.TextPoint:SetActive(false)
+        self.ItemPoint:SetActive(true)
+    else
+        self.TextPoint:SetActive(true)
+        self.ItemPoint:SetActive(false)
+    end
 
     self:refreshNextBlind()
     self.Iteam4:SetActive(false)
@@ -223,3 +231,4 @@ function P:evt_hideUiWhenAction(isVisible)
     self:onUiBlur(not isVisible, "evt_hideUiWhenAction", true)
 end
 
+return P

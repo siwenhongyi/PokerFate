@@ -16,3 +16,4 @@ function P:evt_activity_over(e)
     end
 end
 
+return P

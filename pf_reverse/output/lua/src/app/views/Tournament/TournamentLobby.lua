@@ -23,6 +23,8 @@ function P:onAwake()
 
     self.Item = self:find("Item", self.Views[2])
     self.Item:SetActive(false)
+    self.ItemMTT = self:find("ItemMTT", self.Views[3])
+    self.ItemMTT:SetActive(false)
     self.Empty = self:find("Empty", self.Center)
 
     self.CheckToggle = self:find("CheckToggle", self.Views[1])
@@ -31,6 +33,8 @@ function P:onAwake()
     self.shop_musice_item_filter_button_arrow = self:find("FilterButton/shop_musice_item_filter_button_arrow", self.Views[1])
     self.shop_musice_item_filter_button_arrow_2 = self:find("FilterButton/shop_musice_item_filter_button_arrow_2", self.Views[1])
     self.FilterText = self:find("FilterButton/Text", self.Views[1])
+
+    self.QuickByButton = self:find("RightTop/QuickByButton", self.AnimRoot)
 
     self._filters = {
         {id = 1, name = _T("LAB_TOURNAMENT_8")},
@@ -96,10 +100,17 @@ function P:onAwake()
     end)
 
     self.ListMy = UiListEx:create(self:find("Item2List", self.Views[1]))
-	self.ListMy:setCreateFunc(function()
+	self.ListMy:setCreateFunc(function(data)
+        if data.mtt_start_time then
+		    return CU.GameObject.Instantiate(self.ItemMTT)
+        end
 		return CU.GameObject.Instantiate(self.Item)
 	end)
 	self.ListMy:setRefreshFunc(function(data, item)
+        if data.mtt_start_time then
+            self:refreshMttItem(data, item)
+            return
+        end
 		self:refreshListItem(data, item)
 	end)
     self.ListMy:setScrollToBottomFunc(function()
@@ -136,10 +147,10 @@ function P:onAwake()
 
     self.ListMTT = UiListEx:create(self:find("Item1List", self.Views[3]))
 	self.ListMTT:setCreateFunc(function()
-		return CU.GameObject.Instantiate(self.Item)
+		return CU.GameObject.Instantiate(self.ItemMTT)
 	end)
 	self.ListMTT:setRefreshFunc(function(data, item)
-		self:refreshListItem(data, item)
+		self:refreshMttItem(data, item)
 	end)
 	self.ListMTT:setWidth(230)
 	self.ListMTT:setSpacing(10)
@@ -159,8 +170,10 @@ function P:onShow()
     self:removeAllChildren(self.GalaAddition)
     if ThemeModel:isHaveAddtion(GAME_GAME_TYPE.SNG_HOLDEM_GAME) then
         local obj = ThemeModel:createAddtionButton()
-        obj.transform:SetParent(self.GalaAddition.transform, false)
-        obj.transform.localPosition = bee.v3zero
+        if not bee.isNull(obj) then
+            obj.transform:SetParent(self.GalaAddition.transform, false)
+            obj.transform.localPosition = bee.v3zero
+        end
     end
 
     if self._params and self._params.kind then
@@ -170,6 +183,8 @@ function P:onShow()
         bee.setCheck(self.Tabs[2])
         self:showView(2)
     end
+
+    QuickByModel:addButtonItem(self.uiName, self.QuickByButton)
 end
 
 function P:showView(index)
@@ -192,19 +207,23 @@ function P:refreshMyList()
     bee.setText(self.FilterText, self._filters[self._myFilterIndex or 1].name)
 
     self._historyDatas = nil
-    TournamentModel:reqTourList(TournamentModel.LIST_TYPE.My, function(datas)
-        if bee.isNull(self.node) then
-            return
-        end
-        self._myDatas = datas
-        self:_refreshMyList()
+    if self._myFilterIndex == TournamentModel.HISTORY_TYPE.MTT then
+        self.ListMy:setDatas({})
+    else
+        TournamentModel:reqTourList(TournamentModel.LIST_TYPE.My, function(datas)
+            if bee.isNull(self.node) then
+                return
+            end
+            self._myDatas = datas
+            self:_refreshMyList()
 
-        if self._historyDatas then
-            self:_refreshMyList(self._historyDatas)
+            if self._historyDatas then
+                self:_refreshMyList(self._historyDatas)
+            end
+        end)
+        if not bee.isCheck(self.CheckToggle) then
+            self:refreshHistoryList()
         end
-    end)
-    if not bee.isCheck(self.CheckToggle) then
-        self:refreshHistoryList()
     end
     self.Empty:SetActive(self.ListMy:getDatasCount() == 0)
 end
@@ -243,6 +262,18 @@ function P:refreshSNGList()
             return
         end
         table.sort(datas, function(a, b)
+            if nil == a.isCanSign then
+                a.isCanSign = TournamentModel:isCanSign(a.sign_item_list)
+            end
+            if nil == b.isCanSign then
+                b.isCanSign = TournamentModel:isCanSign(b.sign_item_list)
+            end
+            if a.isCanSign ~= b.isCanSign then
+                return a.isCanSign 
+            end
+            if a.sort_value ~= b.sort_value then
+                return a.sort_value < b.sort_value
+            end
             if a.byin_chips ~= b.byin_chips then
                 return a.byin_chips < b.byin_chips
             end
@@ -250,6 +281,12 @@ function P:refreshSNGList()
         end)
         self.ListSNG:setDatas(datas)
         self.Empty:SetActive(#datas == 0)
+        for _, v in ipairs(datas) do
+            if GF.isTrainingGame(v.game_type) and not GuideManager:isInGuide() then
+                GuideManager:startSystemGuide(14001, 0.5)
+                break
+            end
+        end
     end)
     self.Empty:SetActive(self.ListSNG:getDatasCount() == 0)
 end
@@ -272,9 +309,10 @@ function P:refreshMTTList()
     -- self.Empty:SetActive(self.ListMTT:getDatasCount() == 0)
 end
 
-function P:refreshListItem(data, item)
+function P:_refreshItem(data, item)
     local Ani_root = self:find("Ani_root", item)
 
+    local is_mtt = data.mtt_start_time ~= nil
     local signItem, itemData = nil, nil
     local BuyIn = self:find("BuyIn", Ani_root)
     bee.removeAllClick(BuyIn)
@@ -284,7 +322,6 @@ function P:refreshListItem(data, item)
             if itemData.num >= v.item_num or k == #data.sign_item_list then
                 self:find("BuyIn/icon_10100001", Ani_root):SetActive(true)
                 bee.setIcon(self:find("BuyIn/icon_10100001", Ani_root), tpl_props[v.item_id].icon)
-                -- bee.setText(self:find("BuyIn/TextByin", Ani_root), _N(v.item_num))
                 TournamentModel:setByinText(self:find("BuyIn/TextByin", Ani_root), v, data.tour_status == TOUR_STATUS.Unregister)
                 signItem = v
                 bee.addClick(BuyIn, function()
@@ -295,7 +332,6 @@ function P:refreshListItem(data, item)
         end
     else
         self:find("BuyIn/icon_10100001", Ani_root):SetActive(false)
-        -- bee.setText(self:find("BuyIn/TextByin", Ani_root), _T("LAB_SHOP_COMMON_21"))
         TournamentModel:setByinText(self:find("BuyIn/TextByin", Ani_root), nil)
     end
     if data.tour_status == TOUR_STATUS.Unregister or data.tour_status == TOUR_STATUS.Register then
@@ -304,7 +340,7 @@ function P:refreshListItem(data, item)
         bee.setText(self:find("Players/TextPlayerNum", Ani_root), "" .. data.cur_sign_num)
     end
 
-    for i = 1, 5 do
+    for i = 0, 5 do
         if i == data.style_id then
             local LabelItem = self:find("Item" .. i, Ani_root)
             LabelItem:SetActive(true)
@@ -314,22 +350,17 @@ function P:refreshListItem(data, item)
         end
     end
 
-    if data.my_rank and data.my_rank > 0 then
-        self:find("ImageTag", Ani_root):SetActive(true)
-        bee.setText(self:find("ImageTag/TextTag", Ani_root), "# " .. data.my_rank)
-    else
-        self:find("ImageTag", Ani_root):SetActive(false)
-    end
-
     if data.event_reward_list and #data.event_reward_list > 0 then
         local BgReward = self:find("BgReward", Ani_root)
         BgReward:SetActive(true)
         self:removeAllChildren(BgReward)
         if data.event_id and ThemeModel:isActivityOpen(data.event_id) then
             local obj = ThemeModel:createRewardTag(data.event_id)
-            obj.transform:SetParent(BgReward.transform, false)
-            obj.transform.localPosition = bee.v3zero
-            bee.setText(self:find("TextCount", obj), _N(data.event_reward_list[1].item_num))
+            if not bee.isNull(obj) then
+                obj.transform:SetParent(BgReward.transform, false)
+                obj.transform.localPosition = bee.v3zero
+                bee.setText(self:find("TextCount", obj), _N(data.event_reward_list[1].item_num))
+            end
         end
     else
         self:find("BgReward", Ani_root):SetActive(false)
@@ -362,21 +393,30 @@ function P:refreshListItem(data, item)
     elseif data.tour_status == TOUR_STATUS.Unregister then
         bee.addClick(self:find("RegisterButton", Ani_root), function()
             Game:playSound("ui_button_confirm")
-            -- if not signItem or not itemData then
-            --     UiManager:showToast(_F("LAB_SHOP_COMMON_24", _T(tpl_props[signItem.item_id].name)))
-            --     return
-            -- end
             if signItem and signItem.item_num > ItemModel:getItemNumById(signItem.item_id) then
                 UiManager:showToast(_F("LAB_SHOP_COMMON_24", _T(tpl_props[signItem.item_id].name)))
+                if signItem.item_id == GPropId.Gold then
+                    QuickByModel:checkShowView(GAME_GAME_TYPE.TOURNAMENT)
+                end
                 return
             end
-            if not bee.checkCd("SngSignREQ", 2) then
-                return
+            if is_mtt then
+                if not bee.checkCd("MttSignREQ", 2) then
+                    return
+                end
+                TournamentModel:reqMttSign(data, signItem and signItem.item_id or 0, function()
+                    bee.checkCd("EnterRoomREQ", 2)
+                    self.ListMTT:refreshShowingUi()
+                end)
+            else
+                if not bee.checkCd("SngSignREQ", 2) then
+                    return
+                end
+                TournamentModel:reqSngSign(data, signItem and signItem.item_id or 0, function()
+                    bee.checkCd("EnterRoomREQ", 2)
+                    self.ListSNG:refreshShowingUi()
+                end)
             end
-            TournamentModel:reqSngSign(data, signItem and signItem.item_id or 0, function()
-                bee.checkCd("EnterRoomREQ", 2)
-                self.ListSNG:refreshShowingUi()
-            end)
         end, true)
     elseif data.tour_status == TOUR_STATUS.Finished or data.tour_status == TOUR_STATUS.Losed then
         bee.addClick(self:find("DetailButton", Ani_root), function()
@@ -387,6 +427,73 @@ function P:refreshListItem(data, item)
     bee.addClick2(item, function()
         UiManager:showUI("TournamentSNGDetails", {data = data})
     end, true)
+end
+
+function P:refreshListItem(data, item)
+    if GF.isTrainingGame(data.game_type) then
+        item.name = "ItemTrain"
+    end
+
+    self:_refreshItem(data, item)
+
+    local Ani_root = self:find("Ani_root", item)
+    if data.my_rank and data.my_rank > 0 then
+        self:find("ImageTag", Ani_root):SetActive(true)
+        bee.setText(self:find("ImageTag/TextTag", Ani_root), "# " .. data.my_rank)
+    else
+        self:find("ImageTag", Ani_root):SetActive(false)
+    end
+end
+
+function P:refreshMttItem(data, item)
+    self:_refreshItem(data, item)
+
+    local Ani_root = self:find("Ani_root", item)
+    local Time = self:find("Time", Ani_root)
+    if data.my_rank and data.my_rank > 0 then
+        self:find("Tag", Ani_root):SetActive(true)
+        self:find("Tag/Eliminated", Ani_root):SetActive(false)
+        self:find("Tag/Registered", Ani_root):SetActive(false)
+        self:find("Tag/Rank", Ani_root):SetActive(true)
+        bee.setText(self:find("Tag/Rank/Text", Ani_root), "# " .. data.my_rank)
+
+        Time:SetActive(false)
+    elseif data.tour_status == TOUR_STATUS.Register then
+        self:find("Tag", Ani_root):SetActive(true)
+        self:find("Tag/Eliminated", Ani_root):SetActive(false)
+        self:find("Tag/Registered", Ani_root):SetActive(true)
+        self:find("Tag/Rank", Ani_root):SetActive(false)
+    elseif data.tour_status == TOUR_STATUS.Losed then
+        self:find("Tag", Ani_root):SetActive(true)
+        self:find("Tag/Eliminated", Ani_root):SetActive(true)
+        self:find("Tag/Registered", Ani_root):SetActive(false)
+        self:find("Tag/Rank", Ani_root):SetActive(false)
+    else
+        self:find("Tag", Ani_root):SetActive(false)
+    end
+
+    if data.mtt_start_time > bee.getServerTime() then
+        Time:SetActive(true)
+        self:find("Time1/TextTime"):SetActive(true)
+        self:find("Time2/TextTime"):SetActive(false)
+        self:find("Time3/TextTime"):SetActive(false)
+
+        bee.setText(self:find("Time1/TextTime"), TimeHelp:getDateTimeStr(data.mtt_start_time))
+    elseif data.tour_status == TOUR_STATUS.Inprocess then
+        Time:SetActive(true)
+        self:find("Time1/TextTime"):SetActive(false)
+        self:find("Time2/TextTime"):SetActive(true)
+        self:find("Time3/TextTime"):SetActive(false)
+
+        bee.setText(self:find("Time2/TextTime"), TimeHelp:getTimeStr(bee.getServerTime() - data.mtt_start_time))
+    elseif data.tour_status == TOUR_STATUS.Losed then
+        Time:SetActive(true)
+        self:find("Time1/TextTime"):SetActive(false)
+        self:find("Time2/TextTime"):SetActive(false)
+        self:find("Time3/TextTime"):SetActive(true)
+
+        bee.setText(self:find("Time3/TextTime"), TimeHelp:getTimeStr(bee.getServerTime() - data.mtt_start_time))
+    end
 end
 
 function P:initFilter()
@@ -439,3 +546,9 @@ function P:evt_sng_not_available()
     self:showView(self._showIndex)
 end
 
+function P:hideUI()
+	P.super.hideUI(self)
+	QuickByModel:hideButton(self.QuickByButton)
+end
+
+return P

@@ -22,3 +22,4 @@ function P:onStart()
 	bee.invoke(self.CharacterImage, "setSkinImage", skins[1])
 end
 
+return P

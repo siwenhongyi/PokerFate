@@ -418,3 +418,4 @@ function P:removeApplyTag(friend_uid)
 	end
 end
 
+return P

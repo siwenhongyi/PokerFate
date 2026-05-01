@@ -70,11 +70,11 @@ function P:onAwake()
     self.CollectTotal = 0
 
     self.ReplayTypeDic = {
-        [REPLAY_GAME_TYPE.Poker] = {GAME_GAME_TYPE.LOBBY_HOLDEM_GAME},
-        [REPLAY_GAME_TYPE.Omaha] = {GAME_GAME_TYPE.LOBBY_OMAHA_GAME},
+        [REPLAY_GAME_TYPE.Poker] = {GAME_GAME_TYPE.LOBBY_HOLDEM_GAME, GAME_GAME_TYPE.TRAINING_HOLDEM_GAME},
+        [REPLAY_GAME_TYPE.Omaha] = {GAME_GAME_TYPE.LOBBY_OMAHA_GAME, GAME_GAME_TYPE.TRAINING_OMAHA_GAME},
         [REPLAY_GAME_TYPE.AllInPoker] = {GAME_GAME_TYPE.LOBBY_HOLDEM_ALLIN},
         [REPLAY_GAME_TYPE.Friend] = {GAME_GAME_TYPE.FRIEND_HOLDEM_GAME},
-        [REPLAY_GAME_TYPE.SNG] = {GAME_GAME_TYPE.SNG_HOLDEM_GAME, GAME_GAME_TYPE.SNG_OMAHA_GAME},
+        [REPLAY_GAME_TYPE.SNG] = {GAME_GAME_TYPE.SNG_HOLDEM_GAME, GAME_GAME_TYPE.SNG_OMAHA_GAME, GAME_GAME_TYPE.SNG_TRAIN_GAME},
         [REPLAY_GAME_TYPE.MTT] = {GAME_GAME_TYPE.MTT_HOLDEM_GAME}}
     self.ReplayTypeLabDic = {
         [REPLAY_GAME_TYPE.All] = "LAB_FRIROOM_034",
@@ -164,6 +164,7 @@ function P:switchDropDownPart(sw)
 end
 
 function P:setNearGameData(isOn, type)
+    Game:playSound("ui_tab_switch_1")
     self.InNear = isOn
     if not isOn then
         return
@@ -188,6 +189,7 @@ function P:setNearGameData(isOn, type)
 end
 
 function P:setCollectData(isOn, type)
+    Game:playSound("ui_tab_switch_1")
     self.InCollect = isOn
     if not isOn then
         return
@@ -483,3 +485,4 @@ function P:onScrolling()
     end
 end
 
+return P

@@ -63,6 +63,8 @@ if not LocalStore:getBoolForKey("app_init") then
     -- bee.logEvent("zhu_ce")
 end
 
+YiDunHelper:init()
+
 bee.on("show_game_debug_button", function()
     if not bee.checkCd("show_game_debug_button", 1) then
         return
@@ -349,29 +351,22 @@ function string.getBigNumStr2(num)
             -- bigNumStr= string.format("%0.2f",num/1000)
             bigNumStr = tostring(math.floor(num / 10) / 100)
         end
-    elseif strLen >=7 then
+    elseif  strLen>=7 and strLen<=10 then
         sign = "M"
         if num % 1000000 == 0 then
             bigNumStr= string.format("%d",num/1000000)
-        elseif num <= 100000000 then
-            bigNumStr = tostring(math.floor(num/10000) / 100)
-            -- bigNumStr = string.format("%0.1f", num/1000000)
         else
-            bigNumStr= string.format("%d",num/1000000)
+            bigNumStr = tostring(math.floor(num/10000) / 100)
+        end
+    elseif  strLen> 10  then
+        sign = "B"
+        if num % 1000000000 == 0 then
+            bigNumStr= string.format("%d",num / 1000000000)
+        else
+            bigNumStr = tostring(math.floor(num/10000000) / 100)
         end
     end
 
-    -- local pointIndex = string.find( bigNumStr, "." ,1, true)
-    -- if not pointIndex then
-    --     return string.formatnumberthousands(bigNumStr) .. sign
-    -- else
-    --     local front = string.sub(bigNumStr, 1, pointIndex -1)
-    --     local tail = string.sub(bigNumStr, pointIndex + 1, string.len(bigNumStr))
-    --     if LanguageManager:getLanguage() == "de" then
-    --         return string.format("%s,%s", string.formatnumberthousands(front), tail) .. sign
-    --     end
-    --     return string.format("%s.%s", string.formatnumberthousands(front), tail) .. sign
-    -- end
     return presign .. bigNumStr .. sign
 end
 
@@ -418,3 +413,8 @@ for _, v in ipairs(tpl_HttpCode_list) do
 end
 
 VibrateManager:init()
+math.randomseed(os.time())
+
+if bee.isPc then
+    CS.Utils.SetvSyncCount(0)
+end

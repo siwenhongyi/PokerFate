@@ -77,3 +77,4 @@ function P:onHide()
     P.super.onHide(self)
 end
 
+return P

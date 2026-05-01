@@ -82,3 +82,4 @@ function P:refreshItems()
     end
 end
 
+return P

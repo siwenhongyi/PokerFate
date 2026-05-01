@@ -12,3 +12,4 @@ function P:onStart()
 	end)
 end
 
+return P

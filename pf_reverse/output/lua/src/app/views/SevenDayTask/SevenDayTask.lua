@@ -490,3 +490,4 @@ function P:evt_ColorGameActionRSP()
 	SevenDayTaskModel:requestSevenDayTaskList()
 end
 
+return P

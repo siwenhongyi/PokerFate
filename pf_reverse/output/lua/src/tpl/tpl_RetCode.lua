@@ -9,7 +9,7 @@ local function _initData()
 {"ERR_SERVER_STOP",100,nil,"服务器停服","伺服器維護中","Server under maintenance","サーバーメンテナンス中","서버 점검 중입니다"},
 {"ERR_INNER_ERROR",101,nil,"服务器内部错误","伺服器內部異常","Internal server error","サーバー内部エラー","서버 내부 오류입니다"},
 {"ERR_NOT_ENOUGH_MONEY",102,nil,"金币不足","籌碼不足","Insufficient chips","チップが足りません","칩이 부족합니다"},
-{"ERR_GM_KICK",103,nil,"被GM踢下线","帳號已被強制登出","Your account has been forcibly logged out","アカウントが強制ログアウトされました","운영자에 의해 강제 접속 종료되었습니다"},
+{"ERR_GM_KICK",103,nil,"账号已被强制登出","帳號已被強制登出","Your account has been forcibly logged out","アカウントが強制ログアウトされました","운영자에 의해 강제 접속 종료되었습니다"},
 {"ERR_OTHER_KICK",104,nil,"您已经在其他地方登录。","您已在其他裝置登入。","Your account is logged in on another device","他の端末でログインされました","您已經在其他地方登錄。"},
 {"ERR_SERVER_BUSY",105,nil,"服务器繁忙","伺服器繁忙","Server busy","サーバーが混雑しています","서버가 혼잡합니다"},
 {"ERR_MSG_FREQUENT",106,nil,"操作太频繁,稍后再试","操作過於頻繁，請稍後再試","Too many requests. Please try again later","操作が頻繁すぎます。しばらくしてからお試しください","요청이 너무 빈번합니다. 잠시 후 다시 시도하세요"},
@@ -95,3 +95,4 @@ function tpl_RetCode_clone(key)
     return nil
 end
 
+return P

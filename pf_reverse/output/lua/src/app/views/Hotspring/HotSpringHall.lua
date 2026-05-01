@@ -84,3 +84,4 @@ function P:onShow()
     self:find("hotspring_btn_tips/Eff_poker_Ui_hotspring_wh_loop", self.LeftTop):SetActive(LocalStore:isTagValid("Eff_poker_Ui_hotspring_wh_loop"))
 end
 
+return P

@@ -23,6 +23,12 @@ function P:onAwake()
     self.DrawTicket = self:find("DrawTicket", Currency)
     self.DrawTicketIcon = self:find("DrawTicketIcon", self.DrawTicket)
     self.DrawTicketText = self:find("DrawTicketText", self.DrawTicket)
+
+    self.Up = self:find("Up", self.RightTop)
+    self.Up:SetActive(false)
+    self.UpTag = self:find("UpTag", self.Up)
+    self.UpNameText = self:find("UpNameText", self.Up)
+    self.UpTimeText = self:find("UpTimeText", self.Up)
     
     self.SkipToggle = self:find("SkipToggle", self.RightBottom)
 
@@ -142,15 +148,17 @@ function P:evt_ItemChangeRSP(msg)
 end
 
 function P:evt_gachaUpdate(params)
+    local isMove = false
     if self._waitInit then
         self._waitInit = false
         self:initList()
         self:setCurrencyShow()
         self.LoadingMask:SetActive(false)
         self.AnimRoot:SetActive(true)
+        isMove = true
     end
 
-    self:setRecruitList()
+    self:setRecruitList(isMove)
     self:setCardPoolShow()
 
     if params and params.isNew then
@@ -214,8 +222,8 @@ function P:setBannerItemShow(item, data, isOn)
     bee.setText(NameText, _T(cfg.name))
     bee.setIcon(ItemIcon, cfg.image .. (isOn and "_on" or "_off"), "Gacha", true)
 
-    if self._timeTags[data.pool_id] then
-        scheduler:removeTag(self._timeTags[data.pool_id])
+    if self._timeTags[item] then
+        scheduler:removeTag(self._timeTags[item])
     end
 
     if data.end_ts and data.end_ts > 0 then
@@ -224,7 +232,7 @@ function P:setBannerItemShow(item, data, isOn)
         local leftTime = data.end_ts - bee.getServerTime()
         if leftTime > 0 then
             bee.setText(TimeText, ShopModel:getShopTimeText(leftTime))
-            self._timeTags[data.pool_id] = bee.schedule(1, function()
+            self._timeTags[item] = bee.schedule(1, function()
                 leftTime = leftTime - 1
                 if leftTime > 0 then
                     bee.setText(TimeText, ShopModel:getShopTimeText(leftTime))
@@ -240,7 +248,7 @@ function P:setBannerItemShow(item, data, isOn)
     end
 end
 
-function P:setRecruitList()
+function P:setRecruitList(isMove)
     -- self.RecruitList:clear()
     self.RecruitList:setDatas({})
     local list = GachaModel:getCardPoolList()
@@ -250,12 +258,14 @@ function P:setRecruitList()
         return
     end
 
+    local index = 1
     if not self._selectedCardPool then
         self._selectedCardPool = list[1].pool_id
     else
         local isIn = false
         for k,v in pairs(list) do
             if v.pool_id == self._selectedCardPool then
+                index = k
                 isIn = true
                 break
             end
@@ -266,10 +276,18 @@ function P:setRecruitList()
     end
 
     self.RecruitList:setDatas(list)
+    if isMove then
+        self.RecruitList:moveToYItem(index)
+    end
 end
 
 -- 卡池信息
 function P:setCardPoolShow()
+    if self.upScheduleTag then
+        scheduler:removeTag(self.upScheduleTag)
+        self.upScheduleTag = nil
+    end
+
     if self._gachaCenterItem then
         ObjectCache:putItem(self._gachaCenterItem)
         self._gachaCenterItem = nil
@@ -279,7 +297,12 @@ function P:setCardPoolShow()
         return
     end
 
-    local centerItem = ObjectCache:getItemWithName("views/Gacha/GachaCenter" .. self._selectedCardPool)
+    local cfg = tpl_card_pool[self._selectedCardPool]
+    if not cfg then
+        return
+    end
+    
+    local centerItem = ObjectCache:getItemWithName("views/Gacha/" .. cfg.prefab)
     if not centerItem then
         return
     end
@@ -288,12 +311,11 @@ function P:setCardPoolShow()
     centerItem.transform.localPosition = bee.v3(0, 0, 0)
     centerItem.transform.localScale = bee.v3(1, 1, 1)
     self._gachaCenterItem = centerItem
-
-    local cfg = tpl_card_pool[self._selectedCardPool]
+  
     local characterCount = #cfg.character
     -- 角色信息
     for i, v in ipairs(cfg.character) do
-        self:setRole(self:find("Character/Role" .. i, centerItem), v)
+        self:setRole(self:find("Character/Role" .. i, centerItem), v, cfg)
         self:setNameCard(self:find("NameCard" .. i, centerItem), v)
     end
 
@@ -314,11 +336,65 @@ function P:setCardPoolShow()
     end
     local TipsText = self:find("TipsBg/TipsText", showTitle)
     bee.setText(TipsText, _T(cfg.des))
+
+    if cfg.up then
+        self.Up:SetActive(true)
+
+        bee.setIconInAtlas(self.UpTag, cfg.up)
+        local upRole = tpl_character[cfg.up_character[1]]
+        bee.setText(self.UpNameText, _T(upRole.name))
+
+        local endTime = GachaModel:getCardPoolEndTime(self._selectedCardPool)
+        if endTime > 0 then
+            self.UpTimeText:SetActive(true)
+
+            local leftTime = endTime - bee.getServerTime()
+            if leftTime > 0 then
+                bee.setText(self.UpTimeText, _F("LAB_GACHA_028", ShopModel:getShopTimeText(leftTime)))
+                self.upScheduleTag = self:schedule(1, function()
+                    leftTime = leftTime - 1
+                    if leftTime > 0 then
+                        bee.setText(self.UpTimeText, _F("LAB_GACHA_028", ShopModel:getShopTimeText(leftTime)))
+                    else
+                        bee.setText(self.UpTimeText, _T("LAB_BACKPACK_DES_21"))
+                    end
+                end)
+            else
+                bee.setText(self.UpTimeText, _T("LAB_BACKPACK_DES_21"))
+            end
+        else
+            self.UpTimeText:SetActive(false)
+        end
+    else
+        self.Up:SetActive(false)
+    end
+
+    if self._selectedCardPool == 10005 then
+        self:find("Title/gacha_rainyleisure_title_bg_word_02", centerItem):SetActive(curLan ~= "en")
+        self:find("Title/gacha_rainyleisure_title_bg_word_01", centerItem):SetActive(curLan ~= "en")
+    elseif self._selectedCardPool == 20012 then
+        self:find("bg_gacha_nightflame_bird", centerItem):SetActive(false)
+    end
 end
 
-function P:setRole(item, id)
+function P:setRole(item, id, cfg)
     local showSkin = get_tpl_subKey(tpl_character_skin_list, "role", id)[1]
-    bee.setIcon(self:find("RoleImg", item), showSkin.image, true)
+    local RoleImg = self:find("RoleImg", item)
+    if RoleImg then
+        bee.setIcon(RoleImg, showSkin.image, true)
+
+        if cfg and cfg.up then
+            if cfg.up_character_offset then
+                RoleImg.transform.localPosition = bee.v3(cfg.up_character_offset[1], cfg.up_character_offset[2], 0)
+                if cfg.up_character_offset[3] then
+                    RoleImg.transform.localScale = bee.v3(cfg.up_character_offset[3], cfg.up_character_offset[3], 1)
+                end
+            else
+                RoleImg.transform.localPosition = bee.v3(0, 0, 0)
+                RoleImg.transform.localScale = bee.v3(1, 1, 1)
+            end
+        end
+    end
 end
 
 function P:setNameCard(item, id)
@@ -333,7 +409,7 @@ function P:setNameCard(item, id)
 
     local characterCfg = tpl_character[id]
 
-    bee.setText(CVNameText, "CV:" .. _T(characterCfg.cv))
+    bee.setText(CVNameText, "CV: " .. _T(characterCfg.cv))
     bee.setText(NameText, _T(characterCfg.name))
     bee.setIconInAtlas(CharacterIcon, characterCfg.icon, true)
 
@@ -505,3 +581,4 @@ function P:onClickRecruitTen()
     end
 end
 
+return P

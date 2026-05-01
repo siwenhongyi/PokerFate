@@ -10,6 +10,7 @@ local gamePath = {
 	{name = "LoginModel", cls = require "app.model.LoginModel"},
 	{name = "SdkModel", cls = require "app.model.SdkModel"},
 	{name = "ShopModel", cls = require "app.model.ShopModel"},
+	{name = "ClientDataModel", cls = require "app.model.ClientDataModel"},
 	
 	{name = "ActivityManager", cls = require "app.model.activity.ActivityManager"},
 	{name = "ItemModel", cls = require "app.model.ItemModel"},
@@ -29,6 +30,8 @@ local gamePath = {
     {name = "RankingModel", cls = require "app.model.RankingModel"},
     {name = "TournamentModel", cls = require "app.model.TournamentModel"},
     {name = "SideGameModel", cls = require "app.model.SideGameModel"},
+	{name = "QuickByModel", cls = require "app.model.QuickByModel"},
+	{name = "AchievementModel", cls = require "app.model.AchievementModel"},
 
     {name = "ActivityModel", cls = require "app.model.ActivityModel"},
     {name = "ActivityNewmanCheckinModel", cls = require "app.model.activity.ActivityNewmanCheckinModel"},
@@ -125,13 +128,18 @@ function P:clear(Rebuild)
 end
 
 -- 永久清掉某个模块数据 慎用
-function P:clearData(modelName)
-
-	print("清理"..modelName.."~~~")
-	if P[modelName].clearData then 
-		P[modelName]:clearData() 
-		--P[v.name] = v.cls.new()
-	end
+function P:clearAllData(modelName)
+	local excludeTable = 
+	{
+		-- "LoginModel",
+		-- "PlayerModel",
+		"SdkModel",
+	}
+    for _, v in pairs(allPath) do
+		if not table.contains(excludeTable, v.name) and P[v.name] then
+			P[v.name]:clearData()
+		end
+    end
 end
 
 

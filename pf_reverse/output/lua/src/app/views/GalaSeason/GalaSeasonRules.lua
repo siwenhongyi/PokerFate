@@ -15,3 +15,4 @@ function P:onShow()
     bee.logEvent("galaseason-rules")
 end
 
+return P

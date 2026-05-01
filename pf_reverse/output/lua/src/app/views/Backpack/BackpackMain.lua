@@ -606,6 +606,7 @@ function P:showNormalItemList()
 	local list
 	if self._clickType == TabType.Prop then
 		list = ItemModel:getPropItems()
+		list = ItemModel:getPropItemsByType(GPropKind.TournamentTicket, list)
 	else
 		list = ItemModel:getAllShowItems(self._clickType, self._isOnlyShowOwn)
 	end
@@ -744,8 +745,8 @@ function P:setPropItemShow(item, data)
 	NewIcon:SetActive(ItemModel:isNewItem(data.item_id))
 	if self._clickType == TabType.Prop then
 		-- 普通道具
-		LockMask:SetActive(false)
-		LockIcon:SetActive(false)
+		LockMask:SetActive(data.num <= 0)
+		LockIcon:SetActive(data.num <= 0)
 		Decorate:SetActive(false)
 	elseif self._clickType == TabType.Gift or self._clickType == TabType.Awake then
 		-- 礼物/觉醒道具
@@ -1701,3 +1702,4 @@ function P:decorationGuide()
 	GuideManager:startSystemGuide(4001, 0.65)
 end
 
+return P

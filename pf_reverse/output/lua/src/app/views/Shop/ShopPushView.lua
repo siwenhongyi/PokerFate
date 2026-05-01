@@ -178,3 +178,4 @@ function P:evt_updateShopLimit()
 	end
 end
 
+return P

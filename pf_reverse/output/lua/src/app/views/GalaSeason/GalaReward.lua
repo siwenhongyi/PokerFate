@@ -9,3 +9,4 @@ function P:onAwake()
 end
 
 
+return P

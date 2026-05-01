@@ -117,3 +117,4 @@ function net:EditFavoriteRoleRSP(msg)
             end
         end
     end
+end

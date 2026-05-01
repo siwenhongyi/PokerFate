@@ -74,3 +74,4 @@ function P:refreshUI()
 	self.BoughtText:SetActive(isBougnt)
 end
 
+return P

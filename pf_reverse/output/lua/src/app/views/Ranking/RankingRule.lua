@@ -88,8 +88,9 @@ function P:setRewardListShow(ruleId, id)
 	local RewardItem = self:find("RewardItem", self.RewardList)
 	RewardItem:SetActive(false)
 
-	RewardTitle1:SetActive(id == 1)
-	RewardTitle2:SetActive(id == 2)
+	local ruleCfg = tpl_leaderboard_rules[ruleId]
+	RewardTitle1:SetActive(ruleCfg.rule_rewards_title == 1)
+	RewardTitle2:SetActive(ruleCfg.rule_rewards_title == 2)
 
 	local cfg = RankingModel:getRuleRewardCfg(ruleId, id)
 	for i,v in ipairs(cfg) do
@@ -158,3 +159,4 @@ function P:setRewardItem(item, data, index)
 	end
 end
 
+return P

@@ -4,12 +4,13 @@ function P:onAwake()
     self.AnimRoot = self:find("AnimRoot")
     self.Center = self:find("Center", self.AnimRoot)
     self.RightBottom = self:find("RightBottom", self.AnimRoot)
+    self.RightTop = self:find("RightTop", self.AnimRoot)
     self.Top = self:find("Top", self.AnimRoot)
     self.Bottom = self:find("Bottom", self.AnimRoot)
     self.LeftTop = self:find("LeftTop", self.AnimRoot)
 
     self.CharacterImage = self:find("CharacterImage", self.Center)
-    self.Player = self:find("Player", self.Center)
+    self.Player = self:find("Player", self.Bottom)
     self.ImageTitle = self:find("ImageTitle", self.Player)
     self.TextName = self:find("TextName", self.Player)
     self.TextLevel = self:find("Rank/TextLevel", self.Player)
@@ -21,7 +22,8 @@ function P:onAwake()
 
     self.BuyIn = self:find("BuyIn", self.Bottom)
     self.NextButton = self:find("NextButton", self.Bottom)
-    self.CloseButton = self:find("CloseButton", self.Bottom)
+    self.CloseButton = self:find("CloseButton", self.RightTop)
+
 
     self.Eliminated = self:find("Eliminated", self.Center)
     self.WIN = self:find("WIN", self.Center)
@@ -38,6 +40,9 @@ function P:onAwake()
         
         if self.signItem and self.signItem.item_num > ItemModel:getItemNumById(self.signItem.item_id) then
             UiManager:showToast(_F("LAB_SHOP_COMMON_24", _T(tpl_props[self.signItem.item_id].name)))
+            if self.signItem.item_id == GPropId.Gold then
+                QuickByModel:checkShowView(GameModel.data:getGameType())
+            end
             return
         end
         if not bee.checkCd("SngSignREQ", 2) then
@@ -61,7 +66,6 @@ function P:onAwake()
             self.ShareButton:SetActive(true)
         end)
     end)
-
     GameModel:setStopLeaveRoom(true)
 end
 
@@ -123,17 +127,27 @@ function P:onShow()
         local Item3 = self:find("Item3", Rewards02)
         Item3:SetActive(false)
 
-        bee.setText(self:find("Item2/CountText", Rewards01), _N(self._data.champion_points))
-        bee.addClick(self:find("Item2", Rewards01), function()
-            UiManager:showUI("CommonItemTip", {data = {id = GPropId.ChampionPoints}, target = self:find("Item2/Icon", Rewards01)})
-        end, true)
         local flag = false
+        Rewards01:SetActive(false)
+        if self._data.champion_points > 0 then
+            bee.setText(self:find("Item2/CountText", Rewards01), _N(self._data.champion_points))
+            bee.addClick(self:find("Item2", Rewards01), function()
+                UiManager:showUI("CommonItemTip", {data = {id = GPropId.ChampionPoints}, target = self:find("Item2/Icon", Rewards01)})
+            end, true)
+            Rewards01:SetActive(true)
+        else
+            self:find("Item2", Rewards01):SetActive(false)
+        end
+
+        self:find("Item1", Rewards01):SetActive(false)
         for _, v in ipairs(self._data.reward) do
             if v.item_id == GPropId.Gold then
+                self:find("Item1", Rewards01):SetActive(true)
                 bee.setText(self:find("Item1/CountText", Rewards01), _N(v.item_num))
                 bee.addClick(self:find("Item1", Rewards01), function()
                     UiManager:showUI("CommonItemTip", {data = {id = GPropId.Gold}, target = self:find("Item1/Icon", Rewards01)})
                 end, true)
+                Rewards01:SetActive(true)
             else
                 flag = true
                 local item = CU.GameObject.Instantiate(Item3, BgView.transform, false)
@@ -160,15 +174,21 @@ function P:onShow()
         Rewards02:SetActive(flag)
         if not flag then
             Rewards01.transform.localPosition = bee.v3(0, 100, 0)
+        elseif not Rewards01.activeSelf then
+            Rewards02.transform.localPosition = bee.v3(0, 100, 0)
         end
     else
         bee.invoke(self.CharacterImage, "setSkin", skin or CharacterModel:getUsingRole():getSkinData(), false)
-        bee.invoke(self.CharacterImage, "playAnim", "idle", "skin2", "standby")
+        bee.invoke(self.CharacterImage, "playAnim", "idle", "skin2", "shame")
         Game:playSound("sound_SNG_lose")
         -- self.ShareButton:SetActive(false)
         -- self.Sharetips:SetActive(false)
         -- self:find("Rewards01", self.Bottom):SetActive(false)
         -- self:find("Rewards02", self.Bottom):SetActive(false)
+
+        if self.signItem and self.signItem.item_num > ItemModel:getItemNumById(self.signItem.item_id) then
+            QuickByModel:checkInsideGame(GameModel.data:getGameType(), self._data.shop_id)
+        end
 
         local Rewards01 = self:find("Reward01", self.Eliminated)
         local Rewards02 = self:find("Reward02", self.Eliminated)
@@ -207,9 +227,14 @@ function P:onShow()
     Game:stopMusic()
 end
 
+function P:evt_refreshTopInfo()
+    TournamentModel:setByinText(self:find("tournament_lobby_frame_01/TextByin", self.BuyIn), self.signItem, true)
+end
+
 function P:onHide()
     GameModel:setStopLeaveRoom(nil)
     bee.emit("evt_gameBlur", false, self.__cname)
     P.super.onHide(self)
 end
 
+return P

@@ -67,7 +67,7 @@ end
 function P:onStart()
 	P.super.onStart(self)
 	self:initTableCards()
-	if not GameModel.data:isRecord() then
+	if GameModel.data and not GameModel.data:isRecord() then
 		self:_showActionLayer()
 	end
 
@@ -75,9 +75,11 @@ function P:onStart()
 		UiManager:showUI("GameGuide", {guide = GuideManager.curGuide.guide, data = GuideManager.curGuide})
 	end
 
-	local chipIcon = GameModel.data:getChipIcon()
-	if chipIcon then
-		bee.setIcon(self.ImagePot, chipIcon)
+	if GameModel.data then
+		local chipIcon = GameModel.data:getChipIcon()
+		if chipIcon then
+			bee.setIcon(self.ImagePot, chipIcon)
+		end
 	end
 
 	self:refreshCardBack()
@@ -92,6 +94,9 @@ function P:onDestroy()
 end
 
 function P:onEnable()
+	if not GameModel.data then
+		return
+	end
 	if not GameModel.data:isRecord() then
 		if GameModel.data:isFriendsRoom() then
 			self.uiLayer = UiManager:showUI("PKFriendsRoomLayer")
@@ -904,7 +909,7 @@ function P:evt_WinnerRSP(params)
 					if player and player.uid == v.uid and not player.is_fold then
 						self.seatController[seatid]:playScrap()
 					end
-				elseif v.chips > 0 and v.chips >= tpl_constdata.ScrapRecoverBlindRate * self.data:getBigBlind() then
+				elseif v.chips > 0 and self.data:isCanScrop(v.chips) then
 					local seatid = v.seatid + 1
 					local player = self.data:getPlayer(seatid)
 					if player then
@@ -915,7 +920,7 @@ function P:evt_WinnerRSP(params)
 			end
 		else
 			for _, v in ipairs(params.profit) do
-				if v.chips > 0 and v.chips >= tpl_constdata.ScrapRecoverBlindRate * self.data:getBigBlind() then
+				if v.chips > 0 and self.data:isCanScrop(v.chips) then
 					local seatid = v.seatid + 1
 					local player = self.data:getPlayer(seatid)
 					if player then
@@ -997,7 +1002,6 @@ function P:evt_ChipsBackBRC(params)
 	local seatid = params.seatid + 1
 	local chips = params.chips
 	local player = self.data:getPlayer(seatid)
-	player.chips = player.chips + chips
 	self.seatController[seatid]:refreshChip(player)
 end
 
@@ -1113,7 +1117,8 @@ function P:evt_NoticeRebyRSP(msg)
 				elseif (data.min_byin or data.byin) <= PlayerModel:getGold() then
 					UiManager:showUI("LobbyByinDialog", {data = data, isReby = true})
 				else
-					UiManager:showUI("IngameQuickBy", {data = data, dt = msg.reby_left_time})
+					QuickByModel:checkInsideGame(data.gameType, data.quick_buy)
+					-- UiManager:showUI("IngameQuickBy", {data = data, dt = msg.reby_left_time})
 				end
 			else
 				printError("NoticeRebyRSP no table data for sb: " .. self.data:getSmallBlind())
@@ -1186,3 +1191,4 @@ function P:evt_lan_mod()
 	self.actionLayer:refreshUI()
 end
 
+return P

@@ -30,3 +30,4 @@ function tpl_event_page_clone(key)
     return nil
 end
 
+return P

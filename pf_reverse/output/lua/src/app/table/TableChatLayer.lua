@@ -138,3 +138,4 @@ function P:evt_gameBlur(flag, name)
     self:evt_uiBlur(flag, name)
 end
 
+return P

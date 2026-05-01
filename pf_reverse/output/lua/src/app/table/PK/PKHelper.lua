@@ -555,3 +555,4 @@ function P.__select_top_combination(comb_ls)
 	return comb_ls[1]
 end
 
+return P

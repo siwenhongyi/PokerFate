@@ -87,7 +87,7 @@ function P:setCardPoolList(data)
         end
     end
     for k,v in pairs(list) do
-        v.probability = string.format("%.4f", v.weight / totalWeightList[v.content_type])
+        v.probability = tonumber(string.format("%.4f", v.weight / totalWeightList[v.content_type]))
         local rate
         if v.content_type == CARD_CONTENT_TYPE.CHARACTER then
             rate = data.character_rate
@@ -234,13 +234,28 @@ function P:evt_NoticeBRC(params)
 end
 
 function P:getContainCardPoolId(id)
-    for _, cardPool in ipairs(self._cardPoolList) do
-        for _, v in pairs(cardPool.list) do
+    local poolId
+    local probability = 0
+    for i, cardPool in ipairs(self._cardPoolList) do
+        for k,v in pairs(cardPool.list) do
             if v.content_id == id then
-                return cardPool.pool_id
+                if v.probability > probability then
+                    poolId = cardPool.pool_id
+                    probability = v.probability
+                end
             end
         end
     end
+    return poolId
+end
+
+function P:getCardPoolEndTime(id)
+    for k, v in pairs(self._cardPoolList) do
+        if v.pool_id == id then
+            return v.end_ts
+        end
+    end
+    return 0
 end
 
 -- 跨天
@@ -250,3 +265,4 @@ function P:evt_serverTimeCrossDay()
     end)
 end
 
+return P

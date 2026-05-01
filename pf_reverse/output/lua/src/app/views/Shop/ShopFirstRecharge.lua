@@ -84,3 +84,4 @@ function P:onClickClaimButton()
 	ShopModel:requestReward(self._cfg.shop_type, self._cfg.id)
 end
 
+return P

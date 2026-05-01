@@ -85,3 +85,4 @@ function P:refreshAttrs(level, attrs)
     end
 end
 
+return P

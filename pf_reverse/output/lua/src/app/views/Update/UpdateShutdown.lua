@@ -42,3 +42,4 @@ function P:onShow()
     bee.logEvent("login-update-shut-show")
 end
 
+return P

@@ -1189,3 +1189,4 @@ function P:playZoomWithShake(obj, params, callback)
 	:link()
 end
 
+return AnimationMgr

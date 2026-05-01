@@ -93,13 +93,17 @@ function P:isTournament()
 	return self:isSNG() or self:isMTT()
 end
 
+function P:isTrainingGame()
+	return GF.isTrainingGame(self:getGameType())
+end
+
 function P:isJP()
 	return self:getRoomSubType() == GAME_SUB_TYPE.JPOT
 end
 
 function P:getGameName()
 	if self:isSNG() then
-		return _T("LAB_TOURNAMENT_SNG") .. "-" .. (GameModel.data:getGameType() == GAME_GAME_TYPE.SNG_HOLDEM_GAME and _T("LAB_POKER_GAME") or _T("LAB_OMAHA"))
+		return _T("LAB_TOURNAMENT_SNG") .. "-" .. ((GameModel.data:getGameType() == GAME_GAME_TYPE.SNG_HOLDEM_GAME or GameModel.data:getGameType() == GAME_GAME_TYPE.SNG_TRAIN_GAME) and _T("LAB_POKER_GAME") or _T("LAB_OMAHA"))
 	elseif self:isMTT() then
 		return _T("LAB_TOURNAMENT_MTT") .. "-" .. (GameModel.data:getGameType() == GAME_GAME_TYPE.MTT_HOLDEM_GAME and _T("LAB_POKER_GAME") or _T("LAB_OMAHA"))
 	elseif self:isAllinOrFold() then
@@ -135,7 +139,16 @@ function P:getRoomId()
 end
 
 function P:getRoomName()
-	return self.room_info.room_name
+	local names = self.room_info.room_name or self.room_info.name
+    for _, v in ipairs(names) do
+        if v.lang == LAN:getLanguage() then
+			return v.text
+        end
+    end
+	for _, v in ipairs(names) do
+		return v.text
+    end
+	return ""
 end
 
 function P:getTid()
@@ -753,3 +766,4 @@ function P:setShowCardInfo(pos, flag)
 	self.playing_status.show_card_info[pos] = flag
 end
 
+return P

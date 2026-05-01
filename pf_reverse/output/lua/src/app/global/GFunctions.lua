@@ -71,12 +71,16 @@ function M.isPokerRoom(roomType)
 	return roomType and (roomType == GAME_ROOM_TYPE.HOLDEM)
 end
 
+function M.isPokerGame(gameType)
+	return gameType == GAME_GAME_TYPE.LOBBY_HOLDEM_GAME or gameType == GAME_GAME_TYPE.TRAINING_HOLDEM_GAME
+end
+
 function M.isOmahaRoom(roomType)
 	return roomType == GAME_ROOM_TYPE.OMAHA
 end
 
 function M.isOmahaGame(gameType)
-	return gameType == GAME_GAME_TYPE.LOBBY_OMAHA_GAME
+	return gameType == GAME_GAME_TYPE.LOBBY_OMAHA_GAME or gameType == GAME_GAME_TYPE.TRAINING_OMAHA_GAME
 end
 
 function M.isAllinPoker(gameType)
@@ -88,14 +92,28 @@ function M.isFriendsRoom(gameType)
 end
 
 function M.isSNG(gameType)
-	return gameType == GAME_GAME_TYPE.SNG_HOLDEM_GAME or gameType == GAME_GAME_TYPE.SNG_OMAHA_GAME
+	return gameType == GAME_GAME_TYPE.SNG_HOLDEM_GAME or gameType == GAME_GAME_TYPE.SNG_OMAHA_GAME or gameType == GAME_GAME_TYPE.SNG_TRAIN_GAME
 end
 
-function M.getGameTypeName(gameType)
-	if gameType == GAME_GAME_TYPE.LOBBY_OMAHA_GAME then
+function M.isMTT(gameType)
+	return gameType == GAME_GAME_TYPE.MTT_HOLDEM_GAME or gameType == GAME_GAME_TYPE.MTT_OMAHA_GAME
+end
+
+function M.isTrainingGame(gameType)
+	return gameType == GAME_GAME_TYPE.TRAINING_HOLDEM_GAME or gameType == GAME_GAME_TYPE.TRAINING_OMAHA_GAME or gameType == GAME_GAME_TYPE.SNG_TRAIN_GAME
+end
+
+function M.getGameTypeName(gameType, showRealName)
+	if M.isOmahaGame(gameType) then
 		return _T("LAB_OMAHA")
-	elseif gameType == GAME_GAME_TYPE.LOBBY_HOLDEM_ALLIN then
+	elseif M.isAllinPoker(gameType) then
 		return _T("LAB_ALLIN_01")
+	elseif showRealName and M.isSNG(gameType) then
+		return _T("LAB_SNG")
+	elseif showRealName and M.isMTT(gameType) then
+		return _T("LAB_MTT")
+	elseif showRealName and M.isFriendsRoom(gameType) then
+		return _T("LAB_FRIROOM_001")
 	end
 	return _T("LAB_POKER_GAME")
 end
@@ -111,13 +129,31 @@ end
 
 function M.getTableDatas(gameType)
 	if gameType == GAME_GAME_TYPE.LOBBY_OMAHA_GAME then
-		return tpl_table_omaha
+		if not M.__tpl_table_omaha then
+			M.__tpl_table_omaha = {}
+			for _, v in ipairs(tpl_table_omaha_free_list) do
+				table.insert(M.__tpl_table_omaha, v)
+			end
+			for _, v in ipairs(tpl_table_omaha_list) do
+				table.insert(M.__tpl_table_omaha, v)
+			end
+		end
+		return M.__tpl_table_omaha
 	elseif gameType == GAME_GAME_TYPE.FRIEND_HOLDEM_GAME then
 		return tpl_table_poker_friend
 	elseif gameType == GAME_GAME_TYPE.LOBBY_HOLDEM_ALLIN then
 		return tpl_table_poker_allin
 	end
-	return tpl_table_poker
+	if not M.__tpl_table_poker then
+		M.__tpl_table_poker = {}
+		for _, v in ipairs(tpl_table_poker_free_list) do
+			table.insert(M.__tpl_table_poker, v)
+		end
+		for _, v in ipairs(tpl_table_poker_list) do
+			table.insert(M.__tpl_table_poker, v)
+		end
+	end
+	return M.__tpl_table_poker
 end
 
 function M.getTableDataBySB(gameType, sb)
@@ -521,3 +557,4 @@ function M.setFrameImage(ImageFrame, frame, nativeSize)
 	end
 end
 
+return M

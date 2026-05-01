@@ -11,10 +11,15 @@ local TagLinks =
         ShopVip = {"VipClaimNum"},
     },
     ShopNew = {
-        DecorateNew = {},
-        SkinNew = {}
+        SkinNew = {},
+        DecorateNew = {}, 
     },
     ShopNewOut = {},
+    ShopTimeLimit = {
+        SkinTimeLimit = {},
+        DecorateTimeLimit = {},
+    },
+    ShopTimeLimitOut = {},
     Email = {
         EmailNormal = {"NormalNewEmail"},
         EmailSpecial = {"SpecialNewEmail"},
@@ -31,6 +36,10 @@ local TagLinks =
             WeeklyPoint = {},
             WeeklyReward = {},
         },
+        ChallengeTask = {
+            ChallengePoint = {},
+            ChallengeReward = {},
+        }
     },
     Backpack = {    -- 背包
         BackPackProp = {},
@@ -91,6 +100,11 @@ local TagLinks =
         SchoolPlot = {},    -- 剧情解锁
         SchoolTask = {},    -- 任务奖励
     },
+    ------------------ 活动 兔女郎 ------------------
+    BunnyGirl = {
+        BunnyGirlPlot = {},    -- 剧情解锁
+        BunnyGirlTask = {},    -- 任务奖励
+    },
 
     ------------------ 活动 新春 ------------------
     SpringFestival = {
@@ -100,7 +114,22 @@ local TagLinks =
     ------------------ 更新提示 ------------------
     UpdateTag = {},
 
+    ------------------ 个人信息 ------------------
+    InformationAvatar = {}, -- 头像
+    InformationFrame = {},  -- 头像框
+    InformationTitle = {},  -- 称号
 
+    ------------------ 返利基金 ------------------
+    DevelopmentFund = {},
+
+    ------------------ 成就 ------------------
+    Achievement = {
+        AchTheme1 = {},
+        AchTheme2 = {},
+        AchTheme3 = {},
+        AchTheme4 = {},
+        AchTheme5 = {},
+    },
 }
 
 RedTag = {}
@@ -137,3 +166,4 @@ end
 _bindRedTag(TagLinks)
 for k, v in pairs(RedTagLink) do
     RedTag[k] = k
+end

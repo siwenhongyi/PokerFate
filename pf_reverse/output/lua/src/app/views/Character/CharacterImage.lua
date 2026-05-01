@@ -41,7 +41,8 @@ function P:initSpecialInteraction(callback)
                 self._isSpecialInteract = true
                 self:hideBubble()
                 self:playAnim(name, self._skin, nil, function()
-                    self:playAnim("idle", self._skin, "standby")
+                    -- self:playAnim("idle", self._skin, "standby")
+                    self:switchIdle()
                     self._isSpecialInteract = false
                 end, false, true)
                 Game:playRoleOutVoice(self._skinData.role, cfg.special_click_voice[i + 1])
@@ -110,7 +111,8 @@ function P:initLobbyClickVoice(callback)
         if self._isInLobbyVoice then
             self._isInLobbyVoice = nil
             self:hideBubble()
-            self:playAnim(nil, self._skin, "standby")
+            -- self:playAnim(nil, self._skin, "standby")
+            self:switchIdle()
             Game:stopRoleSound()
             return
         end
@@ -124,7 +126,8 @@ function P:initLobbyClickVoice(callback)
             self:showBubble(chat.text, length, function()
                 self._isInLobbyVoice = nil
                 if not bee.isNull(self.node) then
-                    self:playAnim(nil, self._skin, "standby")
+                    -- self:playAnim(nil, self._skin, "standby")
+                    self:switchIdle()
                 end
             end)
             self:playAnim(nil, self._skin, chat.face, nil, false)
@@ -229,7 +232,15 @@ function P:switchIdle()
     if bee.isNull(self.node) then
         return
     end
-    self:playAnim("idle", self._skin, "standby")
+    -- self:playAnim("idle", self._skin, "standby")
+    if self._roleSpine then
+        local cls = ObjectPool:getCls(self._roleSpine)
+        if cls then
+            cls:switchIdle()
+        else
+            self:playAnim("idle", self._skin, "standby")
+        end
+    end
     self._isSpecialInteract = false
 end
 
@@ -463,3 +474,4 @@ function P:setScrap(flag)
     end
 end
 
+return P

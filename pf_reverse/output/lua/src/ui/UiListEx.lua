@@ -654,4 +654,11 @@ function P:getDatasCount()
     return #self._items
 end
 
+function P:switchScrollInertia(val)
+    if not val then
+        self._list.velocity = bee.v2(0, 0)
+    end
+    self._list.inertia = val
+end
+
 return P

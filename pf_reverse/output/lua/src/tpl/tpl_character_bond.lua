@@ -76,7 +76,13 @@ local function _initData()
 {69,1013,3,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_3]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
 {70,1013,4,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_4]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
 {71,1013,5,nil,nil,{10800001,15,10700001,50},{20211301,20411301,20111304},"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
-{72,1013,6,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"}
+{72,1013,6,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{73,1014,1,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_1]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{74,1014,2,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_2]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{75,1014,3,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_3]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{76,1014,4,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_4]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{77,1014,5,nil,nil,{10800001,15,10700001,50},{20211401,20411401,20111404},"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{78,1014,6,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"}
 }
     for _, v in pairs(bodys) do
         local m = {}
@@ -98,3 +104,4 @@ function tpl_character_bond_clone(key)
     return nil
 end
 
+return P

@@ -105,3 +105,4 @@ function P:onBtConfirm()
     end, true)
 end
 
+return P

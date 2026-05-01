@@ -15,7 +15,7 @@ local function _initData()
 {8,4,"en","https://x.com/PokerFate_EN",nil},
 {9,5,"zh","https://space.bilibili.com/3632315995523599",nil},
 {10,6,"zh","https://weibo.com/u/8498066320",nil},
-{11,7,"zh",nil,"535161913"}
+{11,7,"zh","https://qm.qq.com/q/Qj9NRwvYAI",nil}
 }
     for _, v in pairs(bodys) do
         local m = {}
@@ -37,3 +37,4 @@ function tpl_medialink_config_clone(key)
     return nil
 end
 
+return P

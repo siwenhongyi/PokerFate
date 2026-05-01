@@ -233,19 +233,7 @@ function P:refreshUI()
         self._lovesSpc[self._role.info.special[i]] = 2
     end
 
-    local gifts = get_tpl_subKey(tpl_props_list, "type", GPropKind.Gift)
-    self._gifts = {}
-    for _, v in ipairs(gifts) do
-        local d = ItemModel:getItem(v.id, true)
-        if d then
-            if d.num <= 0 and not self._loves[d.id] and d.quality <= GPropQuality.COLOR_4 then
-            else
-                table.insert(self._gifts, d)
-                d.info = v
-            end
-        end
-    end
-
+    self:regetGifts()
     self:resortDatas()
 
     self._selectGift, self._selectItem = nil, nil
@@ -272,6 +260,21 @@ function P:refreshUI()
     
     if self._role:isCanAwakenRed() then
         CharacterModel:removeAwakenRed(self._role.role_id)
+    end
+end
+
+function P:regetGifts()
+    local gifts = get_tpl_subKey(tpl_props_list, "type", GPropKind.Gift)
+    self._gifts = {}
+    for _, v in ipairs(gifts) do
+        local d = ItemModel:getItem(v.id, true)
+        if d then
+            if d.num <= 0 and not self._loves[d.id] and d.quality <= GPropQuality.COLOR_4 then
+            else
+                table.insert(self._gifts, d)
+                d.info = v
+            end
+        end
     end
 end
 
@@ -522,6 +525,30 @@ function P:evt_RoleAwakenRSP(msg)
 end
 
 function P:evt_ItemChangeRSP(msg)
+    for _, v in ipairs(msg.item_list) do
+        if v.num > 0 and tpl_props[v.item_id].type == GPropKind.Gift then
+            local flag = true
+            for i, gift in ipairs(self._gifts) do
+                if gift.item_id == v.item_id then
+                    if gift == ItemModel:getItem(v.item_id) then
+                        flag = false
+                    else
+                        table.remove(self._gifts, i)
+                    end
+                    break
+                end
+            end
+            if flag then
+                local d = ItemModel:getItem(v.item_id)
+                if d then
+                    table.insert(self._gifts, d)
+                    d.info = tpl_props[v.item_id]
+                end
+            end
+        end
+    end
+    
+    -- self:regetGifts()
     self:resortDatas()
     self.GiftsList:setDatas(self._gifts)
 end
@@ -537,3 +564,4 @@ function P:evt_uiManagerHideUI(uiName)
     end
 end
 
+return P

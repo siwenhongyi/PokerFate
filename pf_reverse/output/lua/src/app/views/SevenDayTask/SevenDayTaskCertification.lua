@@ -93,7 +93,8 @@ end
 
 function P:refreshSign(url)
 	if url and url ~= "" then
-		self.SignatureImg:GetComponent("LoadImage"):DownloadImage(url)
+		-- self.SignatureImg:GetComponent("LoadImage"):DownloadImage(url)
+		bee.getDownloadImage(self.SignatureImg, url)
 
 		self.SignTimeText:SetActive(true)
 		self:setShareCont()
@@ -129,3 +130,4 @@ function P:evt_hideUiWhenAction(isVisible)
     self:onUiBlur(not isVisible, "evt_hideUiWhenAction", true)
 end
 
+return P

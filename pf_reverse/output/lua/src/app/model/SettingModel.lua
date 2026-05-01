@@ -172,6 +172,9 @@ function P:setAutoByin(flag)
 end
 
 function P:isShowBB()
+    if GameModel.data and GameModel.data:isTrainingGame() then
+        return true
+    end
     return self._tableSetting.showBB
 end
 
@@ -352,6 +355,10 @@ end
 
 function P:isColorGameUnlock()
     return tpl_system_info[101].level <= PlayerModel:getCurLevel() and self:isShowColorGame()
+end
+
+function P:isDevelopmentfundUnlock()
+    return tpl_system_info[1001].level <= PlayerModel:getCurLevel()
 end
 
 function P:isShowColorGame()
@@ -624,7 +631,8 @@ function P:isOnlineTagValid(tag)
     return true
 end
 
-function Pevt_videoPlayerError(msg)
+function P:evt_videoPlayerError(msg)
     G_VIDEO_ERROR_MSG = msg
 end
 
+return P

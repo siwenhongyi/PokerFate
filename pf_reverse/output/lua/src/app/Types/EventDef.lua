@@ -80,6 +80,13 @@ local P = {
 
 	-- 比赛
 	"evt_sng_not_available", -- SNG比赛未开放
+
+	-- 返利基金
+	"evt_developmentFund_refresh", -- 返利基金刷新
+
+	-- 引导
+	"evt_sys_guide_start", -- 引导开始
+	"evt_sys_guide_end", -- 引导结束
 }
 
 EventDef = {}

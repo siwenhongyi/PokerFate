@@ -4,6 +4,7 @@ local PopUpView = {
     [1] = "ActivityNewmanCheckin_popup",
     [2] = "ActivityGalaSeasonCheckin_popup",
     [3] = "ActivitySchoolCheckin_popup",
+    [4] = "ActivityBunnyGirlCheckin_popup",
 }
 
 function P:ctor(logic)
@@ -134,3 +135,4 @@ function P:evt_serverTimeCrossDay()
     end)
 end
 
+return P

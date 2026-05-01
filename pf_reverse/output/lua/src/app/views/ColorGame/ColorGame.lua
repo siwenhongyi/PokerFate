@@ -81,6 +81,7 @@ function P:onAwake()
     bee.addClick(self:find("Mask", self.AnimRoot), function()
         if self.HistoricalRecords.activeSelf then
             self.HistoricalRecords:SetActive(false)
+            bee.emit("evt_sideGameRecords", false)
             return
         end
         -- self:hideUI()
@@ -215,6 +216,7 @@ end
 
 function P:onShow()
     self.HistoricalRecords:SetActive(false)
+    bee.emit("evt_sideGameRecords", false)
     self.RecordTips:SetActive(false)
 
     self._betInfos = {0,0,0,0,0,0} -- bet 信息, key = id, value = gold
@@ -249,9 +251,14 @@ end
 
 function P:refreshColorGame()
     self._gold = PlayerModel:getGold()
+    self:_refreshColorGame()
+end
+
+function P:_refreshColorGame()
     self.lvlId = 1
+    local gold = PlayerModel:getGold()
     for k, v in ipairs(self._color_datas) do
-        if self._gold >= v.balance then
+        if gold >= v.balance then
             self.lvlId = k
         else
             break
@@ -264,11 +271,13 @@ function P:refreshColorGame()
         bee.setText(self:find("TextChip", self.ImageChips[k]), _N(self._chipValues[k]))
         self.ImageChips[k]:SetActive(false)
     end
-    self:onBtChipAt(1)
+    if not self._chipIndex then
+        self:onBtChipAt(1)
+    end
+    self.GuideHand:SetActive(false)
     self:refreshUI()
     self.ImageOperateMask:SetActive(false)
     self:refershRewardArea()
-    self.GuideHand:SetActive(false)
 end
 
 function P:refreshUI()
@@ -282,10 +291,33 @@ function P:refreshUI()
 end
 
 function P:_addBets(bets)
-    local bet = 0
-    for k, v in ipairs(bets) do
-        bet = bet + v.value
+    local cacheBets = {0,0,0,0,0,0}
+    for _,v in pairs(bets) do
+        cacheBets[v.id] = cacheBets[v.id] + v.value
     end
+    local exceed = false
+    local bet = 0
+    for i = 1, 6 do
+        bet = bet + cacheBets[i]
+        if cacheBets[i] + self._betInfos[i] > self._data.maxbet then
+            exceed = true
+            break
+        end
+    end
+    if exceed then
+        UiManager:showToast(_F("LAB_COLORGAME_019"))
+        return
+    end
+
+    -- local bet = 0
+    -- for k, v in ipairs(bets) do
+    --     bet = bet + v.value
+    -- end
+    -- if bet + self._betInfos[self._betIndex] > self._data.maxbet then
+    --     UiManager:showToast(_F("LAB_COLORGAME_018", _N(self._data.maxbet)))
+    --     return
+    -- end
+
     if self._gold >= bet then
         local dt = 1 / #bets
         if dt > 0.1 then
@@ -300,6 +332,7 @@ function P:_addBets(bets)
         self:refreshUI()
     else
         UiManager:showToast(_T("LAB_COLORGAME_017"))
+        QuickByModel:checkShowView(GAME_GAME_TYPE.SIDE_GAME_COLOR_GAME)
     end
 end
 
@@ -320,6 +353,7 @@ function P:onBtRebet()
 end
 
 function P:onBtBetAt(index)
+    self._betIndex = index
     local value = self._chipValues[self._chipIndex]
     if value + self._betInfos[index] > self._data.maxbet then
         UiManager:showToast(_F("LAB_COLORGAME_018", _N(self._data.maxbet)))
@@ -337,6 +371,7 @@ function P:onBtBetAt(index)
         Game:playSound("ui_button_confirm")
     else
         UiManager:showToast(_T("LAB_COLORGAME_017"))
+        QuickByModel:checkShowView(GAME_GAME_TYPE.SIDE_GAME_COLOR_GAME)
     end
 end
 
@@ -424,23 +459,23 @@ end
 
 function P:refreshDoubleButton()
     self.RebetButton:SetActive(#self._undos == 0 and self._lastBets ~= nil)
-    local flag = #self._undos > 0
-    if flag then
-        local sum = self:getBetedSum()
-        if sum <= 0 then
-            flag = false
-        elseif self._gold < sum then
-            flag = false
-        else
-            for k, v in ipairs(self._betInfos) do
-                if v + v > self._data.maxbet then
-                    flag = false
-                    break
-                end
-            end
-        end
-    end
-    self.DoubleButton:SetActive(flag)
+    -- local flag = #self._undos > 0
+    -- if flag then
+    --     local sum = self:getBetedSum()
+    --     if sum <= 0 then
+    --         flag = false
+    --     elseif self._gold < sum then
+    --         flag = false
+    --     else
+    --         for k, v in ipairs(self._betInfos) do
+    --             if v + v > self._data.maxbet then
+    --                 flag = false
+    --                 break
+    --             end
+    --         end
+    --     end
+    -- end
+    self.DoubleButton:SetActive(#self._undos > 0)
 end
 
 function P:refershRewardArea(ids)
@@ -512,7 +547,7 @@ end
 
 function P:getBetedSum()
     local ret = 0
-    for _, v in ipairs(self._betInfos) do
+    for _, v in pairs(self._betInfos) do
         ret = ret + v
     end
     return ret
@@ -745,6 +780,11 @@ function P:doShowRewards(msg)
         end
     end
     self._rewardSeq = bee.Tween.sequence(seqs)
+
+    --盈利事件
+    if sum > self:getBetedSum() then
+        bee.emit("evt_ColorGameWin")
+    end
 end
 
 function P:doShowDrawAnim(msg)
@@ -831,14 +871,20 @@ function P:evt_ColorGameActionRSP(msg)
         record.bet_data[i] = {id = i + 100, chips = 0, profit = 0}
     end
     for k, v in ipairs(msg.bets) do
-        record.bet_data[k] = {id = v.id, chips = v.value, profit = 0}
-        for _, vv in ipairs(msg.profits) do
-            if vv.id == v.id then
-                record.bet_data[k].profit = vv.profit - v.value
+        for _, bet in ipairs(record.bet_data) do
+            if bet.id == v.id then
+                bet.chips = v.value
+                for _, vv in ipairs(msg.profits) do
+                    if vv.id == v.id then
+                        bet.profit = vv.profit - v.value
+                        break
+                    end
+                end
                 break
             end
         end
     end
+    
     table.insert(self._recordDatas, 1, record)
     if #self._recordDatas > tpl_constdata.Colorgame_History_Limit then
         table.remove(self._recordDatas)
@@ -860,10 +906,11 @@ end
 function P:evt_refreshTopInfo()
     if self._gold ~= PlayerModel:getGold() then
         self._gold = PlayerModel:getGold()
-        for _, v in ipairs(self._betInfos) do
+        for _, v in pairs(self._betInfos) do
             self._gold = self._gold - v
         end
         self:refreshGold()
+        self:_refreshColorGame()
     end
 end
 
@@ -884,7 +931,7 @@ end
 
 function P:checkPushGift(lvlId, profits)
     local sum = profits or self:getGameProfit()
-    SideGameModel:checkPushGift(self.Sign, sum, GAME_GAME_TYPE.SIDE_GAME_COLOR_GAME, lvlId)
+    QuickByModel:checkSideGame(self.Sign, sum, GAME_GAME_TYPE.SIDE_GAME_COLOR_GAME, lvlId)
     self.Sign = false
 end
 
@@ -902,6 +949,7 @@ end
 -------------- 历史记录 start --------------
 function P:showRecords()
     self.HistoricalRecords:SetActive(true)
+    bee.emit("evt_sideGameRecords", true)
 
     if not self._initRecords then
         self._initRecords = true
@@ -912,6 +960,7 @@ function P:showRecords()
 
         bee.addClick(self:find("CloseButton", AnimRoot), function()
             self.HistoricalRecords:SetActive(false)
+            bee.emit("evt_sideGameRecords", false)
         end)
 
         bee.setText(self:find("TextTipLimit", AnimRoot), _F("LAB_COLORGAME_028", tpl_constdata.Colorgame_History_Limit))
@@ -1033,3 +1082,4 @@ function P:evt_GetSideGameHisRecordRSP(msg)
     end
 end
 
+return P

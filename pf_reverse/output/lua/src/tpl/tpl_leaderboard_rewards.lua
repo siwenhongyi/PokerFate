@@ -81,3 +81,4 @@ function tpl_leaderboard_rewards_clone(key)
     return nil
 end
 
+return P

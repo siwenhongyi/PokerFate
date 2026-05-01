@@ -1,5 +1,5 @@
 local StoryNode = require("app.Story.StoryNode")
-local P = class("Story", UiBase)
+local P = class("Story", UiBlurBase)
 
 function P:onAwake()
 	self._openAnim, self._closeAnim = "UI_1_" .. self.__cname .. "_into", "UI_1_" .. self.__cname .. "_back"
@@ -583,7 +583,7 @@ function P:playBGM(data)
         Game:stopMusic()
         bee.playMusic(data.audio, false, SettingModel:getLobbyBGMVolume())
         if not data.autoPlay then
-            CS.SoundManager.Instance:PauseMusic()
+            Game:pauseBGM()
         end
         self._isPlayBGM = true
     end
@@ -601,12 +601,12 @@ function P:pauseBGM(data)
             end
             bee.changeMusicVolume(v)
             if v <= 0 then
-                CS.SoundManager.Instance:PauseMusic()
+                Game:pauseBGM()
                 self._bgmTween = nil
             end
         end)
     else
-        CS.SoundManager.Instance:PauseMusic()
+        Game:pauseBGM()
     end
 end
 
@@ -615,7 +615,7 @@ function P:resumeBGM(data)
         self._bgmTween:Kill()
         self._bgmTween = nil
     end
-    CS.SoundManager.Instance:UnPauseMusic()
+    Game:resumeBGM()
     if data.fadeIn and data.dt > 0 and SettingModel:getLobbyBGMVolume() > 0 then
         self._bgmTween = bee.Tween.toFloat(0, SettingModel:getLobbyBGMVolume(), data.dt, function(v)
             bee.changeMusicVolume(v)
@@ -868,9 +868,18 @@ function P:evt_story_try_auto_next()
     end
 end
 
+function P:evt_uiBlur(flag, name)
+    self:onUiBlur(flag, name)
+end
+
+function P:evt_gameBlur(flag, name)
+    self:onUiBlur(flag, name)
+end
+
 function P:onUpdate(dt)
     if self._curNode then
         self._curNode:onUpdate(dt)
     end
 end
 
+return P

@@ -30,3 +30,4 @@ function tpl_dailychest_clone(key)
     return nil
 end
 
+return P

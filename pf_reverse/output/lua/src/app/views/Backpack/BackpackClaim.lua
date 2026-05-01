@@ -44,3 +44,4 @@ function P:refreshItem(data, item)
     bee.setText(self:find("TextGet", item), _T(d.button_text))
 end
 
+return P

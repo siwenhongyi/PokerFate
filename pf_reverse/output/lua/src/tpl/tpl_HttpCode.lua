@@ -10,6 +10,7 @@ local function _initData()
 {"HTTP_AUTHENTICATION_FAILED",-2,nil,"login.authorization 验证失败","login.authorization 驗證失敗","login.authorization verification failed","login.authorization 認証失敗","login.authorization 인증 실패입니다"},
 {"HTTP_INVALID_PARAM",-3,nil,"参数错误","參數錯誤","Invalid parameters","パラメータエラー","매개변수 오류입니다"},
 {"HTTP_CONCURRENCY_LIMIT",-4,0,nil,nil,nil,nil,nil},
+{"HTTP_THIRD_RISK_VERIFY_FAILED",-5,nil,"抱歉，当前设备存在安全隐患，如有疑问，请联系客服","抱歉，當前裝置存在安全隱患，如有疑問，請聯絡客服。","Login failed. This device is not secure. Please contact Support for assistance.","申し訳ございません。現在お使いの端末にセキュリティ上の問題が検出されました。ご不明な点がございましたら、カスタマーサポートまでお問い合わせください。","抱歉，当前设备存在安全隐患，如有疑问，请联系客服"},
 {"HTTP_SERVER_STOP",-50,nil,"服务器停服","伺服器維護中","Server under maintenance","サーバーメンテナンス","서버 점검 중입니다"},
 {"HTTP_REGION_NOT_SUPPORTED",-51,nil,"地区未支持","目前地區不可用","Service not available in current region","現在の地域では利用できません","서비스 지역이 아닙니다"},
 {"HTTP_IP_BLOCKED",-52,nil,"账号被封禁，有任何反馈建议可联系客服","帳號已被封禁，如有任何回饋或建議，請聯絡客服","Your account has been banned. Please contact Customer Support for assistance","アカウントが利用停止となっています。ご不明な点がございましたら、カスタマーサポートまでご連絡ください","계정이 차단되었습니다"},
@@ -123,3 +124,4 @@ function tpl_HttpCode_clone(key)
     return nil
 end
 
+return P

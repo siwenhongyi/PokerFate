@@ -123,6 +123,7 @@ function P:setSelect(index)
     self:refreshLeftRight()
     self:refreshUI()
     self:refreshBondLevel()
+    CharacterModel:refreshReddot(self._role.role_id)
 end
 
 function P:refreshBondLevel()
@@ -222,3 +223,4 @@ function P:evt_RoleUnlockRSP(msg)
     end
 end
 
+return P

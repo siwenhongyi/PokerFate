@@ -63,22 +63,22 @@ end
 
 -- 开始系统引导
 function P:startSystemGuide(id, delay)
-    local d = tpl_guide[id]
-    if not self:checkTime(d) then
-        return false
-    end
-    if table.keyof(self.sysGuideIds, id) then
+    local guideId = self:isSysGuideValid(id)
+    if guideId == 0 then
         return false
     end
 
-    if d.start_event then
+    local d = tpl_guide[guideId]
+    if d and d.start_event then
         bee.emit(d.start_event)
     end
+    self.curGuide = d
+    bee.emit(EventDef.evt_sys_guide_start, self.curGuide)
     if d and not UiManager:getUI("GameGuide") then
-        UiManager:showUI("GameGuide", {data = d, delay = delay, sid = id})
-        bee.logEvent("guide-id-trigger", id)
-        Net:post("player/reportGuide", {guide_id = id}, function()
-            self:changeSysGuideId(id)
+        UiManager:showUI("GameGuide", {data = d, delay = delay, sid = guideId})
+        bee.logEvent("guide-id-trigger", guideId)
+        Net:post("player/reportGuide", {guide_id = guideId}, function()
+            self:changeSysGuideId(guideId)
         end)
         return true
     end
@@ -143,6 +143,7 @@ function P:doGuideEnd()
             return true
         end
     elseif self.curGuide and self.curGuide.guide_type == 2 then
+        bee.emit(EventDef.evt_sys_guide_end, self.curGuide)
         self.curGuide = nil
     end
     return false
@@ -165,6 +166,15 @@ function P:getSystemGuides()
     end)
 end
 
+function P:isSysGuideValid(id)
+    if not id then return 0 end
+    local d = tpl_guide[id]
+    if not d or not self:checkTime(d) then
+        return 0
+    end
+    return self:checkGuideId(d, id)
+end
+
 --系统引导存储记录变更
 function P:changeSysGuideId(id)
     table.insert(self.sysGuideIds, id)
@@ -174,9 +184,42 @@ end
 function P:checkTime(cfg)
     if cfg.effective_time == nil then
         return true
-    else
+    end
         -- return true
+    if cfg.guide_old == nil then
         return PlayerModel:getRegisterTime() > cfg.effective_time
+    else
+        return true
     end
 end
 
+--新旧引导判定
+function P:checkGuideId(cfg, id)
+    if cfg.guide_old ~= nil and PlayerModel:getRegisterTime() < cfg.effective_time then
+        if table.keyof(self.sysGuideIds, cfg.guide_old) then
+            return 0
+        end
+        return cfg.guide_old
+    end
+
+    if table.keyof(self.sysGuideIds, id) then
+        return 0
+    end
+    return id
+
+    -- if cfg.guide_old == nil then
+    --     if table.keyof(self.sysGuideIds, id) then
+    --         return false
+    --     end
+    --     return true
+    -- else
+    --     if table.keyof(self.sysGuideIds, cfg.guide_old) then
+    --         return false
+    --     elseif table.keyof(self.sysGuideIds, id) then
+    --         return false
+    --     end
+    --     return true
+    -- end
+end
+
+return P

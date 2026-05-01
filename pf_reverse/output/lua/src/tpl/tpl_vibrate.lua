@@ -18,7 +18,8 @@ local function _initData()
 {"shock_gacha",{2},3},
 {"shock_character",{3},3},
 {"shock_pledge_start",{2},3},
-{"shock_pledge_finish",{2},3}
+{"shock_pledge_finish",{2},3},
+{"shock_pinball",{1},2}
 }
     for _, v in pairs(bodys) do
         local m = {}
@@ -40,3 +41,4 @@ function tpl_vibrate_clone(key)
     return nil
 end
 
+return P

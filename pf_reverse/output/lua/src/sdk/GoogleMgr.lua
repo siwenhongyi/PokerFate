@@ -92,3 +92,4 @@ end
 
 function P:getClientId()
     return CS.GoogleMgr.getClientId()
+end

@@ -47,3 +47,4 @@ function P:removeTag(tag)
     end
 end
 
+return P

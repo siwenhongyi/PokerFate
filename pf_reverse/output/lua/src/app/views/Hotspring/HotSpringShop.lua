@@ -107,3 +107,4 @@ function P:evt_updateShopLimit()
     self:refreshUI()
 end
 
+return P

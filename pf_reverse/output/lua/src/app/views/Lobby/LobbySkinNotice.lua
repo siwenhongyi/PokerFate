@@ -31,3 +31,4 @@ function P:onClickJump()
 	
 end
 
+return P

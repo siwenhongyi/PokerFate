@@ -14,6 +14,8 @@ function P:ctor()
     self.GalaStoryItems = {11100401,11100402,11100403}
     -- 开学季剧情物品ID
     self.SchoolStoryItems = {11100404,11100405,11100406}
+    -- 兔女郎剧情物品ID
+    self.BunnyGirlStoryItems = {11100407,11100408,11100409}
 end
 
 function P:afterLogin()
@@ -84,6 +86,8 @@ function P:createAddtionButton()
         return bee.createObj("views/GalaSeason/GalaAddition")
     elseif id == ActivityId.School then
         return bee.createObj("views/School/SchoolAddition")
+    elseif id == ActivityId.BunnyGirl then
+        return bee.createObj("views/BunnyGirl/BunnyGirlAddition")
     end
     return bee.createObj("views/Hotspring/HotSpringAddition")
 end
@@ -97,6 +101,8 @@ function P:createRewardTag(id)
         return bee.createObj("views/GalaSeason/GalaReward")
     elseif id == ActivityId.School then
         return bee.createObj("views/School/SchoolReward")
+    elseif id == ActivityId.BunnyGirl then
+        return bee.createObj("views/BunnyGirl/BunnyGirlReward")
     end
     return bee.createObj("views/GalaSeason/GalaReward")
 end
@@ -182,6 +188,19 @@ function P:refreshReddot()
             end
         end
         RedManager:addTagWithNum(storyNum, RedTag.SchoolPlot)
+    elseif self:getConfId() == ActivityId.BunnyGirl then
+        RedManager:addTagWithNum(taskNum, RedTag.BunnyGirlTask)
+
+        local storyNum = 0
+        for _, v in ipairs(self.BunnyGirlStoryItems) do
+            if ItemModel:getItemNumById(v) > 0 then
+                local d = self:getStoryData(v)
+                if d and not self:isPlotRewarded(d.id) then
+                    storyNum = storyNum + 1
+                end
+            end
+        end
+        RedManager:addTagWithNum(storyNum, RedTag.BunnyGirlPlot)
     end
 end
 
@@ -326,9 +345,23 @@ function P:isActivityOpen(subId)
     return false
 end
 
+--获取对应活动道具图标
+function P:getThemeIcon()
+    local itemId = self:getItemId()
+    return tpl_props[itemId].icon
+end
+
+function P:getEndTime(subId)
+    if not subId or subId == self:getConfId() then
+        return self._end_time or 0
+    end
+    return 0
+end
+
 function P:evt_serverTimeCrossDay()
 	bee.once(math.random(1, 60), function()
         self:reqTaskList()
     end)
 end
 
+return P

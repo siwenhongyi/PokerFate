@@ -419,7 +419,7 @@ function P:setFriendItem(item, data)
 	bee.removeAllClick(Avatar)
 	bee.addClick(Avatar, function()
 		Game:playSound("ui_button_confirm")
-		UiManager:showUI("InformationMain", {uid = data.uid})
+		UiManager:showUI("InformationMainNew", {uid = data.uid})
 	end)
 end
 
@@ -474,7 +474,7 @@ function P:setRecentItem(item, data)
 	bee.removeAllClick(Avatar)
 	bee.addClick(Avatar, function()
 		Game:playSound("ui_button_confirm")
-		UiManager:showUI("InformationMain", {uid = data.uid})
+		UiManager:showUI("InformationMainNew", {uid = data.uid})
 	end)
 end
 
@@ -569,3 +569,4 @@ function P:evt_friendList(refreshType)
 	self:refreshList()
 end
 
+return P

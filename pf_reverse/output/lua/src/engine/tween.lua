@@ -582,3 +582,4 @@ bee._tweenMeta = {
         end
         o.seq:Join(act)
      end,
+}

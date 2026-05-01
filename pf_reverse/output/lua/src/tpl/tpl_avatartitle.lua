@@ -21,7 +21,8 @@ local function _initData()
 {1014,nil,"Avatartitle[avatartitle_vip_08]"},
 {2001,nil,"Avatartitle[avatartitle_activity_01]"},
 {2002,nil,"Avatartitle[avatartitle_activity_s2_01]"},
-{2003,nil,"Avatartitle[avatartitle_activity_s2_01]"},
+{2003,nil,"Avatartitle[avatartitle_activity_s3_01]"},
+{2004,nil,"Avatartitle[avatartitle_activity_s4_01]"},
 {3001,1001,"Avatartitle[avatartitle_1001_01]"},
 {3002,1002,"Avatartitle[avatartitle_1002_01]"},
 {3003,1003,"Avatartitle[avatartitle_1003_01]"},
@@ -34,7 +35,11 @@ local function _initData()
 {3010,1010,"Avatartitle[avatartitle_1010_01]"},
 {3012,1012,"Avatartitle[avatartitle_1012_01]"},
 {3013,1013,"Avatartitle[avatartitle_1013_01]"},
-{4001,nil,"Avatartitle[avatartitle_sng_01]"}
+{3014,1014,"Avatartitle[avatartitle_1014_01]"},
+{4001,nil,"Avatartitle[avatartitle_sng_01]"},
+{5001,nil,"Avatartitle[avatartitle_achievement_01]"},
+{5002,nil,"Avatartitle[avatartitle_achievement_02]"},
+{5003,nil,"Avatartitle[avatartitle_achievement_03]"}
 }
     for _, v in pairs(bodys) do
         local m = {}
@@ -56,3 +61,4 @@ function tpl_avatartitle_clone(key)
     return nil
 end
 
+return P

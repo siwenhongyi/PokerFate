@@ -167,3 +167,4 @@ function P:evt_buy_Success()
     end)
 end
 
+return P

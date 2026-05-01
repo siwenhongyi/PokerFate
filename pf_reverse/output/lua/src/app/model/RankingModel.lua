@@ -231,3 +231,4 @@ function P:getIsWaitCloseRanking(id)
 	return bee.getServerTime() >= rankingCfg.time_end
 end
 
+return P

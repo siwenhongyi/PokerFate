@@ -27,3 +27,4 @@ function tpl_festival_activity_clone(key)
     return nil
 end
 
+return P

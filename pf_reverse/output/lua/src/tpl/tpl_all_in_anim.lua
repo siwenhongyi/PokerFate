@@ -28,3 +28,4 @@ function tpl_all_in_anim_clone(key)
     return nil
 end
 
+return P

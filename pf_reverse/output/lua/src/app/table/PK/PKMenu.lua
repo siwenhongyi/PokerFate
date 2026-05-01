@@ -127,7 +127,7 @@ function P:onBtRules()
     if ui and not bee.isNull(ui.node) then
         ui.transform.localPosition = bee.v3zero
     else
-        UiManager:showUI(name)
+        UiManager:showUI(name, {data = GameModel.data.room_info})
     end
     self:hideUI()
 
@@ -184,3 +184,4 @@ function P:evt_gameBlur(flag, name)
     end
 end
 
+return P

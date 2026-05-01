@@ -90,7 +90,8 @@ local function _initData()
 {"sound_Colorgame_hit","sound/sidegame/sound_Colorgame_hit.ogg",nil,2,nil},
 {"sound_Colorgame_high","sound/sidegame/sound_Colorgame_high.ogg",nil,2,nil},
 {"sound_Colorgame_middle","sound/sidegame/sound_Colorgame_middle.ogg",nil,2,nil},
-{"sound_Colorgame_lwo","sound/sidegame/sound_Colorgame_lwo.ogg",nil,2,nil}
+{"sound_Colorgame_lwo","sound/sidegame/sound_Colorgame_lwo.ogg",nil,2,nil},
+{"sound_bust_back","sound/sound/sound_bust_back.ogg",nil,2,nil}
 }
     for _, v in pairs(bodys) do
         local m = {}
@@ -112,3 +113,4 @@ function tpl_sound_clone(key)
     return nil
 end
 
+return P

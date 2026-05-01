@@ -88,3 +88,4 @@ function P:setShareCont()
     ShareModel:setShareCont(self.ShareReward, Icon, CountText, 4)
 end
 
+return P

@@ -82,3 +82,4 @@ function P:closeUI()
     end)
 end
 
+return P

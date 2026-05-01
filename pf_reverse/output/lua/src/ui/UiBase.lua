@@ -250,3 +250,4 @@ function P:getRootSortingOrder(offset)
 	return UiManager.sortingIndex * 20 + offset
 end
 
+return P

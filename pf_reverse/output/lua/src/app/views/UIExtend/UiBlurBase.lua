@@ -50,3 +50,4 @@ function P:onUiBlur(flag, name, isMoveY)
     end
 end
 
+return P

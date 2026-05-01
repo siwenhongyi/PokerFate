@@ -37,3 +37,4 @@ function queue:iter()
 		end
 	end
 end
+return queue

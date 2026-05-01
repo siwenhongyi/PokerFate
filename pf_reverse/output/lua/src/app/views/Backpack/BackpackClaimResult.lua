@@ -276,3 +276,4 @@ function P:isMusicItem(data)
     return false
 end
 
+return P

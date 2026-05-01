@@ -171,13 +171,31 @@ function P:evt_buy_Success()
 end
 
 function P:evt_ColorGameActionRSP()
-    self:once(1, function()
-        ThemeModel:reqTaskList(function()
-            self._isInInit = false
-            self:refreshTasks()
-        end)
-    end)
+    self:checkReqTask(101, GAME_GAME_TYPE.SIDE_GAME_COLOR_GAME)
 end
 
+function P:evt_ColorGameWin()
+    self:checkReqTask(104, GAME_GAME_TYPE.SIDE_GAME_COLOR_GAME)
+end
 
+function P:checkReqTask(taskType, gameType)
+    local tasks = ThemeModel:getTasks()
+    local reqable = false
+    for _,v in pairs(tasks) do
+        local cfg = tpl_theme_task[v.task_id]
+        if cfg.task_type == taskType and cfg.value[1] == gameType and v.status == TaskStatus.InProgress then
+            reqable = true
+            break
+        end
+    end
+    if reqable then
+        self:once(1, function()
+            ThemeModel:reqTaskList(function()
+                self._isInInit = false
+                self:refreshTasks()
+            end)
+        end)
+    end
+end
 
+return P

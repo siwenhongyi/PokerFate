@@ -1,9 +1,5 @@
 local P = class("TaskView", UiFullView)
 
-local TaskType = {
-	Daily = 1,
-	Weekly = 2,
-}
 local MaxRewardCount = 5
 
 function P:onAwake()
@@ -14,8 +10,10 @@ function P:onAwake()
 	self.BubbleItem = self:find("BubbleItem", Center)
 	self.DailyToggle = self:find("Tab/DailyToggle", Center)
 	self.WeeklyToggle = self:find("Tab/WeeklyToggle", Center)
+	self.ChallengeToggle = self:find("Tab/ChallengeToggle", Center)
 	RedManager:bind(self:find("RedPoint", self.DailyToggle), RedTag.DailyTask)
 	RedManager:bind(self:find("RedPoint", self.WeeklyToggle), RedTag.WeeklyTask)
+	RedManager:bind(self:find("RedPoint", self.ChallengeToggle), RedTag.ChallengeTask)
 
 	local Reward = self:find("Reward", Center)
 	self.CurPointText = self:find("PointList/Point/CurPointText", Reward)
@@ -63,6 +61,16 @@ function P:onAwake()
 		self:setActivePointCont()
 		self:refreshTaskList(true)
 	end)
+	bee.addClick2(self.ChallengeToggle, function()
+		if self._selectType == TaskCate.Challenge then
+			return
+		end
+		Game:playSound("ui_button_confirm")
+		self._selectType = TaskCate.Challenge
+		self:setToggleShow()
+		self:setActivePointCont()
+		self:refreshTaskList(true)
+	end)
 
 	bee.addClick(self.ClaimButton, function()
 		TaskModel:receiveTaskReward(nil, self._selectType)
@@ -74,10 +82,12 @@ function P:onAwake()
 
 	bee.addClick(self.Point, function()
 		Game:playSound("ui_button_confirm")
-		if self._selectType == TaskType.Weekly then
-			UiManager:showUI("CommonItemTip", {data = {item_id = GPropId.WeeklyPoint, num = 0}, target = self.Point})
-		else
+		if self._selectType == TaskCate.Daily then
 			UiManager:showUI("CommonItemTip", {data = {item_id = GPropId.ActivePoint, num = 0}, target = self.Point})
+		elseif self._selectType == TaskCate.Weekly then
+			UiManager:showUI("CommonItemTip", {data = {item_id = GPropId.WeeklyPoint, num = 0}, target = self.Point})
+		elseif self._selectType == TaskCate.Challenge then
+			UiManager:showUI("CommonItemTip", {data = {item_id = GPropId.ChallengePoint, num = 0}, target = self.Point})
 		end
 	end)
 end
@@ -85,20 +95,13 @@ end
 function P:onStart()
 	if self._params and self._params.jump and self._params.jump.sub_page then
 		self._selectType = self._params.jump.sub_page[1]
+	else
+		self._selectType = TaskCate.Daily
 	end
-	if not self._selectType then
-		if TaskModel:getDailyRewardIsAllReceived() and not TaskModel:getWeeklyRewardIsAllReceived() then
-			self._selectType = TaskCate.Weekly
-		else
-			self._selectType = TaskCate.Daily
-		end
-	end
-
 	self:setToggleShow()
 	self:setActivePointCont()
 
 	TaskModel:requestTaskList(true)
-	-- self:refreshTaskList()
 
 	self._role = CharacterModel:getUsingRole()
     if self._role then
@@ -115,6 +118,19 @@ function P:onStart()
 end
 
 function P:evt_taskUpdate()
+	if not self._selectType then
+		if not TaskModel:getTaskActiveIsAllRewarded(TaskCate.Daily) then
+			self._selectType = TaskCate.Daily
+		elseif not TaskModel:getTaskActiveIsAllRewarded(TaskCate.Weekly) then
+			self._selectType = TaskCate.Weekly
+		elseif TaskModel:isHaveChallengeTask() and (not TaskModel:getTaskActiveIsAllRewarded(TaskCate.Challenge)) then
+			self._selectType = TaskCate.Challenge
+		else
+			self._selectType = TaskCate.Daily
+		end
+		self:setToggleShow()
+	end
+
 	self:setActivePointCont()
 	self:refreshTaskList(false)
 
@@ -122,6 +138,8 @@ function P:evt_taskUpdate()
 		self:playCharacterGreeting()
 		self._characterInit = false
 	end
+
+	self.ChallengeToggle:SetActive(TaskModel:isHaveChallengeTask())
 end
 
 -- 播放打招呼语音
@@ -132,7 +150,7 @@ function P:playCharacterGreeting()
 
 	local skinCfg = self._role:getSkinData()
 	local greetingCfg
-	if TaskModel:isCanRecTaskReward(TaskType.Daily) or TaskModel:isCanRecTaskReward(TaskType.Weekly) then
+	if TaskModel:isCanRecTaskReward(TaskCate.Daily) or TaskModel:isCanRecTaskReward(TaskCate.Weekly) then
 		greetingCfg = skinCfg.task_receive_voice
 	else
 		greetingCfg = skinCfg.task_normal_voice
@@ -164,25 +182,30 @@ function P:evt_updateMonthlyCard()
 end
 
 function P:setToggleShow()
-	self:find("task_tab_on", self.DailyToggle):SetActive(self._selectType == TaskType.Daily)
-	self:find("task_tab_off", self.DailyToggle):SetActive(self._selectType ~= TaskType.Daily)
+	self:find("task_tab_on", self.DailyToggle):SetActive(self._selectType == TaskCate.Daily)
+	self:find("task_tab_off", self.DailyToggle):SetActive(self._selectType ~= TaskCate.Daily)
 
-	self:find("task_tab_on", self.WeeklyToggle):SetActive(self._selectType == TaskType.Weekly)
-	self:find("task_tab_off", self.WeeklyToggle):SetActive(self._selectType ~= TaskType.Weekly)
+	self:find("task_tab_on", self.WeeklyToggle):SetActive(self._selectType == TaskCate.Weekly)
+	self:find("task_tab_off", self.WeeklyToggle):SetActive(self._selectType ~= TaskCate.Weekly)
+
+	self:find("task_tab_on", self.ChallengeToggle):SetActive(self._selectType == TaskCate.Challenge)
+	self:find("task_tab_off", self.ChallengeToggle):SetActive(self._selectType ~= TaskCate.Challenge)
 end
 
 local PointListWidth = 852
 function P:setActivePointCont()
-	local pointData = self._selectType == TaskType.Weekly and TaskModel:getWeeklyPointData() or TaskModel:getDailyPointData()
+	local pointData = TaskModel:getTaskPointData(self._selectType)
 	local maxPointCount = #pointData
 
-	if self._selectType == TaskType.Weekly then
+	if self._selectType == TaskCate.Weekly then
 		bee.setIconInAtlas(self.Point, tpl_props[GPropId.WeeklyPoint].icon)
+	elseif self._selectType == TaskCate.Challenge then
+		bee.setIconInAtlas(self.Point, tpl_props[GPropId.ChallengePoint].icon)
 	else
 		bee.setIconInAtlas(self.Point, tpl_props[GPropId.ActivePoint].icon)
 	end
 
-	local val = self._selectType == TaskType.Weekly and TaskModel:getWeeklyPointVal() or TaskModel:getDailyPointVal()
+	local val = TaskModel:getTaskPointVal(self._selectType)
 	bee.setText(self.CurPointText, val)
 
 	local delVal = 1 / maxPointCount
@@ -204,7 +227,7 @@ function P:setActivePointCont()
 		local item = self.rewardItemList[i]
 		if pointData[i] then
 			item:SetActive(true)
-			item.transform.localPosition = bee.v3((i / maxPointCount) * PointListWidth - PointListWidth / 2, 0, 0)
+			item.transform.localPosition = bee.v3((i / maxPointCount) * PointListWidth - PointListWidth / 2, -8.1, 0)
 
 			local PointCountText = self:find("PointCountText", item)
 			local Icon = self:find("Icon", item)
@@ -212,12 +235,7 @@ function P:setActivePointCont()
 			local OpenEffect = self:find("OpenEffect", item)
 			bee.setText(PointCountText, pointData[i].reward_point)
 
-			local isReward
-			if self._selectType == TaskType.Weekly then
-				isReward = TaskModel:getWeeklyActiveIsRewarded(pointData[i].id)
-			else
-				isReward = TaskModel:getDailyActiveIsRewarded(pointData[i].id)
-			end
+			local isReward = TaskModel:getTaskActiveIsRewarded(self._selectType, pointData[i].id)
 			OpenEffect:SetActive(val >= pointData[i].reward_point and not isReward)
 			Check:SetActive(isReward)
 			Icon:SetActive(not isReward)
@@ -237,7 +255,7 @@ function P:setActivePointCont()
 		end
 	end
 
-	if self._selectType == TaskType.Weekly then
+	if self._selectType == TaskCate.Weekly or self._selectType == TaskCate.Challenge then
 		bee.setText(self.TipsText, _T("LAB_TASKS_UI_18"))
 	else
 		bee.setText(self.TipsText, _T("LAB_TASKS_UI_06"))
@@ -258,8 +276,10 @@ end
 
 function P:refreshTaskList(isInit)
 	local data
-	if self._selectType == TaskType.Weekly then
+	if self._selectType == TaskCate.Weekly then
 		data = TaskModel:getWeeklyTaskList()
+	elseif self._selectType == TaskCate.Challenge then
+		data = TaskModel:getChallengeTaskList()
 	else
 		data = TaskModel:getDailyTaskList()
 	end
@@ -301,12 +321,20 @@ function P:setTaskItem(item, data, isInit, index)
         self:playAnimator("UI_1_TaskView_item_idle", Ani_root)
     end
 
-	local cfg = self._selectType == TaskType.Weekly and tpl_weeklytasks[data.task_id] or tpl_dailytasks[data.task_id]
+	local cfg
+	if self._selectType == TaskCate.Daily then
+		cfg = tpl_dailytasks[data.task_id]
+	elseif self._selectType == TaskCate.Weekly then
+		cfg = tpl_weeklytasks[data.task_id]
+	elseif self._selectType == TaskCate.Challenge then
+		cfg = tpl_challengetasks[data.task_id]
+	end
 	if not cfg then
 		return
 	end
+
 	-- 任务描述
-	local showText = TaskModel:getTaskDesc(cfg)
+	local showText = TaskModel:getTaskDesc(cfg, data)
 	local needValue = #data.value == 1 and data.value[1] or data.value[2]
 	if cfg.task_type == 313 then
 		needValue = data.value[3]
@@ -329,8 +357,10 @@ function P:setTaskItem(item, data, isInit, index)
 	else
 		rewardId1 = rewards[1].item_id
 		rewardCount1 = rewards[1].num
-		if self._selectType == TaskType.Weekly then
+		if self._selectType == TaskCate.Weekly then
 			rewardId2 = GPropId.WeeklyPoint
+		elseif self._selectType == TaskCate.Challenge then
+			rewardId2 = GPropId.ChallengePoint
 		else
 			rewardId2 = GPropId.ActivePoint
 		end
@@ -406,18 +436,18 @@ end
 -- 领取奖励语音
 function P:checkReceiveVoice()
 	self._waitClaimResult = nil
-	if self._selectType == TaskType.Weekly then
-		if not TaskModel:getWeeklyActiveIsAllRewarded() then
-			self._waitClaimResult = TaskType.Weekly
-		end
-	else
-		if not TaskModel:getDailyActiveIsAllRewarded() then
-			self._waitClaimResult = TaskType.Daily
-		end
+	if not TaskModel:getTaskActiveIsAllRewarded(self._selectType) then
+		self._waitClaimResult = clone(self._selectType)
 	end
 end
 
 function P:evt_ColorGameActionRSP()
+	self:once(0.5, function()
+		TaskModel:requestTaskList()
+	end)
+end
+
+function P:evt_PinballActionRSP()
 	self:once(0.5, function()
 		TaskModel:requestTaskList()
 	end)
@@ -432,18 +462,11 @@ function P:evt_BackpackClaimResultClose()
 		return
 	end
 
-	local isReach
-	if self._waitClaimResult == TaskType.Daily then
-		local pointData = TaskModel:getDailyPointData()
-		local maxPoint = pointData[#pointData].reward_point
-		local curPoint = TaskModel:getDailyPointVal()
-		isReach = curPoint >= maxPoint
-	elseif self._waitClaimResult == TaskType.Weekly then
-		local pointData = TaskModel:getWeeklyPointData()
-		local maxPoint = pointData[#pointData].reward_point
-		local curPoint = TaskModel:getWeeklyPointVal()
-		isReach = curPoint >= maxPoint
-	end
+	local pointData = TaskModel:getTaskPointData(self._waitClaimResult)
+	local maxPoint = pointData[#pointData].reward_point
+	local curPoint = TaskModel:getTaskPointVal(self._waitClaimResult)
+	local isReach = curPoint >= maxPoint
+
 	local voiceCfg
 	if isReach then
 		voiceCfg = self._role:getSkinData().award_enough_voice
@@ -459,7 +482,8 @@ end
 
 --引导
 function P:taskGuide()
-	GuideManager:startSystemGuide(7001, 0.65)
+	GuideManager:startSystemGuide(15001, 0.65)
+
 end
 
 function P:evt_guide_turn_week()
@@ -469,3 +493,9 @@ function P:evt_guide_turn_week()
 	item:GetComponent("Button").onClick:Invoke()
 end
 
+function P:evt_guide_turn_challenge()
+	self.ChallengeToggle:GetComponent("Button").onClick:Invoke()
+end
+
+
+return P

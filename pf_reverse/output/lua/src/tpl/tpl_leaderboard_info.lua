@@ -31,3 +31,4 @@ function tpl_leaderboard_info_clone(key)
     return nil
 end
 
+return P

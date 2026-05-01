@@ -416,3 +416,4 @@ function P:refreshRedPoint()
 	end
 end
 
+return P

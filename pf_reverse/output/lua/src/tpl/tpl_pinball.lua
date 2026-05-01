@@ -31,3 +31,4 @@ function tpl_pinball_clone(key)
     return nil
 end
 
+return P

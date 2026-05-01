@@ -198,3 +198,4 @@ function P:evt_lan_mod()
     end
 end
 
+return P

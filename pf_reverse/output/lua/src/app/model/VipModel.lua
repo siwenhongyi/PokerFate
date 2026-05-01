@@ -151,3 +151,4 @@ function P:reqVipReward(level, cb)
 	end)
 end
 
+return P

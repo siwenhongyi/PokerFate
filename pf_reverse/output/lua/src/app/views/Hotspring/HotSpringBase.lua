@@ -68,3 +68,4 @@ function P:evt_refreshTopInfo()
     bee.setTextGold(self.TextCount, _N(ItemModel:getItemNumById(ThemeModel:getItemId())))
 end
 
+return P

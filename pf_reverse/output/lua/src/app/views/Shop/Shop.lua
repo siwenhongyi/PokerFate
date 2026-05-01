@@ -104,6 +104,12 @@ function P:evt_updateShopLimit()
 	end
 end
 
+function P:evt_updateShopPid()
+	if self._curSubViewCls then
+		self._curSubViewCls:refreshUI()
+	end
+end
+
 function P:initToggleList()
 	self.tabtoggleList = UiListEx:create(self.ToggleScrollView)
 	self.tabtoggleList:setCreateFunc(function()
@@ -183,6 +189,16 @@ function P:setTabToggle(item, data)
 	else
 		NewTag:SetActive(false)
 	end
+
+	local TimeLeftTag = self:find("TimeLeftTag", item)
+	RedManager:unbind(TimeLeftTag)
+	if data.id == 2 then
+		RedManager:bind(TimeLeftTag, RedTag.SkinTimeLimit)
+	elseif data.id == 6 then
+		RedManager:bind(TimeLeftTag, RedTag.DecorateTimeLimit)
+	else
+		TimeLeftTag:SetActive(false)
+	end
 end
 
 function P:setTopTab(item, data)
@@ -216,6 +232,14 @@ function P:setTopTab(item, data)
 	RedManager:unbind(NewTag)
 	if self._selectSideTab == 6 then
 		RedManager:bind(NewTag, RedTag.DecorateNew, data.shop_type)
+	end
+
+	local TimeLeftTag = self:find("TimeLeftTag", item)
+	RedManager:unbind(TimeLeftTag)
+	if self._selectSideTab == 6 then
+		RedManager:bind(TimeLeftTag, RedTag.DecorateTimeLimit, data.shop_type)
+	else
+		TimeLeftTag:SetActive(false)
 	end
 
 	bee.removeValueChanged(item)
@@ -354,3 +378,4 @@ function P:setCurrencyItem(currency, data)
 	end, true)
 end
 
+return P

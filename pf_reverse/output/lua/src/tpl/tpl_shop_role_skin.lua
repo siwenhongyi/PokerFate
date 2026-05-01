@@ -3,18 +3,21 @@
 local P = {}
 local PL = {}
 local function _initData()
-    local keys = {'id','shop_type','name','role_skin','image_offset_main','image_offset_window','index','pri','original_pri','discount','new_tag','limit_type','limit_count','time_start','time_end','tag_bg','tag_text',}
+    local keys = {'id','shop_type','name','role_skin','image_offset_main','image_offset_window','index','pri','original_pri','discount','new_tag','is_rerun','limit_type','limit_count','time_start','time_end','tag_bg','tag_text',}
     local bodys = {
-{1,3,"LAB_SKIN_1004_3",100405,{-2,60,1.2},{-186,6,1},1,{10300001,590},nil,nil,nil,4,1,1774490400,1777230000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
-{2,3,"LAB_SKIN_1003_3",100305,{-145,-76,1.2},{-37,-21,0.6},6,{10300001,390},nil,nil,nil,4,1,1774490400,1777230000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
-{3,3,"LAB_SKIN_1005_3",100505,{-126,1,1.2},{-84,-106,0.8},2,{10300001,390},nil,nil,nil,4,1,1774490400,1777230000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
-{4,3,"LAB_SKIN_1008_3",100805,{-161,47,1.05},{-85,-15,0.5},7,{10300001,390},nil,nil,nil,4,1,1774490400,1777230000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
-{5,3,"LAB_SKIN_1009_5",100905,{-67,-57,1.2},{113,-359,1.1},1,{10300001,390},nil,nil,nil,4,1,1770256800,1772910000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
-{6,3,"LAB_SKIN_1010_5",101005,{-117,-27,1.2},{-37,-130,0.8},2,{10300001,390},nil,nil,nil,4,1,1770256800,1772910000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
-{7,3,"LAB_SKIN_1007_5",100705,{-110,-28,1.2},{-123,-434,0.9},3,{10300001,390},nil,nil,nil,4,1,1770256800,1772910000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
-{8,3,"LAB_SKIN_1006_5",100605,{-117,-27,1.2},{-126,-198,0.9},3,{10300001,390},nil,nil,1,4,1,1773280800,1775934000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
-{9,3,"LAB_SKIN_1012_5",101205,{-198,-66,1.3},{81,-191,1},4,{10300001,390},nil,nil,1,4,1,1773280800,1775934000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
-{10,3,"LAB_SKIN_1013_5",101305,{-41,-157,1.5},{-163,-296,1},5,{10300001,390},nil,nil,1,4,1,1773280800,1775934000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"}
+{1,3,"LAB_SKIN_1004_3",100405,{-2,60,1.2},{-186,6,1},201,{10300001,590},nil,nil,nil,1,4,1,1774490400,1777230000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
+{2,3,"LAB_SKIN_1003_3",100305,{-145,-76,1.2},{-37,-21,0.6},401,{10300001,390},nil,nil,nil,1,4,1,1774490400,1777230000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
+{3,3,"LAB_SKIN_1005_3",100505,{-126,1,1.2},{-84,-106,0.8},202,{10300001,390},nil,nil,nil,1,4,1,1774490400,1777230000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
+{4,3,"LAB_SKIN_1008_3",100805,{-161,47,1.05},{-85,-15,0.5},402,{10300001,390},nil,nil,nil,1,4,1,1774490400,1777230000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
+{5,3,"LAB_SKIN_1009_5",100905,{-67,-57,1.2},{113,-359,1.1},501,{10300001,390},nil,nil,nil,nil,4,1,1770256800,1772910000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
+{6,3,"LAB_SKIN_1010_5",101005,{-117,-27,1.2},{-37,-130,0.8},502,{10300001,390},nil,nil,nil,nil,4,1,1770256800,1772910000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
+{7,3,"LAB_SKIN_1007_5",100705,{-110,-28,1.2},{-123,-434,0.9},503,{10300001,390},nil,nil,nil,nil,4,1,1770256800,1772910000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
+{8,3,"LAB_SKIN_1006_5",100605,{-117,-27,1.2},{-126,-198,0.9},301,{10300001,390},nil,nil,1,nil,4,1,1773280800,1775934000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
+{9,3,"LAB_SKIN_1012_5",101205,{-198,-66,1.3},{81,-191,1},302,{10300001,390},nil,nil,1,nil,4,1,1773280800,1775934000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
+{10,3,"LAB_SKIN_1013_5",101305,{-41,-157,1.5},{-163,-296,1},303,{10300001,390},nil,nil,1,nil,4,1,1773280800,1775934000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
+{11,3,"LAB_SKIN_1014_5",101405,{-57,-2,1.2},{-272,-360,0.9},102,{10300001,390},nil,nil,1,nil,4,1,1776304800,1778958000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
+{12,3,"LAB_SKIN_1001_6",100106,{-190,-24,1.2},{195,-306,1},103,{10300001,390},nil,nil,1,nil,4,1,1776304800,1778958000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"},
+{13,3,"LAB_SKIN_1002_5",100205,{-74,3,1.1},{-288,-225,1},101,{10300001,590},nil,nil,1,nil,4,1,1776304800,1778958000,"Shop[shop_skin_event_bg]","LAB_SHOP_COMMON_1"}
 }
     for _, v in pairs(bodys) do
         local m = {}
@@ -36,3 +39,4 @@ function tpl_shop_role_skin_clone(key)
     return nil
 end
 
+return P

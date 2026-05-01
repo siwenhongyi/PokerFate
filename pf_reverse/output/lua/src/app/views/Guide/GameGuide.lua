@@ -71,6 +71,7 @@ function P:initUI(fade, delay)
     
     self.ImageTip:SetActive(false)
     self.Finger:SetActive(false)
+    self.Hollow:SetActive(false)
 
     bee.setOpacity(self.Bg, 0)
     self.BgButton.enabled = false
@@ -255,7 +256,7 @@ function P:weakGuide()
     if self._data.delay then
         bee.setOpacity(self.Bg, 0)
     end
-    self.Hollow:SetActive(false)
+    -- self.Hollow:SetActive(false)
 
     if self._data.show_ui then
         local hollowAction = function()
@@ -265,8 +266,12 @@ function P:weakGuide()
                     for _, v in ipairs(self._data.show_ui) do
                         local n = bee.find(v, UiManager:getUiRoot())
                         if n then
-                            local pos = n.transform.position
-                            self:setHollow(true, pos, self._data.show_area)
+                            if self._data.show_area then
+                                local pos = n.transform.position
+                                self:setHollow(true, pos, self._data.show_area)
+                            else
+                                self:addShowUiTip(n)
+                            end
                         end
                     end
                 end
@@ -317,6 +322,12 @@ function P:addShowUiTip(n)
         local cmp = n:GetComponent("Button")
         if cmp then
             cmp.onClick:Invoke()
+        else
+            cmp = n:GetComponent("Toggle")
+            if cmp then
+                cmp.isOn = true
+                cmp.onValueChanged:Invoke(true)
+            end
         end
         if self._needClickNum then
             self._needClickNum = self._needClickNum - 1
@@ -328,7 +339,14 @@ function P:addShowUiTip(n)
         self:_checkNext()
         self:_checkLog()
     end
-    bee.addClick2(tipUi, cb)
+    local tipbtn = tipUi:GetComponent("Button")
+    if not bee.isNull(tipbtn) then
+        bee.addClick2(tipUi, cb)
+    end
+    local tiptoggle = tipUi:GetComponent("Toggle")
+    if not bee.isNull(tiptoggle) then
+        bee.onCheck(tipUi, cb)
+    end
     self._clickUi[tipUi] = cb
     self._needClickNum = nil
     if self._data.finger then
@@ -348,6 +366,24 @@ function P:addShowUiTip(n)
     end
 end
 
+function P:addShowUiTipWithOutClick(n)
+    local tipUi = CU.GameObject.Instantiate(n, self.BgTipUi.transform, true)
+    local animators = tipUi:GetComponentsInChildren(typeof(CU.Animator))
+    if animators then
+        for i = 0, animators.Length - 1 do
+            animators[i].enabled = false
+        end
+    end
+    local images = tipUi:GetComponentsInChildren(typeof(CU.UI.Image))
+    if images then
+        for i = 0, images.Length - 1 do
+            images[i].raycastTarget = false
+        end
+    end
+    self._tipUis[n] = tipUi
+    n.transform.localScale = bee.v3zero
+end
+
 function P:hideUiTip()
     if self._tipUis then
         for k, v in pairs(self._tipUis) do
@@ -359,7 +395,14 @@ function P:hideUiTip()
     end
     if self._clickUi then
         for k, v in pairs(self._clickUi) do
-            bee.removeClick(k, v)
+            local tipbtn = k:GetComponent("Button")
+            if not bee.isNull(tipbtn) then
+                bee.removeClick(k, v)
+            end
+            local tiptoggle = k:GetComponent("Toggle")
+            if not bee.isNull(tiptoggle) then
+                bee.removeCheck(k)
+            end
         end
         self._clickUi = nil
     end
@@ -418,7 +461,7 @@ function P:_doGuideEnd()
     if GuideManager:doGuideEnd() then
         return false
     end
-    bee.emit("evt_guide_end")
+    bee.emit("evt_guide_end", self._data)
     if self._RoleCamera then
         self._RoleCamera.depth = -1
     end
@@ -538,3 +581,4 @@ function P:setHollow(show, pos, area)
 end
 
 
+return P

@@ -64,3 +64,4 @@ function P:evt_ItemChangeRSP(msg)
     self:onShow()
 end
 
+return P

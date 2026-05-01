@@ -5,7 +5,6 @@ local PL = {}
 local function _initData()
     local keys = {'id','view','src','adapt','sound',}
     local bodys = {
-{"TipDialog","views/TipDialog","app.views.TipDialog",nil,nil},
 {"GameDebugUI","views/GameDebugUI","app.views.GameDebugUI",nil,nil},
 {"CommonItemTip","views/Common/CommonItemTip","app.views.Common.CommonItemTip",nil,nil},
 {"CommonItemTipLR","views/Common/CommonItemTipLR","app.views.Common.CommonItemTipLR",nil,nil},
@@ -30,6 +29,9 @@ local function _initData()
 {"LoginNoNetwordDialog","views/Login/LoginNoNetwordDialog","app.views.Login.LoginNoNetwordDialog",nil,nil},
 {"LoginSetLanguage","views/Login/LoginSetLanguage","app.views.Login.LoginSetLanguage",nil,nil},
 {"LoginQueue","views/Login/LoginQueue","app.views.Login.LoginQueue",nil,nil},
+{"LoginBanTipDialog","views/Login/LoginBanTipDialog","app.views.Login.LoginBanTipDialog",nil,nil},
+{"Loginrepair","views/Login/Loginrepair","app.views.Login.Loginrepair",nil,nil},
+{"Loginline","views/Login/Loginline","app.views.Login.Loginline",nil,nil},
 {"LobbyLayer","views/Lobby/LobbyLayer","app.views.Lobby.LobbyLayer",1,nil},
 {"LobbyByinDialog","views/Lobby/LobbyByinDialog","app.views.Lobby.LobbyByinDialog",nil,nil},
 {"LobbyEnterDialog","views/Lobby/LobbyEnterDialog","app.views.Lobby.LobbyEnterDialog",nil,nil},
@@ -56,6 +58,7 @@ local function _initData()
 {"TableChatLayer","views/table/TableChatLayer","app.table.TableChatLayer",1,nil},
 {"PKTable3D","views/table/PK/PKTable3D","app.table.PK.PKTable",1,nil},
 {"PKTable3DSNG","views/table/PK/PKTable3D","app.table.PK.PKTable3DSNG",1,nil},
+{"PKTable3DMTT","views/table/PK/PKTable3D","app.table.PK.PKTable3DMTT",1,nil},
 {"PKUILayer","views/table/PK/PKUILayer","app.table.PK.PKUILayer",1,nil},
 {"PKUIRecordLayer","views/table/PK/PKUIRecordLayer","app.table.PK.PKUIRecordLayer",1,nil},
 {"PKMenu","views/table/PK/PKMenu","app.table.PK.PKMenu",1,nil},
@@ -71,7 +74,7 @@ local function _initData()
 {"IngameQuickBy","views/table/IngameQuickBy","app.table.IngameQuickBy",nil,nil},
 {"IngameInvite","views/table/IngameInvite","app.table.IngameInvite",1,nil},
 {"ColorGame","views/ColorGame/ColorGame","app.views.ColorGame.ColorGame",1,nil},
-{"SideGameView","views/SideGame/SideGameView","app.views.SideGame.SideGameView",nil,nil},
+{"SideGameView","views/SideGame/SideGameView","app.views.SideGame.SideGameView",1,nil},
 {"CharacterChangeName","views/Character/CharacterChangeName","app.views.Character.CharacterChangeName",nil,nil},
 {"CharacterMain","views/Character/CharacterMain","app.views.Character.CharacterMain",1,nil},
 {"CharacterMainBonds","views/Character/CharacterMainBonds","app.views.Character.CharacterMainBonds",1,nil},
@@ -98,6 +101,7 @@ local function _initData()
 {"InformationAvatar","views/Info/InformationAvatar","app.views.Info.InformationAvatar",nil,nil},
 {"InformationAvatarDetail","views/Info/InformationAvatarDetail","app.views.Info.InformationAvatarDetail",nil,nil},
 {"InformationMain","views/Info/InformationMain","app.views.Info.InformationMain",1,nil},
+{"InformationMainNew","views/Info/InformationMainNew","app.views.Info.InformationMainNew",1,nil},
 {"InformationRename","views/Info/InformationRename","app.views.Info.InformationRename",nil,nil},
 {"InformationManifesto","views/Info/InformationManifesto","app.views.Info.InformationManifesto",nil,nil},
 {"Friend","views/Friend/Friend","app.views.Friend.Friend",1,nil},
@@ -174,6 +178,7 @@ local function _initData()
 {"ActivityNewmanCheckin","views/Activitynewman/ActivityNewmanCheckin","app.views.Activitynewman.ActivityNewmanCheckin",nil,nil},
 {"ActivityGalaSeasonCheckin_popup","views/ActivityGalaSeasonCheckin/ActivityGalaSeasonCheckin_popup","app.views.ActivityGalaSeasonCheckin.ActivityGalaSeasonCheckin_popup",nil,nil},
 {"ActivitySchoolCheckin_popup","views/ActivitySchoolCheckin/ActivitySchoolCheckin_popup","app.views.ActivitySchoolCheckin.ActivitySchoolCheckin_popup",nil,nil},
+{"ActivityBunnyGirlCheckin_popup","views/ActivityBunnyGirlCheckin/ActivityBunnyGirlCheckin_popup","app.views.ActivityBunnyGirlCheckin.ActivityBunnyGirlCheckin_popup",nil,nil},
 {"ShopPayment","views/ShopPayment","ShopPayment",nil,nil},
 {"RankingMain","views/Ranking/RankingMain","app.views.Ranking.RankingMain",1,nil},
 {"RankingRule","views/Ranking/RankingRule","app.views.Ranking.RankingRule",nil,nil},
@@ -189,6 +194,19 @@ local function _initData()
 {"TournamentSNGShowdownWin","views/TournamentSNG/TournamentSNGShowdownWin","app.views.TournamentSNG.TournamentSNGShowdown",1,nil},
 {"TournamentSNGShowdownLose","views/TournamentSNG/TournamentSNGShowdownLose","app.views.TournamentSNG.TournamentSNGShowdown",1,nil},
 {"TournamentSNGRules","views/TournamentSNG/TournamentSNGRules","app.views.TournamentSNG.TournamentSNGRules",1,nil},
+{"TournamentIngameCount","views/TournamentMTT/TournamentIngameCount","app.views.TournamentMTT.TournamentIngameCount",1,nil},
+{"TournamentIngameMTTRightList","views/TournamentMTT/TournamentIngameMTTRightList","app.views.TournamentMTT.TournamentIngameMTTRightList",1,nil},
+{"TournamentIngamePopup","views/TournamentMTT/TournamentIngamePopup","app.views.TournamentMTT.TournamentIngamePopup",1,nil},
+{"TournamentMTTDetails","views/TournamentMTT/TournamentMTTDetails","app.views.TournamentMTT.TournamentMTTDetails",1,nil},
+{"TournamentMTTlist","views/TournamentMTT/TournamentMTTlist","app.views.TournamentMTT.TournamentMTTlist",1,nil},
+{"TournamentMTTpayout","views/TournamentMTT/TournamentMTTpayout","app.views.TournamentMTT.TournamentMTTpayout",1,nil},
+{"TournamentMTTPrizes","views/TournamentMTT/TournamentMTTPrizes","app.views.TournamentMTT.TournamentMTTPrizes",1,nil},
+{"TournamentMTTRanks","views/TournamentMTT/TournamentMTTRanks","app.views.TournamentMTT.TournamentMTTRanks",1,nil},
+{"TournamentMTTRules","views/TournamentMTT/TournamentMTTRules","app.views.TournamentMTT.TournamentMTTRules",1,nil},
+{"TournamentMTTShowdown","views/TournamentMTT/TournamentMTTShowdown","app.views.TournamentMTT.TournamentMTTShowdown",1,nil},
+{"TournamentMTTShowdown02","views/TournamentMTT/TournamentMTTShowdown02","app.views.TournamentMTT.TournamentMTTShowdown02",1,nil},
+{"TournamentMTTShowdownLose","views/TournamentMTT/TournamentMTTShowdownLose","app.views.TournamentMTT.TournamentMTTShowdownLose",1,nil},
+{"TournamentMTTUILayer","views/TournamentMTT/TournamentMTTUILayer","app.views.TournamentMTT.TournamentMTTUILayer",1,nil},
 {"GalaSeasonMain","views/GalaSeason/GalaSeasonMain","app.views.GalaSeason.GalaSeasonMain",1,nil},
 {"GalaSeasonShop","views/GalaSeason/GalaSeasonShop","app.views.GalaSeason.GalaSeasonShop",1,nil},
 {"GalaSeasonActivity","views/GalaSeason/GalaSeasonActivity","app.views.GalaSeason.GalaSeasonActivity",1,nil},
@@ -214,7 +232,25 @@ local function _initData()
 {"SchoolLog","views/School/SchoolLog","app.views.School.SchoolLog",nil,nil},
 {"SchoolHint","views/School/SchoolHint","app.views.School.SchoolHint",nil,nil},
 {"SchoolPlayer","views/School/SchoolPlayer","app.views.School.SchoolPlayer",nil,nil},
-{"SchoolNotice","views/School/SchoolNotice","app.views.School.SchoolNotice",nil,nil}
+{"SchoolNotice","views/School/SchoolNotice","app.views.School.SchoolNotice",nil,nil},
+{"BunnyGirl","views/BunnyGirl/BunnyGirl","app.views.BunnyGirl.BunnyGirl",1,nil},
+{"BunnyGirlStory","views/BunnyGirl/BunnyGirlStory","app.views.BunnyGirl.BunnyGirlStory",1,nil},
+{"BunnyGirlShop","views/BunnyGirl/BunnyGirlShop","app.views.BunnyGirl.BunnyGirlShop",1,nil},
+{"BunnyGirlTask","views/BunnyGirl/BunnyGirlTask","app.views.BunnyGirl.BunnyGirlTask",1,nil},
+{"BunnyGirlExchange","views/BunnyGirl/BunnyGirlExchange","app.views.BunnyGirl.BunnyGirlExchange",nil,nil},
+{"BunnyGirlRules","views/BunnyGirl/BunnyGirlRules","app.views.BunnyGirl.BunnyGirlRules",nil,nil},
+{"BunnyGirlPlot","views/BunnyGirl/BunnyGirlPlot","app.views.BunnyGirl.BunnyGirlPlot",nil,nil},
+{"BunnyGirlLog","views/BunnyGirl/BunnyGirlLog","app.views.BunnyGirl.BunnyGirlLog",nil,nil},
+{"BunnyGirlHint","views/BunnyGirl/BunnyGirlHint","app.views.BunnyGirl.BunnyGirlHint",nil,nil},
+{"BunnyGirlPlayer","views/BunnyGirl/BunnyGirlPlayer","app.views.BunnyGirl.BunnyGirlPlayer",nil,nil},
+{"BunnyGirlNotice","views/BunnyGirl/BunnyGirlNotice","app.views.BunnyGirl.BunnyGirlNotice",nil,nil},
+{"BunnyGirlPackage","views/BunnyGirl/BunnyGirlPackage","app.views.BunnyGirl.BunnyGirlPackage",nil,nil},
+{"DevelopmentFund","views/DevelopmentFund/DevelopmentFund","app.views.DevelopmentFund.DevelopmentFund",1,nil},
+{"DevelopmentFundReward","views/DevelopmentFund/DevelopmentFundReward","app.views.DevelopmentFund.DevelopmentFundReward",nil,nil},
+{"AchievementMain","views/Achievement/AchievementMain","app.views.Achievement.AchievementMain",1,nil},
+{"AchievementDetail","views/Achievement/AchievementDetail","app.views.Achievement.AchievementDetail",1,nil},
+{"AchievementRecord","views/Achievement/AchievementRecord","app.views.Achievement.AchievementRecord",nil,nil},
+{"AchievementTips","views/Achievement/AchievementTips","app.views.Achievement.AchievementTips",nil,nil}
 }
     for _, v in pairs(bodys) do
         local m = {}
@@ -236,3 +272,4 @@ function tpl_ui_config_clone(key)
     return nil
 end
 
+return P

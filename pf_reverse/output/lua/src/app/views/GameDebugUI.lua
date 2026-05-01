@@ -529,3 +529,4 @@ function P:onBtRoleSmall(obj, face)
     end
 end
 
+return P

@@ -154,3 +154,4 @@ function P:evt_RoleUnlockRSP()
     self:refreshSelected(self._selectedItem, self._selectedId, true)
 end
 
+return P

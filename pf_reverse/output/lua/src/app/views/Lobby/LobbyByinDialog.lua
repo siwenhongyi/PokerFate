@@ -9,7 +9,9 @@ function P:onAwake()
     self.TextMin = self:find("TextMin", Buyin)
     self.TextMax = self:find("TextMax", Buyin)
     self.ImageArrow = self:find("ingame_blinds_fg_arrow", Buyin)
+    self.Chip = self:find("Chip", self.Panel)
     self.TextGold = self:find("Chip/TextGold", self.Panel)
+    self.BgTips = self:find("BgTips", self.Panel)
 
     self.Slider = self:find("Slider", self.Panel)
     self.StartButton = self:find("StartButton", self.Panel)
@@ -56,12 +58,8 @@ function P:onAwake()
         self:hideUI()
     end)
     bee.addClick(self.ButtonNoGold, function()
-        -- if PlayerModel:getGold() < self._params.data.min_byin then
-        --     UiManager:showToast(_T("LAB_SMALL_THAN_BUYIN"))
-        -- else
-        --     UiManager:showToast(_T("LAB_GOLD_LACK"))
-        -- end
         UiManager:showToast(_T("LAB_GOLD_LACK"))
+        QuickByModel:checkShowView(self._params.data.gameType)
     end)
     bee.addClick(self.PlusButton, function()
         if self._curStep < #tpl_constdata.PokerBuyinStep then
@@ -102,9 +100,17 @@ function P:onShow()
         end
     end
 
-    bee.setText(self.TextMin, _N(self._params.data.min_byin))
-    bee.setText(self.TextMax, _N(self._params.data.max_byin))
+    if GF.isTrainingGame(self._params.data.gameType) then
+        bee.setText(self.TextMin, _N(self._params.data.min_byin / self._params.data.bb) .. "BB")
+        bee.setText(self.TextMax, _N(self._params.data.max_byin / self._params.data.bb) .. "BB")
+    else
+        bee.setText(self.TextMin, _N(self._params.data.min_byin))
+        bee.setText(self.TextMax, _N(self._params.data.max_byin))
+    end
     bee.setTextGold(self.TextGold, _N(PlayerModel:getGold()))
+
+    self.BgTips:SetActive(GF.isTrainingGame(self._params.data.gameType) and GameModel.data == nil)
+    self.Chip:SetActive(not GF.isTrainingGame(self._params.data.gameType))
 
     if self._params and (self._params.isReby or self._params.isSetReby) then
         self.InfoButton:SetActive(false)
@@ -153,11 +159,17 @@ end
 
 function P:setCurStep(step)
     self._curStep = step
-    local gold = tpl_constdata.PokerBuyinStep[self._curStep] * self._params.data.bb
-    bee.setText(self.TextBuyin, _N(gold))
+    if GF.isTrainingGame(self._params.data.gameType) then
+        bee.setText(self.TextBuyin, tpl_constdata.PokerBuyinStep[self._curStep] .. "BB")
+        self.StartButton:SetActive(true)
+        self.ButtonNoGold:SetActive(false)
+    else
+        local gold = tpl_constdata.PokerBuyinStep[self._curStep] * self._params.data.bb
+        bee.setText(self.TextBuyin, _N(gold))
 
-    self.StartButton:SetActive(PlayerModel:getGold() >= gold)
-    self.ButtonNoGold:SetActive(PlayerModel:getGold() < gold)
+        self.StartButton:SetActive(PlayerModel:getGold() >= gold)
+        self.ButtonNoGold:SetActive(PlayerModel:getGold() < gold)
+    end
     self.PlusButton:SetActive(self._curStep ~= #tpl_constdata.PokerBuyinStep)
     self.MinusButton:SetActive(self._curStep ~= 1)
 end
@@ -167,7 +179,15 @@ function P:onBtClose()
         Net:sendReq("pb.LeaveRoomREQ", {})
     elseif self._params.isSetReby then
     else
-        UiManager:showUI("OmahaBlinds", {data = self._params.data, gameType = self._params.data.gameType})
+        local gameType = self._params.data.gameType
+        if GF.isTrainingGame(gameType) then
+            if GF.isPokerGame(gameType) then
+                gameType = GAME_GAME_TYPE.LOBBY_HOLDEM_GAME
+            elseif GF.isOmahaGame(gameType) then
+                gameType = GAME_GAME_TYPE.LOBBY_OMAHA_GAME
+            end
+        end
+        UiManager:showUI("OmahaBlinds", {data = self._params.data, gameType = gameType})
     end
     self:hideUI()
 end
@@ -184,3 +204,4 @@ function P:evt_TableGameOverRSP()
     end
 end
 
+return P

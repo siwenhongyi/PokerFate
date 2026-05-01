@@ -58,3 +58,4 @@ function P:updateDelay()
     bee.setText(self.TextDelay, _T("LAB_SETTINGS_057") .. self:getInfoText("" .. dt .. "ms"))
 end
 
+return P

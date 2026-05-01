@@ -75,10 +75,14 @@ function P:getBigBlind()
 end
 
 function P:getReplayTitle(data)
+    local subTitle = _N(data.small_blind) .. "/" .. _N(data.big_blind)
     if data.tour_name and "" ~= data.tour_name then
-        return data.tour_name .. "-" .. " " .. _N(data.small_blind) .. "/" .. _N(data.big_blind) .. "-" .. TimeHelp:getDateTimeStr(data.game_start_time)
+        return data.tour_name .. "-" .. subTitle .. "-" .. TimeHelp:getDateTimeStr(data.game_start_time)
     end
-    return GF.getGameTypeName(data.game_type) .. "-" .. " " .. _N(data.small_blind) .. "/" .. _N(data.big_blind) .. "-" .. TimeHelp:getDateTimeStr(data.game_start_time)
+    if GF.isTrainingGame(data.game_type) then
+        subTitle = _T("LAB_GAME_053")
+    end
+    return GF.getGameTypeName(data.game_type) .. "-" .. subTitle .. "-" .. TimeHelp:getDateTimeStr(data.game_start_time)
 end
 
 function P:getReplayList(cb)
@@ -205,3 +209,4 @@ function P:switchTable(fromMenu)
     end
 end
 
+return P

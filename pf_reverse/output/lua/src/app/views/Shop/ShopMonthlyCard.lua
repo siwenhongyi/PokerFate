@@ -138,3 +138,4 @@ function P:onClickPurchase()
 	UiManager:showUI("ShopMonthlyCardPurchase")
 end
 
+return P

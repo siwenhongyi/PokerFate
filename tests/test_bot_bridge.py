@@ -444,6 +444,43 @@ def test_blind_status_updates_sng_blinds_from_cached_schedule() -> None:
     assert b._api.small_blind == 50.0
 
 
+def test_sng_train_game_type_disables_profit_lock_without_sng_info(monkeypatch) -> None:
+    import pf_intercept.bot as bot_mod
+
+    notified = []
+    monkeypatch.setattr(bot_mod, "notify", lambda event, **fields: notified.append(event))
+
+    b = BotBridge(max_auto_rebuy=3)
+    b._my_uid = "99"
+    b._my_seat = 0
+    b._uid_to_seat["99"] = 0
+    b.handle(
+        "pb.EnterRoomRSP",
+        {
+            "code": 0,
+            "roomid": 20399792,
+            "game_type": 40050301,
+            "room_info": {},
+            "table_status": {"seat": []},
+        },
+    )
+    b._bb = 50.0
+    b._sb = 25.0
+
+    out = b.handle(
+        "pb.WinnerRSP",
+        {
+            "winner": [],
+            "profit": [{"uid": "99", "chips": "30000"}],
+        },
+    )
+
+    assert b._is_sng_room is True
+    assert out is None
+    assert b._profit_lock_deferred is None
+    assert "profit_lock_trigger" not in notified
+
+
 def test_sng_disables_profit_lock_even_above_threshold(monkeypatch) -> None:
     import pf_intercept.bot as bot_mod
 

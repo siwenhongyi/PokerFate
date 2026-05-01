@@ -19,8 +19,8 @@ function net:UserLoginRSP(msg)
         -- PlayerModel:requestDecorationScheme()
         ShareModel:initShareList()
         -- EmailModel:reqEmailList(EmailModel.MAIL_TYPE.Normal, 0)
-        -- EmailModel:reqEmailList(EmailModel.MAIL_TYPE.Special, 0)
         EmailModel:reqEmailList(nil, 0, function()
+            EmailModel:reqEmailList(EmailModel.MAIL_TYPE.Special, 0)
             EmailModel:reqEmailNum()
         end)
         TaskModel:requestTaskList()
@@ -30,6 +30,9 @@ function net:UserLoginRSP(msg)
         VipModel:reqVipData()
         ActivityModel:initActInfo()
         ActivityManager:reqActivityData()
+        QuickByModel:requireData()
+        AchievementModel:requestAchTask()
+        bee.once(3, function () AchievementModel:requestAchTaskClearCount() end)
 
         LoginModel:resetHeartBeat()
         bee.logEvent("net_delay", math.floor(Net:getDelay() * 1000), UrlManager:getServerUrl())
@@ -123,16 +126,13 @@ function net:SelfUserInfoRSP(msg)
     GuideManager:setCurStep(msg.newer_guide_step)
     VipModel:setVipLevel(msg.vip_level)
     GuideManager:getSystemGuides()
+    ClientDataModel:initDatas(msg.client_def_str)
 
     bee.emit("evt_refreshTopInfo")
     bee.emit("evt_refreshLevel")
     bee.emit("evt_refreshName")
     bee.emit("evt_refreshAvatar")
     bee.emit("evt_refreshLobbyScene")
-end
-
-function net:SelfAchievementsRSP(msg)
-    PlayerModel._achievements = msg.achievements
 end
 
 function net:UserValueRSP(msg)
@@ -237,7 +237,7 @@ function net:NoticeBRC(msg)
             end
         end
     elseif msg.type == tpl_PushConsts.SERVER_MAINTAIN_NORMAL.code then
-        if msg.message then
+        if msg.message and bee.isInHome() then
             local d = json.decode(msg.message)
             if d then
                 GF.showServerMaintain(d)
@@ -262,6 +262,9 @@ function net:NoticeBRC(msg)
                 ShopModel:onPaySucces(d, d)
             end
         end
+    elseif msg.type == tpl_PushConsts.GAME_REBATE_SETTLE.code then
+        ClientDataModel:reqDevelopmentFundData()
+        bee.emit(EventDef.evt_developmentFund_refresh)
     elseif msg.type >= 10091 and msg.type <= 100100 then -- pay success for stove
         if msg.message then
             local d = json.decode(msg.message)
@@ -269,6 +272,14 @@ function net:NoticeBRC(msg)
                 ShopModel:doPaySuc()
                 local pidCfg = ShopModel:getPidDataByPid(d.pid)
                 ShopModel:onPaySucces(pidCfg, d)
+            end
+        end
+    elseif msg.type == tpl_PushConsts.ACHIEVEMENT_TASK_REFRESH.code then
+        if msg.message then
+            local d = json.decode(msg.message)
+            if d then
+                -- UiManager:showUI("AchievementTips", {clearId = d[1]})
+                bee.emit("evt_clearAchievement", {clearIds = d})
             end
         end
 	end
@@ -297,3 +308,4 @@ function net:CancelLoginQueueRSP()
 end
 
 function net:LoginQueueStatusChangeBRC()
+end

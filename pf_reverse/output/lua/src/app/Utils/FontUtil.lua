@@ -168,3 +168,4 @@ bee.setTextOrigin = function(obj, s, cmpName)
             end
         end
     end
+end

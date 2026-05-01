@@ -26,7 +26,7 @@ function P:onAwake()
 	bee.addClick2(self.Button, function()
 		Game:playSound("ui_button_confirm")
 		local info = self.data:getPlayer(self.seatid)
-		UiManager:showUI("InformationMain", {uid = info.uid, from = "table"})
+		UiManager:showUI("InformationMainNew", {uid = info.uid, from = "table"})
     	bee.logEvent("ingame-profile", GameModel.data:getGameType(), GameModel.data:getRoomId())
 	end)
 	bee.addClick2(self:find("ButtonChip"), function()
@@ -79,7 +79,7 @@ function P:refreshUI()
 				local Mask = self:find("Mask", self._roleSpine)
 				if Mask then
 					if bee.isIos or bee.isEditor then
-						bee.convertMaskToSoftMask(Mask)
+						-- bee.convertMaskToSoftMask(Mask)
 					end
 					self._roleMask = Mask
 					self._roleMask2 = self:find("Mask2", self._roleSpine)
@@ -328,11 +328,7 @@ function P:playScrap(cb)
 	if info then
 		local isNeedScrap = info.chips <= 0
 		if not isNeedScrap then
-			if self.data:isSNG() then
-				isNeedScrap = info.begin_chips - info.chips >= self.data.room_info.bust_threshold
-			else
-				isNeedScrap = info.begin_chips - info.chips >= self.data:getBigBlind() * tpl_constdata.ScrapBlindRate
-			end
+			isNeedScrap = self.data:isCanScrop(info.begin_chips - info.chips)
 		end
 		if isNeedScrap then
 			SettingModel:setScrapPlayer(self.data, info.uid, true)
@@ -400,7 +396,14 @@ end
 
 function P:playUnScrap()
 	if self._roleSpineNode then
-		bee.invoke(self._roleSpineNode, "stopScrap")
+		if bee.invoke(self._roleSpineNode, "isInScrapState") then
+			local pos = self:isMe() and bee.v3(17, 96) or bee.v3(17, 80)
+			local eft = GameModel.layer:playUIEffect("Prefab/PKTable/Eff_poker_baoyihuifu", self.transform, pos)
+			self:once(0.19, function()
+				bee.invoke(self._roleSpineNode, "stopScrap")
+			end)
+			Game:playSound("sound_bust_back")
+		end
 	end
 end
 
@@ -605,7 +608,8 @@ function P:refreshAddingChips(is_adding, chips, type)
 				UiManager:showUI("LobbyByinDialog", {data = data, isReby = true})
 			else
 				if not UiManager:getUI("IngameQuickBy") then
-					UiManager:showUI("IngameQuickBy", {data = data, dt = self.data:getRebuyRemainTime(self.seatid)})
+					QuickByModel:checkInsideGame(data.gameType, data.quick_buy)
+					-- UiManager:showUI("IngameQuickBy", {data = data, dt = self.data:getRebuyRemainTime(self.seatid)})
 				end
 			end
 		else

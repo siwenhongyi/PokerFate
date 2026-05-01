@@ -17,6 +17,7 @@ function P:requestTaskList(immediately)
 
 		self._daily_task_list = data.daily_list 	-- 每日任务列表
 		self._weekly_task_list = data.weekly_list 	-- 每周任务列表
+		self._challenge_task_list = data.challenge_list -- 挑战任务列表
 		self._point_data = data.point_data 			-- 活跃点数据
 		-- 每日活跃点配置
 		self._daily_point_conf_list = data.daily_point_conf_list
@@ -24,6 +25,9 @@ function P:requestTaskList(immediately)
 		-- 每周活跃点配置
 		self._weekly_point_conf_list = data.weekly_point_conf_list
 		table.sort(self._weekly_point_conf_list, function(a, b) return a.reward_point < b.reward_point end)
+		-- 挑战任务活跃点配置
+		self._challenge_point_conf_list = data.challenge_point_conf_list
+		table.sort(self._challenge_point_conf_list, function(a, b) return a.reward_point < b.reward_point end)
 
 		self:refreshRedPoint()
 
@@ -74,18 +78,20 @@ function P:isHaveTaskType(task_type)
 	return flag
 end
 
--- 获取每日任务活跃数据
-function P:getDailyPointData()
-	return self._daily_point_conf_list or {}
-end
-
--- 获取每周任务活跃数据
-function P:getWeeklyPointData()
-	return self._weekly_point_conf_list or {}
+-- 获取任务活跃数据
+function P:getTaskPointData(task_cate)
+	if task_cate == TaskCate.Daily then
+		return self._daily_point_conf_list or {}
+	elseif task_cate == TaskCate.Weekly then
+		return self._weekly_point_conf_list or {}
+	elseif task_cate == TaskCate.Challenge then
+		return self._challenge_point_conf_list or {}
+	end
+	return {}
 end
 
 -- 每日任务奖励点是否已领取
-function P:getDailyActiveIsRewarded(id)
+function P:_getDailyActiveIsRewarded(id)
 	if not self._point_data.daily_reward_id_list then
 		return false
 	end
@@ -98,7 +104,7 @@ function P:getDailyActiveIsRewarded(id)
 end
 
 -- 每周任务奖励点是否已领取
-function P:getWeeklyActiveIsRewarded(id)
+function P:_getWeeklyActiveIsRewarded(id)
 	if not self._point_data.weekly_reward_id_list then
 		return false
 	end
@@ -108,6 +114,30 @@ function P:getWeeklyActiveIsRewarded(id)
 		end
 	end
 	return false
+end
+
+-- 挑战任务奖励点是否已领取
+function P:_getChallengeActiveIsRewarded(id)
+	if not self._point_data.challenge_reward_id_list then
+		return false
+	end
+	for k,v in pairs(self._point_data.challenge_reward_id_list) do
+		if v == id then
+			return true
+		end
+	end
+	return false
+end
+
+-- 任务活跃点奖励是否已领取
+function P:getTaskActiveIsRewarded(task_cate, id)
+	if task_cate == TaskCate.Daily then
+		return self:_getDailyActiveIsRewarded(id)
+	elseif task_cate == TaskCate.Weekly then
+		return self:_getWeeklyActiveIsRewarded(id)
+	elseif task_cate == TaskCate.Challenge then
+		return self:_getChallengeActiveIsRewarded(id)
+	end
 end
 
 -- 获取每日活跃点
@@ -126,18 +156,25 @@ function P:getWeeklyPointVal()
 	return self._point_data.weekly_point
 end
 
--- 日活跃奖励是否已全部领取
-function P:getDailyActiveIsAllRewarded()
-	local pointData = self:getDailyPointData()
-	local maxId = #pointData
-	return self:getDailyActiveIsRewarded(pointData[maxId].id)
+-- 获取任务活跃点
+function P:getTaskPointVal(task_cate)
+	if not self._point_data then
+		return 0
+	end
+	if task_cate == TaskCate.Daily then
+		return self._point_data.daily_point
+	elseif task_cate == TaskCate.Weekly then
+		return self._point_data.weekly_point
+	elseif task_cate == TaskCate.Challenge then
+		return self._point_data.challenge_point
+	end
+	return 0
 end
 
--- 周活跃奖励是否已全部领取
-function P:getWeeklyActiveIsAllRewarded()
-	local pointData = self:getWeeklyPointData()
+function P:getTaskActiveIsAllRewarded(task_cate)
+	local pointData = self:getTaskPointData(task_cate)
 	local maxId = #pointData
-	return self:getWeeklyActiveIsRewarded(pointData[maxId].id)
+	return self:getTaskActiveIsRewarded(task_cate, pointData[maxId].id)
 end
 
 local _sortTaskList = function(list)
@@ -182,46 +219,65 @@ function P:getWeeklyTaskList()
 	return _sortTaskList(self._weekly_task_list)
 end
 
+-- 获取挑战任务列表
+function P:getChallengeTaskList()
+	if not self._challenge_task_list then
+		return {}
+	end
+	return _sortTaskList(self._challenge_task_list)
+end
+
+-- 是否有挑战任务
+function P:isHaveChallengeTask()
+	if not self._challenge_task_list or not next(self._challenge_task_list) then
+		return false
+	end
+	return true
+end
+
 -- 获取任务描述
-function P:getTaskDesc(cfg)
-	local valCount = #cfg.value
+function P:getTaskDesc(cfg, data)
+	local value = cfg.value
+	if data then
+		value = data.value
+	end
+	local valCount = #value
 	if cfg.task_type == 311 then
 		return _T(cfg.dec)
 	elseif cfg.task_type == 313 then
-		return _F(cfg.dec, cfg.value[3])
+		return _F(cfg.dec, value[3])
 	elseif valCount == 1 then
-		return _F(cfg.dec, _N(cfg.value[1]))
+		return _F(cfg.dec, _N(value[1]))
 	elseif valCount == 2 then
-		if cfg.value[1] == 0 then
+		if value[1] == 0 then
 			-- 任意玩法
-			return _F(cfg.dec, _N(cfg.value[2]))
-		elseif tpl_task_type_info[cfg.value[1]] then
-			return _F(cfg.dec, _N(cfg.value[2]), _T(tpl_task_type_info[cfg.value[1]].name))
+			return _F(cfg.dec, _N(value[2]))
+		elseif tpl_task_type_info[value[1]] then
+			return _F(cfg.dec, _N(value[2]), _T(tpl_task_type_info[value[1]].name))
 		else
-			return _F(cfg.dec, _N(cfg.value[2]))
+			return _F(cfg.dec, _N(value[2]))
 		end
 	else
 		return _T(cfg.dec)
 	end
 end
 
-function P:getDailyCanReceiveList()
-	local isMonthlyCard = ShopModel:isMonthlyCard()
-	local list = {}
-	for k, v in pairs(self:getDailyTaskList()) do
-		if v.status == TaskStatus.Completed then
-			if not v.monthly_card_task or isMonthlyCard then
-				table.insert(list, v.id)
-			end
-		end
+function P:getTaskCanReceiveList(task_cate)
+	local taskList
+	if task_cate == TaskCate.Daily then
+		taskList = self:getDailyTaskList()
+	elseif task_cate == TaskCate.Weekly then
+		taskList = self:getWeeklyTaskList()
+	elseif task_cate == TaskCate.Challenge then
+		taskList = self:getChallengeTaskList()
 	end
-	return list
-end
 
-function P:getWeeklyCanReceiveList()
-	local isMonthlyCard = ShopModel:isMonthlyCard()
 	local list = {}
-	for k, v in pairs(self:getWeeklyTaskList()) do
+	if not taskList then
+		return list
+	end
+	local isMonthlyCard = ShopModel:isMonthlyCard()
+	for k, v in pairs(taskList) do
 		if v.status == TaskStatus.Completed then
 			if not v.monthly_card_task or isMonthlyCard then
 				table.insert(list, v.id)
@@ -234,20 +290,10 @@ end
 -- 判断是否有可领取的任务奖励
 function P:isCanRecTaskReward(task_cate)
 	-- 任务奖励
-	local ids = {}
-	if task_cate == TaskCate.Weekly then
-		ids = self:getWeeklyCanReceiveList()
-	else
-		ids = self:getDailyCanReceiveList()
-	end
+	local ids = self:getTaskCanReceiveList(task_cate)
 
 	-- 活跃点奖励
-	local rewardPoints
-	if task_cate == TaskCate.Weekly then
-		rewardPoints = self:getCanRewardWeeklyPointList()
-	else
-		rewardPoints = self:getCanRewardDailyPointList()
-	end
+	local rewardPoints = self:getCanRewardTaskPointList(task_cate)
 
 	if not next(ids) and not next(rewardPoints) then
 		return false
@@ -267,22 +313,14 @@ function P:receiveTaskReward(id, task_cate)
 		args.id_arr = {id}
 		args.all = false
 	else
-		if task_cate == TaskCate.Weekly then
-			args.id_arr = self:getWeeklyCanReceiveList()
-		else
-			args.id_arr = self:getDailyCanReceiveList()
-		end
+		args.id_arr = self:getTaskCanReceiveList(task_cate)
 		args.all = true
 	end
 
 	-- 活跃点奖励（一键领取时可同时领取活跃点奖励）
 	local rewardPoints
 	if args.all then
-		if task_cate == TaskCate.Weekly then
-			rewardPoints = self:getCanRewardWeeklyPointList()
-		else
-			rewardPoints = self:getCanRewardDailyPointList()
-		end
+		rewardPoints = self:getCanRewardTaskPointList(task_cate)
 	end
 
 	-- 判断是否有可领取的
@@ -310,6 +348,17 @@ function P:receiveTaskReward(id, task_cate)
 					RedManager:removeTag(RedTag.WeeklyReward, v)
 				end
 			end
+		elseif task_cate == TaskCate.Challenge then
+			if rewardPoints then
+				for k,v in pairs(rewardPoints) do
+					RedManager:removeTag(RedTag.ChallengePoint, v)
+				end
+			end
+			if args.id_arr then
+				for k,v in pairs(args.id_arr) do
+					RedManager:removeTag(RedTag.ChallengeReward, v)
+				end
+			end
 		else
 			if rewardPoints then
 				for k,v in pairs(rewardPoints) do
@@ -331,6 +380,8 @@ function P:receiveTaskReward(id, task_cate)
 		if data.reward_point and data.reward_point > 0 then
 			if task_cate == TaskCate.Weekly then
 				table.insert(rewards, {major_type = GMajorType.PROP, item_id = GPropId.WeeklyPoint, num = data.reward_point})
+			elseif task_cate == TaskCate.Challenge then
+				table.insert(rewards, {major_type = GMajorType.PROP, item_id = GPropId.ChallengePoint, num = data.reward_point})
 			else
 				table.insert(rewards, {major_type = GMajorType.PROP, item_id = GPropId.ActivePoint, num = data.reward_point})
 			end
@@ -357,6 +408,8 @@ function P:receivePointReward(id, task_cate)
 
 		if task_cate == TaskCate.Weekly then
 			RedManager:removeTag(RedTag.WeeklyPoint, id)
+		elseif task_cate == TaskCate.Challenge then
+			RedManager:removeTag(RedTag.ChallengePoint, id)
 		else
 			RedManager:removeTag(RedTag.DailyPoint, id)
 		end
@@ -374,25 +427,13 @@ function P:evt_NoticeBRC(params)
 	end
 end
 
-function P:getCanRewardDailyPointList()
+function P:getCanRewardTaskPointList(task_cate)
+	local pointVal = self:getTaskPointVal(task_cate)
+	local pointData = self:getTaskPointData(task_cate)
 	local list = {}
-	local dailyPoint = self:getDailyPointVal()
-	for k,v in pairs(self:getDailyPointData()) do
-		if dailyPoint >= v.reward_point then
-			if not self:getDailyActiveIsRewarded(v.id) then
-				table.insert(list, v.id)
-			end
-		end
-	end
-	return list
-end
-
-function P:getCanRewardWeeklyPointList()
-	local list = {}
-	local weeklyPoint = self:getWeeklyPointVal()
-	for k,v in pairs(self:getWeeklyPointData()) do
-		if weeklyPoint >= v.reward_point then
-			if not self:getWeeklyActiveIsRewarded(v.id) then
+	for i,v in ipairs(pointData) do
+		if pointVal >= v.reward_point then
+			if not self:getTaskActiveIsRewarded(task_cate, v.id) then
 				-- RedManager:addTag(RedTag.WeeklyPoint, v.id)
 				table.insert(list, v.id)
 			end
@@ -405,25 +446,29 @@ function P:refreshRedPoint()
 	RedManager:removeTag(RedTag.Task)
 
 	-- 每日活跃奖励
-	for k,v in pairs(self:getCanRewardDailyPointList()) do
+	for k,v in pairs(self:getCanRewardTaskPointList(TaskCate.Daily)) do
 		RedManager:addTag(RedTag.DailyPoint, v)
 	end
-
 	-- 每周活跃奖励
-	for k,v in pairs(self:getCanRewardWeeklyPointList()) do
+	for k,v in pairs(self:getCanRewardTaskPointList(TaskCate.Weekly)) do
 		RedManager:addTag(RedTag.WeeklyPoint, v)
 	end
-
-	local isMonthlyCard = ShopModel:isMonthlyCard()
-
-	-- 每日可领取任务
-	for k, v in pairs(self:getDailyCanReceiveList()) do
-		RedManager:addTag(RedTag.DailyReward, v)
+	-- 挑战任务活跃奖励
+	for k,v in pairs(self:getCanRewardTaskPointList(TaskCate.Challenge)) do
+		RedManager:addTag(RedTag.ChallengePoint, v)
 	end
 
+	-- 每日可领取任务
+	for k, v in pairs(self:getTaskCanReceiveList(TaskCate.Daily)) do
+		RedManager:addTag(RedTag.DailyReward, v)
+	end
 	-- 每周可领取任务
-	for k, v in pairs(self:getWeeklyCanReceiveList()) do
+	for k, v in pairs(self:getTaskCanReceiveList(TaskCate.Weekly)) do
 		RedManager:addTag(RedTag.WeeklyReward, v)
+	end
+	-- 挑战可领取任务
+	for k, v in pairs(self:getTaskCanReceiveList(TaskCate.Challenge)) do
+		RedManager:addTag(RedTag.ChallengeReward, v)
 	end
 end
 
@@ -467,3 +512,4 @@ function P:evt_serverTimeCrossDay()
     end)
 end
 
+return P

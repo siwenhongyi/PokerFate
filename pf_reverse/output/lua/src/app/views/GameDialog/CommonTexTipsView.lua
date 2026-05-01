@@ -97,3 +97,4 @@ function P:setContentPos()
 	self.UpDescriptionCont.transform.localPosition = bee.v3(endPosX, endPosY)
 end
 
+return P

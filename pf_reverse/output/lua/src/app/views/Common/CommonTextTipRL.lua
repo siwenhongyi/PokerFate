@@ -63,3 +63,4 @@ function P:setContentPos()
 	self.ItemTips.transform.localPosition = bee.v3(endPosX, endPosY)
 end
 
+return P
