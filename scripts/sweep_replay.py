@@ -41,6 +41,17 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def _load_json_stdout(text: str) -> dict:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find('{')
+        end = text.rfind('}')
+        if start >= 0 and end > start:
+            return json.loads(text[start:end + 1])
+        raise
+
+
 def _default_shards() -> int:
     return max(1, (os.cpu_count() or 4) - 2)
 
@@ -134,7 +145,7 @@ def run_one(task: tuple) -> dict[str, Any]:
         }
 
     try:
-        summary = json.loads(proc.stdout)
+        summary = _load_json_stdout(proc.stdout)
     except Exception:
         json_summary.write_text(proc.stdout, encoding='utf-8')
         return {

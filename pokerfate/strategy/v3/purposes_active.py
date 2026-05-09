@@ -17,6 +17,7 @@ from typing import List, Optional, Tuple
 from pokerfate.strategy.v3.context import DecisionCtx
 from pokerfate.strategy.v3.exploit import no_fold_equity, sticky_passive
 from pokerfate.strategy.v3.purpose import Purpose, TriggerResult
+from pokerfate.strategy.v3.stackoff_guard import stackoff_guard_reason
 
 _RC_WET_PEN = float(_os.environ.get('PF_RANGECBET_WET_PEN', '0.5'))
 _RC_LOWBROAD_PEN = float(_os.environ.get('PF_RANGECBET_LOWBROAD_PEN', '0.7'))
@@ -24,6 +25,45 @@ _RC_FLUSH_PEN = float(_os.environ.get('PF_RANGECBET_FLUSH_PEN', '0.5'))
 _RC_PAIRED_PEN = float(_os.environ.get('PF_RANGECBET_PAIRED_PEN', '0.6'))
 _DS_HU_W = float(_os.environ.get('PF_DEFAULT_STAB_HU', '0.5'))
 _DS_MULTI_W = float(_os.environ.get('PF_DEFAULT_STAB_MULTI', '0.5'))
+_DS_AIR_MIN_EQ = float(_os.environ.get('PF_DEFAULT_STAB_AIR_MIN_EQ', '0.25'))
+_DS_LOWFE_MULT = float(_os.environ.get('PF_DEFAULT_STAB_LOWFE_WEIGHT_MULT', '0.0'))
+_DS_LOWFE_MIN_EQ = float(_os.environ.get('PF_DEFAULT_STAB_LOWFE_MIN_EQ', '0.35'))
+_COMMIT_VALUE_EQ_FLOOR = float(_os.environ.get('PF_COMMIT_VALUE_EQ_FLOOR', '0.55'))
+_VALUE_JAM_RIVER_DANGER_ADD = float(_os.environ.get('PF_VALUE_JAM_RIVER_DANGER_ADD', '0.04'))
+_VALUE_JAM_PAIRED_ADD = float(_os.environ.get('PF_VALUE_JAM_PAIRED_ADD', '0.05'))
+_VALUE_JAM_COMPLETING_ADD = float(_os.environ.get('PF_VALUE_JAM_COMPLETING_ADD', '0.04'))
+_PROTECTION_MIN_EQ = float(_os.environ.get('PF_PROTECTION_MIN_EQ', '0.40'))
+_PROTECTION_STICKY_EQ_ADD = float(_os.environ.get('PF_PROTECTION_STICKY_EQ_ADD', '0.03'))
+_PROTECTION_MULTIWAY_EQ_ADD = float(_os.environ.get('PF_PROTECTION_MULTIWAY_EQ_ADD', '0.04'))
+_ACTIVE_PROTECTION_MEDIUM_MIN_EQ = float(
+    _os.environ.get('PF_ACTIVE_PROTECTION_MEDIUM_MIN_EQ', '1.10')
+)
+_ACTIVE_PROTECTION_WETNESS_MIN = float(
+    _os.environ.get('PF_ACTIVE_PROTECTION_WETNESS_MIN', '0.45')
+)
+_ACTIVE_PROTECTION_MAX_NUTS = float(
+    _os.environ.get('PF_ACTIVE_PROTECTION_MAX_NUTS', '0.35')
+)
+_PURE_BLUFF_RIVER_FOLD_MIN = float(_os.environ.get('PF_PURE_BLUFF_RIVER_FOLD_MIN', '0.52'))
+_PURE_BLUFF_CATCHER_MIN = float(_os.environ.get('PF_PURE_BLUFF_CATCHER_MIN', '0.42'))
+_BARREL_RESIST_CALL_EQ_ADD = float(_os.environ.get('PF_BARREL_RESIST_CALL_EQ_ADD', '0.04'))
+_BARREL_RESIST_RAISE_EQ_ADD = float(_os.environ.get('PF_BARREL_RESIST_RAISE_EQ_ADD', '0.10'))
+_BARREL_RESIST_WEIGHT_MULT = float(_os.environ.get('PF_BARREL_RESIST_WEIGHT_MULT', '0.70'))
+_SUPER_MONSTER_EQ = float(_os.environ.get('PF_SUPER_MONSTER_EQ', '0.985'))
+_SUPER_MONSTER_MC = float(_os.environ.get('PF_SUPER_MONSTER_MC', '0.95'))
+_SUPER_MONSTER_MAX_VILLAIN_NUTS = float(
+    _os.environ.get('PF_SUPER_MONSTER_MAX_VILLAIN_NUTS', '0.02')
+)
+_MONSTER_EQ = float(_os.environ.get('PF_MONSTER_VALUE_EQ', '0.92'))
+_MONSTER_MC = float(_os.environ.get('PF_MONSTER_VALUE_MC', '0.85'))
+_MONSTER_MAX_VILLAIN_NUTS = float(
+    _os.environ.get('PF_MONSTER_VALUE_MAX_VILLAIN_NUTS', '0.10')
+)
+_MONSTER_AIR_WEAK_MIN = float(_os.environ.get('PF_MONSTER_AIR_WEAK_MIN', '0.50'))
+_MONSTER_PAYING_MIN = float(_os.environ.get('PF_MONSTER_PAYING_MIN', '0.35'))
+_MONSTER_DRAW_PRESSURE_MIN = float(
+    _os.environ.get('PF_MONSTER_DRAW_PRESSURE_MIN', '0.15')
+)
 
 
 # ---------------------------------------------------------------------------
@@ -37,6 +77,97 @@ def _villain_caps(ctx: DecisionCtx) -> bool:
 def _bluff_catcher_density(ctx: DecisionCtx) -> float:
     return (ctx.villain_bucket_dist.get('medium', 0.0)
             + ctx.villain_bucket_dist.get('weak_draw', 0.0))
+
+
+def _bucket_mass(ctx: DecisionCtx, *names: str) -> float:
+    dist = ctx.villain_bucket_dist or {}
+    return sum(dist.get(name, 0.0) for name in names)
+
+
+def _villain_nuts(ctx: DecisionCtx) -> float:
+    return (ctx.villain_bucket_dist or {}).get('nuts', 0.0)
+
+
+def _draw_pressure_mass(ctx: DecisionCtx) -> float:
+    dist = ctx.villain_bucket_dist or {}
+    return dist.get('draw', 0.0) + 0.5 * dist.get('weak_draw', 0.0)
+
+
+def _super_monster(ctx: DecisionCtx) -> bool:
+    rank = ctx.hero_hand_rank
+    if rank in {'four_of_a_kind', 'straight_flush', 'royal_flush'}:
+        return True
+    # A nut full house can be practically locked, but only when both equity
+    # estimators and villain range agree that almost no better combo exists.
+    return (
+        rank == 'full_house'
+        and ctx.equity_range >= _SUPER_MONSTER_EQ
+        and ctx.equity_mc >= _SUPER_MONSTER_MC
+        and _villain_nuts(ctx) <= _SUPER_MONSTER_MAX_VILLAIN_NUTS
+    )
+
+
+def _monster_value_kind(ctx: DecisionCtx, *, allow_facing_bet: bool = False) -> str:
+    """Return 'super' / 'monster' for the special nut-value plan.
+
+    This is intentionally narrower than "hero has nuts": the plan is for
+    hands that should avoid blasting air off the pot, not for ordinary strong
+    value or fragile straight/flush spots.
+    """
+    if (ctx.facing_bet and not allow_facing_bet) or ctx.hero_bucket != 'nuts':
+        return ''
+    if ctx.street not in ('flop', 'turn', 'river'):
+        return ''
+    if ctx.spr <= 1.5 and ctx.street != 'river':
+        return ''
+    if _super_monster(ctx):
+        return 'super'
+
+    rank = ctx.hero_hand_rank
+    if ctx.equity_range < _MONSTER_EQ or ctx.equity_mc < _MONSTER_MC:
+        return ''
+    if _villain_nuts(ctx) > _MONSTER_MAX_VILLAIN_NUTS:
+        return ''
+    if rank == 'full_house':
+        return 'monster'
+    if rank in {'straight', 'flush'}:
+        safer_shape = (
+            ctx.equity_range >= 0.96
+            and _villain_nuts(ctx) <= 0.06
+            and not ctx.board_sig.paired
+            and ctx.board_sig.wetness < 0.45
+            and _draw_pressure_mass(ctx) < _MONSTER_DRAW_PRESSURE_MIN
+        )
+        return 'monster' if safer_shape else ''
+    return ''
+
+
+def monster_value_plan_kind(ctx: DecisionCtx, *, allow_facing_bet: bool = False) -> str:
+    """Public helper for tests and for other value purposes to defer."""
+    return _monster_value_kind(ctx, allow_facing_bet=allow_facing_bet)
+
+
+def _can_overbet_value(ctx: DecisionCtx) -> bool:
+    """Return True iff OverbetValue would be a legal candidate in this spot.
+
+    Keep this helper aligned with OverbetValue.trigger() so any "defer to
+    overbet" logic never drops ThickValueBet when overbet itself cannot fire.
+    """
+    if ctx.facing_bet:
+        return False
+    if ctx.street not in ('turn', 'river'):
+        return False
+    if ctx.nut_advantage < 0.25:
+        return False
+    if ctx.equity_range < 0.75:
+        return False
+    if ctx.num_opponents != 1 or ctx.spr < 2.4:
+        return False
+    if not _villain_caps(ctx):
+        return False
+    if _bluff_catcher_density(ctx) < 0.40:
+        return False
+    return True
 
 
 def commit_value_eq(spr: float) -> float:
@@ -56,9 +187,29 @@ def commit_value_eq(spr: float) -> float:
         SPR ≤ 2 → 0.55 | SPR 3 → 0.60 | SPR 4 → 0.67 | SPR ≥ 6 → 0.72
     """
     if spr <= 0:
-        return 0.55
+        return _COMMIT_VALUE_EQ_FLOOR
     raw = spr / (spr + 2.0)
-    return max(0.55, min(0.72, raw))
+    return max(_COMMIT_VALUE_EQ_FLOOR, min(0.72, raw))
+
+
+def _river_danger_add(ctx: DecisionCtx) -> float:
+    if ctx.street != 'river':
+        return 0.0
+    add = _VALUE_JAM_RIVER_DANGER_ADD
+    if ctx.board_sig.paired:
+        add += _VALUE_JAM_PAIRED_ADD
+    if ctx.board_sig.flush_possible or ctx.board_sig.straight_possible:
+        add += _VALUE_JAM_COMPLETING_ADD
+    return add
+
+
+def _barrel_resistance_eq_add(ctx: DecisionCtx) -> float:
+    add = 0.0
+    if getattr(ctx, 'prev_bet_called_count', 0) > 0:
+        add += _BARREL_RESIST_CALL_EQ_ADD * min(3, ctx.prev_bet_called_count)
+    if getattr(ctx, 'prev_bet_raised', False):
+        add += _BARREL_RESIST_RAISE_EQ_ADD
+    return add
 
 
 # ---------------------------------------------------------------------------
@@ -172,11 +323,27 @@ class ProtectionBet(Purpose):
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
         if ctx.facing_bet:
             return TriggerResult(False)
-        if ctx.hero_bucket != 'strong':
+        if ctx.hero_bucket not in ('medium', 'strong'):
             return TriggerResult(False)
-        if not (ctx.board_sig.flush_draw or ctx.board_sig.straight_draw_heavy):
+        pressure = ctx.board_sig.wetness
+        if ctx.board_sig.flush_draw or ctx.board_sig.flush_possible:
+            pressure = max(pressure, 0.50)
+        if ctx.board_sig.straight_draw_heavy:
+            pressure = max(pressure, 0.50)
+        if pressure < _ACTIVE_PROTECTION_WETNESS_MIN:
+            return TriggerResult(False)
+        if (ctx.villain_bucket_dist or {}).get('nuts', 0.0) > _ACTIVE_PROTECTION_MAX_NUTS:
             return TriggerResult(False)
         if ctx.spr < 3 or ctx.spr > 8:
+            return TriggerResult(False)
+        protection_need = _PROTECTION_MIN_EQ
+        if ctx.hero_bucket == 'medium':
+            protection_need = max(protection_need, _ACTIVE_PROTECTION_MEDIUM_MIN_EQ)
+        if ctx.n_sticky >= 1:
+            protection_need += _PROTECTION_STICKY_EQ_ADD
+        if ctx.num_opponents >= 2:
+            protection_need += _PROTECTION_MULTIWAY_EQ_ADD
+        if ctx.equity_range < protection_need:
             return TriggerResult(False)
         return TriggerResult(True, 0.9)
 
@@ -252,7 +419,81 @@ class ThinValueBet(Purpose):
 
 
 # ---------------------------------------------------------------------------
-# 5. thick_value_bet
+# 5. monster_value_plan
+# ---------------------------------------------------------------------------
+
+
+class MonsterValuePlan(Purpose):
+    """Special plan for lock/near-lock nut hands.
+
+    It is not the old "villain will bluff, so check" slow-play. This plan is
+    hand-strength driven:
+      - super monster: check/small bet on flop, then escalate after resistance
+      - monster: small/medium value, less pure check because redraws exist
+    """
+
+    id = 'monster_value_plan'
+
+    def trigger(self, ctx: DecisionCtx) -> TriggerResult:
+        kind = _monster_value_kind(ctx)
+        if not kind:
+            return TriggerResult(False)
+        if ctx.street == 'river' and ctx.spr <= 1.5:
+            return TriggerResult(True, 5.5)
+        base = 5.0 if kind == 'super' else 3.6
+        if ctx.prev_bet_called_count > 0:
+            base += 0.8
+        if ctx.prev_bet_raised:
+            base += 1.2
+        if _bucket_mass(ctx, 'medium', 'strong') >= _MONSTER_PAYING_MIN:
+            base += 0.5
+        return TriggerResult(True, base)
+
+    def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
+        kind = _monster_value_kind(ctx)
+        resisted = ctx.prev_bet_called_count > 0 or ctx.prev_bet_raised
+        paying = _bucket_mass(ctx, 'medium', 'strong')
+        air_weak = _bucket_mass(ctx, 'air', 'weak_draw')
+        draw_pressure = _draw_pressure_mass(ctx)
+
+        if kind == 'super':
+            if ctx.street == 'flop' and not resisted:
+                return [(0.00, 0.50), (0.33, 0.25), (0.50, 0.25)]
+            if ctx.street == 'turn':
+                if resisted:
+                    if ctx.prev_bet_raised:
+                        return [(0.75, 0.45), (1.00, 0.55)]
+                    return [(0.55, 0.40), (0.75, 0.60)]
+                if ctx.flop_checked_through or ctx.my_prev_actions.get('flop') == 'check':
+                    return [(0.33, 0.45), (0.55, 0.55)]
+                return [(0.50, 0.40), (0.66, 0.60)]
+            if ctx.street == 'river':
+                if resisted:
+                    return [(0.75, 0.35), (1.00, 0.35), (2.00, 0.30)]
+                return [(0.55, 0.45), (0.75, 0.40), (1.00, 0.15)]
+
+        # Monster, not lock: no pure check unless air is abundant and redraw
+        # pressure is low. Once anyone calls/raises, shift to harvest mode.
+        if resisted:
+            if ctx.prev_bet_raised:
+                return [(0.75, 0.45), (1.00, 0.55)]
+            return [(0.55, 0.40), (0.75, 0.60)]
+        if ctx.street == 'river':
+            return [(0.66, 0.40), (0.85, 0.40), (1.00, 0.20)]
+        if paying >= _MONSTER_PAYING_MIN:
+            return [(0.55, 0.45), (0.75, 0.55)]
+        if draw_pressure >= _MONSTER_DRAW_PRESSURE_MIN or ctx.board_sig.wetness >= 0.55:
+            return [(0.50, 0.45), (0.66, 0.40), (0.75, 0.15)]
+        if air_weak >= _MONSTER_AIR_WEAK_MIN:
+            return [(0.00, 0.10), (0.33, 0.50), (0.50, 0.40)]
+        return [(0.40, 0.45), (0.55, 0.55)]
+
+    def alpha_target(self, ctx: DecisionCtx, frac: float) -> Optional[float]:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# 6. thick_value_bet
 # ---------------------------------------------------------------------------
 
 
@@ -261,6 +502,8 @@ class ThickValueBet(Purpose):
 
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
         if ctx.facing_bet:
+            return TriggerResult(False)
+        if _monster_value_kind(ctx):
             return TriggerResult(False)
         # Equity 门槛按 SPR commitment 动态化（不再固定 0.70）：低 SPR
         # 下门槛降到 0.55 以让"两对/顶对顶踢 + 低 SPR"这个常见 value
@@ -285,9 +528,10 @@ class ThickValueBet(Purpose):
                 eq_need = min(eq_need, 0.55)
         if ctx.equity_range < eq_need:
             return TriggerResult(False)
-        # Don't compete with overbet_value when nut advantage is high.
-        if ctx.nut_advantage >= 0.25 and ctx.equity_range >= 0.75 \
-                and ctx.street in ('turn', 'river') and ctx.num_opponents == 1:
+        # Don't compete with overbet_value only when overbet is truly legal.
+        # This keeps ThickValueBet alive in boundary spots (e.g. 2.0 < SPR < 2.4)
+        # where overbet cannot trigger yet.
+        if _can_overbet_value(ctx):
             return TriggerResult(False)
         # Don't compete with range_cbet on flop dry boards.
         if ctx.street == 'flop' and ctx.board_sig.is_dry \
@@ -365,17 +609,7 @@ class OverbetValue(Purpose):
     street_gate = ('turn', 'river')
 
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
-        if ctx.facing_bet:
-            return TriggerResult(False)
-        if ctx.nut_advantage < 0.25:
-            return TriggerResult(False)
-        if ctx.equity_range < 0.75:
-            return TriggerResult(False)
-        if ctx.num_opponents != 1 or ctx.spr < 3:
-            return TriggerResult(False)
-        if not _villain_caps(ctx):
-            return TriggerResult(False)
-        if _bluff_catcher_density(ctx) < 0.40:
+        if not _can_overbet_value(ctx):
             return TriggerResult(False)
         w = 1.2 * (0.5 + ctx.nut_advantage)
         return TriggerResult(True, w)
@@ -445,9 +679,9 @@ class PureBluffRiver(Purpose):
             return TriggerResult(False)
         if not (ctx.blockers.nut_flush_blocker or ctx.blockers.straight_blocker):
             return TriggerResult(False)
-        if _bluff_catcher_density(ctx) < 0.35:
+        if _bluff_catcher_density(ctx) < _PURE_BLUFF_CATCHER_MIN:
             return TriggerResult(False)
-        if ctx.villain_stats.river_fold_rate <= 0.40:
+        if ctx.villain_stats.river_fold_rate <= _PURE_BLUFF_RIVER_FOLD_MIN:
             return TriggerResult(False)
         # Sticky 对手硬门：pure bluff 的 EV 主项完全依赖 FE；river_fold_rate
         # 已有 > 0.40 门，但 river_fold 与 fold_to_cbet 不同 street——对
@@ -586,10 +820,16 @@ class DoubleBarrel(Purpose):
             return TriggerResult(False)
         if ctx.my_prev_actions.get('flop') != 'bet':
             return TriggerResult(False)
-        # good barrel card = high (A/K/Q) turn or equity >= 0.45
-        if ctx.equity_range < 0.45 and ctx.board_sig.high_card_rank < 12:
+        need = 0.45 + _barrel_resistance_eq_add(ctx)
+        if ctx.hero_bucket in ('air', 'weak_draw', 'draw') and ctx.equity_range < need:
             return TriggerResult(False)
-        return TriggerResult(True, 0.7 + 0.5 * ctx.equity_range)
+        # good barrel card = high (A/K/Q) turn or equity >= need
+        if ctx.equity_range < need and ctx.board_sig.high_card_rank < 12:
+            return TriggerResult(False)
+        weight = 0.7 + 0.5 * ctx.equity_range
+        if ctx.hero_bucket in ('air', 'weak_draw', 'draw') and getattr(ctx, 'resistance_level', 0.0) > 0:
+            weight *= _BARREL_RESIST_WEIGHT_MULT
+        return TriggerResult(True, weight)
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
         return [(0.55, 0.3), (0.66, 0.5), (0.75, 0.2)]
@@ -615,9 +855,16 @@ class TripleBarrel(Purpose):
             return TriggerResult(False)
         if ctx.hero_bucket == 'air' and not ctx.blockers.count():
             return TriggerResult(False)
+        if ctx.hero_bucket in ('air', 'weak_draw', 'draw'):
+            need = _barrel_resistance_eq_add(ctx)
+            if need > 0 and ctx.equity_range < need:
+                return TriggerResult(False)
         if ctx.villain_stats.river_fold_rate < 0.35:
             return TriggerResult(False)
-        return TriggerResult(True, 0.7)
+        weight = 0.7
+        if ctx.hero_bucket in ('air', 'weak_draw', 'draw') and getattr(ctx, 'resistance_level', 0.0) > 0:
+            weight *= _BARREL_RESIST_WEIGHT_MULT
+        return TriggerResult(True, weight)
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
         return [(0.75, 0.3), (1.00, 0.4), (1.50, 0.3)]
@@ -674,7 +921,7 @@ class StopAndGo(Purpose):
 
 
 # ---------------------------------------------------------------------------
-# 17. value_jam (SPR <= 2 with strong hand — bypass normal sizing)
+# 17. value_jam (SPR <= 2.4 with strong hand — bypass normal sizing)
 # ---------------------------------------------------------------------------
 
 
@@ -684,14 +931,16 @@ class ValueJam(Purpose):
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
         if ctx.facing_bet:
             return TriggerResult(False)
-        if ctx.spr > 2.0:
+        if ctx.spr > 2.4:
             return TriggerResult(False)
-        # Equity 门按 SPR commitment threshold：SPR ≤ 2 时 commit_value_eq
+        # Equity 门按 SPR commitment threshold：SPR ≤ 2.4 时 commit_value_eq
         # 返回 0.55，即"被 call 赢 > 50%" Janda 最小 value 标准。原 0.70
-        # 硬门在 SPR 1-2 的 commit 区把大量合法 value_jam（两对/顶对顶踢）
+        # 硬门在 SPR 1-2.4 的 commit 区把大量合法 value_jam（两对/顶对顶踢）
         # 挡在门外。
-        eq_need = commit_value_eq(ctx.spr)
+        eq_need = commit_value_eq(ctx.spr) + _river_danger_add(ctx)
         if ctx.equity_range < eq_need:
+            return TriggerResult(False)
+        if stackoff_guard_reason(ctx, self.id, will_jam=True):
             return TriggerResult(False)
         # 权重按 eq margin over commit 动态增长，保证在 SPR ≤ 2 与
         # ThickValueBet（cap 2.0）的 overlap 区 ValueJam 主导：jam 是
@@ -742,9 +991,21 @@ class DefaultStab(Purpose):
         # 湿板 + air 桶：最危险组合（对手听牌可能性高，stab 失败率高）
         if ctx.board_sig.is_wet and ctx.hero_bucket == 'air':
             return TriggerResult(False)
+        if ctx.equity_range < _DS_AIR_MIN_EQ:
+            return TriggerResult(False)
+        if ctx.num_opponents >= 2 and ctx.equity_range < max(0.40, _DS_AIR_MIN_EQ):
+            return TriggerResult(False)
+        if no_fold_equity(ctx) and ctx.equity_range < _DS_LOWFE_MIN_EQ:
+            return TriggerResult(False)
+        if ctx.hero_bucket in ('air', 'weak_draw') and no_fold_equity(ctx) and _DS_LOWFE_MULT <= 0:
+            return TriggerResult(False)
         # 2026-04-28 P0.5：HU/多人 权重 env 可调。原 0.45 永远输给 thick_value(0.8+)
         # 和 range_cbet(0.8)，PFR check-frequency 实战 > 60%，远偏离业界 cbet ~55%。
         w = _DS_HU_W if ctx.num_opponents == 1 else _DS_MULTI_W
+        if ctx.hero_bucket in ('air', 'weak_draw') and no_fold_equity(ctx):
+            w *= _DS_LOWFE_MULT
+        if ctx.hero_bucket in ('air', 'weak_draw', 'draw') and getattr(ctx, 'resistance_level', 0.0) > 0:
+            w *= _BARREL_RESIST_WEIGHT_MULT
         return TriggerResult(True, w)
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
@@ -760,7 +1021,7 @@ class DefaultStab(Purpose):
 def all_active() -> list:
     return [
         RangeCbet(), PolarizedCbet(), ProtectionBet(),
-        ThinValueBet(), ThickValueBet(), BlockBet(),
+        ThinValueBet(), MonsterValuePlan(), ThickValueBet(), BlockBet(),
         OverbetValue(), SemiBluff(), PureBluffRiver(),
         DelayedCbet(), ProbeBet(), FloatBet(),
         TurnDonk(), DoubleBarrel(), TripleBarrel(),

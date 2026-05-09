@@ -14,12 +14,15 @@ Order (doc 03 §8):
 
 from __future__ import annotations
 
+import os as _os
 from dataclasses import dataclass
 
 from pokerfate.strategy.v3.context import DecisionCtx
 
 
 _STREET_HARD_CAP = {'flop': 0.80, 'turn': 1.30, 'river': 2.00}
+_JAM_ROUNDUP_STACK_FRAC = float(_os.environ.get('PF_JAM_ROUNDUP_STACK_FRAC', '0.60'))
+_JAM_ROUNDUP_DANGER_FRAC = float(_os.environ.get('PF_JAM_ROUNDUP_DANGER_FRAC', '0.80'))
 
 
 def _geo_cap(spr: float, street: str) -> float:
@@ -29,6 +32,13 @@ def _geo_cap(spr: float, street: str) -> float:
     ratio = 1.0 + 2.0 * spr
     base = (ratio ** (1.0 / streets_left) - 1.0) / 2.0
     return base * 1.1   # 1.1 buffer
+
+
+def _jam_roundup_threshold(ctx: DecisionCtx) -> float:
+    if ctx.street == 'river' and (ctx.board_sig.paired or ctx.board_sig.flush_possible
+                                  or ctx.board_sig.straight_possible):
+        return _JAM_ROUNDUP_DANGER_FRAC
+    return _JAM_ROUNDUP_STACK_FRAC
 
 
 @dataclass
@@ -48,7 +58,8 @@ def calibrate(frac: float, ctx: DecisionCtx, purpose_id: str = '') -> CalibrateR
     # cap matters at low SPR — otherwise the geo cap compresses the bet to
     # an awkward mid-bet below the jam threshold (and we lose commitment EV).
     raw_amount = frac * ctx.pot
-    if ctx.stack > 0 and raw_amount >= ctx.stack * 0.60:
+    jam_threshold = _jam_roundup_threshold(ctx)
+    if ctx.stack > 0 and raw_amount >= ctx.stack * jam_threshold:
         amount = ctx.stack
         eff = amount / ctx.pot if ctx.pot > 0 else 0.0
         return CalibrateResult(eff, amount, True)
@@ -86,7 +97,7 @@ def calibrate(frac: float, ctx: DecisionCtx, purpose_id: str = '') -> CalibrateR
 
     # 6. Jam round-up (doc 03 §8 step 6)
     jammed = False
-    if ctx.stack > 0 and amount >= ctx.stack * 0.60:
+    if ctx.stack > 0 and amount >= ctx.stack * jam_threshold:
         amount = ctx.stack
         jammed = True
 

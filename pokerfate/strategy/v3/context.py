@@ -116,6 +116,12 @@ class DecisionCtx:
 
     # === Hero strength ===
     hero_bucket: str = 'air'                    # nuts/strong/medium/draw/weak_draw/air
+    hero_made_subtype: str = ''                 # fine-grained made-hand shape
+    hero_hand_rank: str = ''                    # evaluator rank: full_house/quads/...
+    hero_made_rank: int = 0
+    hero_kicker_rank: int = 0
+    board_pair_rank: int = 0
+    pocket_pair_rank: int = 0
     equity_mc: float = 0.5                      # vs random hand
     equity_range: float = 0.5                   # vs villain bayesian range
     equity_uncertainty: float = 0.0             # equity_range 的悲观半宽 [0, 0.30]
@@ -162,6 +168,13 @@ class DecisionCtx:
     is_pfr: bool = False
     flop_checked_through: bool = False
     turn_checked_through: bool = False
+
+    # === Cross-street resistance summary ===
+    prev_bet_called_count: int = 0
+    prev_bet_raised: bool = False
+    prev_bet_was_multiway: bool = False
+    prev_bet_frac: float = 0.0
+    resistance_level: float = 0.0
 
     # === Derived convenience flags ===
     @property

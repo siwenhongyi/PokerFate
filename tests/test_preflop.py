@@ -114,6 +114,34 @@ class TestOpenRange:
         size = self.strat.open_raise_size('UTG', 2.0)
         assert size == 6.0  # 3 BB
 
+    def test_iso_raise_sizing_adds_limper_premium(self):
+        # CO normal open is 2.5bb; vs 1 limper iso becomes 3.5bb.
+        size = self.strat.iso_raise_size('CO', 2.0, num_limpers=1)
+        assert size == pytest.approx(7.0)
+
+        # UTG normal open is 3bb; vs 2 limpers iso becomes 5bb.
+        size = self.strat.iso_raise_size('UTG', 2.0, num_limpers=2)
+        assert size == pytest.approx(10.0)
+
+        # Blinds add one extra OOP blind on top of the limper premium.
+        size = self.strat.iso_raise_size('SB', 2.0, num_limpers=1)
+        assert size == pytest.approx(10.0)
+
+    def test_non_bb_limper_spot_uses_iso_sizing(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Ac', 'Ad'),
+            position='CO',
+            facing_action='none',
+            open_raise=0,
+            is_ip=True,
+            big_blind=2.0,
+            stack=200.0,
+            pot=5.0,
+            num_limpers=1,
+        )
+        assert action == 'raise'
+        assert amount == pytest.approx(7.0)
+
 
 class TestBBBigBlindOption:
     """BB-specific decision logic: free check or iso-raise when no one raised."""
@@ -175,8 +203,8 @@ class TestBBBigBlindOption:
         assert amount > 0
 
     def test_bb_iso_sizing_scales_with_limpers(self):
-        """Iso-raise size = (2 + limpers) * BB."""
-        # 1 limper → 3 BB
+        """BB iso-raise adds limper premium plus OOP premium."""
+        # 1 limper → 5 BB
         _, size1 = self.strat.decide(
             hole_cards=cards('Ac', 'Ad'),
             position='BB',
@@ -189,9 +217,9 @@ class TestBBBigBlindOption:
             is_big_blind=True,
             num_limpers=1,
         )
-        assert size1 == 2.0 * 3  # (2+1)*2
+        assert size1 == pytest.approx(2.0 * 5)
 
-        # 2 limpers → 4 BB
+        # 2 limpers → 6 BB
         _, size2 = self.strat.decide(
             hole_cards=cards('Kc', 'Kd'),
             position='BB',
@@ -204,7 +232,7 @@ class TestBBBigBlindOption:
             is_big_blind=True,
             num_limpers=2,
         )
-        assert size2 == 2.0 * 4  # (2+2)*2
+        assert size2 == pytest.approx(2.0 * 6)
 
     def test_bb_iso_range_includes_pairs_and_broadway(self):
         """BB iso-raise range should include key pocket pairs and broadway hands."""
@@ -408,6 +436,86 @@ class TestThreeBetCallRangeByPos:
     def test_btn_defend_is_widest(self):
         for hand in ('T9s', '98s', '87s', 'JTs', 'KQo'):
             assert hand in _3BET_CALL_BY_POS['BTN']
+
+
+class TestPreflopChartExpandOverlay:
+    """Chart-backed overlays only widen baseline folds in guarded spots."""
+
+    strat = PreflopStrategy()
+
+    def test_btn_kqo_3bets_co_small_open_before_equity_gate(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Kc', 'Qd'),
+            position='BTN',
+            facing_action='open',
+            open_raise=20.0,  # 2bb
+            is_ip=True,
+            big_blind=10.0,
+            stack=1310.0,
+            pot=40.0,
+            to_call=20.0,
+            stack_bb=131.0,
+            villain_position='CO',
+            equity=0.25,
+        )
+        assert action == 'raise'
+        assert amount == pytest.approx(90.0)
+        assert 'chart_expand:ip_3bet_small_open' in self.strat.last_expand_reason
+
+    def test_btn_kqo_still_folds_vs_utg_large_open_low_equity(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Kc', 'Qd'),
+            position='BTN',
+            facing_action='open',
+            open_raise=30.0,  # 3bb, no chart overlay spot
+            is_ip=True,
+            big_blind=10.0,
+            stack=1000.0,
+            pot=45.0,
+            to_call=30.0,
+            stack_bb=100.0,
+            villain_position='UTG',
+            equity=0.18,
+        )
+        assert (action, amount) == ('fold', 0.0)
+        assert self.strat.last_expand_reason == ''
+
+    def test_utg_jts_calls_btn_3bet_when_deep_and_chart_supports_call(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Jd', 'Td'),
+            position='UTG',
+            facing_action='3bet',
+            open_raise=180.0,  # villain 3bet to 18bb
+            is_ip=False,
+            big_blind=10.0,
+            stack=1200.0,
+            pot=260.0,
+            to_call=160.0,
+            stack_bb=120.0,
+            villain_position='BTN',
+            equity=0.34,
+        )
+        assert action == 'call'
+        assert amount == pytest.approx(160.0)
+        assert 'chart_expand:deep_3bet_defend' in self.strat.last_expand_reason
+
+    def test_utg_jts_overlay_disabled_when_short(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Jd', 'Td'),
+            position='UTG',
+            facing_action='3bet',
+            open_raise=180.0,
+            is_ip=False,
+            big_blind=10.0,
+            stack=450.0,
+            pot=260.0,
+            to_call=160.0,
+            stack_bb=45.0,
+            villain_position='BTN',
+            equity=0.34,
+        )
+        assert (action, amount) == ('fold', 0.0)
+        assert self.strat.last_expand_reason == ''
 
 
 class TestBBDefenseVsOpen:

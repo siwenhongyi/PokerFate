@@ -210,6 +210,9 @@ class PokerBot:
             stack_bb=stack_bb,
             big_blind=bb,
         )
+        preflop_expand_reason = getattr(self.preflop, 'last_expand_reason', '')
+        if preflop_expand_reason:
+            self._last_reasoning += f" | {preflop_expand_reason}"
         self._last_gto_refs = self._lookup_preflop_gto(
             gs, player, position, facing_action, num_limpers,
         )
@@ -230,6 +233,7 @@ class PokerBot:
             'sticky_density': sticky_density,
             'cold_callers': cold_callers,
             'squeeze_callers': squeeze_callers,
+            'preflop_expand_reason': preflop_expand_reason,
         }
         return self._to_action(action_str, amount, to_call, stack)
 
@@ -542,6 +546,9 @@ class PokerBot:
 
         # ── P5: pass last flop bet fraction for multi-street consistency ─
         last_bet_frac_val = self.postflop._last_bet_frac if self.postflop._last_bet_street == 'flop' else 0.0
+        prev_resistance = self._prev_bet_resistance(
+            prev_street, num_opponents, last_bet_frac_val,
+        )
 
         # ── P26: villain bucket_dist['nuts'] for call tightening.
         # Only nuts% is used now — strong% was for the removed zero_bluff gate.
@@ -645,6 +652,11 @@ class PokerBot:
                 self._opp_street_actions.get(primary_opp_id, {})
                 if primary_opp_id >= 0 else {}
             ),
+            prev_bet_called_count=prev_resistance['called_count'],
+            prev_bet_raised=prev_resistance['raised'],
+            prev_bet_was_multiway=prev_resistance['was_multiway'],
+            prev_bet_frac=prev_resistance['frac'],
+            resistance_level=prev_resistance['level'],
             equity_mc=raw_mc,
             equity_range=equity,
             decision_seed=engine_seed,
@@ -770,6 +782,10 @@ class PokerBot:
             range_seed=range_seed,
             engine_seed=engine_seed,
             villain_bucket_dist=v_bucket_dist,
+            prev_bet_called_count=prev_resistance['called_count'],
+            prev_bet_raised=prev_resistance['raised'],
+            prev_bet_was_multiway=prev_resistance['was_multiway'],
+            resistance_level=prev_resistance['level'],
         )
         return self._to_action(action_str, amount, to_call, stack)
 
@@ -877,9 +893,14 @@ class PokerBot:
         range_seed: Optional[int],
         engine_seed: Optional[int],
         villain_bucket_dist: Dict[str, float],
+        prev_bet_called_count: int = 0,
+        prev_bet_raised: bool = False,
+        prev_bet_was_multiway: bool = False,
+        resistance_level: float = 0.0,
     ) -> dict:
         out = self.postflop._last_output
         candidates = list(getattr(out, 'candidates', []) or [])
+        detail = self.postflop._last_cbet_detail or {}
         entropy = None
         range_summary = {}
         if primary_opp_id >= 0:
@@ -909,11 +930,20 @@ class PokerBot:
             'stack': stack,
             'spr': round(spr, 4),
             'hero_bucket': hero_bucket,
+            'hero_made_subtype': detail.get('hero_made_subtype', ''),
+            'hero_hand_rank': detail.get('hero_hand_rank', ''),
+            'hero_kicker_rank': int(detail.get('hero_kicker_rank') or 0),
+            'board_pair_rank': int(detail.get('board_pair_rank') or 0),
+            'pocket_pair_rank': int(detail.get('pocket_pair_rank') or 0),
             'nut_advantage': round(nut_advantage, 4),
             'primary_opp_id': primary_opp_id,
             'villain_bucket_dist': {
                 k: round(float(v), 4) for k, v in (villain_bucket_dist or {}).items()
             },
+            'prev_bet_called_count': int(prev_bet_called_count),
+            'prev_bet_raised': bool(prev_bet_raised),
+            'prev_bet_was_multiway': bool(prev_bet_was_multiway),
+            'resistance_level': round(float(resistance_level), 4),
             'range_entropy': entropy,
             'range_summary': range_summary,
             'top_villain_combos': self._top_villain_combos(
@@ -926,9 +956,49 @@ class PokerBot:
             'final_purpose': getattr(out, 'purpose', ''),
             'final_action': action,
             'final_amount': amount,
+            'decision_reason': getattr(out, 'reason', ''),
+            'strategy_gates': list(detail.get('strategy_gates') or []),
             'arbitration_mode': getattr(out, 'arbitration_mode', 'mixed'),
             'top_gap': round(float(getattr(out, 'top_gap', 0.0) or 0.0), 4),
             'leverage_flags': list(getattr(out, 'leverage_flags', []) or []),
+        }
+
+    def _prev_bet_resistance(
+        self,
+        prev_street: str,
+        num_opponents: int,
+        last_bet_frac: float,
+    ) -> dict:
+        """Summarize how much resistance hero's previous-street bet met."""
+        if not prev_street or self._my_street_actions.get(prev_street) != 'raise':
+            return {
+                'called_count': 0,
+                'raised': False,
+                'was_multiway': False,
+                'frac': 0.0,
+                'level': 0.0,
+            }
+
+        prev_actions = [
+            streets.get(prev_street)
+            for streets in self._opp_street_actions.values()
+            if streets.get(prev_street)
+        ]
+        called_count = sum(1 for action in prev_actions if action == 'call')
+        raised = any(action == 'raise' for action in prev_actions)
+        was_multiway = num_opponents >= 2 or called_count >= 2
+        level = min(
+            1.0,
+            called_count * 0.25
+            + (0.55 if raised else 0.0)
+            + (0.20 if was_multiway else 0.0),
+        )
+        return {
+            'called_count': called_count,
+            'raised': raised,
+            'was_multiway': was_multiway,
+            'frac': float(last_bet_frac or 0.0),
+            'level': level,
         }
 
     @staticmethod
@@ -1023,8 +1093,8 @@ class PokerBot:
 
         if action_str == "raise":
             if facing_action == "none":
-                if position == "BB":
-                    return f"{tag} {cat} BB {num_limpers}人limp→iso {eq} | {meta}"
+                if num_limpers > 0:
+                    return f"{tag} {cat} {position} {num_limpers}人limp→iso {eq} | {meta}"
                 return f"{tag} {cat} {position} {facing}→开加 {eq} | {meta}"
             elif facing_action == "open":
                 kind = "3bet价值" if cat in _3BET_VALUE else "3bet诈唬"
@@ -1112,8 +1182,6 @@ class PokerBot:
                     action_label = "延迟续注(delayed-cbet)"
                 elif opponent_checked_back and not is_ip:
                     action_label = "探测下注(probe)"
-                elif opponent_checked_back and not is_ip:
-                    action_label = "donk下注"
                 elif equity >= 0.90:
                     action_label = "强牌下注"
                 elif equity >= 0.60:
@@ -1127,16 +1195,15 @@ class PokerBot:
         elif action_str == "check":
             action_label = "强牌过牌控池" if equity >= 0.85 else "过牌"
         else:
-            action_label = f"赔率{pot_odds:.0%}不足→弃牌"
+            if facing_bet and equity >= pot_odds:
+                action_label = f"范围压力→弃牌(赔率{pot_odds:.0%})"
+            else:
+                action_label = f"赔率{pot_odds:.0%}不足→弃牌"
 
         main_line = f"{head} {eq} {action_label}"
 
         # ── detail lines ──────────────────────────────────────────────────
         details = []
-
-        # Decision seed (可复现)
-        seed = self.postflop._last_decision_seed
-        details.append(f"seed={seed}")
 
         # v3 decision fields: purpose, frac, candidates, α-gate, exploit
         cd = self.postflop._last_cbet_detail or {}
@@ -1159,11 +1226,21 @@ class PokerBot:
         # Candidate distribution — top 3 by probability, skip trivial (<5%).
         candidates = cd.get('candidates') or []
         if candidates:
-            top = sorted(candidates, key=lambda x: -x[1])[:3]
-            top = [(p, prob) for p, prob in top if prob >= 0.05]
+            ranked = [(p, prob) for p, prob in sorted(candidates, key=lambda x: -x[1]) if prob >= 0.05]
+            top = ranked[:3]
+            shown = {p for p, _ in top}
+            selected = purpose.split("→", 1)[0]
+            if selected not in shown:
+                selected_row = next(((p, prob) for p, prob in ranked if p == selected), None)
+                if selected_row is not None:
+                    top = (top[:2] + [selected_row]) if len(top) >= 3 else (top + [selected_row])
             if top:
                 cand_str = " ".join(f"{p}[{prob * 100:.0f}%]" for p, prob in top)
                 details.append(f"候选: {cand_str}")
+
+        gates = cd.get('strategy_gates') or []
+        if gates:
+            details.append("门: " + " | ".join(str(g) for g in gates[:3]))
 
         # α-gate result — only show when gate was actually evaluated.
         alpha = cd.get('alpha')
@@ -1191,8 +1268,10 @@ class PokerBot:
             ctx_flags.append("opp-checked-back")
         if fold_to_cbet_val is not None:
             ctx_flags.append(f"fold_to_cbet={fold_to_cbet_val:.0%}")
-        ctx_flags.append(f"AF={opp_af:.1f}")
-        details.append(" ".join(ctx_flags))
+        if abs(opp_af - 1.5) >= 0.3:
+            ctx_flags.append(f"AF={opp_af:.1f}")
+        if ctx_flags:
+            details.append(" ".join(ctx_flags))
 
         if facing_bet and abs(exploit_need_adjust) > 1e-6:
             details.append(f"need_adj={exploit_need_adjust:+.3f}")

@@ -150,7 +150,7 @@ def test_obvious_plus_ev_call_cannot_collapse_to_fold() -> None:
         )
 
 
-def test_fold_override_rescues_tracker_compressed_equity() -> None:
+def test_fold_override_does_not_rescue_obvious_fold_only_air() -> None:
     board = cards('7s', '5d', '2c')
     ctx = DecisionCtx(
         street='flop',
@@ -168,8 +168,38 @@ def test_fold_override_rescues_tracker_compressed_equity() -> None:
         facing_bet=True,
         hero_bucket='air',
         equity_mc=0.53,
-        equity_range=0.13,
+        equity_range=0.09,
         equity_uncertainty=0.05,
+        board_sig=v3_board.analyze(board),
+        villain_stats=sticky_passive_stats(),
+    )
+
+    out = V3Engine().decide(ctx)
+
+    assert out.action == 'fold'
+    assert out.purpose == 'fold'
+
+
+def test_fold_override_rescues_marginal_tracker_compressed_equity() -> None:
+    board = cards('7s', '5d', '2c')
+    ctx = DecisionCtx(
+        street='flop',
+        hole_cards=cards('Ac', 'Qd'),
+        board=board,
+        position='SB',
+        is_ip=False,
+        num_opponents=1,
+        pot=90.0,
+        to_call=30.0,
+        stack=500.0,
+        big_blind=2.0,
+        spr=5.5,
+        pot_odds=30.0 / 120.0,
+        facing_bet=True,
+        hero_bucket='medium',
+        equity_mc=0.53,
+        equity_range=0.23,
+        equity_uncertainty=0.03,
         board_sig=v3_board.analyze(board),
         villain_stats=sticky_passive_stats(),
     )
@@ -178,6 +208,115 @@ def test_fold_override_rescues_tracker_compressed_equity() -> None:
 
     assert out.action == 'call'
     assert out.purpose == 'fold_override_call'
+
+
+def test_fold_override_does_not_rescue_low_spr_commit_spot() -> None:
+    board = cards('6d', 'Ad', '8s')
+    ctx = DecisionCtx(
+        street='flop',
+        hole_cards=cards('Qs', 'Qc'),
+        board=board,
+        position='BB',
+        is_ip=False,
+        num_opponents=2,
+        pot=1052499.0,
+        to_call=373499.0,
+        stack=663525.0,
+        big_blind=10000.0,
+        spr=0.4,
+        pot_odds=373499.0 / (1052499.0 + 373499.0),
+        facing_bet=True,
+        hero_bucket='medium',
+        equity_mc=0.55,
+        equity_range=0.38,
+        equity_uncertainty=0.05,
+        board_sig=v3_board.analyze(board),
+        villain_bucket_dist={
+            'medium': 0.37, 'air': 0.30, 'draw': 0.16,
+            'strong': 0.12, 'nuts': 0.05,
+        },
+        villain_stats=sticky_passive_stats(),
+        n_sticky=1,
+    )
+
+    out = V3Engine().decide(ctx)
+
+    assert out.action == 'fold'
+    assert out.purpose == 'fold'
+    assert 'low_spr' in out.reason or 'stack_commit' in out.reason
+
+
+def test_fold_override_rescues_cheap_low_spr_river_call_with_range_edge() -> None:
+    board = cards('2c', 'Qh', '9c', '5c', '4s')
+    ctx = DecisionCtx(
+        street='river',
+        hole_cards=cards('Ah', 'Qs'),
+        board=board,
+        position='UTG+1',
+        is_ip=True,
+        num_opponents=1,
+        pot=855_000.0,
+        to_call=150_000.0,
+        stack=1_237_342.0,
+        big_blind=10_000.0,
+        spr=0.2,
+        pot_odds=150_000.0 / (855_000.0 + 150_000.0),
+        facing_bet=True,
+        hero_bucket='medium',
+        equity_mc=0.83,
+        equity_range=0.19,
+        equity_uncertainty=0.08,
+        board_sig=v3_board.analyze(board),
+        villain_bucket_dist={
+            'nuts': 0.79, 'strong': 0.10, 'medium': 0.11,
+            'draw': 0.0, 'weak_draw': 0.0, 'air': 0.0,
+        },
+        villain_stats=sticky_passive_stats(af=1.0),
+        n_sticky=1,
+        seed=39,
+    )
+
+    out = V3Engine().decide(ctx)
+
+    assert out.action == 'call'
+    assert out.purpose == 'fold_override_call'
+    assert 'cheap_range_call' in out.reason
+
+
+def test_fold_override_does_not_rescue_fold_dominant_call_candidate() -> None:
+    board = cards('Qh', '8s', '3d')
+    ctx = DecisionCtx(
+        street='flop',
+        hole_cards=cards('Ks', '8c'),
+        board=board,
+        position='SB',
+        is_ip=False,
+        num_opponents=1,
+        pot=100.0,
+        to_call=33.0,
+        stack=500.0,
+        big_blind=2.0,
+        spr=4.0,
+        pot_odds=33.0 / 133.0,
+        facing_bet=True,
+        hero_bucket='medium',
+        equity_mc=0.55,
+        equity_range=0.30,
+        equity_uncertainty=0.06,
+        board_sig=v3_board.analyze(board),
+        villain_bucket_dist={
+            'medium': 0.34, 'air': 0.25, 'draw': 0.17,
+            'strong': 0.18, 'nuts': 0.06,
+        },
+        villain_stats=sticky_passive_stats(),
+        n_sticky=1,
+    )
+
+    out = V3Engine().decide(ctx)
+
+    assert out.action == 'fold'
+    assert out.purpose == 'fold'
+    assert 'fold_prob' in out.reason
 
 
 def test_hu_pfr_default_stab_survives_when_range_cbet_is_soft_penalized() -> None:

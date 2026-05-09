@@ -9,6 +9,7 @@ Reference: PioSolver equity-bucket concept.
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from typing import List
 
 from pokerfate.core.card import Card
@@ -22,6 +23,23 @@ MEDIUM = 'medium'       # top pair weak kicker, second pair, pocket pair below t
 DRAW = 'draw'           # flush draw, OESD (8+ outs)
 WEAK_DRAW = 'weak_draw' # gutshot, backdoor + overcards
 AIR = 'air'             # nothing
+
+
+@dataclass(frozen=True)
+class MadeHandInfo:
+    """Fine-grained made-hand shape for stack-off guards.
+
+    `categorize_cards()` intentionally stays coarse because many strategy
+    branches use six stable buckets. This structure adds the missing detail
+    for reverse-implied-odds spots without changing those buckets.
+    """
+
+    subtype: str = 'none'
+    hand_rank: str = 'none'
+    made_rank: int = 0
+    kicker_rank: int = 0
+    board_pair_rank: int = 0
+    pocket_pair_rank: int = 0
 
 
 def categorize(combo_idx: int, board: List[Card]) -> str:
@@ -99,6 +117,131 @@ def categorize_cards(hole: List[Card], board: List[Card]) -> str:
         return WEAK_DRAW
 
     return AIR
+
+
+def made_hand_info(hole: List[Card], board: List[Card]) -> MadeHandInfo:
+    """Return structural made-hand detail independent of equity estimates."""
+    if not hole or not board or len(hole) < 2 or len(board) < 3:
+        return MadeHandInfo(subtype=_preflop_bucket(hole) if len(hole) >= 2 else 'none')
+
+    all_cards = list(hole) + list(board)
+    score = HandEvaluator.evaluate(all_cards)
+    hand_rank = HandRank(score[0])
+    hand_rank_name = hand_rank.name.lower()
+    hole_ranks = [c.rank for c in hole]
+    board_ranks = [c.rank for c in board]
+    board_counts = Counter(board_ranks)
+    pocket_pair_rank = hole_ranks[0] if hole_ranks[0] == hole_ranks[1] else 0
+    board_pair_ranks = [r for r, cnt in board_counts.items() if cnt >= 2]
+    board_pair_rank = max(board_pair_ranks) if board_pair_ranks else 0
+
+    if hand_rank >= HandRank.FULL_HOUSE:
+        return MadeHandInfo(
+            subtype='full_house_plus',
+            hand_rank=hand_rank_name,
+            made_rank=score[1] if len(score) > 1 else 0,
+            board_pair_rank=board_pair_rank,
+            pocket_pair_rank=pocket_pair_rank,
+        )
+
+    if hand_rank in (HandRank.STRAIGHT, HandRank.FLUSH):
+        return MadeHandInfo(
+            subtype='straight_or_flush',
+            hand_rank=hand_rank_name,
+            made_rank=score[1] if len(score) > 1 else 0,
+            board_pair_rank=board_pair_rank,
+            pocket_pair_rank=pocket_pair_rank,
+        )
+
+    if hand_rank == HandRank.THREE_OF_A_KIND:
+        trip_rank = score[1]
+        hole_trip_count = sum(1 for r in hole_ranks if r == trip_rank)
+        board_trip_count = board_counts.get(trip_rank, 0)
+        if hole_trip_count == 2:
+            subtype = 'set'
+            kicker = max((r for r in board_ranks if r != trip_rank), default=0)
+        elif hole_trip_count == 1 and board_trip_count >= 2:
+            side_kickers = [r for r in hole_ranks if r != trip_rank]
+            kicker = max(side_kickers) if side_kickers else 0
+            subtype = 'trips_top_kicker' if kicker >= 12 else 'trips_weak_kicker'
+        elif board_trip_count >= 3:
+            kicker = max(hole_ranks)
+            subtype = 'board_trips_kicker'
+        else:
+            kicker = max((r for r in hole_ranks if r != trip_rank), default=0)
+            subtype = 'trips'
+        return MadeHandInfo(
+            subtype=subtype,
+            hand_rank=hand_rank_name,
+            made_rank=trip_rank,
+            kicker_rank=kicker,
+            board_pair_rank=board_pair_rank,
+            pocket_pair_rank=pocket_pair_rank,
+        )
+
+    if hand_rank == HandRank.TWO_PAIR:
+        high_pair = score[1]
+        low_pair = score[2]
+        kicker = score[3] if len(score) > 3 else 0
+        pair_ranks = {high_pair, low_pair}
+        if board_pair_rank:
+            if pocket_pair_rank and pocket_pair_rank in pair_ranks:
+                board_side_high = max((r for r in board_ranks if r != board_pair_rank), default=0)
+                if pocket_pair_rank < max(board_pair_rank, board_side_high):
+                    subtype = 'board_pair_pocket_underpair'
+                else:
+                    subtype = 'board_pair_pocket_pair'
+            elif set(hole_ranks) & pair_ranks:
+                subtype = 'board_pair_hero_pair'
+            else:
+                subtype = 'board_two_pair'
+        else:
+            subtype = 'clean_two_pair' if (set(hole_ranks) & pair_ranks) else 'board_two_pair'
+        return MadeHandInfo(
+            subtype=subtype,
+            hand_rank=hand_rank_name,
+            made_rank=high_pair,
+            kicker_rank=kicker,
+            board_pair_rank=board_pair_rank,
+            pocket_pair_rank=pocket_pair_rank,
+        )
+
+    if hand_rank == HandRank.ONE_PAIR:
+        pair_rank = score[1]
+        kicker = max((r for r in hole_ranks if r != pair_rank), default=0)
+        if pocket_pair_rank:
+            top_board = max(board_ranks)
+            subtype = 'clean_overpair' if pocket_pair_rank > top_board else 'pocket_pair'
+        elif pair_rank in hole_ranks:
+            top_board = max(board_ranks)
+            if pair_rank >= top_board:
+                subtype = 'top_pair_good_kicker' if kicker >= 12 else 'top_pair_weak_kicker'
+            else:
+                subtype = 'pair'
+        elif board_pair_rank:
+            subtype = 'board_pair_kicker'
+        else:
+            subtype = 'pair'
+        return MadeHandInfo(
+            subtype=subtype,
+            hand_rank=hand_rank_name,
+            made_rank=pair_rank,
+            kicker_rank=kicker,
+            board_pair_rank=board_pair_rank,
+            pocket_pair_rank=pocket_pair_rank,
+        )
+
+    return MadeHandInfo(
+        subtype='high_card',
+        hand_rank=hand_rank_name,
+        kicker_rank=max(hole_ranks) if hole_ranks else 0,
+        board_pair_rank=board_pair_rank,
+        pocket_pair_rank=pocket_pair_rank,
+    )
+
+
+def made_hand_subtype(hole: List[Card], board: List[Card]) -> str:
+    return made_hand_info(hole, board).subtype
 
 
 def _preflop_bucket(hole: List[Card]) -> str:

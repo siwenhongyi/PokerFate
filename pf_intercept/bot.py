@@ -106,10 +106,15 @@ def _card_str(code: int) -> str | None:
 
 _STAGE_TO_STREET = {1: "preflop", 2: "flop", 3: "turn", 4: "river"}
 _SNG_GAME_TYPES = {10050301, 10060301, 40050301}
+_FRIEND_GAME_TYPES = {20010103}
 
 
 def _is_sng_game_type(game_type) -> bool:
     return _chip_int(game_type, 0) in _SNG_GAME_TYPES
+
+
+def _is_friend_game_type(game_type) -> bool:
+    return _chip_int(game_type, 0) in _FRIEND_GAME_TYPES
 
 
 def _chip_int(value, default: int = 0) -> int:
@@ -202,6 +207,9 @@ class BotBridge:
         self._sng_blind_schedule: dict[int, tuple[float, float]] = {}
         self._sng_blind_level: int = 0
         self._is_sng_room: bool = False
+        self._is_friend_room: bool = False
+        self._skip_profit_lock: bool = False
+        self._skip_profit_lock_reason: str = ""
 
         # C2S 帧里的 room_id 须与客户端 Net.packNetData 一致（GameModel:getRoomId）。
         # 部分 S2C（如 WinnerRSP）wire 上 room_id 可能为 0，要用进房时或任意非 0 帧补全。
@@ -432,7 +440,19 @@ class BotBridge:
         if "game_type" in msg:
             self._session_game_type = _chip_int(msg.get("game_type"), 0)
         sng_info = msg.get("sngroom_info") or {}
+        friend_info = msg.get("friend_room_info") or {}
         self._is_sng_room = _is_sng_game_type(self._session_game_type)
+        self._is_friend_room = (
+            _is_friend_game_type(self._session_game_type)
+            or bool(friend_info)
+        )
+        if self._is_sng_room:
+            self._skip_profit_lock_reason = "sng"
+        elif self._is_friend_room:
+            self._skip_profit_lock_reason = "friend_room"
+        else:
+            self._skip_profit_lock_reason = ""
+        self._skip_profit_lock = bool(self._skip_profit_lock_reason)
         room_info_early = msg.get("room_info") or {}
         if "lobby_coin" in room_info_early:
             self._session_lobby_coin = _chip_int(room_info_early.get("lobby_coin"), 0)
@@ -1151,7 +1171,7 @@ class BotBridge:
             - 自动续入 -= 100 BB（NoticeRebyRSP → RebyREQ）
             - 盈利锁仓重进 -= 100 BB
         """
-        if self._is_sng_room:
+        if self._skip_profit_lock:
             return None
         if (
             self._my_seat is None

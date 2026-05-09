@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os as _os
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -25,6 +26,20 @@ from pokerfate.core.card import Card
 from pokerfate.core.hand_evaluator import HandEvaluator
 from pokerfate.strategy.range_v2 import hand_categorizer as hcat
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
+
+_PRED_EQ_SAMPLES = int(_os.environ.get('PF_CAL_PRED_EQ_SAMPLES', '500'))
+_ACTUAL_EQ_PREFLOP_SAMPLES = int(
+    _os.environ.get('PF_CAL_ACTUAL_EQ_PREFLOP_SAMPLES', '3000')
+)
+_ACTUAL_EQ_FLOP_SAMPLES = int(
+    _os.environ.get('PF_CAL_ACTUAL_EQ_FLOP_SAMPLES', '1800')
+)
+_ACTUAL_EQ_TURN_SAMPLES = int(
+    _os.environ.get('PF_CAL_ACTUAL_EQ_TURN_SAMPLES', '1200')
+)
+_ACTUAL_EQ_RIVER_UNSHOWN_SAMPLES = int(
+    _os.environ.get('PF_CAL_ACTUAL_EQ_RIVER_UNSHOWN_SAMPLES', '2000')
+)
 
 
 @dataclass
@@ -354,7 +369,8 @@ class ShowdownCalibrator:
             RangeEquityCalculator,
         )
         return float(RangeEquityCalculator.weighted_equity(
-            hero_cards, board, w_norm, num_opponents=1, n_samples=500,
+            hero_cards, board, w_norm, num_opponents=1,
+            n_samples=_PRED_EQ_SAMPLES,
         ))
 
     @staticmethod
@@ -366,7 +382,7 @@ class ShowdownCalibrator:
             RangeEquityCalculator,
         )
         return float(RangeEquityCalculator.weighted_equity_multi(
-            hero_cards, board, opp_ranges, n_samples=500,
+            hero_cards, board, opp_ranges, n_samples=_PRED_EQ_SAMPLES,
         ))
 
     @staticmethod
@@ -425,11 +441,11 @@ class ShowdownCalibrator:
 
         # 按街道控制采样量：前街多一点，后街少一点
         if need == 5:
-            n_samples = 3000
+            n_samples = _ACTUAL_EQ_PREFLOP_SAMPLES
         elif need == 2:
-            n_samples = 1800
+            n_samples = _ACTUAL_EQ_FLOP_SAMPLES
         else:  # need == 1
-            n_samples = 1200
+            n_samples = _ACTUAL_EQ_TURN_SAMPLES
 
         win = 0.0
         hero = list(hero_cards[:2])
@@ -518,13 +534,13 @@ class ShowdownCalibrator:
 
         # 采样量：按 runout 长度 + n_unshown 增幅（填充引入额外方差）
         if need_runout == 5:
-            base = 3000
+            base = _ACTUAL_EQ_PREFLOP_SAMPLES
         elif need_runout == 2:
-            base = 1800
+            base = _ACTUAL_EQ_FLOP_SAMPLES
         elif need_runout == 1:
-            base = 1200
+            base = _ACTUAL_EQ_TURN_SAMPLES
         else:   # 0 runout but n_unshown > 0
-            base = 2000
+            base = _ACTUAL_EQ_RIVER_UNSHOWN_SAMPLES
         n_samples = int(base * (1.0 + 0.25 * n_unshown))
 
         score = 0.0
