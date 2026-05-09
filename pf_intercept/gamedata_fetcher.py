@@ -13,15 +13,20 @@ Rate field scaling (all /10000 to a [0, 1] percentage):
     ✅ 使用：  play_times / pool_entry_rate / add_before_flipping_rate /
               show_hand_rate / active_rate
 
-⚠️ active_rate note (fixed 2026-04-22):
-  The earlier `/1000` interpretation treated active_rate as an AF *ratio*
-  (bets/passive). The server actually stores it as a percentage — matches
-  the in-game UI display which clamps at 100%. This is AFq (bets/all-actions),
-  not AF. We convert AFq → AF ratio here so downstream `aggression_factor`
-  (which expects a ratio) gets a compatible value:
-        AF = AFq / (1 - AFq)
-  Examples:  AFq 17% → AF 0.20   |  AFq 50% → AF 1.0
-             AFq 67% → AF 2.0    |  AFq 80% → AF 4.0
+⚠️ active_rate note (updated 2026-05-03):
+  active_rate is interpreted as AFq (aggressive-action frequency), but not in
+  the classic tracker denominator. Empirical replay over all local logs shows
+  this server AFq is closest to:
+      AFq ≈ A / (A + C + K + F)
+  where A=aggressive, C=call, K=check, F=fold.
+
+  To map this AFq to an AF-like ratio A/C used by downstream decision rules:
+      AF = AFq / ((1 - AFq) * R)
+      R = C / (C + K + F) ≈ 0.3109
+
+  The calibration constant R=0.3109 is inferred from aggregated local logs
+  (all players excluding hero, plus robustness checks on hero-fold subsets).
+  This keeps server prior magnitude aligned with in-session behavior.
 """
 
 from __future__ import annotations
@@ -47,6 +52,7 @@ log = logging.getLogger("pf_gamedata")
 
 _SALT = "Z3r0w0nd3rd3!3z4jz89z9DLbg&8Gjt("
 _TOKEN_FILE = Path(__file__).resolve().parent.parent / "data" / "auth_token.txt"
+_AFQ_TO_AF_CALL_SHARE = 0.3109
 
 
 # ── Signing ───────────────────────────────────────────────────────────────────
@@ -138,12 +144,12 @@ def seed_from_server(stats: OpponentStats, data: dict) -> bool:
     pfr  = max(0.0, min(vpip, (data.get("add_before_flipping_rate") or 0) / 10000))
     wtsd = max(0.0, min(1.0, (data.get("show_hand_rate") or 0) / 10000))
 
-    # active_rate 是百分比（AFq = bets/(bets+passive), 见文件顶 docstring）。
-    # 转换成 AF 比率（bets/passive），与下游 `aggression_factor` property 语义对齐：
-    #   AFq = 0.5 → AF = 1.0 (均衡)    AFq = 0.8 → AF = 4.0 (疯狂)
-    # 上限截到 95% 避免除 0 爆炸值。
+    # active_rate 是百分比 AFq（见文件顶注释）。
+    # 经验映射到 AF(A/C)：
+    #   AF = AFq / ((1 - AFq) * R), R=C/(C+K+F)≈0.3109
+    # 仍保留上限截断避免极端除零爆炸。
     afq = max(0.0, min(0.95, (data.get("active_rate") or 0) / 10000))
-    af  = max(0.01, afq / max(1e-3, 1.0 - afq))
+    af  = max(0.01, afq / max(1e-3, (1.0 - afq) * _AFQ_TO_AF_CALL_SHARE))
 
     # ── 直接替换：hands_seen 为原始次数，vpip/pfr 由 rate × play_times 精确还原 ─
     stats.hands_seen = play_times

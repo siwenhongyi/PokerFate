@@ -16,6 +16,7 @@ from pokerfate.strategy.v3 import (
 from pokerfate.strategy.v3 import alpha_gate, calibrator
 from pokerfate.strategy.v3 import board as v3_board
 from pokerfate.strategy.v3 import exploit as v3_exploit
+from pokerfate.strategy.range_v2.hand_categorizer import made_hand_info
 
 
 def card(s: str) -> Card:
@@ -885,7 +886,7 @@ class TestPurposeTriggers:
                 'medium': 0.35, 'weak_draw': 0.20,
                 'draw': 0.10, 'air': 0.20,
             },
-            villain_stats=VillainStats(river_fold_rate=0.50),
+            villain_stats=VillainStats(river_fold_rate=0.55),
         )
         assert p.trigger(ctx).hit
 
@@ -921,6 +922,157 @@ class TestPurposeTriggers:
             ),
         )
         assert not p.trigger(ctx_station).hit
+
+    def test_super_monster_flop_mixes_check_and_small_bet(self):
+        from pokerfate.strategy.v3.purposes_active import MonsterValuePlan
+        p = MonsterValuePlan()
+        ctx = self._base_ctx(
+            hero_bucket='nuts',
+            hero_hand_rank='four_of_a_kind',
+            equity_range=0.995,
+            equity_mc=0.99,
+            spr=8.0,
+            villain_bucket_dist={
+                'nuts': 0.0, 'strong': 0.05, 'medium': 0.10,
+                'draw': 0.05, 'weak_draw': 0.20, 'air': 0.60,
+            },
+        )
+        assert p.trigger(ctx).hit
+        assert p.sizer(ctx) == [(0.00, 0.50), (0.33, 0.25), (0.50, 0.25)]
+
+    def test_super_monster_turn_escalates_after_flop_call(self):
+        from pokerfate.strategy.v3.purposes_active import MonsterValuePlan
+        p = MonsterValuePlan()
+        ctx = self._base_ctx(
+            street='turn',
+            hero_bucket='nuts',
+            hero_hand_rank='four_of_a_kind',
+            equity_range=0.995,
+            equity_mc=0.99,
+            spr=5.0,
+            prev_bet_called_count=1,
+            villain_bucket_dist={'nuts': 0.0, 'strong': 0.20, 'medium': 0.40},
+        )
+        assert p.trigger(ctx).hit
+        assert p.sizer(ctx) == [(0.55, 0.40), (0.75, 0.60)]
+
+    def test_monster_full_house_air_heavy_uses_small_value_plan(self):
+        from pokerfate.strategy.v3.purposes_active import MonsterValuePlan, ThickValueBet
+        p = MonsterValuePlan()
+        thick = ThickValueBet()
+        ctx = self._base_ctx(
+            hero_bucket='nuts',
+            hero_hand_rank='full_house',
+            hero_made_subtype='full_house_plus',
+            equity_range=0.95,
+            equity_mc=0.90,
+            spr=7.0,
+            villain_bucket_dist={
+                'nuts': 0.04, 'strong': 0.05, 'medium': 0.10,
+                'draw': 0.03, 'weak_draw': 0.20, 'air': 0.58,
+            },
+        )
+        assert p.trigger(ctx).hit
+        assert p.sizer(ctx) == [(0.00, 0.10), (0.33, 0.50), (0.50, 0.40)]
+        assert not thick.trigger(ctx).hit
+
+    def test_monster_full_house_draw_pressure_does_not_pure_check(self):
+        from pokerfate.strategy.v3.purposes_active import MonsterValuePlan
+        p = MonsterValuePlan()
+        wet = cards('Jh', 'Th', '9h')
+        ctx = self._base_ctx(
+            hero_bucket='nuts',
+            hero_hand_rank='full_house',
+            hero_made_subtype='full_house_plus',
+            equity_range=0.94,
+            equity_mc=0.88,
+            spr=7.0,
+            board=wet,
+            board_sig=v3_board.analyze(wet),
+            villain_bucket_dist={
+                'nuts': 0.06, 'strong': 0.10, 'medium': 0.12,
+                'draw': 0.18, 'weak_draw': 0.12, 'air': 0.42,
+            },
+        )
+        assert p.trigger(ctx).hit
+        sizes = p.sizer(ctx)
+        assert all(frac > 0 for frac, _ in sizes)
+        assert sizes == [(0.50, 0.45), (0.66, 0.40), (0.75, 0.15)]
+
+    def test_tiny_donk_low_spr_overpair_protection_raise(self):
+        from pokerfate.strategy.v3.purposes_defensive import ProtectionRaise
+        board = cards('7d', '9d', '6h')
+        info = made_hand_info(cards('Ah', 'As'), board)
+        ctx = self._base_ctx(
+            street='flop',
+            hole_cards=cards('Ah', 'As'),
+            board=board,
+            board_sig=BoardSignals(
+                wetness=0.75,
+                flush_draw=True,
+                straight_draw_heavy=True,
+                high_card_rank=9,
+            ),
+            facing_bet=True,
+            hero_bucket='strong',
+            hero_made_subtype=info.subtype,
+            hero_hand_rank=info.hand_rank,
+            hero_made_rank=info.made_rank,
+            pot=115_000.0,
+            to_call=10_000.0,
+            stack=230_000.0,
+            spr=2.0,
+            pot_odds=10_000.0 / 125_000.0,
+            num_opponents=2,
+            equity_range=0.51,
+            equity_mc=0.59,
+            villain_bucket_dist={
+                'nuts': 0.14, 'strong': 0.11, 'medium': 0.26,
+                'draw': 0.18, 'weak_draw': 0.14, 'air': 0.17,
+            },
+        )
+        p = ProtectionRaise()
+        result = p.trigger(ctx)
+        assert info.subtype == 'clean_overpair'
+        assert result.hit
+        assert result.weight >= 2.5
+
+        out = V3Engine().decide(ctx)
+        assert out.action == 'raise'
+        assert out.purpose == 'protection_raise'
+
+    def test_tiny_donk_overpair_still_respects_high_villain_nuts(self):
+        from pokerfate.strategy.v3.purposes_defensive import ProtectionRaise
+        board = cards('7d', '9d', '6h')
+        info = made_hand_info(cards('Ah', 'As'), board)
+        ctx = self._base_ctx(
+            street='flop',
+            hole_cards=cards('Ah', 'As'),
+            board=board,
+            board_sig=BoardSignals(
+                wetness=0.75,
+                flush_draw=True,
+                straight_draw_heavy=True,
+                high_card_rank=9,
+            ),
+            facing_bet=True,
+            hero_bucket='strong',
+            hero_made_subtype=info.subtype,
+            hero_hand_rank=info.hand_rank,
+            pot=115_000.0,
+            to_call=10_000.0,
+            stack=230_000.0,
+            spr=2.0,
+            pot_odds=10_000.0 / 125_000.0,
+            num_opponents=2,
+            equity_range=0.51,
+            equity_mc=0.59,
+            villain_bucket_dist={
+                'nuts': 0.35, 'strong': 0.30, 'medium': 0.15,
+                'draw': 0.10, 'weak_draw': 0.05, 'air': 0.05,
+            },
+        )
+        assert not ProtectionRaise().trigger(ctx).hit
 
     def test_stop_and_go_continuous_across_ftc_boundary(self):
         """StopAndGo 触发权重应随 fold_to_cbet 平滑变化，不在旧硬区间
@@ -979,3 +1131,217 @@ class TestPurposeTriggers:
             ),
         )
         assert not p.trigger(ctx).hit
+
+
+class TestNonNutStackoffGuard:
+    def test_made_hand_info_marks_non_nut_trips_and_board_pair_two_pair(self):
+        info = made_hand_info(cards('Qc', 'Ts'), cards('Ah', '8s', '2h', 'Qd', 'Qs'))
+        assert info.subtype == 'trips_weak_kicker'
+        assert info.kicker_rank == 10
+
+        under = made_hand_info(cards('Tc', 'Ts'), cards('Qh', 'Qd', '6s'))
+        assert under.subtype == 'board_pair_pocket_underpair'
+        assert under.pocket_pair_rank == 10
+        assert under.board_pair_rank == 12
+
+    def _facing_river_ctx(self, **over) -> DecisionCtx:
+        board = cards('Ah', '8s', '2h', 'Qd', 'Qs')
+        info = made_hand_info(cards('Qc', 'Ts'), board)
+        defaults = dict(
+            street='river',
+            hole_cards=cards('Qc', 'Ts'),
+            board=board,
+            position='BTN',
+            is_ip=True,
+            num_opponents=1,
+            pot=1_037_500.0,
+            to_call=310_936.0,
+            stack=1_298_934.0,
+            big_blind=20_000.0,
+            spr=1.7,
+            pot_odds=310_936.0 / (1_037_500.0 + 310_936.0),
+            facing_bet=True,
+            hero_bucket='nuts',
+            hero_made_subtype=info.subtype,
+            hero_made_rank=info.made_rank,
+            hero_kicker_rank=info.kicker_rank,
+            board_pair_rank=info.board_pair_rank,
+            pocket_pair_rank=info.pocket_pair_rank,
+            equity_mc=0.72,
+            equity_range=0.83,
+            board_sig=v3_board.analyze(board),
+            villain_bucket_dist={
+                'nuts': 0.44, 'strong': 0.51,
+                'medium': 0.03, 'draw': 0.0,
+                'weak_draw': 0.0, 'air': 0.02,
+            },
+        )
+        defaults.update(over)
+        return DecisionCtx(**defaults)
+
+    def test_river_trips_weak_kicker_does_not_value_raise_jam(self):
+        engine = V3Engine()
+        ctx = self._facing_river_ctx(seed=1)
+        out = engine.decide(ctx)
+        assert out.action == 'call'
+        assert out.purpose != 'value_raise' or 'stackoff_guard' in out.reason
+
+    def test_river_trips_low_side_card_stays_call_even_with_high_equity(self):
+        board = cards('6h', 'Qs', 'Ks', 'Ah', 'Kd')
+        info = made_hand_info(cards('Kc', '4s'), board)
+        ctx = self._facing_river_ctx(
+            hole_cards=cards('Kc', '4s'),
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hero_made_subtype=info.subtype,
+            hero_made_rank=info.made_rank,
+            hero_kicker_rank=info.kicker_rank,
+            board_pair_rank=info.board_pair_rank,
+            pocket_pair_rank=info.pocket_pair_rank,
+            equity_mc=1.0,
+            equity_range=1.0,
+            villain_bucket_dist={
+                'nuts': 0.10, 'strong': 0.45,
+                'medium': 0.35, 'draw': 0.0,
+                'weak_draw': 0.0, 'air': 0.10,
+            },
+            seed=2,
+        )
+        assert info.subtype == 'trips_weak_kicker'
+        out = V3Engine().decide(ctx)
+        assert out.action == 'call'
+
+    def test_river_ip_full_house_monster_forces_value_raise_over_call(self):
+        board = cards('9c', '9h', 'Kh', '2d', '4s')
+        info = made_hand_info(cards('Kc', '9d'), board)
+        ctx = self._facing_river_ctx(
+            street='river',
+            hole_cards=cards('Kc', '9d'),
+            board=board,
+            board_sig=v3_board.analyze(board),
+            position='BTN',
+            is_ip=True,
+            pot=500_000.0,
+            to_call=120_000.0,
+            stack=1_000_000.0,
+            spr=2.0,
+            pot_odds=120_000.0 / 620_000.0,
+            hero_bucket='nuts',
+            hero_made_subtype=info.subtype,
+            hero_hand_rank=info.hand_rank,
+            hero_made_rank=info.made_rank,
+            hero_kicker_rank=info.kicker_rank,
+            board_pair_rank=info.board_pair_rank,
+            pocket_pair_rank=info.pocket_pair_rank,
+            equity_mc=0.96,
+            equity_range=0.94,
+            villain_bucket_dist={
+                'nuts': 0.04, 'strong': 0.35, 'medium': 0.30,
+                'draw': 0.0, 'weak_draw': 0.0, 'air': 0.31,
+            },
+            seed=7,
+        )
+        out = V3Engine().decide(ctx)
+        assert out.action == 'raise'
+        assert out.purpose == 'value_raise'
+        assert 'monster_river_raise' in out.leverage_flags
+
+    def test_river_ip_quads_super_monster_forces_raise_for_many_seeds(self):
+        board = cards('9c', '9h', '9s', '2d', '4s')
+        info = made_hand_info(cards('9d', 'Kc'), board)
+        for seed in range(1, 16):
+            ctx = self._facing_river_ctx(
+                street='river',
+                hole_cards=cards('9d', 'Kc'),
+                board=board,
+                board_sig=v3_board.analyze(board),
+                position='BTN',
+                is_ip=True,
+                pot=500_000.0,
+                to_call=80_000.0,
+                stack=1_000_000.0,
+                spr=2.0,
+                pot_odds=80_000.0 / 580_000.0,
+                hero_bucket='nuts',
+                hero_made_subtype=info.subtype,
+                hero_hand_rank=info.hand_rank,
+                hero_made_rank=info.made_rank,
+                hero_kicker_rank=info.kicker_rank,
+                board_pair_rank=info.board_pair_rank,
+                pocket_pair_rank=info.pocket_pair_rank,
+                equity_mc=1.0,
+                equity_range=1.0,
+                villain_bucket_dist={
+                    'nuts': 0.0, 'strong': 0.30, 'medium': 0.35,
+                    'draw': 0.0, 'weak_draw': 0.0, 'air': 0.35,
+                },
+                seed=seed,
+            )
+            out = V3Engine().decide(ctx)
+            assert out.action == 'raise'
+            assert out.purpose == 'value_raise'
+
+    def test_paired_board_pocket_pair_value_jam_is_blocked(self):
+        board = cards('Qh', 'Qd', '6s')
+        info = made_hand_info(cards('Tc', 'Ts'), board)
+        ctx = DecisionCtx(
+            street='flop',
+            hole_cards=cards('Tc', 'Ts'),
+            board=board,
+            position='BTN',
+            is_ip=True,
+            num_opponents=1,
+            pot=1_000_000.0,
+            stack=700_000.0,
+            big_blind=20_000.0,
+            spr=0.7,
+            facing_bet=False,
+            hero_bucket='strong',
+            hero_made_subtype=info.subtype,
+            hero_made_rank=info.made_rank,
+            hero_kicker_rank=info.kicker_rank,
+            board_pair_rank=info.board_pair_rank,
+            pocket_pair_rank=info.pocket_pair_rank,
+            equity_mc=0.57,
+            equity_range=0.57,
+            board_sig=v3_board.analyze(board),
+            seed=3,
+        )
+        out = V3Engine().decide(ctx)
+        assert out.action != 'bet' or out.amount < ctx.stack
+        assert out.purpose != 'value_jam'
+
+    def test_jam_sized_thick_value_on_board_pair_downgrades_to_check(self):
+        board = cards('3h', '5d', '8s', 'Ah', '3c')
+        info = made_hand_info(cards('Tc', 'Ts'), board)
+        ctx = DecisionCtx(
+            street='river',
+            hole_cards=cards('Tc', 'Ts'),
+            board=board,
+            position='BTN',
+            is_ip=True,
+            num_opponents=1,
+            pot=1_050_000.0,
+            stack=682_244.0,
+            big_blind=20_000.0,
+            spr=0.65,
+            facing_bet=False,
+            hero_bucket='strong',
+            hero_made_subtype=info.subtype,
+            hero_made_rank=info.made_rank,
+            hero_kicker_rank=info.kicker_rank,
+            board_pair_rank=info.board_pair_rank,
+            pocket_pair_rank=info.pocket_pair_rank,
+            equity_mc=0.91,
+            equity_range=0.91,
+            board_sig=v3_board.analyze(board),
+            villain_bucket_dist={
+                'nuts': 0.02, 'strong': 0.04,
+                'medium': 0.03, 'draw': 0.0,
+                'weak_draw': 0.0, 'air': 0.91,
+            },
+            seed=4,
+        )
+        out = V3Engine().decide(ctx)
+        assert out.action == 'check'
+        assert 'stackoff_guard' in out.reason

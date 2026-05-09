@@ -476,6 +476,8 @@ def test_sng_train_game_type_disables_profit_lock_without_sng_info(monkeypatch) 
     )
 
     assert b._is_sng_room is True
+    assert b._skip_profit_lock is True
+    assert b._skip_profit_lock_reason == "sng"
     assert out is None
     assert b._profit_lock_deferred is None
     assert "profit_lock_trigger" not in notified
@@ -526,8 +528,89 @@ def test_sng_disables_profit_lock_even_above_threshold(monkeypatch) -> None:
     )
 
     assert out is None
+    assert b._skip_profit_lock is True
+    assert b._skip_profit_lock_reason == "sng"
     assert b._profit_lock_deferred is None
     assert b._profit_lock_reenter is None
+    assert "profit_lock_trigger" not in notified
+
+
+def test_friend_room_game_type_disables_profit_lock(monkeypatch) -> None:
+    import pf_intercept.bot as bot_mod
+
+    notified = []
+    monkeypatch.setattr(bot_mod, "notify", lambda event, **fields: notified.append(event))
+
+    b = BotBridge(max_auto_rebuy=3)
+    b._my_uid = "99"
+    b._my_seat = 0
+    b._uid_to_seat["99"] = 0
+    b.handle(
+        "pb.EnterRoomRSP",
+        {
+            "code": 0,
+            "roomid": 200001,
+            "game_type": 20010103,
+            "room_info": {"bb": 2.0, "sb": 1.0},
+            "table_status": {"seat": []},
+        },
+    )
+
+    out = b.handle(
+        "pb.WinnerRSP",
+        {
+            "winner": [],
+            "profit": [{"uid": "99", "chips": "30000"}],
+        },
+    )
+
+    assert b._is_friend_room is True
+    assert b._skip_profit_lock is True
+    assert b._skip_profit_lock_reason == "friend_room"
+    assert out is None
+    assert b._profit_lock_deferred is None
+    assert "profit_lock_trigger" not in notified
+
+
+def test_friend_room_info_disables_profit_lock_without_game_type(monkeypatch) -> None:
+    import pf_intercept.bot as bot_mod
+
+    notified = []
+    monkeypatch.setattr(bot_mod, "notify", lambda event, **fields: notified.append(event))
+
+    b = BotBridge(max_auto_rebuy=3)
+    b._my_uid = "99"
+    b._my_seat = 0
+    b._uid_to_seat["99"] = 0
+    b.handle(
+        "pb.EnterRoomRSP",
+        {
+            "code": 0,
+            "roomid": 200002,
+            "game_type": 10010101,
+            "room_info": {"bb": 2.0, "sb": 1.0},
+            "friend_room_info": {
+                "is_private": True,
+                "owner_uid": "99",
+                "owner_name": "hero",
+            },
+            "table_status": {"seat": []},
+        },
+    )
+
+    out = b.handle(
+        "pb.WinnerRSP",
+        {
+            "winner": [],
+            "profit": [{"uid": "99", "chips": "30000"}],
+        },
+    )
+
+    assert b._is_friend_room is True
+    assert b._skip_profit_lock is True
+    assert b._skip_profit_lock_reason == "friend_room"
+    assert out is None
+    assert b._profit_lock_deferred is None
     assert "profit_lock_trigger" not in notified
 
 

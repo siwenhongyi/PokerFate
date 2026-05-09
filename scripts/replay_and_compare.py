@@ -254,13 +254,40 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
             api._street_contribs[hero_id] = my_current_bet_this_street
             api._bot._my_street_actions[hist_street] = hist_action
 
-    # hand_over call — pass empty result since the API will be re-used.
+    # hand_over call — pass parsed showdown data when available so Range V2
+    # learner/calibration replay has the same ground truth as the console log.
     result = hand.get("result") or {}
+    name_to_pid = {p.get("name"): p["id"] for p in players}
+    final_stacks_by_pid = {
+        name_to_pid[name]: int(stack)
+        for name, stack in (result.get("final_stacks") or {}).items()
+        if name in name_to_pid
+    }
+    if hero_id not in final_stacks_by_pid:
+        final_stacks_by_pid[hero_id] = int(hero_stack)
+
+    showdown_by_pid = {
+        name_to_pid[name]: cards
+        for name, cards in (result.get("showdown_hands") or {}).items()
+        if name in name_to_pid
+    }
+
+    def _clean_winner_name(name: str) -> str:
+        return name.split("[", 1)[0].strip()
+
+    winner_ids = [
+        name_to_pid[name]
+        for raw in (result.get("winners") or [])
+        for name in [_clean_winner_name(str(raw))]
+        if name in name_to_pid
+    ]
     try:
         api.hand_over(
-            winner_ids=[],   # name-based, but we don't translate; safe to skip
+            winner_ids=winner_ids,
             pot=int(result.get("pot", 0)),
-            final_stacks={hero_id: int(hero_stack)},
+            final_stacks=final_stacks_by_pid,
+            showdown_hands=showdown_by_pid or None,
+            my_profit_delta=result.get("my_delta"),
         )
     except Exception as exc:
         print(

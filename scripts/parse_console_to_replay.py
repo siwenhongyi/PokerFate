@@ -68,6 +68,10 @@ HAND_RESULT_RE = re.compile(
     r"✔\s*(.+?)\s*\[([^\]]*)\]\s*赢得\s*(\d+)"
     r"\s+本手\s*([+-]?\d+)"
 )
+LEARNER_RE = re.compile(
+    r"◈\s+学习\s+(.+?)\s+"
+    r"([2-9TJQKA][♠♥♦♣])\s+([2-9TJQKA][♠♥♦♣])"
+)
 # 结算行末尾的最终筹码（│ name X  name Y ...）
 FINAL_STACKS_RE = re.compile(r"│\s*(.+)$")
 PLAYER_STACK_RE = re.compile(r"(\S+?)\s+(\d+)(?:\s|$)")
@@ -295,6 +299,17 @@ def parse_log(log_path: Path, hero_name: str, bb_value: int = 1000) -> list[dict
                 folded_in_hand.add(opp_name)
             continue
 
+        # Range V2 showdown learner line after the result contains revealed
+        # villain hole cards. Keep the hand open until the next header so
+        # replay can feed showdown_hands back into calibration.
+        m = LEARNER_RE.search(text)
+        if m and cur.get("result"):
+            pname = m.group(1).strip()
+            cards = parse_cards_str(m.group(2) + " " + m.group(3))
+            if len(cards) == 2:
+                cur["result"].setdefault("showdown_hands", {})[pname] = cards
+            continue
+
         # hand result
         m = HAND_RESULT_RE.search(text)
         if m:
@@ -316,7 +331,6 @@ def parse_log(log_path: Path, hero_name: str, bb_value: int = 1000) -> list[dict
                 for sm in PLAYER_STACK_RE.finditer(tail_m.group(1)):
                     pname, stack = sm.group(1), int(sm.group(2))
                     cur["result"]["final_stacks"][pname] = stack
-            finish_hand()
             continue
 
     finish_hand()

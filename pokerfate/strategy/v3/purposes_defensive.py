@@ -9,12 +9,94 @@ from pokerfate.strategy.gto import GTOMath
 from pokerfate.strategy.v3.context import DecisionCtx
 from pokerfate.strategy.v3.exploit import AF_PASSIVE_BASELINE, no_fold_equity
 from pokerfate.strategy.v3.purpose import Purpose, TriggerResult
+from pokerfate.strategy.v3.stackoff_guard import stackoff_guard_reason
 
 # 2026-04-25 参数扫描钩子：overbet fold 加权的 pot_odds 阈值（3 级累加）
 # 默认保持 v2 配置 0.55 / 0.65 / 0.75。扫描后选中的最优值写到默认。
 _BR_T1 = float(_os.environ.get('PF_BR_T1', '0.55'))
 _BR_T2 = float(_os.environ.get('PF_BR_T2', '0.65'))
 _BR_T3 = float(_os.environ.get('PF_BR_T3', '0.75'))
+_PR_MIN_EQ = float(_os.environ.get('PF_PROTECTION_RAISE_MIN_EQ', '0.55'))
+_PR_MEDIUM_ADD = float(_os.environ.get('PF_PROTECTION_RAISE_MEDIUM_ADD', '0.03'))
+_PR_MULTIWAY_ADD = float(_os.environ.get('PF_PROTECTION_RAISE_MULTIWAY_ADD', '0.03'))
+_PR_STICKY_ADD = float(_os.environ.get('PF_PROTECTION_RAISE_STICKY_ADD', '0.03'))
+_PR_WETNESS_MIN = float(_os.environ.get('PF_PROTECTION_RAISE_WETNESS_MIN', '0.35'))
+_PR_DRAW_MASS_MIN = float(_os.environ.get('PF_PROTECTION_RAISE_DRAW_MASS_MIN', '0.08'))
+_PR_MAX_NUTS = float(_os.environ.get('PF_PROTECTION_RAISE_MAX_NUTS', '0.30'))
+_PR_MAX_POT_ODDS = float(_os.environ.get('PF_PROTECTION_RAISE_MAX_POT_ODDS', '0.20'))
+_PR_MIN_SPR = float(_os.environ.get('PF_PROTECTION_RAISE_MIN_SPR', '0.5'))
+_PR_MAX_SPR = float(_os.environ.get('PF_PROTECTION_RAISE_MAX_SPR', '8.0'))
+_PR_VALUE_DEFER_MARGIN = float(_os.environ.get('PF_PROTECTION_RAISE_VALUE_DEFER_MARGIN', '0.08'))
+_PR_WEIGHT = float(_os.environ.get('PF_PROTECTION_RAISE_WEIGHT', '1.0'))
+_PR_TINY_DONK_OVERPAIR_MAX_POT_ODDS = float(
+    _os.environ.get('PF_PROTECTION_RAISE_TINY_DONK_OVERPAIR_MAX_POT_ODDS', '0.12')
+)
+_PR_TINY_DONK_OVERPAIR_MAX_SPR = float(
+    _os.environ.get('PF_PROTECTION_RAISE_TINY_DONK_OVERPAIR_MAX_SPR', '2.5')
+)
+_PR_TINY_DONK_OVERPAIR_MIN_PRESSURE = float(
+    _os.environ.get('PF_PROTECTION_RAISE_TINY_DONK_OVERPAIR_MIN_PRESSURE', '0.55')
+)
+_PR_TINY_DONK_OVERPAIR_MAX_NUTS = float(
+    _os.environ.get('PF_PROTECTION_RAISE_TINY_DONK_OVERPAIR_MAX_NUTS', '0.20')
+)
+_PR_TINY_DONK_OVERPAIR_MIN_EQ = float(
+    _os.environ.get('PF_PROTECTION_RAISE_TINY_DONK_OVERPAIR_MIN_EQ', '0.50')
+)
+_PR_TINY_DONK_OVERPAIR_WEIGHT = float(
+    _os.environ.get('PF_PROTECTION_RAISE_TINY_DONK_OVERPAIR_WEIGHT', '2.5')
+)
+_ORJ_MIN_SPR = float(_os.environ.get('PF_OVERBET_RAISE_JAM_MIN_SPR', '2.0'))
+_ORJ_MAX_SPR = float(_os.environ.get('PF_OVERBET_RAISE_JAM_MAX_SPR', '4.0'))
+_ORJ_MIN_NUT_ADV = float(_os.environ.get('PF_OVERBET_RAISE_JAM_MIN_NUT_ADV', '0.30'))
+_ORJ_MIN_EQ = float(_os.environ.get('PF_OVERBET_RAISE_JAM_MIN_EQ', '0.90'))
+_ORJ_MAX_STRONG_VILLAIN_NUTS = float(
+    _os.environ.get('PF_OVERBET_RAISE_JAM_MAX_STRONG_VILLAIN_NUTS', '0.55')
+)
+_ORJ_WEIGHT_BASE = float(_os.environ.get('PF_OVERBET_RAISE_JAM_WEIGHT_BASE', '7.0'))
+_ORJ_WEIGHT_EQ_SCALE = float(_os.environ.get('PF_OVERBET_RAISE_JAM_WEIGHT_EQ_SCALE', '18.0'))
+_ORJ_WEIGHT_NUTADV_SCALE = float(_os.environ.get('PF_OVERBET_RAISE_JAM_WEIGHT_NUTADV_SCALE', '4.0'))
+
+
+def _villain_draw_mass(ctx: DecisionCtx) -> float:
+    dist = ctx.villain_bucket_dist or {}
+    return dist.get('draw', 0.0) + dist.get('weak_draw', 0.0)
+
+
+def _draw_pressure(ctx: DecisionCtx) -> float:
+    pressure = ctx.board_sig.wetness
+    if ctx.board_sig.flush_draw or ctx.board_sig.flush_possible:
+        pressure = max(pressure, 0.50)
+    if ctx.board_sig.straight_draw_heavy:
+        pressure = max(pressure, 0.50)
+    pressure = max(pressure, _villain_draw_mass(ctx))
+    return pressure
+
+
+def _tiny_donk_overpair_protection(ctx: DecisionCtx, pressure: float, nuts: float) -> bool:
+    """Low-SPR wet-board overpair should not let tiny donks realize equity."""
+    return (
+        ctx.street == 'flop'
+        and ctx.hero_bucket == 'strong'
+        and ctx.hero_made_subtype == 'clean_overpair'
+        and ctx.spr <= _PR_TINY_DONK_OVERPAIR_MAX_SPR
+        and ctx.pot_odds <= _PR_TINY_DONK_OVERPAIR_MAX_POT_ODDS
+        and pressure >= _PR_TINY_DONK_OVERPAIR_MIN_PRESSURE
+        and nuts <= _PR_TINY_DONK_OVERPAIR_MAX_NUTS
+    )
+
+
+def _protection_raise_need(ctx: DecisionCtx, pressure: float, nuts: float) -> float:
+    need = _PR_MIN_EQ
+    if ctx.hero_bucket == 'medium':
+        need += _PR_MEDIUM_ADD
+    if ctx.num_opponents >= 2:
+        need += _PR_MULTIWAY_ADD
+    if ctx.n_sticky >= 1:
+        need += _PR_STICKY_ADD
+    if _tiny_donk_overpair_protection(ctx, pressure, nuts):
+        need = min(need, _PR_TINY_DONK_OVERPAIR_MIN_EQ)
+    return need
 
 
 def _opp_raise_premium(ctx: DecisionCtx) -> float:
@@ -136,6 +218,8 @@ class ValueRaise(Purpose):
         need = 0.72 + _opp_raise_premium(ctx)
         if ctx.equity_range < need:
             return TriggerResult(False)
+        if stackoff_guard_reason(ctx, self.id, will_jam=(ctx.spr <= 2.0)):
+            return TriggerResult(False)
         # Vote weight grows monotonically past the trigger threshold and
         # sharply past 0.85 to dominate bluff_catch_call at near-nuts equity
         # (doc 03 §9.2 shape). Tuned so that:
@@ -192,7 +276,7 @@ class SemiBluffRaise(Purpose):
 
 
 # ---------------------------------------------------------------------------
-# protection_raise  (multiway only — doc 1 §4.8 inherited gates)
+# protection_raise
 # ---------------------------------------------------------------------------
 
 
@@ -206,27 +290,42 @@ class ProtectionRaise(Purpose):
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
         if not ctx.facing_bet:
             return TriggerResult(False)
-        if ctx.num_opponents not in (2, 3):
+        if ctx.num_opponents > 3:
             return TriggerResult(False)
         if ctx.street not in ('flop', 'turn'):
             return TriggerResult(False)
-        if ctx.spr < 3.0 or ctx.pot <= 0:
-            return TriggerResult(False)
-        if ctx.villain_stats.af > 1.5:
+        if ctx.spr < _PR_MIN_SPR or ctx.spr > _PR_MAX_SPR or ctx.pot <= 0:
             return TriggerResult(False)
         if ctx.to_call <= 0:
             return TriggerResult(False)
-        # 2026-04-25 P1-3：去 bet_frac <= 0.40 硬门。原限制只对 villain 小注
-        # 做 protection raise——但 villain 大注面前的 2-3 人池 strong/nuts +
-        # 干板场景，raise 同样有保护 value 对抗 draws 的意义。eq>=0.75 + 干板
-        # + strong/nuts 已经是足够严的 filter，不需要再加 bet-size 限制。
-        if ctx.equity_range < 0.75:
+        if ctx.pot_odds > _PR_MAX_POT_ODDS:
             return TriggerResult(False)
-        if ctx.board_sig.wetness >= 0.55 or ctx.board_sig.flush_possible:
+
+        # Protection raise 的语义不是“近坚果价值加注”，而是“脆弱领先牌
+        # 不想给多人/听牌便宜实现 equity”。因此必须有 draw pressure，且
+        # 对手坚果密度不能过高；近坚果高 equity spot 让 value_raise 接管。
+        if ctx.hero_bucket not in ('medium', 'strong'):
             return TriggerResult(False)
-        if ctx.hero_bucket not in ('strong', 'nuts'):
+        pressure = _draw_pressure(ctx)
+        if pressure < _PR_WETNESS_MIN and _villain_draw_mass(ctx) < _PR_DRAW_MASS_MIN:
             return TriggerResult(False)
-        return TriggerResult(True, 0.8)
+        nuts = (ctx.villain_bucket_dist or {}).get('nuts', 0.0)
+        if nuts > _PR_MAX_NUTS:
+            return TriggerResult(False)
+
+        tiny_donk_overpair = _tiny_donk_overpair_protection(ctx, pressure, nuts)
+        need = _protection_raise_need(ctx, pressure, nuts)
+        if ctx.equity_range < need:
+            return TriggerResult(False)
+
+        value_need = 0.72 + _opp_raise_premium(ctx)
+        if ctx.hero_bucket == 'strong' and ctx.equity_range >= value_need + _PR_VALUE_DEFER_MARGIN:
+            return TriggerResult(False)
+
+        w = _PR_WEIGHT + max(0.0, ctx.equity_range - need) * 2.0 + pressure * 0.4
+        if tiny_donk_overpair:
+            w = max(w, _PR_TINY_DONK_OVERPAIR_WEIGHT)
+        return TriggerResult(True, max(0.4, w))
 
 
 # ---------------------------------------------------------------------------
@@ -244,13 +343,26 @@ class OverbetRaiseJam(Purpose):
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
         if not ctx.facing_bet:
             return TriggerResult(False)
-        if not (2.0 < ctx.spr <= 4.0):
+        if not (_ORJ_MIN_SPR < ctx.spr <= _ORJ_MAX_SPR):
             return TriggerResult(False)
-        if ctx.nut_advantage < 0.30:
+        if ctx.hero_bucket not in ('strong', 'nuts'):
             return TriggerResult(False)
-        if ctx.equity_range < 0.85:
+        if ctx.nut_advantage < _ORJ_MIN_NUT_ADV:
             return TriggerResult(False)
-        return TriggerResult(True, 1.5)
+        if ctx.equity_range < _ORJ_MIN_EQ:
+            return TriggerResult(False)
+        if (ctx.hero_bucket == 'strong'
+                and (ctx.villain_bucket_dist or {}).get('nuts', 0.0)
+                > _ORJ_MAX_STRONG_VILLAIN_NUTS):
+            return TriggerResult(False)
+        if stackoff_guard_reason(ctx, self.id, will_jam=True):
+            return TriggerResult(False)
+        w = (
+            _ORJ_WEIGHT_BASE
+            + max(0.0, ctx.equity_range - _ORJ_MIN_EQ) * _ORJ_WEIGHT_EQ_SCALE
+            + ctx.nut_advantage * _ORJ_WEIGHT_NUTADV_SCALE
+        )
+        return TriggerResult(True, max(1.5, w))
 
 
 # ---------------------------------------------------------------------------

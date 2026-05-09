@@ -18,9 +18,10 @@ from typing import Dict, List, Optional, Tuple
 from pokerfate.strategy.v3 import alpha_gate, calibrator, exploit
 from pokerfate.strategy.v3.context import DecisionCtx
 from pokerfate.strategy.v3.purpose import Purpose, PurposeRegistry, TriggerResult
-from pokerfate.strategy.v3.purposes_active import all_active
+from pokerfate.strategy.v3.purposes_active import all_active, monster_value_plan_kind
 from pokerfate.strategy.v3.purposes_defensive import all_defensive
 from pokerfate.strategy.v3.purposes_passive import all_passive
+from pokerfate.strategy.v3.stackoff_guard import stackoff_guard_reason
 
 # 2026-04-28 P0.1：max_alt 阈值（≥此值时 baseline 归零）。env 可覆盖供 sweep。
 _BASELINE_THRESH = float(os.environ.get('PF_BASELINE_THRESH', '0.6'))
@@ -29,11 +30,42 @@ _BASELINE_THRESH = float(os.environ.get('PF_BASELINE_THRESH', '0.6'))
 # guard but stops over-penalizing raw MC in profitable call/fold nodes.
 _FOLD_OVERRIDE_MARGIN = float(os.environ.get('PF_FOLD_OVERRIDE_MARGIN', '0.00'))
 _FOLD_OVERRIDE_MC_PENALTY = float(os.environ.get('PF_FOLD_OVERRIDE_MC_PENALTY', '0.10'))
+_FOLD_OVERRIDE_FOLD_ONLY_MAX_RANGE_GAP = float(
+    os.environ.get('PF_FOLD_OVERRIDE_FOLD_ONLY_MAX_RANGE_GAP', '0.03')
+)
+_FOLD_OVERRIDE_FOLD_ONLY_EXTRA_MARGIN = float(
+    os.environ.get('PF_FOLD_OVERRIDE_FOLD_ONLY_EXTRA_MARGIN', '0.00')
+)
+_FOLD_OVERRIDE_RIVER_STRONG_MAX = float(
+    os.environ.get('PF_FOLD_OVERRIDE_RIVER_STRONG_MAX', '0.55')
+)
+_FOLD_OVERRIDE_MAX_FOLD_PROB_WITH_CALL = float(
+    os.environ.get('PF_FOLD_OVERRIDE_MAX_FOLD_PROB_WITH_CALL', '0.80')
+)
+_FOLD_OVERRIDE_FOLD_PROB_EDGE_ALLOW = float(
+    os.environ.get('PF_FOLD_OVERRIDE_FOLD_PROB_EDGE_ALLOW', '0.15')
+)
+_FOLD_OVERRIDE_LOW_SPR_DISABLE = float(
+    os.environ.get('PF_FOLD_OVERRIDE_LOW_SPR_DISABLE', '1.00')
+)
+_FOLD_OVERRIDE_STACK_COMMIT_DISABLE = float(
+    os.environ.get('PF_FOLD_OVERRIDE_STACK_COMMIT_DISABLE', '0.35')
+)
+_FOLD_OVERRIDE_CHEAP_CALL_MAX_POT_ODDS = float(
+    os.environ.get('PF_FOLD_OVERRIDE_CHEAP_CALL_MAX_POT_ODDS', '0.20')
+)
+_FOLD_OVERRIDE_STICKY_MC_EXTRA_PENALTY = float(
+    os.environ.get('PF_FOLD_OVERRIDE_STICKY_MC_EXTRA_PENALTY', '0.10')
+)
 _MC_RANGE_DIVERGENCE_GUARD = os.environ.get('PF_MC_RANGE_DIVERGENCE_GUARD', '1') == '1'
 _MC_RANGE_DIVERGENCE_MIN = float(os.environ.get('PF_MC_RANGE_DIVERGENCE_MIN', '0.18'))
 _MC_RANGE_DIVERGENCE_EXTRA_PENALTY = float(os.environ.get('PF_MC_RANGE_DIVERGENCE_EXTRA_PENALTY', '0.15'))
 _MC_RANGE_DIVERGENCE_MIN_STREET = os.environ.get('PF_MC_RANGE_DIVERGENCE_MIN_STREET', 'turn')
 _MC_RANGE_DIVERGENCE_MIN_CALL_POT = float(os.environ.get('PF_MC_RANGE_DIVERGENCE_MIN_CALL_POT', '0.20'))
+_OVERBET_RAISE_JAM_FORCE = os.environ.get('PF_OVERBET_RAISE_JAM_FORCE', '1') != '0'
+_OVERBET_RAISE_JAM_FORCE_MIN_WEIGHT = float(
+    os.environ.get('PF_OVERBET_RAISE_JAM_FORCE_MIN_WEIGHT', '0.0')
+)
 _LEVERAGE_TOP_GAP = float(os.environ.get('PF_LEVERAGE_TOP_GAP', '0.18'))
 _LEVERAGE_MIN_TOP = float(os.environ.get('PF_LEVERAGE_MIN_TOP', '0.48'))
 _LEVERAGE_DETERMINISTIC = os.environ.get('PF_LEVERAGE_DETERMINISTIC', '1') != '0'
@@ -138,17 +170,31 @@ class V3Engine:
         return out, deltas
 
     def _mc_range_divergence_penalty(self, ctx: DecisionCtx) -> float:
+        penalty = _FOLD_OVERRIDE_MC_PENALTY
+        vs = ctx.worst_villain_stats if ctx.worst_villain_stats.hands_seen else ctx.villain_stats
+        stickyish = (
+            ctx.n_sticky >= 1
+            or ctx.max_value_lean >= 1.2
+            or (
+                vs.hands_seen >= 20
+                and vs.af <= 1.0
+                and (vs.wtsd >= 0.32 or vs.fold_to_cbet <= 0.30)
+            )
+        )
+        if stickyish:
+            penalty += _FOLD_OVERRIDE_STICKY_MC_EXTRA_PENALTY
+
         if not _MC_RANGE_DIVERGENCE_GUARD:
-            return _FOLD_OVERRIDE_MC_PENALTY
+            return penalty
         street_order = {'flop': 1, 'turn': 2, 'river': 3}
         min_order = street_order.get(_MC_RANGE_DIVERGENCE_MIN_STREET, 2)
         if street_order.get(ctx.street, 0) < min_order:
-            return _FOLD_OVERRIDE_MC_PENALTY
+            return penalty
         if ctx.pot <= 0 or ctx.to_call / ctx.pot < _MC_RANGE_DIVERGENCE_MIN_CALL_POT:
-            return _FOLD_OVERRIDE_MC_PENALTY
+            return penalty
         if ctx.equity_mc - ctx.equity_range < _MC_RANGE_DIVERGENCE_MIN:
-            return _FOLD_OVERRIDE_MC_PENALTY
-        return _FOLD_OVERRIDE_MC_PENALTY + _MC_RANGE_DIVERGENCE_EXTRA_PENALTY
+            return penalty
+        return penalty + _MC_RANGE_DIVERGENCE_EXTRA_PENALTY
 
     def _leverage_flags(self, ctx: DecisionCtx) -> List[str]:
         flags: List[str] = []
@@ -166,6 +212,86 @@ class V3Engine:
         if ctx.facing_large_bet:
             flags.append('facing_large_bet')
         return flags
+
+    def _fold_override_allowed(
+        self,
+        ctx: DecisionCtx,
+        candidates: List[Tuple[Purpose, float]],
+        blended_eq: float,
+    ) -> Tuple[bool, str]:
+        """Guard fold→call override when the candidate pool was effectively fold-only."""
+        if ctx.hero_bucket not in {'medium', 'strong', 'nuts'}:
+            return False, f'fold-only guard: bucket={ctx.hero_bucket}'
+
+        stack_commit = ctx.to_call / ctx.stack if ctx.stack > 0 else 0.0
+        if stack_commit >= _FOLD_OVERRIDE_STACK_COMMIT_DISABLE:
+            return False, (
+                f'fold-only guard: stack_commit {stack_commit:.2f} >= '
+                f'{_FOLD_OVERRIDE_STACK_COMMIT_DISABLE:.2f}'
+            )
+
+        cheap_range_call = (
+            ctx.pot_odds <= _FOLD_OVERRIDE_CHEAP_CALL_MAX_POT_ODDS
+            and ctx.equity_range >= ctx.pot_odds
+        )
+
+        if ctx.spr > 0 and ctx.spr <= _FOLD_OVERRIDE_LOW_SPR_DISABLE:
+            if not cheap_range_call:
+                return False, (
+                    f'fold-only guard: low_spr {ctx.spr:.2f} <= '
+                    f'{_FOLD_OVERRIDE_LOW_SPR_DISABLE:.2f}'
+                )
+
+        total = sum(max(0.0, w) for _, w in candidates)
+        fold_prob = 0.0
+        has_call_candidate = False
+        if total > 0:
+            fold_prob = sum(
+                max(0.0, w) for p, w in candidates if p.id == 'fold'
+            ) / total
+            has_call_candidate = any(
+                p.default_action == 'call' for p, w in candidates if w > 0
+            )
+
+        range_edge = ctx.equity_range - ctx.pot_odds
+        if (
+            has_call_candidate
+            and fold_prob > _FOLD_OVERRIDE_MAX_FOLD_PROB_WITH_CALL
+            and range_edge <= _FOLD_OVERRIDE_FOLD_PROB_EDGE_ALLOW
+            and not cheap_range_call
+        ):
+            return False, (
+                f'fold-only guard: fold_prob {fold_prob:.2f} > '
+                f'{_FOLD_OVERRIDE_MAX_FOLD_PROB_WITH_CALL:.2f}'
+            )
+
+        range_gap = max(0.0, ctx.pot_odds - ctx.equity_range)
+        if range_gap > _FOLD_OVERRIDE_FOLD_ONLY_MAX_RANGE_GAP:
+            return False, (
+                f'fold-only guard: range_gap {range_gap:.2f} > '
+                f'{_FOLD_OVERRIDE_FOLD_ONLY_MAX_RANGE_GAP:.2f}'
+            )
+
+        strong_mass = (
+            (ctx.villain_bucket_dist or {}).get('nuts', 0.0)
+            + (ctx.villain_bucket_dist or {}).get('strong', 0.0)
+        )
+        if (
+            ctx.street == 'river'
+            and strong_mass >= _FOLD_OVERRIDE_RIVER_STRONG_MAX
+            and not cheap_range_call
+        ):
+            return False, (
+                f'fold-only guard: river strong_mass {strong_mass:.2f} >= '
+                f'{_FOLD_OVERRIDE_RIVER_STRONG_MAX:.2f}'
+            )
+
+        need = ctx.pot_odds + _FOLD_OVERRIDE_MARGIN + _FOLD_OVERRIDE_FOLD_ONLY_EXTRA_MARGIN
+        if blended_eq < need:
+            return False, (
+                f'fold-only guard: blended_eq {blended_eq:.2f} < need {need:.2f}'
+            )
+        return True, 'cheap_range_call' if cheap_range_call else 'fold_only_extra_margin'
 
     def _choose_purpose(
         self,
@@ -272,6 +398,16 @@ class V3Engine:
                                    top_gap=top_gap,
                                    leverage_flags=leverage_flags,
                                    reason='calibrator produced 0')
+        guard = stackoff_guard_reason(ctx, purpose.id, will_jam=cal.jammed)
+        if guard:
+            return DecisionOutput(
+                action='check', amount=0.0, purpose=purpose.id, frac=0.0,
+                seed=seed, candidates=cand_probs, exploit_deltas=deltas,
+                jammed=False, downgraded_to_check=True,
+                arbitration_mode=arbitration_mode, top_gap=top_gap,
+                leverage_flags=list(dict.fromkeys(leverage_flags + ['stackoff_guard'])),
+                reason=f'stackoff_guard {guard}',
+            )
         # α gate on the calibrated frac
         check = alpha_gate.check(ctx, cal.frac, purpose.id)
 
@@ -360,7 +496,27 @@ class V3Engine:
         pool = [p for p in self.registry.all() if p.facing_bet]
         candidates, deltas = self._collect_candidates(pool, ctx)
 
-        chosen, cand_probs, arb_mode, top_gap, flags = self._choose_purpose(candidates, ctx)
+        cand_probs = self._candidate_probs(candidates)
+        forced_raise = self._force_river_monster_raise(ctx, candidates)
+        if forced_raise is not None:
+            chosen = forced_raise
+            arb_mode = 'deterministic'
+            top_gap = 1.0
+            flags = list(dict.fromkeys(self._leverage_flags(ctx) + ['monster_river_raise']))
+        else:
+            chosen, cand_probs, arb_mode, top_gap, flags = self._choose_purpose(candidates, ctx)
+
+        if _OVERBET_RAISE_JAM_FORCE:
+            overbet = next(
+                ((p, w) for p, w in candidates
+                 if p.id == 'overbet_raise_jam'
+                 and w >= _OVERBET_RAISE_JAM_FORCE_MIN_WEIGHT),
+                None,
+            )
+            if overbet is not None:
+                chosen = overbet[0]
+                arb_mode = 'deterministic'
+                flags = list(dict.fromkeys((flags or []) + ['overbet_raise_jam_force']))
 
         if chosen is None or chosen.id == 'fold':
             # 2026-04-28 P0.2：tracker 对 loose-passive 对手会把 equity_range
@@ -372,7 +528,8 @@ class V3Engine:
                 ctx.equity_range - (ctx.equity_uncertainty or 0.0),
                 ctx.equity_mc - mc_penalty,
             )
-            if blended_eq >= ctx.pot_odds + _FOLD_OVERRIDE_MARGIN:
+            allowed, guard_reason = self._fold_override_allowed(ctx, candidates, blended_eq)
+            if allowed and blended_eq >= ctx.pot_odds + _FOLD_OVERRIDE_MARGIN:
                 return DecisionOutput(
                     action='call', amount=min(ctx.to_call, ctx.stack),
                     purpose='fold_override_call', seed=seed,
@@ -380,7 +537,7 @@ class V3Engine:
                     arbitration_mode=arb_mode, top_gap=top_gap,
                     leverage_flags=flags,
                     reason=f'fold→call override (blended_eq {blended_eq:.2f} '
-                           f'≥ pot_odds {ctx.pot_odds:.2f})',
+                           f'≥ pot_odds {ctx.pot_odds:.2f}; {guard_reason})',
                 )
             return DecisionOutput(action='fold', amount=0.0, purpose='fold',
                                    seed=seed, candidates=cand_probs,
@@ -388,7 +545,7 @@ class V3Engine:
                                    arbitration_mode=arb_mode,
                                    top_gap=top_gap,
                                    leverage_flags=flags,
-                                   reason='fold baseline sampled')
+                                   reason=f'fold baseline sampled; {guard_reason}')
 
         if chosen.default_action == 'call':
             return DecisionOutput(
@@ -402,6 +559,18 @@ class V3Engine:
 
         # Raise path
         amount = self._raise_amount(ctx, chosen)
+        guard = stackoff_guard_reason(
+            ctx, chosen.id, will_jam=(amount >= ctx.stack and ctx.stack > 0),
+        )
+        if guard:
+            return DecisionOutput(
+                action='call', amount=min(ctx.to_call, ctx.stack),
+                purpose=chosen.id, seed=seed,
+                candidates=cand_probs, exploit_deltas=deltas,
+                arbitration_mode=arb_mode, top_gap=top_gap,
+                leverage_flags=list(dict.fromkeys((flags or []) + ['stackoff_guard'])),
+                reason=f'stackoff_guard {guard} raise→call',
+            )
         if amount <= ctx.to_call:
             # Can't legally raise → fall back to call.
             return DecisionOutput(
@@ -430,6 +599,32 @@ class V3Engine:
         # Standard raise: max(to_call * 2.8, to_call + 0.75 pot) clamped to stack.
         size = max(ctx.to_call * 2.8, ctx.to_call + ctx.pot * 0.75)
         return min(size, ctx.stack)
+
+    def _force_river_monster_raise(
+        self,
+        ctx: DecisionCtx,
+        candidates: List[Tuple[Purpose, float]],
+    ) -> Optional[Purpose]:
+        """River IP monster/super-monster should harvest value, not bluff-catch.
+
+        Keep this after candidate collection so regular value_raise gates and
+        stackoff guards still decide whether raising is legal.
+        """
+        if not (
+            ctx.street == 'river'
+            and ctx.facing_bet
+            and ctx.is_ip
+            and monster_value_plan_kind(ctx, allow_facing_bet=True)
+        ):
+            return None
+        for pid in ('overbet_raise_jam', 'value_raise'):
+            match = next(
+                (p for p, w in candidates if p.id == pid and w > 0),
+                None,
+            )
+            if match is not None:
+                return match
+        return None
 
     # ------------------------------------------------------------------
     # Shared utilities
