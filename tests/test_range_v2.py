@@ -1506,3 +1506,59 @@ class TestShowdownCalibration:
         ctx = ActionContext(position='CO', board=board, street='flop', facing_action='bet')
         # 应不抛异常
         tracker.observe_action(1, 'call', 'flop', ctx, prof, board=board)
+
+
+class TestBucketPosteriorCalibration:
+    """Offline-fitted bucket calibration should shift bucket mass, not combos."""
+
+    def _seed_bucket_weights(self, tracker, player_id, board, target):
+        cats = tracker._get_categories(board)
+        board_ints = {hcm.card_to_int(c) for c in board}
+        w = np.zeros(1326, dtype=np.float64)
+        for cat, mass in target.items():
+            idxs = []
+            for idx, c in enumerate(cats):
+                if c != cat:
+                    continue
+                c1, c2 = hcm.ALL_COMBOS[idx]
+                if c1 in board_ints or c2 in board_ints:
+                    continue
+                idxs.append(idx)
+            assert idxs, f'no combos for {cat} on board {board}'
+            for idx in idxs:
+                w[idx] = mass / len(idxs)
+        w /= w.sum()
+        tracker._weights[player_id] = w
+
+    def test_flop_raise_over_calibration_moves_strong_up_air_down(self):
+        tracker = BayesianRangeTracker(ActionModel())
+        board = [Card.from_str(c) for c in ['Qh', 'Jd', '7c']]
+        self._seed_bucket_weights(
+            tracker, 1, board,
+            {
+                'nuts': 0.08, 'strong': 0.12, 'medium': 0.25,
+                'draw': 0.12, 'weak_draw': 0.08, 'air': 0.35,
+            },
+        )
+        before = tracker.get_bucket_distribution(1, board)
+        tracker._apply_bucket_calibration(1, 'flop', board, 'action:raise_over')
+        after = tracker.get_bucket_distribution(1, board)
+
+        assert after['strong'] > before['strong']
+        assert after['medium'] > before['medium']
+        assert after['air'] < before['air']
+        assert abs(sum(after.values()) - 1.0) < 1e-9
+
+    def test_fold_other_has_no_bucket_side_effect(self):
+        tracker = BayesianRangeTracker(ActionModel())
+        board = [Card.from_str(c) for c in ['Qh', 'Jd', '7c']]
+        self._seed_bucket_weights(
+            tracker, 1, board,
+            {
+                'nuts': 0.08, 'strong': 0.12, 'medium': 0.25,
+                'draw': 0.12, 'weak_draw': 0.08, 'air': 0.35,
+            },
+        )
+        before = tracker.get_distribution(1)
+        tracker._apply_bucket_calibration(1, 'flop', board, 'action:fold_other')
+        np.testing.assert_allclose(tracker.get_distribution(1), before)

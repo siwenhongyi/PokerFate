@@ -633,6 +633,121 @@ def test_sng_suppresses_bot_notifications(monkeypatch) -> None:
     assert notified == []
 
 
+def test_friend_room_suppresses_bot_notifications(monkeypatch) -> None:
+    import pf_intercept.bot as bot_mod
+
+    notified = []
+    monkeypatch.setattr(bot_mod, "notify", lambda event, **fields: notified.append(event))
+
+    b = BotBridge(max_auto_rebuy=3)
+    b._is_friend_room = True
+    b._my_seat = 0
+    b._bb = 50.0
+    b._hand_start_chips[0] = 1000
+
+    b._check_hand_swing(2000)
+
+    assert notified == []
+
+
+def test_hand_swing_triggers_at_twenty_bb_without_percent_gate(monkeypatch) -> None:
+    import pf_intercept.bot as bot_mod
+
+    notified = []
+    monkeypatch.setattr(
+        bot_mod,
+        "notify",
+        lambda event, **fields: notified.append((event, fields)),
+    )
+
+    b = BotBridge(max_auto_rebuy=3)
+    b._my_seat = 0
+    b._bb = 50.0
+    b._hand_start_chips[0] = 100_000
+
+    b._check_hand_swing(999)
+    assert notified == []
+
+    b._check_hand_swing(1_000)
+    assert notified == [
+        (
+            "hand_swing",
+            {
+                "profit_delta": 1_000,
+                "start_chips": 100_000,
+                "big_blind": 50,
+                "hand_detail": "",
+            },
+        )
+    ]
+
+
+def test_hand_swing_includes_last_hand_detail(monkeypatch) -> None:
+    import pf_intercept.bot as bot_mod
+
+    notified = []
+    monkeypatch.setattr(
+        bot_mod,
+        "notify",
+        lambda event, **fields: notified.append((event, fields)),
+    )
+
+    class FakeAPI:
+        def last_hand_push_detail(self):
+            return "手牌: A♠ A♥\n行动:\n翻前: 我加10bb"
+
+    b = BotBridge(max_auto_rebuy=3)
+    b._my_seat = 0
+    b._bb = 50.0
+    b._hand_start_chips[0] = 100_000
+    b._api = FakeAPI()
+
+    b._check_hand_swing(1_000)
+
+    assert notified[0][1]["hand_detail"] == "手牌: A♠ A♥\n行动:\n翻前: 我加10bb"
+
+
+def test_auto_collect_current_hand_calls_collcard_once(monkeypatch) -> None:
+    import pf_intercept.bot as bot_mod
+
+    calls = []
+    monkeypatch.setattr(
+        bot_mod,
+        "_sync_collect_game",
+        lambda gameid, *, roomid=0, tid=1, reason="": calls.append(
+            (gameid, roomid, tid, reason)
+        ),
+    )
+
+    b = BotBridge(max_auto_rebuy=3)
+    b._current_gameid = "g123"
+    b._table_room_id = 42
+    b._table_tid = 7
+
+    assert b._maybe_auto_collect_current_hand(["四条"]) is True
+    assert b._maybe_auto_collect_current_hand(["盈利50.0BB"]) is False
+    assert calls == [("g123", 42, 7, "四条")]
+
+
+def test_special_rooms_skip_auto_collect(monkeypatch) -> None:
+    import pf_intercept.bot as bot_mod
+
+    calls = []
+    monkeypatch.setattr(
+        bot_mod,
+        "_sync_collect_game",
+        lambda gameid, *, roomid=0, tid=1, reason="": calls.append(gameid),
+    )
+
+    for attr in ("_is_sng_room", "_is_friend_room"):
+        b = BotBridge(max_auto_rebuy=3)
+        b._current_gameid = "g123"
+        setattr(b, attr, True)
+        assert b._maybe_auto_collect_current_hand(["四条"]) is False
+
+    assert calls == []
+
+
 def test_profit_lock_threshold_in_config() -> None:
     assert isinstance(config.PROFIT_LOCK_BB_THRESHOLD, int)
     assert config.PROFIT_LOCK_BB_THRESHOLD >= 1

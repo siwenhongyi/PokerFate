@@ -210,7 +210,7 @@ def test_fold_override_rescues_marginal_tracker_compressed_equity() -> None:
     assert out.purpose == 'fold_override_call'
 
 
-def test_fold_override_does_not_rescue_low_spr_commit_spot() -> None:
+def test_fold_override_rescues_low_spr_commit_spot_when_cheap_edge_is_clear() -> None:
     board = cards('6d', 'Ad', '8s')
     ctx = DecisionCtx(
         street='flop',
@@ -241,9 +241,81 @@ def test_fold_override_does_not_rescue_low_spr_commit_spot() -> None:
 
     out = V3Engine().decide(ctx)
 
-    assert out.action == 'fold'
-    assert out.purpose == 'fold'
-    assert 'low_spr' in out.reason or 'stack_commit' in out.reason
+    assert out.action == 'call'
+    assert out.purpose == 'fold_override_call'
+    assert 'cheap_commit_range_call' in out.reason
+
+
+def test_fold_override_rescues_committed_low_spr_when_range_edge_is_clear() -> None:
+    board = cards('Js', 'Jd', '4h')
+    ctx = DecisionCtx(
+        street='flop',
+        hole_cards=cards('Ac', 'Kc'),
+        board=board,
+        position='CO',
+        is_ip=True,
+        num_opponents=1,
+        pot=200.0,
+        to_call=70.0,
+        stack=180.0,
+        big_blind=10.0,
+        spr=0.4,
+        pot_odds=70.0 / 270.0,
+        facing_bet=True,
+        hero_bucket='medium',
+        equity_mc=0.63,
+        equity_range=0.42,
+        equity_uncertainty=0.20,
+        board_sig=v3_board.analyze(board),
+        villain_bucket_dist={
+            'air': 0.46, 'nuts': 0.32, 'strong': 0.20, 'medium': 0.02,
+        },
+        villain_stats=sticky_passive_stats(af=0.3, fold_to_cbet=0.29, wtsd=0.35),
+        n_sticky=1,
+    )
+
+    out = V3Engine().decide(ctx)
+
+    assert out.action == 'call'
+    assert out.purpose == 'fold_override_call'
+    assert candidate_prob(out, 'fold') > candidate_prob(out, 'bluff_catch_call')
+    assert 'commit_range_call' in out.reason
+
+
+def test_fold_override_rescues_cheap_committed_low_spr_call() -> None:
+    board = cards('Ad', 'Kh', '7s')
+    ctx = DecisionCtx(
+        street='flop',
+        hole_cards=cards('Ac', 'Qs'),
+        board=board,
+        position='BTN',
+        is_ip=True,
+        num_opponents=1,
+        pot=375_000.0,
+        to_call=12_000.0,
+        stack=30_000.0,
+        big_blind=10_000.0,
+        spr=0.08,
+        pot_odds=12_000.0 / 387_000.0,
+        facing_bet=True,
+        hero_bucket='medium',
+        equity_mc=0.315,
+        equity_range=0.125,
+        equity_uncertainty=0.0,
+        board_sig=v3_board.analyze(board),
+        villain_bucket_dist={
+            'medium': 0.31, 'air': 0.27, 'draw': 0.20,
+            'nuts': 0.09, 'strong': 0.11,
+        },
+        villain_stats=sticky_passive_stats(af=0.8),
+        n_sticky=1,
+    )
+
+    out = V3Engine().decide(ctx)
+
+    assert out.action == 'call'
+    assert out.purpose == 'fold_override_call'
+    assert 'cheap_commit_range_call' in out.reason
 
 
 def test_fold_override_rescues_cheap_low_spr_river_call_with_range_edge() -> None:
@@ -264,7 +336,7 @@ def test_fold_override_rescues_cheap_low_spr_river_call_with_range_edge() -> Non
         facing_bet=True,
         hero_bucket='medium',
         equity_mc=0.83,
-        equity_range=0.19,
+        equity_range=0.24,
         equity_uncertainty=0.08,
         board_sig=v3_board.analyze(board),
         villain_bucket_dist={

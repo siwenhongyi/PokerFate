@@ -1,0 +1,40 @@
+{
+  "configs": [
+    {},
+    {
+      "PF_FOLD_OVERRIDE_COMMIT_EDGE_MIN": "9.99"
+    },
+    {
+      "PF_FOLD_OVERRIDE_COMMIT_EDGE_MIN": "0.08"
+    },
+    {
+      "PF_FOLD_OVERRIDE_COMMIT_EDGE_MIN": "0.10"
+    },
+    {
+      "PF_FOLD_OVERRIDE_COMMIT_EDGE_MIN": "0.15"
+    },
+    {
+      "PF_FOLD_OVERRIDE_COMMIT_EDGE_MIN": "0.12",
+      "PF_FOLD_OVERRIDE_COMMIT_NUTS_MAX": "0.30",
+      "PF_FOLD_OVERRIDE_COMMIT_STRONG_MAX": "0.55"
+    },
+    {
+      "PF_FOLD_OVERRIDE_COMMIT_EDGE_MIN": "0.12",
+      "PF_FOLD_OVERRIDE_COMMIT_NUTS_MAX": "0.55",
+      "PF_FOLD_OVERRIDE_COMMIT_STRONG_MAX": "0.75"
+    },
+    {
+      "PF_FOLD_OVERRIDE_COMMIT_EDGE_MIN": "0.12",
+      "PF_FOLD_OVERRIDE_LOW_SPR_DISABLE": "1.20"
+    },
+    {
+      "PF_FOLD_OVERRIDE_COMMIT_EDGE_MIN": "0.15",
+      "PF_FOLD_OVERRIDE_LOW_SPR_DISABLE": "1.20"
+    },
+    {
+      "PF_FOLD_OVERRIDE_COMMIT_EDGE_MIN": "0.10",
+      "PF_FOLD_OVERRIDE_COMMIT_NUTS_MAX": "0.40",
+      "PF_FOLD_OVERRIDE_COMMIT_STRONG_MAX": "0.60"
+    }
+  ]
+}

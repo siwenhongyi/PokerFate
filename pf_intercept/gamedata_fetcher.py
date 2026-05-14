@@ -31,85 +31,53 @@ Rate field scaling (all /10000 to a [0, 1] percentage):
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
-import random
-import ssl
-import string
-import time
-import urllib.request
-from pathlib import Path
 from typing import Optional
 
-import certifi
-
-_SSL_CTX = ssl.create_default_context(cafile=certifi.where())
-
+from pf_intercept import config
+from pf_intercept.http_api import (
+    GAME_HTTP_SSL_CTX,
+    load_auth_token,
+    sign_request,
+    signed_post_json,
+)
 from pokerfate.bot.opponent_model import OpponentStats
 
 log = logging.getLogger("pf_gamedata")
 
-_SALT = "Z3r0w0nd3rd3!3z4jz89z9DLbg&8Gjt("
-_TOKEN_FILE = Path(__file__).resolve().parent.parent / "data" / "auth_token.txt"
+_SSL_CTX = GAME_HTTP_SSL_CTX
 _AFQ_TO_AF_CALL_SHARE = 0.3109
 
 
 # ── Signing ───────────────────────────────────────────────────────────────────
 
 def _sign(rand: str, ts: str) -> str:
-    raw = f"random={rand}&ts={ts}&salt={_SALT}"
-    return hashlib.md5(raw.encode()).hexdigest()
+    """Compatibility wrapper for older imports."""
+    return sign_request(rand, ts)
 
 
 def _load_token() -> Optional[str]:
-    try:
-        token = _TOKEN_FILE.read_text(encoding="utf-8").strip()
-        return token or None
-    except (OSError, UnicodeError) as exc:
-        log.warning(
-            "[gamedata] failed to read token file %s (%s: %s)",
-            _TOKEN_FILE,
-            type(exc).__name__,
-            exc,
-        )
-        return None
-    except Exception:
-        log.exception("[gamedata] unexpected error reading token file %s", _TOKEN_FILE)
-        return None
+    """Compatibility wrapper for older imports."""
+    return load_auth_token()
 
 
 # ── HTTP fetch (sync, run in executor) ───────────────────────────────────────
 
 def _sync_fetch(uid: int, http_host: str, chnl: int, game_type: int, token: str) -> Optional[dict]:
-    rand = "".join(random.choices(string.ascii_letters + string.digits, k=6))
-    ts   = str(int(time.time()))
-    body = json.dumps({
-        "game_type":  game_type,
-        "chnl":       chnl,
-        "random":     rand,
-        "sign":       _sign(rand, ts),
-        "player_uid": uid,
-        "ts":         ts,
-    }).encode("utf-8")
-
-    url = f"https://{http_host}/player/gameData"
-    req = urllib.request.Request(url, data=body, method="POST")
-    req.add_header("Content-Type", "application/json; charset=utf-8")
-    req.add_header("Authorization", token)
-    req.add_header("User-Agent", "UnityPlayer/2022.3.62f3 (UnityWebRequest/1.0, libcurl/8.10.1-DEV)")
-    req.add_header("Accept", "*/*")
-    req.add_header("X-Unity-Version", "2022.3.62f3")
-    log.debug("[gamedata] POST %s uid=%d", url, uid)
-    try:
-        with urllib.request.urlopen(req, timeout=8, context=_SSL_CTX) as resp:
-            raw = resp.read()
-            log.debug("[gamedata] uid=%d response: %s", uid, raw[:500])
-            return json.loads(raw)
-    except Exception as exc:
-        log.warning("[gamedata] uid=%d 请求失败 (%s: %s) url=%s",
-                    uid, type(exc).__name__, exc, url)
-        return None
+    result = signed_post_json(
+        "/player/gameData",
+        {
+            "game_type": game_type or config.GAMEDATA_GAME_TYPE,
+            "player_uid": uid,
+        },
+        host=http_host or config.GAMEDATA_HTTP_HOST,
+        chnl=chnl,
+        token=token,
+        timeout=8,
+    )
+    if result is None:
+        log.warning("[gamedata] uid=%d 请求失败 host=%s", uid, http_host)
+    return result
 
 
 # ── Merge server data into OpponentStats ─────────────────────────────────────

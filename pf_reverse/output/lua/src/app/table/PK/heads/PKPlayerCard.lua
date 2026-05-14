@@ -2,6 +2,46 @@ local P = class("PKPlayerCard", Object)
 
 -- 玩家的手牌
 
+local CARD_NUMBER_VOICE_NAMES = {
+    [2] = "2",
+    [3] = "3",
+    [4] = "4",
+    [5] = "5",
+    [6] = "6",
+    [7] = "7",
+    [8] = "8",
+    [9] = "9",
+    [10] = "T",
+    [11] = "J",
+    [12] = "Q",
+    [13] = "K",
+    [14] = "A",
+}
+
+local function getHoleCardVoiceKey(cards)
+    if not cards or not cards[1] or not cards[2] then
+        return nil
+    end
+
+    local n1, n2 = GF.getCardNumber(cards[1]), GF.getCardNumber(cards[2])
+    local r1, r2 = CARD_NUMBER_VOICE_NAMES[n1], CARD_NUMBER_VOICE_NAMES[n2]
+    if not r1 or not r2 then
+        return nil
+    end
+
+    if n1 == n2 then
+        return r1 .. r2
+    end
+
+    local s1, s2 = GF.getCardSuit(cards[1]), GF.getCardSuit(cards[2])
+    if n1 > n2 then
+        n1, n2 = n2, n1
+        r1, r2 = r2, r1
+    end
+
+    return r1 .. r2 .. (s1 == s2 and "s" or "o")
+end
+
 function P:setData(data, seatid, head)
     self.data = data
     self.seatid = seatid
@@ -16,6 +56,19 @@ function P:playSound(key)
 			Game:playRoleInVoice(d.role, key)
 		end
 	end
+end
+
+function P:playHoleCardVoice(info, fallbackKey)
+    if info and info.hand_cards and self.data and self.data:getHandCardNum() == 2 then
+        local key = getHoleCardVoiceKey(info.hand_cards)
+        if key then
+            self:playSound(key)
+            return
+        end
+    end
+    if fallbackKey then
+        self:playSound(fallbackKey)
+    end
 end
 
 function P:onAwake()
@@ -305,9 +358,9 @@ function P:showCardType(cardType, cards, isDealing, pkType)
             self.BgCardValue:SetActive(false)
 			if self._isDealing then
 				if info.hand_cards and GF.getCardNumber(info.hand_cards[1]) == GF.getCardNumber(info.hand_cards[2]) then
-					self:playSound(ROLE_VOICE.one_pair)
+					self:playHoleCardVoice(info, ROLE_VOICE.one_pair)
 				else
-					self:playSound(ROLE_VOICE.high_card)
+					self:playHoleCardVoice(info, ROLE_VOICE.high_card)
 				end
 			end
 		elseif boards and #boards > 0 then
@@ -319,22 +372,22 @@ function P:showCardType(cardType, cards, isDealing, pkType)
                 self:find("ImageBar1", self.BgCardValue):SetActive(true)
                 self:find("ImageBar2", self.BgCardValue):SetActive(false)
                 if self._isDealing then
-                    self:playSound(ROLE_VOICE.strong_cards)
+                    self:playHoleCardVoice(info, ROLE_VOICE.strong_cards)
                 end
             elseif 2 == handValue then
                 self:find("ImageBar1", self.BgCardValue):SetActive(false)
                 self:find("ImageBar2", self.BgCardValue):SetActive(true)
                 if self._isDealing then
-                    self:playSound(ROLE_VOICE.weak_cards)
+                    self:playHoleCardVoice(info, ROLE_VOICE.weak_cards)
                 end
             else
                 self:find("ImageBar1", self.BgCardValue):SetActive(false)
                 self:find("ImageBar2", self.BgCardValue):SetActive(true)
                 if self._isDealing then
 					if info.hand_cards and GF.getCardNumber(info.hand_cards[1]) == GF.getCardNumber(info.hand_cards[2]) then
-						self:playSound(ROLE_VOICE.one_pair)
+						self:playHoleCardVoice(info, ROLE_VOICE.one_pair)
 					else
-						self:playSound(ROLE_VOICE.high_card)
+						self:playHoleCardVoice(info, ROLE_VOICE.high_card)
 					end
                 end
             end

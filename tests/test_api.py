@@ -35,6 +35,118 @@ class TestAPILifecycle:
         api.deal_hole_cards(["Ac", "Ad"])
         assert len(api._hole_cards) == 2
 
+    def test_hand_over_builds_push_detail(self):
+        api = make_api()
+        start_hand(api)
+        api.deal_hole_cards(["As", "Ah"])
+        api.deal_board(["Ks", "7d", "2c"], street="flop", pot=20)
+        api.deal_board(["9h"], street="turn", pot=60)
+        api.deal_board(["3c"], street="river", pot=120)
+        api._action_history = [
+            (1, Action(ActionType.RAISE, 6), "preflop"),
+            (0, Action(ActionType.RAISE, 20), "preflop"),
+            (1, Action(ActionType.CALL, 20), "preflop"),
+            (1, Action(ActionType.CHECK), "flop"),
+            (0, Action(ActionType.RAISE, 24), "flop"),
+        ]
+
+        api.hand_over(
+            winner_ids=[0],
+            pot=118,
+            final_stacks={0: 240, 1: 160},
+            showdown_hands={1: ["Kd", "Qd"]},
+            my_profit_delta=40,
+        )
+
+        detail = api.last_hand_push_detail()
+        assert "手牌: A♠️ A♥️" in detail
+        assert "牌面: K♠️ 7♦️ 2♣️ | 9♥️ | 3♣️" in detail
+        assert "翻前: Opponent加3bb; 我加10bb; Opponent跟10bb" in detail
+        assert "亮牌: Opponent:K♦️ Q♦️" in detail
+        assert "结果: PokerFate 赢池 118，我 +40" in detail
+
+    def test_auto_collect_reasons_include_big_profit(self):
+        api = make_api()
+        start_hand(api)
+        api.deal_hole_cards(["Ac", "Kd"])
+
+        api.hand_over(
+            winner_ids=[0],
+            pot=120,
+            final_stacks={0: 300, 1: 100},
+            my_profit_delta=100,
+        )
+
+        assert api.last_auto_collect_reasons(50) == ["盈利50.0BB"]
+
+    def test_auto_collect_reasons_include_four_of_a_kind(self):
+        api = make_api()
+        start_hand(api)
+        api.deal_hole_cards(["Ah", "Ad"])
+        api.deal_board(["Ac", "As", "7d"], street="flop")
+        api.deal_board(["2c"], street="turn")
+        api.deal_board(["3h"], street="river")
+
+        api.hand_over(
+            winner_ids=[0],
+            pot=80,
+            final_stacks={0: 240, 1: 160},
+            my_profit_delta=0,
+        )
+
+        assert api.last_auto_collect_reasons(50) == ["四条"]
+
+    def test_auto_collect_reasons_include_royal_flush(self):
+        api = make_api()
+        start_hand(api)
+        api.deal_hole_cards(["As", "Ks"])
+        api.deal_board(["Qs", "Js", "Ts"], street="flop")
+        api.deal_board(["2d"], street="turn")
+        api.deal_board(["3c"], street="river")
+
+        api.hand_over(
+            winner_ids=[0],
+            pot=80,
+            final_stacks={0: 240, 1: 160},
+            my_profit_delta=0,
+        )
+
+        assert api.last_auto_collect_reasons(50) == ["皇家同花顺"]
+
+    def test_auto_collect_reasons_include_full_house_without_board_trips(self):
+        api = make_api()
+        start_hand(api)
+        api.deal_hole_cards(["Ah", "Ad"])
+        api.deal_board(["Ac", "Kd", "Kh"], street="flop")
+        api.deal_board(["2s"], street="turn")
+        api.deal_board(["3c"], street="river")
+
+        api.hand_over(
+            winner_ids=[0],
+            pot=80,
+            final_stacks={0: 240, 1: 160},
+            my_profit_delta=0,
+        )
+
+        assert api.last_auto_collect_reasons(50) == ["葫芦"]
+
+    def test_auto_collect_reasons_exclude_board_trip_full_house(self):
+        api = make_api()
+        start_hand(api)
+        api.deal_hole_cards(["Ah", "Kd"])
+        api.deal_board(["7c", "7d", "7h"], street="flop")
+        api.deal_board(["2s"], street="turn")
+        api.deal_board(["2d"], street="river")
+
+        api.hand_over(
+            winner_ids=[0],
+            pot=80,
+            final_stacks={0: 240, 1: 160},
+            my_profit_delta=0,
+        )
+
+        assert api.last_auto_collect_reasons(50) == []
+
     def test_request_action_returns_decision(self):
         api = make_api()
         start_hand(api)

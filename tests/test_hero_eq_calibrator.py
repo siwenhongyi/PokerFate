@@ -2,9 +2,15 @@
 
 from pokerfate.strategy.range_v2.hero_eq_calibrator import (
     HeroEquityCalibrator,
+    _BIAS_SHRINK_K,
     classify_action_ctx_from_trigger,
     classify_action_ctx_from_decision,
 )
+
+
+def _shrunk_shift(raw_bias: float, n: int) -> float:
+    clamped = max(-0.25, min(0.25, raw_bias))
+    return clamped * n / (n + _BIAS_SHRINK_K)
 
 
 class TestHeroEquityCalibrator:
@@ -22,11 +28,12 @@ class TestHeroEquityCalibrator:
     def test_positive_bias_shifts_up(self):
         cal = HeroEquityCalibrator()
         # Historical: pred=40%, actual=80% → bias=+40%
+        # bias clamped to +25%, then shrunk by n/(n+K).
         for _ in range(10):
             cal.record('strong', 'flop', 2, predicted=0.40, actual=0.80)
-        # bias clamped to +25%
         result = cal.calibrate(0.50, 'strong', 'flop', 2)
-        assert result == 0.75
+        expected = 0.50 + _shrunk_shift(0.40, 10)
+        assert abs(result - expected) < 1e-9
 
     def test_negative_bias_shifts_down(self):
         cal = HeroEquityCalibrator()
@@ -34,12 +41,13 @@ class TestHeroEquityCalibrator:
         for _ in range(10):
             cal.record('medium', 'turn', 1, predicted=0.70, actual=0.50)
         result = cal.calibrate(0.60, 'medium', 'turn', 1)
-        assert abs(result - 0.40) < 1e-9
+        expected = 0.60 + _shrunk_shift(-0.20, 10)
+        assert abs(result - expected) < 1e-9
 
     def test_clamp_within_0_1(self):
         cal = HeroEquityCalibrator()
         # Extreme bias scenario
-        for _ in range(10):
+        for _ in range(1000):
             cal.record('nuts', 'river', 1, predicted=0.10, actual=0.95)
         # raw + 0.25 = 1.05 → clamp to 1.0
         result = cal.calibrate(0.95, 'nuts', 'river', 1)
@@ -161,8 +169,10 @@ class TestActionCtxSplit:
         assert abs(cal.bias_for('medium', 'turn', 3, 'passive') - 0.02) < 0.01
         # 两个桶独立，不会混
         raw = 0.30
-        assert cal.calibrate(raw, 'medium', 'turn', 3, 'raise') == 0.50   # 推高
-        assert abs(cal.calibrate(raw, 'medium', 'turn', 3, 'passive') - 0.32) < 0.01  # 几乎不变
+        raise_expected = raw + _shrunk_shift(0.20, 10)
+        passive_expected = raw + _shrunk_shift(0.02, 10)
+        assert abs(cal.calibrate(raw, 'medium', 'turn', 3, 'raise') - raise_expected) < 1e-9
+        assert abs(cal.calibrate(raw, 'medium', 'turn', 3, 'passive') - passive_expected) < 1e-9
 
     def test_default_ctx_passive_backwards_compat(self):
         """不传 action_ctx 时默认 passive，保证旧调用不崩。"""

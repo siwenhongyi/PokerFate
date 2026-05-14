@@ -88,6 +88,77 @@ from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards, made_
 log = logging.getLogger(__name__)
 
 
+_STRAIGHT_SEQUENCES = tuple(
+    frozenset(seq)
+    for seq in (
+        (14, 13, 12, 11, 10),
+        (13, 12, 11, 10, 9),
+        (12, 11, 10, 9, 8),
+        (11, 10, 9, 8, 7),
+        (10, 9, 8, 7, 6),
+        (9, 8, 7, 6, 5),
+        (8, 7, 6, 5, 4),
+        (7, 6, 5, 4, 3),
+        (6, 5, 4, 3, 2),
+        (14, 5, 4, 3, 2),
+    )
+)
+
+
+def _hero_draw_profile(hole: List[Card], board: List[Card]) -> DrawProfile:
+    """Classify hero's unfinished draw shape for DrawCall risk controls.
+
+    This intentionally stays separate from the coarse hero_bucket classifier:
+    older code may still call broadway four-liners "draw"; DrawCall needs the
+    finer distinction between true 8-out draws, gutshots, backdoors, and
+    overcards-only.
+    """
+    if len(hole) < 2 or len(board) < 3 or len(board) >= 5:
+        return DrawProfile()
+
+    cards = list(hole) + list(board)
+    suit_counts = Counter(c.suit for c in cards)
+    flush_draw = any(
+        cnt >= 4 and any(h.suit == suit for h in hole)
+        for suit, cnt in suit_counts.items()
+    )
+    backdoor_flush = (
+        len(board) == 3
+        and not flush_draw
+        and any(
+            cnt >= 3 and any(h.suit == suit for h in hole)
+            for suit, cnt in suit_counts.items()
+        )
+    )
+
+    all_ranks = {int(c.rank) for c in cards}
+    hole_ranks = {int(c.rank) for c in hole}
+    straight_out_ranks: set[int] = set()
+    for seq in _STRAIGHT_SEQUENCES:
+        present = seq & all_ranks
+        if len(present) != 4:
+            continue
+        if not (hole_ranks & present):
+            continue
+        missing = seq - present
+        if len(missing) == 1:
+            straight_out_ranks.update(missing)
+
+    oesd = len(straight_out_ranks) >= 2
+    gutshot = len(straight_out_ranks) == 1
+
+    top_board = max(int(c.rank) for c in board)
+    overcards = all(int(c.rank) > top_board for c in hole)
+
+    return DrawProfile(
+        flush_draw=flush_draw,
+        oesd=oesd,
+        gutshot=gutshot,
+        backdoor_flush=backdoor_flush,
+        overcards=overcards,
+    )
+
+
 # ---------------------------------------------------------------------------
 # BoardTexture — kept as a small public class used by reasoning text / tests
 # ---------------------------------------------------------------------------
@@ -177,6 +248,8 @@ def _fold_override_note(ctx: DecisionCtx, out) -> str | None:
         tag = f"fold>{_pct(_v3_engine._FOLD_OVERRIDE_MAX_FOLD_PROB_WITH_CALL)}"
     elif 'river strong_mass' in reason:
         tag = f"strong>{_pct(_v3_engine._FOLD_OVERRIDE_RIVER_STRONG_MAX)}"
+    elif 'fragile ' in reason:
+        tag = f"fragile>{_pct(_v3_engine._FOLD_OVERRIDE_FRAGILE_STRONG_MAX)}"
     elif 'blended_eq' in reason and out.purpose != 'fold_override_call':
         tag = 'blend<need'
     return (
@@ -313,7 +386,8 @@ def _stackoff_guard_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
     watched = {'value_jam', 'value_raise', 'overbet_raise_jam', 'thick_value_bet', 'overbet_value'}
     selected = out.purpose.split("→", 1)[0] if out.purpose else ''
     if 'stackoff_guard' in (out.reason or ''):
-        return f"SG-block {selected} sub={ctx.hero_made_subtype or '-'}"
+        reason = (out.reason or '').replace('stackoff_guard ', '', 1)
+        return f"SG-block {selected} {reason} sub={ctx.hero_made_subtype or '-'}"
     if selected not in watched and not (ids & watched):
         return None
     if not ctx.board_sig.paired and ctx.hero_made_subtype not in {
@@ -423,6 +497,7 @@ class PostflopStrategy:
         max_trap_lean: float = 0.0,
         max_bluff_lean: float = 0.0,
         n_sticky: int = 0,
+        villain_vs_hero_dist: Optional[Dict[str, float]] = None,
         my_prev_actions: Optional[dict] = None,
         opp_prev_actions: Optional[dict] = None,
         prev_bet_called_count: int = 0,
@@ -460,6 +535,7 @@ class PostflopStrategy:
             max_trap_lean=max_trap_lean,
             max_bluff_lean=max_bluff_lean,
             n_sticky=n_sticky,
+            villain_vs_hero_dist=villain_vs_hero_dist,
             my_prev_actions=my_prev_actions,
             opp_prev_actions=opp_prev_actions,
             prev_bet_called_count=prev_bet_called_count,
@@ -497,6 +573,7 @@ class PostflopStrategy:
             'hero_kicker_rank': ctx.hero_kicker_rank,
             'board_pair_rank': ctx.board_pair_rank,
             'pocket_pair_rank': ctx.pocket_pair_rank,
+            'villain_vs_hero_dist': dict(ctx.villain_vs_hero_dist or {}),
             'seed': out.seed,
         }
         self._last_bet_detail = {
@@ -541,6 +618,7 @@ class PostflopStrategy:
         max_trap_lean: float = 0.0,
         max_bluff_lean: float = 0.0,
         n_sticky: int = 0,
+        villain_vs_hero_dist: Optional[Dict[str, float]] = None,
         my_prev_actions: Optional[dict] = None,
         opp_prev_actions: Optional[dict] = None,
         prev_bet_called_count: int = 0,
@@ -580,6 +658,7 @@ class PostflopStrategy:
             'nut_flush_blocker': False, 'set_blocker': False, 'straight_blocker': False,
         }
         blockers = BlockerSet(**bl)
+        draw_profile = _hero_draw_profile(hole, board_list) if hole else DrawProfile()
 
         # Villain stats — caller 可以直接传入完整 VillainStats（推荐路径），
         # 这样 hands_seen / wtsd / bluff_win_rate / bet_win_count / flop_afq /
@@ -667,10 +746,11 @@ class PostflopStrategy:
             equity_uncertainty=equity_uncertainty,
             compression=compression,
             nut_advantage=nut_advantage,
-            draw=DrawProfile(),
+            draw=draw_profile,
             blockers=blockers,
             board_sig=board_sig,
             villain_bucket_dist=vbd,
+            villain_vs_hero_dist=dict(villain_vs_hero_dist or {}),
             villain_stats=vs,
             exploit_adj={},
             worst_villain_stats=worst_villain_stats if worst_villain_stats is not None else vs,

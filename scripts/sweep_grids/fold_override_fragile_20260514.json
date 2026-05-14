@@ -1,0 +1,22 @@
+{
+  "configs": [
+    {},
+    {
+      "PF_FOLD_OVERRIDE_CHEAP_CALL_MAX_POT_ODDS": "0.30"
+    },
+    {
+      "PF_FOLD_OVERRIDE_FRAGILE_STRONG_MAX": "0.45"
+    },
+    {
+      "PF_FOLD_OVERRIDE_FRAGILE_STRONG_MAX": "0.55"
+    },
+    {
+      "PF_FOLD_OVERRIDE_CHEAP_CALL_MAX_POT_ODDS": "0.30",
+      "PF_FOLD_OVERRIDE_FRAGILE_STRONG_MAX": "0.45"
+    },
+    {
+      "PF_FOLD_OVERRIDE_CHEAP_CALL_MAX_POT_ODDS": "0.30",
+      "PF_FOLD_OVERRIDE_FRAGILE_STRONG_MAX": "0.55"
+    }
+  ]
+}

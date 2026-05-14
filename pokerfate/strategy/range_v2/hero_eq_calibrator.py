@@ -15,8 +15,11 @@ ShowdownLearner 学的是**对手**的"某类牌强度下会做什么动作"，�
 3. 样本不足时返回 raw（无副作用）
 
 校准方式：按 (bucket, street, n_opp_bin) 聚合 (pred, actual) 对，
-计算平均 bias = mean(actual - pred)，将 raw_eq + bias 作为校准值。
-bias 被 clamp 到 ±0.25 防止极端样本 runaway。
+计算平均 bias = mean(actual - pred)，先 clamp 到 ±0.25，再按
+`n/(n+50)` 收缩后加到 raw_eq。收缩常数来自 2-5.log 训练、6.log
+交叉验证：multiway MAE 13.01pp → 12.92pp，river MAE 20.69pp → 20.40pp，
+且 RMSE 基本不变。河牌 actual 是 0/100 的二元标签，小样本直接吃满 bias
+会过拟合；收缩让样本越多越接近旧公式。
 
 语义注意：调用方应传 `predicted_hero_eq_multi` / `actual_hero_eq_street_multi`
 （多人池口径），和决策层 `ctx.equity_range` 同口径。单挑场景 n_opp=1 自成一桶。
@@ -24,11 +27,13 @@ bias 被 clamp 到 ±0.25 防止极端样本 runaway。
 
 from __future__ import annotations
 
+import os as _os
 from typing import Dict, List, Tuple
 
 
 _MIN_SAMPLES = 10         # 低于此样本量直接返回 raw
 _MAX_SHIFT = 0.25         # bias 单次最多 ±25pp，防止 runaway
+_BIAS_SHRINK_K = float(_os.environ.get('PF_HEQ_BIAS_SHRINK_K', '50'))
 _VALID_CTX = frozenset(('passive', 'bet', 'raise'))
 
 
@@ -111,6 +116,8 @@ class HeroEquityCalibrator:
             return raw_eq
         bias = sum(a - p for p, a in samples) / len(samples)
         bias = max(-_MAX_SHIFT, min(_MAX_SHIFT, bias))
+        if _BIAS_SHRINK_K > 0:
+            bias *= len(samples) / (len(samples) + _BIAS_SHRINK_K)
         return max(0.0, min(1.0, raw_eq + bias))
 
     def sample_count(self, bucket: str, street: str, num_opp: int,

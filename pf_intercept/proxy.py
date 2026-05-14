@@ -863,6 +863,8 @@ async def main(
     spoof_role_id: int | None = None,
     spoof_skin_id: int | None = None,
     use_range_equity: bool = True,
+    entertainment_web_host: str | None = config.ENTERTAINMENT_WEB_HOST,
+    entertainment_web_port: int | None = config.ENTERTAINMENT_WEB_PORT,
 ) -> None:
     global _bot, _entertainment
     _load_bark_key_from_file()
@@ -882,6 +884,8 @@ async def main(
     _entertainment = EntertainmentRuntime(
         host=config.ENTERTAINMENT_CMD_HOST,
         port=config.ENTERTAINMENT_CMD_PORT,
+        web_host=entertainment_web_host,
+        web_port=entertainment_web_port,
     )
     await _entertainment.start()
     log.info(
@@ -902,6 +906,9 @@ async def main(
         f"{config.ENTERTAINMENT_CMD_HOST}:{config.ENTERTAINMENT_CMD_PORT}；"
         "示例：python3 -m pf_entertainment.cli color red=1000 lvl=1"
     )
+    if entertainment_web_host is not None and entertainment_web_port is not None:
+        urls = _entertainment.status_data().get("web_urls", [])
+        print(f"[proxy] 娱乐游戏 Web {', '.join(urls) or '-'}")
 
     server_ssl = _make_server_ssl()
 
@@ -974,6 +981,22 @@ def _parse_proxy_args() -> argparse.Namespace:
         default="range",
         help="胜率模型：range=两阶段Range估算（默认），eqr=GTO+EQR（同mingli分支）",
     )
+    p.add_argument(
+        "--entertainment-web-host",
+        default=config.ENTERTAINMENT_WEB_HOST,
+        help=f"娱乐小游戏 Web 监听地址（默认 {config.ENTERTAINMENT_WEB_HOST}）",
+    )
+    p.add_argument(
+        "--entertainment-web-port",
+        type=int,
+        default=config.ENTERTAINMENT_WEB_PORT,
+        help=f"娱乐小游戏 Web 监听端口（默认 {config.ENTERTAINMENT_WEB_PORT}）",
+    )
+    p.add_argument(
+        "--no-entertainment-web",
+        action="store_true",
+        help="不启动娱乐小游戏 Web",
+    )
     return p.parse_args()
 
 
@@ -986,5 +1009,11 @@ if __name__ == "__main__":
             spoof_role_id=_args.role_id,
             spoof_skin_id=_args.skin_id,
             use_range_equity=(_args.equity_mode == "range"),
+            entertainment_web_host=(
+                None if _args.no_entertainment_web else _args.entertainment_web_host
+            ),
+            entertainment_web_port=(
+                None if _args.no_entertainment_web else _args.entertainment_web_port
+            ),
         )
     )

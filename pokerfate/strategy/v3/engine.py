@@ -51,8 +51,29 @@ _FOLD_OVERRIDE_LOW_SPR_DISABLE = float(
 _FOLD_OVERRIDE_STACK_COMMIT_DISABLE = float(
     os.environ.get('PF_FOLD_OVERRIDE_STACK_COMMIT_DISABLE', '0.35')
 )
+_FOLD_OVERRIDE_COMMIT_EDGE_MIN = float(
+    os.environ.get('PF_FOLD_OVERRIDE_COMMIT_EDGE_MIN', '0.12')
+)
+_FOLD_OVERRIDE_COMMIT_CHEAP_EDGE_MIN = float(
+    os.environ.get('PF_FOLD_OVERRIDE_COMMIT_CHEAP_EDGE_MIN', '0.08')
+)
+_FOLD_OVERRIDE_COMMIT_NUTS_MAX = float(
+    os.environ.get('PF_FOLD_OVERRIDE_COMMIT_NUTS_MAX', '0.40')
+)
+_FOLD_OVERRIDE_COMMIT_STRONG_MAX = float(
+    os.environ.get('PF_FOLD_OVERRIDE_COMMIT_STRONG_MAX', '0.60')
+)
 _FOLD_OVERRIDE_CHEAP_CALL_MAX_POT_ODDS = float(
-    os.environ.get('PF_FOLD_OVERRIDE_CHEAP_CALL_MAX_POT_ODDS', '0.20')
+    os.environ.get('PF_FOLD_OVERRIDE_CHEAP_CALL_MAX_POT_ODDS', '0.30')
+)
+_FOLD_OVERRIDE_FRAGILE_EDGE_MIN = float(
+    os.environ.get('PF_FOLD_OVERRIDE_FRAGILE_EDGE_MIN', '0.08')
+)
+_FOLD_OVERRIDE_FRAGILE_STRONG_MAX = float(
+    os.environ.get('PF_FOLD_OVERRIDE_FRAGILE_STRONG_MAX', '0.55')
+)
+_FOLD_OVERRIDE_FRAGILE_COMMIT_MIN = float(
+    os.environ.get('PF_FOLD_OVERRIDE_FRAGILE_COMMIT_MIN', '0.25')
 )
 _FOLD_OVERRIDE_STICKY_MC_EXTRA_PENALTY = float(
     os.environ.get('PF_FOLD_OVERRIDE_STICKY_MC_EXTRA_PENALTY', '0.10')
@@ -69,6 +90,16 @@ _OVERBET_RAISE_JAM_FORCE_MIN_WEIGHT = float(
 _LEVERAGE_TOP_GAP = float(os.environ.get('PF_LEVERAGE_TOP_GAP', '0.18'))
 _LEVERAGE_MIN_TOP = float(os.environ.get('PF_LEVERAGE_MIN_TOP', '0.48'))
 _LEVERAGE_DETERMINISTIC = os.environ.get('PF_LEVERAGE_DETERMINISTIC', '1') != '0'
+
+_FRAGILE_FOLD_OVERRIDE_SUBTYPES = {
+    'top_pair_weak_kicker',
+    'board_pair_kicker',
+    'board_pair_hero_pair',
+    'board_pair_pocket_underpair',
+    'board_two_pair',
+    'trips_weak_kicker',
+    'board_trips_kicker',
+}
 
 
 @dataclass
@@ -223,20 +254,76 @@ class V3Engine:
         if ctx.hero_bucket not in {'medium', 'strong', 'nuts'}:
             return False, f'fold-only guard: bucket={ctx.hero_bucket}'
 
+        dist = ctx.villain_bucket_dist or {}
+        nut_prob = dist.get('nuts', 0.0)
+        strong_mass = nut_prob + dist.get('strong', 0.0)
+        range_edge = ctx.equity_range - ctx.pot_odds
         stack_commit = ctx.to_call / ctx.stack if ctx.stack > 0 else 0.0
-        if stack_commit >= _FOLD_OVERRIDE_STACK_COMMIT_DISABLE:
+        fragile = (ctx.hero_made_subtype or '') in _FRAGILE_FOLD_OVERRIDE_SUBTYPES
+
+        if fragile:
+            if (
+                ctx.hero_made_subtype in {'board_pair_kicker', 'board_two_pair'}
+                and ctx.street != 'river'
+            ):
+                fragile = False
+
+        if fragile:
+            fragile_high_leverage = (
+                stack_commit >= _FOLD_OVERRIDE_FRAGILE_COMMIT_MIN
+                or ctx.pot_odds >= 0.25
+                or ctx.spr <= 1.5
+            )
+            if (
+                fragile_high_leverage
+                and (
+                    strong_mass >= _FOLD_OVERRIDE_FRAGILE_STRONG_MAX
+                    or range_edge < _FOLD_OVERRIDE_FRAGILE_EDGE_MIN
+                    or blended_eq < ctx.pot_odds + _FOLD_OVERRIDE_FRAGILE_EDGE_MIN
+                )
+            ):
+                return False, (
+                    f'fold-only guard: fragile {ctx.hero_made_subtype} '
+                    f'edge {range_edge:.2f} strong {strong_mass:.2f}'
+                )
+
+        cheap_range_call = (
+            ctx.pot_odds <= _FOLD_OVERRIDE_CHEAP_CALL_MAX_POT_ODDS
+            and ctx.equity_range >= ctx.pot_odds
+            and range_edge >= _FOLD_OVERRIDE_COMMIT_CHEAP_EDGE_MIN
+        )
+        commit_base = (
+            stack_commit >= _FOLD_OVERRIDE_STACK_COMMIT_DISABLE
+            and ctx.street != 'river'
+            and ctx.spr > 0
+            and ctx.spr <= _FOLD_OVERRIDE_LOW_SPR_DISABLE
+            and nut_prob < _FOLD_OVERRIDE_COMMIT_NUTS_MAX
+            and strong_mass < _FOLD_OVERRIDE_COMMIT_STRONG_MAX
+        )
+        standard_commit_call = (
+            commit_base
+            and range_edge >= _FOLD_OVERRIDE_COMMIT_EDGE_MIN
+            and blended_eq >= ctx.pot_odds + _FOLD_OVERRIDE_COMMIT_EDGE_MIN
+        )
+        cheap_commit_call = (
+            commit_base
+            and cheap_range_call
+            and range_edge >= _FOLD_OVERRIDE_COMMIT_CHEAP_EDGE_MIN
+            and blended_eq >= ctx.pot_odds + _FOLD_OVERRIDE_COMMIT_CHEAP_EDGE_MIN
+        )
+        commit_range_call = standard_commit_call or cheap_commit_call
+
+        if (
+            stack_commit >= _FOLD_OVERRIDE_STACK_COMMIT_DISABLE
+            and not commit_range_call
+        ):
             return False, (
                 f'fold-only guard: stack_commit {stack_commit:.2f} >= '
                 f'{_FOLD_OVERRIDE_STACK_COMMIT_DISABLE:.2f}'
             )
 
-        cheap_range_call = (
-            ctx.pot_odds <= _FOLD_OVERRIDE_CHEAP_CALL_MAX_POT_ODDS
-            and ctx.equity_range >= ctx.pot_odds
-        )
-
         if ctx.spr > 0 and ctx.spr <= _FOLD_OVERRIDE_LOW_SPR_DISABLE:
-            if not cheap_range_call:
+            if not (cheap_range_call or commit_range_call):
                 return False, (
                     f'fold-only guard: low_spr {ctx.spr:.2f} <= '
                     f'{_FOLD_OVERRIDE_LOW_SPR_DISABLE:.2f}'
@@ -253,7 +340,6 @@ class V3Engine:
                 p.default_action == 'call' for p, w in candidates if w > 0
             )
 
-        range_edge = ctx.equity_range - ctx.pot_odds
         if (
             has_call_candidate
             and fold_prob > _FOLD_OVERRIDE_MAX_FOLD_PROB_WITH_CALL
@@ -272,10 +358,6 @@ class V3Engine:
                 f'{_FOLD_OVERRIDE_FOLD_ONLY_MAX_RANGE_GAP:.2f}'
             )
 
-        strong_mass = (
-            (ctx.villain_bucket_dist or {}).get('nuts', 0.0)
-            + (ctx.villain_bucket_dist or {}).get('strong', 0.0)
-        )
         if (
             ctx.street == 'river'
             and strong_mass >= _FOLD_OVERRIDE_RIVER_STRONG_MAX
@@ -291,7 +373,11 @@ class V3Engine:
             return False, (
                 f'fold-only guard: blended_eq {blended_eq:.2f} < need {need:.2f}'
             )
-        return True, 'cheap_range_call' if cheap_range_call else 'fold_only_extra_margin'
+        if cheap_range_call:
+            return True, 'cheap_commit_range_call' if cheap_commit_call else 'cheap_range_call'
+        if commit_range_call:
+            return True, 'commit_range_call'
+        return True, 'fold_only_extra_margin'
 
     def _choose_purpose(
         self,
@@ -560,7 +646,8 @@ class V3Engine:
         # Raise path
         amount = self._raise_amount(ctx, chosen)
         guard = stackoff_guard_reason(
-            ctx, chosen.id, will_jam=(amount >= ctx.stack and ctx.stack > 0),
+            ctx, chosen.id,
+            will_jam=(amount >= ctx.stack * 0.85 and ctx.stack > 0),
         )
         if guard:
             return DecisionOutput(

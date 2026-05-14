@@ -10,12 +10,13 @@ import pytest
 
 from pokerfate.core.card import Card
 from pokerfate.strategy.v3 import (
-    BlockerSet, BoardSignals, DecisionCtx, DecisionOutput, V3Engine,
+    BlockerSet, BoardSignals, DecisionCtx, DecisionOutput, DrawProfile, V3Engine,
     VillainStats,
 )
 from pokerfate.strategy.v3 import alpha_gate, calibrator
 from pokerfate.strategy.v3 import board as v3_board
 from pokerfate.strategy.v3 import exploit as v3_exploit
+from pokerfate.strategy.postflop import _hero_draw_profile
 from pokerfate.strategy.range_v2.hand_categorizer import made_hand_info
 
 
@@ -60,6 +61,16 @@ class TestBoardSignals:
     def test_blockers_set(self):
         bl = v3_board.detect_blockers(cards('Ac', '7d'), cards('Kh', '7h', '2c'))
         assert bl['set_blocker'] is True
+
+    def test_draw_profile_broadway_is_gutshot_not_oesd(self):
+        draw = _hero_draw_profile(cards('As', 'Ks'), cards('Qc', 'Jd', '4h'))
+        assert draw.gutshot is True
+        assert draw.oesd is False
+        assert draw.overcards is True
+
+    def test_draw_profile_real_oesd(self):
+        draw = _hero_draw_profile(cards('9s', '8s'), cards('7d', '6c', '2h'))
+        assert draw.oesd is True
 
 
 # ---------------------------------------------------------------------------
@@ -482,6 +493,7 @@ class TestEngineDefense:
         # implied bonus keeps the call +EV.
         ctx = self._setup_facing_bet(
             hero_bucket='draw',
+            draw=DrawProfile(flush_draw=True),
             equity_mc=0.36, equity_range=0.36,
             pot=30.0, to_call=15.0,
             pot_odds=15.0 / 45.0,   # 0.33
@@ -490,6 +502,42 @@ class TestEngineDefense:
         calls = sum(1 for _ in range(30)
                     if engine.decide(ctx).action == 'call')
         assert calls >= 20
+
+    def test_dirty_overcards_do_not_get_draw_call_bonus(self):
+        engine = V3Engine()
+        board = cards('4s', '3s', '6s')
+        ctx = self._setup_facing_bet(
+            street='flop',
+            hole_cards=cards('Ac', '9c'),
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hero_bucket='weak_draw',
+            draw=DrawProfile(overcards=True),
+            equity_mc=0.36, equity_range=0.31,
+            pot=550.0, to_call=275.0,
+            pot_odds=275.0 / 825.0,
+            spr=1.0, stack=1000.0,
+        )
+        out = engine.decide(ctx)
+        assert out.action == 'fold'
+
+    def test_gutshot_overcards_can_still_draw_call(self):
+        engine = V3Engine()
+        board = cards('Qc', 'Jd', '4h')
+        ctx = self._setup_facing_bet(
+            street='flop',
+            hole_cards=cards('As', 'Ks'),
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hero_bucket='draw',
+            draw=DrawProfile(gutshot=True, overcards=True),
+            equity_mc=0.61, equity_range=0.48,
+            pot=100.0, to_call=30.0,
+            pot_odds=30.0 / 130.0,
+            spr=2.3, stack=300.0,
+        )
+        out = engine.decide(ctx)
+        assert out.action == 'call'
 
     def test_opp_raise_premium_is_monotonic_in_af(self):
         """premium 是 AF 的连续单调减函数：AF 越高，premium 越低。
@@ -857,6 +905,58 @@ class TestPurposeTriggers:
         )
         # 注意：overbet_value deferral 需要 nut_advantage >= 0.25；默认 0 → thick
         # value 应当触发，除非 sticky gate。
+        assert p.trigger(ctx).hit
+
+    def test_semi_bluff_raise_blocks_backdoor_blocker_vs_station(self):
+        from pokerfate.strategy.v3.purposes_defensive import SemiBluffRaise
+        p = SemiBluffRaise()
+        board = cards('Ts', '8s', '4d')
+        ctx = self._base_ctx(
+            street='flop',
+            hole_cards=cards('As', 'Kc'),
+            board=board,
+            board_sig=v3_board.analyze(board),
+            facing_bet=True,
+            hero_bucket='weak_draw',
+            equity_range=0.40,
+            draw=DrawProfile(backdoor_flush=True, overcards=True),
+            blockers=BlockerSet(nut_flush_blocker=True),
+            pot=385.0,
+            to_call=100.0,
+            stack=5000.0,
+            spr=12.8,
+            villain_stats=VillainStats(
+                hands_seen=30, af=0.6,
+                fold_to_cbet=0.29, fold_to_cbet_opps=10,
+                wtsd=0.35,
+            ),
+        )
+        assert not p.trigger(ctx).hit
+
+    def test_semi_bluff_raise_allows_real_flush_draw_with_blocker(self):
+        from pokerfate.strategy.v3.purposes_defensive import SemiBluffRaise
+        p = SemiBluffRaise()
+        board = cards('Ts', '8s', '4d')
+        ctx = self._base_ctx(
+            street='flop',
+            hole_cards=cards('As', 'Ks'),
+            board=board,
+            board_sig=v3_board.analyze(board),
+            facing_bet=True,
+            hero_bucket='draw',
+            equity_range=0.42,
+            draw=DrawProfile(flush_draw=True, overcards=True),
+            blockers=BlockerSet(nut_flush_blocker=True),
+            pot=385.0,
+            to_call=100.0,
+            stack=5000.0,
+            spr=12.8,
+            villain_stats=VillainStats(
+                hands_seen=30, af=1.6,
+                fold_to_cbet=0.50, fold_to_cbet_opps=10,
+                wtsd=0.24,
+            ),
+        )
         assert p.trigger(ctx).hit
 
     def test_pure_bluff_river_requires_blocker(self):
@@ -1345,3 +1445,116 @@ class TestNonNutStackoffGuard:
         out = V3Engine().decide(ctx)
         assert out.action == 'check'
         assert 'stackoff_guard' in out.reason
+
+    def test_completed_flush_non_flush_straight_does_not_overbet_jam(self):
+        board = cards('2s', '4s', '5d', 'Jc', '3s')
+        info = made_hand_info(cards('6s', '6h'), board)
+        ctx = DecisionCtx(
+            street='river',
+            hole_cards=cards('6s', '6h'),
+            board=board,
+            position='MP',
+            is_ip=True,
+            num_opponents=1,
+            pot=8_000_000.0,
+            to_call=1_200_000.0,
+            stack=7_383_394.0,
+            big_blind=50_000.0,
+            spr=3.1,
+            pot_odds=1_200_000.0 / 9_200_000.0,
+            facing_bet=True,
+            hero_bucket='nuts',
+            hero_made_subtype=info.subtype,
+            hero_hand_rank=info.hand_rank,
+            hero_made_rank=info.made_rank,
+            hero_kicker_rank=info.kicker_rank,
+            board_pair_rank=info.board_pair_rank,
+            pocket_pair_rank=info.pocket_pair_rank,
+            equity_mc=0.95,
+            equity_range=0.91,
+            nut_advantage=0.31,
+            board_sig=v3_board.analyze(board),
+            villain_bucket_dist={
+                'nuts': 0.40, 'strong': 0.17, 'medium': 0.35,
+                'draw': 0.0, 'weak_draw': 0.0, 'air': 0.08,
+            },
+            seed=30,
+        )
+        assert info.hand_rank == 'straight'
+        out = V3Engine().decide(ctx)
+        assert out.action != 'raise'
+        assert out.purpose != 'overbet_raise_jam'
+
+    def test_four_to_straight_two_pair_does_not_value_jam(self):
+        board = cards('Ac', 'Jh', 'Qh', 'Kd', '7d')
+        info = made_hand_info(cards('As', 'Jc'), board)
+        ctx = DecisionCtx(
+            street='river',
+            hole_cards=cards('As', 'Jc'),
+            board=board,
+            position='SB',
+            is_ip=False,
+            num_opponents=1,
+            pot=2_000_000.0,
+            stack=4_600_000.0,
+            big_blind=50_000.0,
+            spr=2.3,
+            facing_bet=False,
+            hero_bucket='strong',
+            hero_made_subtype=info.subtype,
+            hero_hand_rank=info.hand_rank,
+            hero_made_rank=info.made_rank,
+            hero_kicker_rank=info.kicker_rank,
+            board_pair_rank=info.board_pair_rank,
+            pocket_pair_rank=info.pocket_pair_rank,
+            equity_mc=0.82,
+            equity_range=0.75,
+            board_sig=v3_board.analyze(board),
+            villain_bucket_dist={
+                'nuts': 0.20, 'strong': 0.25, 'medium': 0.35,
+                'draw': 0.0, 'weak_draw': 0.0, 'air': 0.20,
+            },
+            seed=63,
+        )
+        assert info.subtype == 'clean_two_pair'
+        out = V3Engine().decide(ctx)
+        assert out.purpose != 'value_jam'
+        assert out.amount < ctx.stack
+
+    def test_fragile_top_pair_vs_passive_high_leverage_folds(self):
+        board = cards('As', '8d', '6s', 'Th')
+        info = made_hand_info(cards('Ac', '2c'), board)
+        ctx = DecisionCtx(
+            street='turn',
+            hole_cards=cards('Ac', '2c'),
+            board=board,
+            position='SB',
+            is_ip=False,
+            num_opponents=2,
+            pot=2_000_000.0,
+            to_call=800_000.0,
+            stack=1_600_000.0,
+            big_blind=50_000.0,
+            spr=0.8,
+            pot_odds=800_000.0 / 2_800_000.0,
+            facing_bet=True,
+            hero_bucket='medium',
+            hero_made_subtype=info.subtype,
+            hero_hand_rank=info.hand_rank,
+            hero_made_rank=info.made_rank,
+            hero_kicker_rank=info.kicker_rank,
+            board_pair_rank=info.board_pair_rank,
+            pocket_pair_rank=info.pocket_pair_rank,
+            equity_mc=0.34,
+            equity_range=0.34,
+            board_sig=v3_board.analyze(board),
+            villain_stats=VillainStats(af=0.5, hands_seen=30, bet_win_count=8),
+            villain_bucket_dist={
+                'nuts': 0.12, 'strong': 0.26, 'medium': 0.38,
+                'draw': 0.10, 'weak_draw': 0.04, 'air': 0.10,
+            },
+            seed=4,
+        )
+        assert info.subtype == 'top_pair_weak_kicker'
+        out = V3Engine().decide(ctx)
+        assert out.action == 'fold'
