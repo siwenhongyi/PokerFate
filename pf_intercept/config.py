@@ -23,6 +23,11 @@ WSS_PORT     = 9012
 ENTERTAINMENT_CMD_HOST = "127.0.0.1"
 ENTERTAINMENT_CMD_PORT = 9021
 
+# Local Web UI for entertainment side games.
+# Bind all local interfaces so phones / other LAN devices can open the UI.
+ENTERTAINMENT_WEB_HOST = "0.0.0.0"
+ENTERTAINMENT_WEB_PORT = 9022
+
 # Additional ports the game might hit on SERVER_HOST → TCP pass-through.
 PASSTHROUGH_PORTS: list[int] = [443, 80]
 
@@ -90,6 +95,16 @@ PROFIT_LOCK_QUICKSTART_DELAY_SEC = 0.5
 # 中间若出现盈利锁仓会清零破产计数。发起 QuickStart 前会清零本策略统计，避免池子小回到同房时立刻再次逃离。
 ROOM_ESCAPE_ENABLED = True
 ROOM_ESCAPE_CONSECUTIVE_BUSTS = 2
+
+# 自动收藏牌局：WinnerRSP 结算后，满足条件就调用 /collCard/update。
+# 与盈利锁仓一致，SNG / 好友局会跳过。
+# 条件：
+#   1) 单手盈利 >= AUTO_COLLECT_PROFIT_BB_THRESHOLD BB
+#   2) 我方获胜且最终牌型为四条 / 同花顺 / 皇家同花顺 / 葫芦
+#      其中葫芦会排除“公共牌本身三条/葫芦”导致的排面葫芦。
+AUTO_COLLECT_HANDS_ENABLED = True
+AUTO_COLLECT_PROFIT_BB_THRESHOLD = 50
+GAME_HTTP_VERSION = "1.5.1"
 
 # ── GameData API (30-day player stats) ───────────────────────────────────────
 # HTTP API host — from the login response's server list (UrlManager.getHttpUrl).

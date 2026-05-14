@@ -36,6 +36,40 @@ BARK_EVENT_ICONS: dict[str, str] = {
 }
 
 
+def _fit_utf8(text: str, max_bytes: int, suffix: str = "...") -> str:
+    raw = text.encode("utf-8")
+    if len(raw) <= max_bytes:
+        return text
+    suffix_raw = suffix.encode("utf-8")
+    budget = max(0, max_bytes - len(suffix_raw))
+    clipped = raw[:budget]
+    while clipped:
+        try:
+            return clipped.decode("utf-8") + suffix
+        except UnicodeDecodeError:
+            clipped = clipped[:-1]
+    return suffix if max_bytes >= len(suffix_raw) else ""
+
+
+def _append_hand_detail(body: str, fields: dict[str, Any]) -> str:
+    detail = fields.get("hand_detail")
+    if not detail:
+        return body
+    detail_text = str(detail).strip()
+    if not detail_text:
+        return body
+
+    # Bark ultimately uses APNs; regular APNs payloads are capped at 4096 bytes.
+    # Keep the visible body comfortably below that to leave room for title/icon
+    # and Bark's own JSON wrapper.
+    max_body_bytes = 3000
+    prefix = body + "\n\n"
+    budget = max_body_bytes - len(prefix.encode("utf-8"))
+    if budget <= 0:
+        return _fit_utf8(body, max_body_bytes)
+    return prefix + _fit_utf8(detail_text, budget)
+
+
 def format_bark_message(event: str, fields: dict[str, Any]) -> tuple[str, str, str | None]:
     icon: str | None = BARK_EVENT_ICONS.get(event)
     if icon is None:
@@ -87,15 +121,16 @@ def format_bark_message(event: str, fields: dict[str, Any]) -> tuple[str, str, s
         is_up = delta_f >= 0
         pct = delta_f / start_f * 100.0
         delta_bb = delta_f / bb_f
+        start_bb = start_f / bb_f
         sign = "+" if is_up else ""
         icon = BARK_EVENT_ICONS.get("hand_swing_up" if is_up else "hand_swing_down") or icon
         title = f"单手波动 · {sign}{delta_bb:.1f} BB"
         body = (
             f"本手盈亏: {sign}{int(delta_f)}（{sign}{delta_bb:.1f} BB）\n"
-            f"开局筹码: {int(start_f)}（占比 {sign}{pct:.1f}%）\n"
+            f"开局筹码: {int(start_f)}（{start_bb:.1f} BB，占比 {sign}{pct:.1f}%）\n"
             f"BB = {int(bb_f)}"
         )
-        return title, body, icon
+        return title, _append_hand_detail(body, fields), icon
 
     if event == "gamedata_no_history":
         title = "新玩家 · 无历史数据"

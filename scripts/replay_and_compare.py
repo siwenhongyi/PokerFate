@@ -660,6 +660,7 @@ def main() -> None:
     # how the live bot experiences session boundaries).
     comparisons: list[dict] = []
     last_session = None
+    last_big_blind = None
     api: Optional[PokerFateAPI] = None
     hero_id_cache: dict[int, Optional[int]] = {}
 
@@ -672,11 +673,18 @@ def main() -> None:
             if args.progress and (idx == 1 or idx == total_hands or idx % progress_every == 0):
                 print(f"__PF_PROGRESS__ {idx} {total_hands}", file=sys.stderr, flush=True)
             continue
-        if session != last_session or api is None or hero_id != getattr(api, "my_player_id", None):
+        table_bb = float(hand.get("big_blind") or 2.0)
+        if (
+            session != last_session
+            or api is None
+            or hero_id != getattr(api, "my_player_id", None)
+            or table_bb != last_big_blind
+        ):
             # Fresh API for new session or changed hero id
             api = PokerFateAPI(
                 my_player_id=hero_id,
-                big_blind=2.0,   # replay doesn't depend on BB; API uses it
+                big_blind=table_bb,
+                small_blind=table_bb / 2.0,
                 autosave_path=None,
                 log_file=None,
                 verbose=False,
@@ -687,6 +695,7 @@ def main() -> None:
             # Silence per-hand pretty-print so summary 不被淹没。
             api._log._console = False
             last_session = session
+            last_big_blind = table_bb
 
         comparisons.extend(_replay_hand(api, hand, hero_id))
         if args.progress and (idx == 1 or idx == total_hands or idx % progress_every == 0):

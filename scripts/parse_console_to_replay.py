@@ -186,6 +186,7 @@ def parse_log(log_path: Path, hero_name: str, bb_value: int = 1000) -> list[dict
             cur = {
                 "hand": hand_no,
                 "session": session_id,
+                "big_blind": bb_value,
                 "dealer_id": 0,
                 "players": players,
                 "hole_cards": [],

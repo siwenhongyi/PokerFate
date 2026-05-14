@@ -37,3 +37,6 @@ logs/
 docs/
 data/
 !pokerfate/data
+
+# PokerFate reverse local workspace
+pf_reverse/local/

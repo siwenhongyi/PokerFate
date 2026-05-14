@@ -91,7 +91,7 @@ request_action()
 |------|---------|
 | `auto_rebuy` | 筹码清零，自动续入时 |
 | `profit_lock_trigger` | 现金桌盈利锁仓触发（准备离桌时） |
-| `hand_swing` | 单手盈亏超过 20BB 且超过开局筹码 30% |
+| `hand_swing` | 单手盈亏达到 20BB |
 | `wss_disconnected` | WebSocket 异常断开 |
 | `gamedata_no_history` | 本次进程首次遇到无历史数据玩家（code=-2），每次启动最多一次 |
 | `token_captured` | 模板支持；当前 `force_domain.py` 只写入 token 文件，不自动推送 |
@@ -113,6 +113,7 @@ request_action()
 | `bark_key.txt` | Bark 设备 Key（第一行） |
 | `auth_token.txt` | 游戏 REST API 鉴权 token（由 `force_domain.py` 登录时自动写入，无需手动填写） |
 | `ip_cache.json` | DNS 解析结果缓存（跨重启复用，加速连接） |
+| `entertainment_color_records.json` | 小游戏 Web 记录的彩球任务历史与每局盈亏 |
 | `resources.md` | 游戏内角色/皮肤/道具 ID 速查表 |
 
 ---
@@ -192,6 +193,29 @@ request_action()
 - `--role-id` / `--skin-id`：本地展示层篡改本人角色和皮肤 ID。
 
 启动后打开游戏客户端正常进桌，proxy 自动检测 seat/blinds 并开始决策。
+
+### 4. 小游戏 Web
+
+代理启动后会同时启动娱乐小游戏 Web，并默认监听所有本机网卡，局域网设备可通过电脑的局域网 IP 访问：
+
+```text
+http://127.0.0.1:9022
+http://<电脑局域网IP>:9022
+```
+
+页面里可以设置彩球的起始筹码、最大筹码、倍投倍率和循环次数。彩球任务的选色统计只存在于本次任务内：第一局随机选色，后续按本次任务已开出的彩球中出现次数最少的颜色下注。任务结束后会把本次每局盈亏写入：
+
+```text
+data/entertainment_color_records.json
+```
+
+如需关闭或改端口：
+
+```bash
+.venv/bin/python -m pf_intercept.proxy --no-entertainment-web
+.venv/bin/python -m pf_intercept.proxy --entertainment-web-port 19022
+.venv/bin/python -m pf_intercept.proxy --entertainment-web-host 127.0.0.1
+```
 
 ---
 

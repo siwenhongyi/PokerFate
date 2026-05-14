@@ -212,6 +212,7 @@ class PokerLogger:
         bucket_dist: Optional[Dict[str, float]] = None,
         vs_hero: Optional[Dict[str, float]] = None,
         to_call: float = 0.0,
+        pot_before_action: float = 0.0,
     ):
         self._file({
             "event": "opponent_action",
@@ -224,6 +225,7 @@ class PokerLogger:
             "range_pct": round(range_pct, 3) if range_pct > 0 else None,
             "bucket_dist": {k: round(v, 3) for k, v in (bucket_dist or {}).items() if v > 0.01} or None,
             "vs_hero": {k: round(v, 3) for k, v in (vs_hero or {}).items()} or None,
+            "pot_before_action": round(pot_before_action, 2) if pot_before_action > 0 else None,
         })
         if not self._console:
             return
@@ -272,6 +274,9 @@ class PokerLogger:
             # pot 比率（翻后）或 bb 倍数（翻前）
             if street.lower() == "preflop":
                 size_str = f"({amt_bb:.0f}bb)"
+            elif pot_before_action > 0:
+                ratio = amount / pot_before_action
+                size_str = f"({amt_bb:.0f}bb {ratio:.1f}x pot)"
             elif pot > 0:
                 ratio = amount / pot
                 size_str = f"({amt_bb:.0f}bb {ratio:.1f}x pot)"

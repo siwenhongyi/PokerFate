@@ -179,6 +179,9 @@ class PokerBot:
         squeeze_callers = callers_after_last_raise if facing_action == 'open' else 0
         cold_callers = callers_after_last_raise if facing_action in ('3bet', '4bet') else 0
         sticky_density = self._preflop_sticky_density(gs, player)
+        fourbet_call_edge_adjust = self._preflop_4bet_call_edge_adjust(
+            gs, player, facing_action,
+        )
         action_str, amount = self.preflop.decide(
             hole_cards=player.hole_cards,
             position=position,
@@ -199,6 +202,7 @@ class PokerBot:
             sticky_density=sticky_density,
             cold_callers=cold_callers,
             squeeze_callers=squeeze_callers,
+            fourbet_call_edge_adjust=fourbet_call_edge_adjust,
         )
 
         self._last_reasoning = self._preflop_reasoning(
@@ -228,6 +232,7 @@ class PokerBot:
             'facing_action': facing_action,
             'action': action_str,
             'amount': amount,
+            'fourbet_call_edge_adjust': fourbet_call_edge_adjust,
             'position': position,
             'num_active_opponents': num_opponents,
             'sticky_density': sticky_density,
@@ -305,6 +310,36 @@ class PokerBot:
         stats = [self.opponent_model.get(pid).to_villain_stats() for pid in opp_ids]
         _, _, _, _, n_sticky = aggregate_villain_stats(stats)
         return max(0.0, min(1.0, n_sticky / max(1, len(stats))))
+
+    def _preflop_4bet_call_edge_adjust(
+        self, gs: GameState, player: Player, facing_action: str,
+    ) -> float:
+        """Adjustment to 4bet-call edge gates; negative loosens, positive tightens."""
+        if facing_action != '4bet':
+            return 0.0
+        opp_id = gs.last_aggressor_id(player.player_id, street='preflop')
+        if opp_id is None:
+            return 0.0
+        stats = self.opponent_model.get(opp_id)
+        if stats.hands_seen < MIN_HANDS_FOR_CLASSIFICATION:
+            return 0.0
+
+        vpip = stats.vpip
+        pfr = stats.pfr
+        af = stats.aggression_factor
+        three_bet = stats.three_bet_pct
+        gap = vpip - pfr
+        ptype = stats.player_type()
+
+        if ptype == 'maniac' or three_bet >= 0.14 or (pfr >= 0.28 and af >= 1.6):
+            return -0.03
+        if three_bet >= 0.10 or (vpip >= 0.34 and pfr >= 0.22 and af >= 1.3):
+            return -0.02
+        if pfr <= 0.12 and af < 1.3:
+            return 0.03
+        if pfr <= 0.16 and gap >= 0.18:
+            return 0.02
+        return 0.0
 
     # ------------------------------------------------------------------
     # Postflop logic
@@ -570,6 +605,23 @@ class PokerBot:
                 )
                 villain_nuts_pct = 0.0
 
+        villain_vs_hero_dist: Dict[str, float] = {}
+        if (self.use_range_equity
+                and len(board) >= 5
+                and primary_opp_id is not None
+                and primary_opp_id >= 0):
+            try:
+                villain_vs_hero_dist = self._range_tracker.get_vs_hero_dist(
+                    primary_opp_id, board, list(player.hole_cards),
+                )
+            except Exception:
+                log.exception(
+                    "villain vs hero distribution failed for opponent=%s board=%s",
+                    primary_opp_id,
+                    [str(c) for c in board],
+                )
+                villain_vs_hero_dist = {}
+
         # Replace fixed equity bumps with dynamic pot-odds threshold adjustment.
         # This keeps "equity" as a model estimate while exploit reads move "need".
         exploit_need_adjust = 0.0
@@ -644,6 +696,7 @@ class PokerBot:
             max_trap_lean=max_tl,
             max_bluff_lean=max_bl,
             n_sticky=n_sticky,
+            villain_vs_hero_dist=villain_vs_hero_dist,
             # 2026-04-25 修 P0 bug：把完整跟踪的 hero / 主要 villain 街道动作
             # 传给 engine，修 double_barrel / triple_barrel / stop_and_go /
             # float_bet 永远拿不到历史动作的 bug。
@@ -940,6 +993,10 @@ class PokerBot:
             'villain_bucket_dist': {
                 k: round(float(v), 4) for k, v in (villain_bucket_dist or {}).items()
             },
+            'villain_vs_hero_dist': {
+                k: round(float(v), 4)
+                for k, v in (detail.get('villain_vs_hero_dist') or {}).items()
+            },
             'prev_bet_called_count': int(prev_bet_called_count),
             'prev_bet_raised': bool(prev_bet_raised),
             'prev_bet_was_multiway': bool(prev_bet_was_multiway),
@@ -1104,6 +1161,8 @@ class PokerBot:
             else:
                 return f"{tag} {cat} {facing}→5bet全押 {eq} | {meta}"
         elif action_str == "call":
+            if facing_action == "none" and num_limpers > 0:
+                return f"{tag} {cat} {position} {num_limpers}人limp→平call {eq} | {meta}"
             return f"{tag} {cat} {position} {facing}→跟注 {eq} | {meta}"
         else:
             return f"{tag} {cat} {position} {facing}→弃牌 {eq} | {meta}"

@@ -58,6 +58,51 @@ _init_data()
 _DEFAULT_LOG_FILE    = str(Path(__file__).resolve().parent / "logs" / "pokerfate.log")
 _DEFAULT_OPPONENTS   = str(Path(__file__).resolve().parent / "data" / "opponents.json")
 
+_PUSH_STREET_LABELS = {
+    "preflop": "翻前",
+    "flop": "翻牌",
+    "turn": "转牌",
+    "river": "河牌",
+}
+_PUSH_ACTION_LABELS = {
+    ActionType.FOLD: "弃",
+    ActionType.CHECK: "过",
+    ActionType.CALL: "跟",
+    ActionType.RAISE: "加",
+}
+_PUSH_SUIT_SYMBOLS = {"s": "♠️", "h": "♥️", "d": "♦️", "c": "♣️"}
+_AUTO_COLLECT_HAND_RANKS = {
+    HandRank.FOUR_OF_A_KIND: "四条",
+    HandRank.STRAIGHT_FLUSH: "同花顺",
+    HandRank.ROYAL_FLUSH: "皇家同花顺",
+}
+
+
+def _fit_utf8(text: str, max_bytes: int, suffix: str = "...") -> str:
+    raw = text.encode("utf-8")
+    if len(raw) <= max_bytes:
+        return text
+    suffix_raw = suffix.encode("utf-8")
+    budget = max(0, max_bytes - len(suffix_raw))
+    clipped = raw[:budget]
+    while clipped:
+        try:
+            return clipped.decode("utf-8") + suffix
+        except UnicodeDecodeError:
+            clipped = clipped[:-1]
+    return suffix if max_bytes >= len(suffix_raw) else ""
+
+
+def _push_card_text(card) -> str:
+    s = str(card)
+    if len(s) < 2:
+        return s
+    return s[:-1] + _PUSH_SUIT_SYMBOLS.get(s[-1].lower(), s[-1])
+
+
+def _push_cards_text(cards) -> str:
+    return " ".join(_push_card_text(c) for c in cards)
+
 
 # ---------------------------------------------------------------------------
 # Public data types for the external interface
@@ -250,6 +295,10 @@ class PokerFateAPI:
         self._street_base_pot: float = 0.0
         self._street_base_street: str = "preflop"
         self._street_contribs: Dict[int, float] = {}
+        self._last_hand_push_detail: str = ""
+        self._last_auto_collect_reasons: list[str] = []
+        self._last_winner_ids: list[int] = []
+        self._last_my_delta: float = 0.0
 
         # ── 2026-04-23: Showdown calibration ──
         # 每次 tracker range 调整时记录预测，手牌结束时对比摊牌实际，写入
@@ -317,6 +366,10 @@ class PokerFateAPI:
         self._hole_cards = []
         self._board = []
         self._action_history = []
+        self._last_hand_push_detail = ""
+        self._last_auto_collect_reasons = []
+        self._last_winner_ids = []
+        self._last_my_delta = 0.0
         self._decision_index = 0
         self._my_stack_start: float = 0.0  # set after resolving stacks below
 
@@ -600,6 +653,7 @@ class PokerFateAPI:
             bucket_dist=bucket_dist,
             vs_hero=vs_hero,
             to_call=to_call,
+            pot_before_action=pot_at_action,
         )
 
         # Check for newly significant opponent patterns and surface them
@@ -984,6 +1038,23 @@ class PokerFateAPI:
             # 翻前弃牌（无公牌）：显示底牌
             my_combo = _fmt_hole(self._hole_cards)
 
+        self._last_hand_push_detail = self._build_hand_push_detail(
+            winner_names=winner_names,
+            pot=pot,
+            my_delta=my_delta,
+            final_stacks=final_stacks or {},
+            showdown_hands=showdown_hands or {},
+            hand_combos=hand_combos or {},
+            my_combo=my_combo,
+        )
+        self._last_winner_ids = list(winner_ids)
+        self._last_my_delta = float(my_delta)
+        self._last_auto_collect_reasons = self._build_auto_collect_reasons(
+            winner_ids=winner_ids,
+            my_delta=my_delta,
+            profit_threshold_bb=50.0,
+        )
+
         self._log.hand_result(
             winner_names=winner_names,
             pot=pot,
@@ -1148,6 +1219,183 @@ class PokerFateAPI:
                 self.autosave_path,
                 showdown_data=sd_data,
             )
+
+    def last_hand_push_detail(self, max_bytes: int = 2200) -> str:
+        """Return the latest hand detail in a push-friendly compact form."""
+        return _fit_utf8(self._last_hand_push_detail, max_bytes)
+
+    def last_auto_collect_reasons(self, profit_threshold_bb: float = 50.0) -> list[str]:
+        """Reasons why the latest hand should be auto-collected."""
+        return self._build_auto_collect_reasons(
+            winner_ids=self._last_winner_ids,
+            my_delta=self._last_my_delta,
+            profit_threshold_bb=profit_threshold_bb,
+        )
+
+    def _build_auto_collect_reasons(
+        self,
+        *,
+        winner_ids: List[int],
+        my_delta: float,
+        profit_threshold_bb: float,
+    ) -> list[str]:
+        reasons: list[str] = []
+
+        bb = float(self.big_blind or 0.0)
+        if bb > 0:
+            threshold_bb = max(0.0, float(profit_threshold_bb))
+            if my_delta >= threshold_bb * bb:
+                reasons.append(f"盈利{my_delta / bb:.1f}BB")
+
+        if self.my_player_id not in set(winner_ids):
+            return reasons
+
+        rank = self._my_best_hand_rank()
+        if rank is None:
+            return reasons
+
+        if rank == HandRank.FULL_HOUSE:
+            if not self._board_has_rank_trip():
+                reasons.append("葫芦")
+            return reasons
+
+        label = _AUTO_COLLECT_HAND_RANKS.get(rank)
+        if label:
+            reasons.append(label)
+        return reasons
+
+    def _my_best_hand_rank(self) -> Optional[HandRank]:
+        if not self._hole_cards or len(self._hole_cards) + len(self._board) < 5:
+            return None
+        try:
+            score = HandEvaluator.evaluate(self._hole_cards + self._board)
+        except Exception:
+            return None
+        return score[0]
+
+    def _board_has_rank_trip(self) -> bool:
+        return any(count >= 3 for count in Counter(c.rank.value for c in self._board).values())
+
+    def _build_hand_push_detail(
+        self,
+        *,
+        winner_names: List[str],
+        pot: float,
+        my_delta: float,
+        final_stacks: Dict[int, float],
+        showdown_hands: Dict[int, List[str]],
+        hand_combos: Dict[str, str],
+        my_combo: Optional[str],
+    ) -> str:
+        lines: list[str] = []
+        lines.append(f"手牌: {_push_cards_text(self._hole_cards) or '-'}")
+        lines.append(f"牌面: {self._push_board_text()}")
+
+        action_lines = self._push_action_lines()
+        if action_lines:
+            lines.append("行动:")
+            lines.extend(action_lines)
+        else:
+            lines.append("行动: -")
+
+        show_line = self._push_showdown_line(showdown_hands, hand_combos)
+        if show_line:
+            lines.append(show_line)
+
+        winners = " & ".join(self._short_push_name(n) for n in winner_names) or "-"
+        sign = "+" if my_delta >= 0 else ""
+        lines.append(f"结果: {winners} 赢池 {pot:.0f}，我 {sign}{my_delta:.0f}")
+        if my_combo:
+            lines.append(f"我牌型: {my_combo}")
+
+        my_final = final_stacks.get(self.my_player_id)
+        if my_final is not None:
+            lines.append(f"我结算筹码: {my_final:.0f}")
+        return "\n".join(lines)
+
+    def _push_board_text(self) -> str:
+        board = list(self._board)
+        if not board:
+            return "-"
+        parts: list[str] = []
+        if len(board) >= 3:
+            parts.append(_push_cards_text(board[:3]))
+        if len(board) >= 4:
+            parts.append(_push_cards_text(board[3:4]))
+        if len(board) >= 5:
+            parts.append(_push_cards_text(board[4:5]))
+        if not parts:
+            parts.append(_push_cards_text(board))
+        return " | ".join(parts)
+
+    def _push_action_lines(self) -> list[str]:
+        grouped: dict[str, list[str]] = {
+            "preflop": [],
+            "flop": [],
+            "turn": [],
+            "river": [],
+        }
+        for item in self._action_history:
+            if len(item) < 3:
+                continue
+            pid, action, street = item[0], item[1], str(item[2]).lower()
+            if street not in grouped:
+                continue
+            grouped[street].append(self._push_action_text(pid, action))
+
+        lines: list[str] = []
+        for street in ("preflop", "flop", "turn", "river"):
+            actions = grouped.get(street) or []
+            if not actions:
+                continue
+            lines.append(f"{_PUSH_STREET_LABELS[street]}: " + "; ".join(actions))
+        return lines
+
+    def _push_action_text(self, player_id: int, action: Action) -> str:
+        who = "我" if player_id == self.my_player_id else self._short_push_name(
+            self._session_names.get(player_id, str(player_id))
+        )
+        label = _PUSH_ACTION_LABELS.get(action.action_type, str(action.action_type))
+        amount = float(getattr(action, "amount", 0.0) or 0.0)
+        if action.action_type in (ActionType.CALL, ActionType.RAISE) and amount > 0:
+            return f"{who}{label}{self._push_amount(amount)}"
+        return f"{who}{label}"
+
+    def _push_amount(self, amount: float) -> str:
+        bb = float(self.big_blind or 0.0)
+        if bb <= 0:
+            return f"{amount:.0f}"
+        amount_bb = amount / bb
+        if abs(amount_bb - round(amount_bb)) < 0.05:
+            return f"{amount_bb:.0f}bb"
+        return f"{amount_bb:.1f}bb"
+
+    def _push_showdown_line(
+        self,
+        showdown_hands: Dict[int, List[str]],
+        hand_combos: Dict[str, str],
+    ) -> str:
+        if not showdown_hands:
+            return "亮牌: 无"
+
+        parts: list[str] = []
+        for pid in sorted(showdown_hands):
+            raw_name = self._session_names.get(pid, str(pid))
+            who = "我" if pid == self.my_player_id else self._short_push_name(raw_name)
+            cards = _push_cards_text(showdown_hands[pid])
+            combo = hand_combos.get(raw_name, "")
+            text = f"{who}:{cards}"
+            if combo:
+                text += f" {combo}"
+            parts.append(text)
+        return "亮牌: " + "; ".join(parts)
+
+    @staticmethod
+    def _short_push_name(name: str, max_chars: int = 10) -> str:
+        text = str(name).strip() or "-"
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars] + "~"
 
     # ------------------------------------------------------------------
     # Convenience: parse card strings

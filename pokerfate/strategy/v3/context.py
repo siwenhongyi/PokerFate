@@ -141,6 +141,9 @@ class DecisionCtx:
     # === Opponent / range ===
     primary_opp_id: int = -1
     villain_bucket_dist: Dict[str, float] = field(default_factory=dict)
+    # River-only hero-relative showdown distribution from villain range:
+    # {'win': hero beats villain, 'tie': split, 'loss': villain beats hero}.
+    villain_vs_hero_dist: Dict[str, float] = field(default_factory=dict)
     villain_stats: VillainStats = field(default_factory=VillainStats)
     exploit_adj: Dict[str, object] = field(default_factory=dict)
 

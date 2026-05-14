@@ -17,9 +17,13 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
+import os
+import signal
 import socket
 import struct
+import subprocess
 import sys
+import time
 
 from pf_intercept.config import EXTERNAL_DNS_SERVERS, PREFERRED_WSS_HOSTS
 
@@ -27,6 +31,122 @@ log = logging.getLogger(__name__)
 
 
 # ── 系统 DNS 探测 ──────────────────────────────────────────────────────────────
+
+def _port53_occupied() -> bool:
+    """Return True if UDP 53 is currently occupied."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.bind(("0.0.0.0", 53))
+        return False
+    except OSError:
+        return True
+
+
+def _port53_pids() -> list[int]:
+    """Best-effort list of pids currently holding port 53."""
+    try:
+        out = subprocess.check_output(
+            ["lsof", "-nP", "-t", "-i:53"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+    pids: set[int] = set()
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            pids.add(int(line))
+        except ValueError:
+            continue
+    return sorted(pids)
+
+
+def _pid_command(pid: int) -> str:
+    try:
+        out = subprocess.check_output(
+            ["ps", "-o", "command=", "-p", str(pid)],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        return out.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+
+
+def _is_stale_dns_server(cmd: str) -> bool:
+    return "pf_intercept.dns_server" in cmd
+
+
+def _kill_pids(pids: list[int]) -> None:
+    if not pids:
+        return
+
+    def _alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+    alive = [pid for pid in pids if _alive(pid)]
+    if not alive:
+        return
+
+    for pid in alive:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+
+    deadline = time.time() + 1.5
+    while time.time() < deadline:
+        alive = [pid for pid in alive if _alive(pid)]
+        if not alive:
+            return
+        time.sleep(0.1)
+
+    for pid in alive:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def _cleanup_stale_port53_owner() -> None:
+    """Root preflight: kill stale pf_intercept.dns_server occupying port 53."""
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return
+    if not _port53_occupied():
+        return
+
+    me = os.getpid()
+    stale: list[int] = []
+    foreign: list[tuple[int, str]] = []
+    for pid in _port53_pids():
+        if pid == me:
+            continue
+        cmd = _pid_command(pid)
+        if _is_stale_dns_server(cmd):
+            stale.append(pid)
+        else:
+            foreign.append((pid, cmd))
+
+    if stale:
+        log.warning("port 53 occupied by stale dns_server pids=%s, killing", stale)
+        _kill_pids(stale)
+
+    if _port53_occupied():
+        if foreign:
+            desc = ", ".join(
+                f"{pid}:{cmd or '<unknown>'}" for pid, cmd in foreign[:4]
+            )
+            log.warning("port 53 still occupied by non-dns_server process(es): %s", desc)
+        else:
+            log.warning("port 53 still occupied after stale cleanup")
+
 
 def _system_dns() -> str | None:
     """从 /etc/resolv.conf 读取系统当前使用的 DNS 服务器。"""
@@ -277,6 +397,7 @@ if __name__ == "__main__":
     ip_arg = sys.argv[1] if len(sys.argv) > 1 else None
 
     async def _run() -> None:
+        _cleanup_stale_port53_owner()
         await serve(ip_arg)
         await asyncio.Future()   # 永久保活
 

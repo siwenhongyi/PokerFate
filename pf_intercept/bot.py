@@ -23,13 +23,16 @@ stage (RoundStartBRC):
 
 from __future__ import annotations
 import asyncio
+import functools
 import logging
 import random
 
 from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
 from pf_intercept import config
 from pf_intercept.action_types import ACTION_TYPE_TO_EVENT_ACTION, FOLD_ACTION_TYPES
-from pf_intercept.gamedata_fetcher import _load_token, _sync_fetch, seed_from_server
+from pf_intercept.collcard import _sync_collect_game
+from pf_intercept.gamedata_fetcher import _sync_fetch, seed_from_server
+from pf_intercept.http_api import load_auth_token
 from pf_notify import notify
 from pf_notify.templates import format_chips_km_signed
 
@@ -214,6 +217,9 @@ class BotBridge:
         # C2S 帧里的 room_id 须与客户端 Net.packNetData 一致（GameModel:getRoomId）。
         # 部分 S2C（如 WinnerRSP）wire 上 room_id 可能为 0，要用进房时或任意非 0 帧补全。
         self._table_room_id: int = 0
+        self._table_tid: int = 1
+        self._current_gameid: str = ""
+        self._auto_collected_gameids: set[str] = set()
 
         # GameData API: 已拉取过的 uid（本次 proxy 进程内不重复拉）
         self._fetched_uids: set[str] = set()
@@ -300,9 +306,12 @@ class BotBridge:
         self._room_escape_bust_count = 0
 
     def _notify(self, event: str, **fields) -> None:
-        """Room-aware notification wrapper. SNG/tournament rooms stay quiet."""
+        """Room-aware notification wrapper. SNG/tournament/friend rooms stay quiet."""
         if self._is_sng_room:
             log.debug("[BOT] SNG room: skip notify event=%s", event)
+            return
+        if self._is_friend_room:
+            log.debug("[BOT] friend room: skip notify event=%s", event)
             return
         notify(event, **fields)
 
@@ -527,6 +536,12 @@ class BotBridge:
 
         # Seed player names from current table snapshot + trigger server stats fetch
         table_status = msg.get("table_status") or {}
+        tid = _chip_int(table_status.get("tid", 0), 0)
+        if tid > 0:
+            self._table_tid = tid
+        gameid = str(table_status.get("gameid") or "").strip()
+        if gameid and gameid != "0":
+            self._current_gameid = gameid
         for seat_status in table_status.get("seat", []):
             self._extract_seat_name(seat_status)
             self._trigger_gamedata_fetch(seat_status)
@@ -642,7 +657,7 @@ class BotBridge:
 
         pname = name or self._seat_names.get(seat) or f"seat{seat}"
 
-        token = _load_token()
+        token = load_auth_token()
         if not token:
             log.warning("[gamedata] %s: auth_token.txt 缺失，跳过", pname)
             return
@@ -746,6 +761,10 @@ class BotBridge:
     def _on_dealer_info(self, msg: dict) -> tuple[str, dict, float] | None:
         if not self._ensure_api():
             return None
+
+        gameid = str(msg.get("gameid") or "").strip()
+        if gameid and gameid != "0":
+            self._current_gameid = gameid
 
         self._stage   = 1
         self._pot     = 0
@@ -1130,13 +1149,72 @@ class BotBridge:
         if self._my_seat is not None:
             self._check_hand_swing(my_profit_delta)
 
+        if self._api is not None:
+            reasons = self._api.last_auto_collect_reasons(
+                float(config.AUTO_COLLECT_PROFIT_BB_THRESHOLD)
+            )
+            self._maybe_auto_collect_current_hand(reasons)
+
         return self._maybe_profit_lock_leave_reenter(final_stacks)
 
-    def _check_hand_swing(self, profit_delta: int) -> None:
-        """单手盈亏波动：|delta| > 20BB 且 > 本手开始时筹码的 30%，发通知。
+    def _maybe_auto_collect_current_hand(self, reasons: list[str]) -> bool:
+        if not getattr(config, "AUTO_COLLECT_HANDS_ENABLED", True):
+            return False
+        if self._is_sng_room or self._is_friend_room:
+            log.debug(
+                "[BOT] 自动收藏：特殊房间跳过 gameid=%s sng=%s friend=%s",
+                self._current_gameid,
+                self._is_sng_room,
+                self._is_friend_room,
+            )
+            return False
+        reasons = [str(r) for r in reasons if str(r)]
+        if not reasons:
+            return False
 
-        百分比基准是本手 DealerInfo 记录的开局筹码（_hand_start_chips），
-        不是牌局进行中的瞬时筹码（我们会不断下注，基数会变）。
+        gameid = str(self._current_gameid or "").strip()
+        if not gameid or gameid == "0":
+            log.warning("[BOT] 自动收藏：命中 %s，但缺少 gameid，跳过。", "/".join(reasons))
+            return False
+        if gameid in self._auto_collected_gameids:
+            return False
+        self._auto_collected_gameids.add(gameid)
+
+        room_id = _chip_int(self._table_room_id, 0)
+        tid = _chip_int(self._table_tid, 1)
+        reason = "/".join(reasons)
+        log.warning(
+            "[BOT] 自动收藏：gameid=%s roomid=%s tid=%s reason=%s",
+            gameid,
+            room_id,
+            tid,
+            reason,
+        )
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            _sync_collect_game(gameid, roomid=room_id, tid=tid, reason=reason)
+            return True
+
+        loop.run_in_executor(
+            None,
+            functools.partial(
+                _sync_collect_game,
+                gameid,
+                roomid=room_id,
+                tid=tid,
+                reason=reason,
+            ),
+        )
+        return True
+
+    def _check_hand_swing(self, profit_delta: int) -> None:
+        """单手盈亏波动：|delta| >= 20BB 时发通知。
+
+        通知里仍展示相对本手开局筹码的百分比；百分比基准是本手
+        DealerInfo 记录的开局筹码（_hand_start_chips），不是牌局进行中
+        的瞬时筹码（我们会不断下注，基数会变）。
         """
         bb = float(self._bb or 0.0)
         if bb <= 0 or self._my_seat is None:
@@ -1145,15 +1223,17 @@ class BotBridge:
         if start_chips <= 0:
             return
         abs_delta = abs(int(profit_delta))
-        if abs_delta <= 20 * bb:
+        if abs_delta < 20 * bb:
             return
-        if abs_delta * 100 <= 30 * start_chips:
-            return
+        hand_detail = ""
+        if self._api is not None:
+            hand_detail = self._api.last_hand_push_detail()
         self._notify(
             "hand_swing",
             profit_delta=int(profit_delta),
             start_chips=start_chips,
             big_blind=int(bb),
+            hand_detail=hand_detail,
         )
 
     def _maybe_profit_lock_leave_reenter(
