@@ -28,6 +28,7 @@ from pokerfate.strategy.v3 import (
     BlockerSet, DecisionCtx, DrawProfile, V3Engine, VillainStats,
 )
 from pokerfate.strategy.v3 import engine as _v3_engine
+from pokerfate.strategy.v3 import early_relative as _v3_early_relative
 from pokerfate.strategy.v3 import purposes_active as _v3_active
 from pokerfate.strategy.v3 import purposes_defensive as _v3_defensive
 from pokerfate.strategy.v3.stackoff_guard import stackoff_guard_reason
@@ -248,6 +249,14 @@ def _fold_override_note(ctx: DecisionCtx, out) -> str | None:
         tag = f"fold>{_pct(_v3_engine._FOLD_OVERRIDE_MAX_FOLD_PROB_WITH_CALL)}"
     elif 'river strong_mass' in reason:
         tag = f"strong>{_pct(_v3_engine._FOLD_OVERRIDE_RIVER_STRONG_MAX)}"
+    elif 'rel_loss_dominant' in reason:
+        tag = 'rel_loss'
+    elif 'fragile_rel_eq' in reason:
+        tag = 'rel_eq'
+    elif 'fragile_rel_price' in reason:
+        tag = 'rel_price'
+    elif 'early_rel_risk' in reason:
+        tag = 'early_rel'
     elif 'fragile ' in reason:
         tag = f"fragile>{_pct(_v3_engine._FOLD_OVERRIDE_FRAGILE_STRONG_MAX)}"
     elif 'blended_eq' in reason and out.purpose != 'fold_override_call':
@@ -343,7 +352,11 @@ def _protection_bet_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
         return None
     nuts = float((ctx.villain_bucket_dist or {}).get('nuts', 0.0) or 0.0)
     need = _v3_active._PROTECTION_MIN_EQ
-    if ctx.hero_bucket == 'medium':
+    medium_disabled = (
+        ctx.hero_bucket == 'medium'
+        and not _v3_active._ACTIVE_PROTECTION_MEDIUM_ENABLED
+    )
+    if ctx.hero_bucket == 'medium' and not medium_disabled:
         need = max(need, _v3_active._ACTIVE_PROTECTION_MEDIUM_MIN_EQ)
     if ctx.n_sticky >= 1:
         need += _v3_active._PROTECTION_STICKY_EQ_ADD
@@ -353,6 +366,8 @@ def _protection_bet_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
     tag = 'ok'
     if ctx.hero_bucket not in ('medium', 'strong'):
         tag = f"bucket={ctx.hero_bucket}"
+    elif medium_disabled:
+        tag = 'medium-off'
     elif pressure < _v3_active._ACTIVE_PROTECTION_WETNESS_MIN:
         tag = f"pr<{_pct(_v3_active._ACTIVE_PROTECTION_WETNESS_MIN)}"
     elif nuts > _v3_active._ACTIVE_PROTECTION_MAX_NUTS:
@@ -377,9 +392,27 @@ def _value_jam_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
     )
     if not active and not near:
         return None
-    need = _v3_active.commit_value_eq(ctx.spr) + _v3_active._river_danger_add(ctx)
+    rel_add = _v3_early_relative.value_jam_eq_add(ctx)
+    need = _v3_active.commit_value_eq(ctx.spr) + _v3_active._river_danger_add(ctx) + rel_add
     tag = 'ok' if ctx.equity_range >= need else f"eq<{_pct(need)}"
-    return f"VJ-{tag} eq={_pct(ctx.equity_range)}/{_pct(need)} spr={ctx.spr:.1f}"
+    rel = f" erel+{_pct(rel_add)}" if rel_add > 0 else ""
+    return f"VJ-{tag} eq={_pct(ctx.equity_range)}/{_pct(need)} spr={ctx.spr:.1f}{rel}"
+
+
+def _early_relative_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
+    call_add = _v3_early_relative.call_margin_add(ctx)
+    jam_add = _v3_early_relative.value_jam_eq_add(ctx)
+    if call_add <= 0 and jam_add <= 0:
+        return None
+    if call_add > 0 and out.purpose not in {
+        'bluff_catch_call', 'fold_override_call', 'fold',
+    }:
+        return None
+    if jam_add > 0 and out.purpose != 'value_jam' and 'value_jam' not in ids:
+        return None
+    desc = _v3_early_relative.describe(ctx, active_value=jam_add > 0)
+    add = call_add if call_add > 0 else jam_add
+    return f"ER add={_pct(add)} {desc}"
 
 
 def _stackoff_guard_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
@@ -387,6 +420,8 @@ def _stackoff_guard_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
     selected = out.purpose.split("→", 1)[0] if out.purpose else ''
     if 'stackoff_guard' in (out.reason or ''):
         reason = (out.reason or '').replace('stackoff_guard ', '', 1)
+        if reason.startswith('downsize '):
+            return f"SG-down {selected} {reason[9:]} sub={ctx.hero_made_subtype or '-'}"
         return f"SG-block {selected} {reason} sub={ctx.hero_made_subtype or '-'}"
     if selected not in watched and not (ids & watched):
         return None
@@ -427,6 +462,7 @@ def _strategy_gate_notes(ctx: DecisionCtx, out) -> list[str]:
         _protection_bet_note(ctx, out, ids),
         _stackoff_guard_note(ctx, out, ids),
         _value_jam_note(ctx, out, ids),
+        _early_relative_note(ctx, out, ids),
         _resistance_note(ctx, out, ids),
     ]
     return [n for n in notes if n][:3]
@@ -474,6 +510,7 @@ class PostflopStrategy:
         facing_bet: bool,
         num_opponents: int,
         big_blind: float,
+        effective_stack: Optional[float] = None,
         opponent_fold_rate: float = 0.45,
         fold_to_cbet: Optional[float] = None,
         spr: float = 5.0,
@@ -519,7 +556,8 @@ class PostflopStrategy:
         fold_to_cbet / value_only / opponent_fold_rate 拼装残缺版。
         """
         ctx = self._build_ctx(
-            equity=equity, pot=pot, to_call=to_call, stack=stack, board=board,
+            equity=equity, pot=pot, to_call=to_call, stack=stack,
+            effective_stack=effective_stack, board=board,
             is_ip=is_ip, street=street, facing_bet=facing_bet,
             num_opponents=num_opponents, big_blind=big_blind, spr=spr,
             opponent_af=opponent_af, opponent_fold_rate=opponent_fold_rate,
@@ -604,6 +642,7 @@ class PostflopStrategy:
 
     def _build_ctx(
         self, *, equity: float, pot: float, to_call: float, stack: float,
+        effective_stack: Optional[float] = None,
         board: List[Card], is_ip: bool, street: str, facing_bet: bool,
         num_opponents: int, big_blind: float, spr: float,
         opponent_af: float, opponent_fold_rate: float,
@@ -729,6 +768,11 @@ class PostflopStrategy:
             pot=pot,
             to_call=to_call,
             stack=stack,
+            effective_stack=(
+                float(effective_stack)
+                if effective_stack is not None and effective_stack > 0
+                else float(stack)
+            ),
             big_blind=big_blind,
             spr=spr,
             pot_odds=pot_odds,

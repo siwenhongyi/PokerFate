@@ -7,5 +7,11 @@ from pokerfate.calibration.showdown_calibration import (
     CalibrationResult,
     ShowdownCalibrator,
 )
+from pokerfate.calibration.runtime_recorder import RuntimeCalibrationRecorder
 
-__all__ = ['PredictionRecord', 'CalibrationResult', 'ShowdownCalibrator']
+__all__ = [
+    'PredictionRecord',
+    'CalibrationResult',
+    'ShowdownCalibrator',
+    'RuntimeCalibrationRecorder',
+]

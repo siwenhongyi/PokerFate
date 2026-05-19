@@ -50,92 +50,44 @@ _BUCKET_CAL_MAX_FACTOR = float(_os.environ.get('PF_BUCKET_CAL_MAX_FACTOR', '8.0'
 _BUCKET_CAL_CATS = ('nuts', 'strong', 'medium', 'draw', 'weak_draw', 'air')
 _BUCKET_CAL_IDX = {cat: i for i, cat in enumerate(_BUCKET_CAL_CATS)}
 
-# Fitted on 2-5.log, cross-validated on 6.log with full bucket distribution
-# replay. Formula: q = softmax(gamma * log(p) + theta). The layer preserves
-# combo ordering inside each bucket; it only recalibrates bucket mass.
+# Safe subset fitted on 2-5 logs and cross-validated on 6 logs with full
+# bucket-distribution rows (2026-05-16). We only keep contexts where validation
+# NLL improves and strong/nuts under-20% risk does not worsen. Formula:
+# q = softmax(gamma * log(p) + theta). The layer preserves combo ordering
+# inside each bucket; it only recalibrates bucket mass.
 _BUCKET_CALIBRATION: Dict[str, tuple[float, Dict[str, float]]] = {
-    'flop board:flop': (
-        0.8617,
-        {
-            'air': -0.1389, 'draw': 0.1915, 'medium': 0.1924,
-            'nuts': -0.0920, 'strong': -0.1354, 'weak_draw': -0.0176,
-        },
-    ),
-    'flop action:bet': (
-        0.8045,
-        {
-            'air': -0.2111, 'draw': 0.0234, 'medium': 0.7331,
-            'nuts': -0.4145, 'strong': -0.0490, 'weak_draw': -0.0819,
-        },
-    ),
-    'flop action:call': (
-        0.9448,
-        {
-            'air': 0.0802, 'draw': 0.2534, 'medium': 0.0236,
-            'nuts': -0.0549, 'strong': -0.2392, 'weak_draw': -0.0631,
-        },
-    ),
-    'flop action:check': (
-        0.8992,
-        {
-            'air': -0.0821, 'draw': 0.1698, 'medium': -0.0948,
-            'nuts': 0.0358, 'strong': -0.1610, 'weak_draw': 0.1324,
-        },
-    ),
     'flop action:raise_over': (
-        0.7533,
+        0.5500,
         {
-            'air': -0.7110, 'draw': 0.3420, 'medium': 0.5809,
-            'nuts': -0.2520, 'strong': 0.1951, 'weak_draw': -0.1548,
-        },
-    ),
-    'turn board:turn': (
-        0.9244,
-        {
-            'air': 0.0336, 'draw': 0.1091, 'medium': 0.1979,
-            'nuts': -0.2007, 'strong': -0.1291, 'weak_draw': -0.0107,
-        },
-    ),
-    'turn action:bet': (
-        0.8638,
-        {
-            'air': 0.0118, 'draw': -0.0420, 'medium': 0.6359,
-            'nuts': -0.5473, 'strong': -0.0552,
+            'air': -0.5363, 'draw': 0.0685, 'medium': 0.8187,
+            'nuts': -0.5516, 'strong': 0.2476, 'weak_draw': -0.0469,
         },
     ),
     'turn action:call': (
-        0.8233,
+        0.7399,
         {
-            'air': 0.0963, 'draw': 0.0619, 'medium': 0.0110,
-            'nuts': 0.0363, 'strong': -0.0390, 'weak_draw': -0.1665,
+            'air': 0.1453, 'draw': 0.0993, 'medium': 0.0515,
+            'nuts': -0.0643, 'strong': -0.0931, 'weak_draw': -0.1386,
         },
-    ),
-    'turn action:check': (
-        0.8764,
-        {'air': 0.0371, 'draw': 0.1634, 'strong': -0.2479, 'weak_draw': 0.0541},
     ),
     'turn action:raise_over': (
-        0.6500,
+        0.5500,
         {
-            'air': -0.1763, 'draw': 0.0433, 'medium': 0.3515,
-            'nuts': -0.4404, 'strong': 0.1414, 'weak_draw': 0.0805,
+            'air': -0.4089, 'draw': -0.0657, 'medium': 0.8308,
+            'nuts': -0.4810, 'strong': 0.0835, 'weak_draw': 0.0413,
         },
     ),
-    'river board:river': (
-        0.9166,
-        {'air': 0.2226, 'medium': 0.2185, 'nuts': -0.3603, 'strong': -0.0808},
-    ),
     'river action:bet': (
-        0.7590,
-        {'air': -0.0911, 'medium': 0.5684, 'nuts': -0.5142, 'strong': 0.0373},
+        0.7149,
+        {'air': -0.1820, 'medium': 0.7050, 'nuts': -0.5129, 'strong': -0.0077},
     ),
-    'river action:check': (
-        0.9140,
-        {'air': 0.1272, 'medium': 0.1000, 'nuts': -0.0556, 'strong': -0.1716},
+    'river action:call': (
+        0.6994,
+        {'air': -0.0731, 'medium': -0.0282, 'nuts': 0.0259, 'strong': 0.0778},
     ),
     'river action:raise_over': (
-        0.6500,
-        {'air': -0.0921, 'medium': 0.0552, 'nuts': -0.1864, 'strong': 0.2250},
+        0.6931,
+        {'air': -0.3667, 'medium': 0.7555, 'nuts': -0.3807},
     ),
 }
 

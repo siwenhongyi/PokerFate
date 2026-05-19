@@ -1,0 +1,32 @@
+{
+  "configs": [
+    {},
+    {"PF_ALPHA_OVER_MULT": "1.50"},
+    {"PF_ALPHA_OVER_MULT": "1.75"},
+    {"PF_ALPHA_OVER_MULT": "2.00"},
+    {"PF_ALPHA_OVER_MULT_DEFAULT_STAB": "1.50"},
+    {"PF_ALPHA_OVER_MULT_DEFAULT_STAB": "1.75"},
+    {"PF_ALPHA_OVER_MULT_DEFAULT_STAB": "2.00"},
+    {"PF_ALPHA_OVER_MULT_SEMI_BLUFF": "1.50"},
+    {"PF_ALPHA_OVER_MULT_SEMI_BLUFF": "1.75"},
+    {"PF_ALPHA_OVER_MULT_SEMI_BLUFF": "2.00"},
+    {
+      "PF_ALPHA_OVER_MULT_DEFAULT_STAB": "1.75",
+      "PF_ALPHA_OVER_MULT_SEMI_BLUFF": "1.75"
+    },
+    {
+      "PF_ALPHA_OVER_MULT_HU": "1.75",
+      "PF_ALPHA_OVER_MULT_PFR": "1.50"
+    },
+    {
+      "PF_ALPHA_OVER_MULT_LOOSE": "1.75",
+      "PF_ALPHA_LOOSE_VPIP_MIN": "0.40"
+    },
+    {
+      "PF_ALPHA_OVER_MULT_DEFAULT_STAB": "1.75",
+      "PF_ALPHA_OVER_MULT_SEMI_BLUFF": "1.75",
+      "PF_ALPHA_OVER_MULT_LOOSE": "2.00",
+      "PF_ALPHA_LOOSE_VPIP_MIN": "0.40"
+    }
+  ]
+}

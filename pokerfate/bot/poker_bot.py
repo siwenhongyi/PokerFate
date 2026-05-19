@@ -26,7 +26,16 @@ from pokerfate.strategy.range_v2.hero_eq_calibrator import (
     HeroEquityCalibrator,
     classify_action_ctx_from_decision,
 )
-from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards as _hero_categorize
+from pokerfate.strategy.range_v2.river_relative_calibrator import (
+    RiverRelativeCalibrator,
+    action_ctx_from_decision as river_rel_action_ctx_from_decision,
+    board_texture_key as river_rel_board_texture_key,
+    relation_eq as river_rel_eq,
+)
+from pokerfate.strategy.range_v2.hand_categorizer import (
+    categorize_cards as _hero_categorize,
+    made_hand_info as _hero_made_info,
+)
 
 log = logging.getLogger(__name__)
 
@@ -69,6 +78,7 @@ class PokerBot:
         # bias per (hero_bucket, street, n_opp) and shifts future raw eq by
         # historical mean bias. Mirrors ShowdownLearner but on the hero side.
         self._hero_eq_calibrator = HeroEquityCalibrator()
+        self._river_relative_calibrator = RiverRelativeCalibrator()
         self._current_board: List[Card] = []
         self._v2_action_history: Dict[int, list] = {}
         self._last_equity: float = 0.5
@@ -167,10 +177,14 @@ class PokerBot:
             self._last_equity = pf_range_eq
             self._last_equity_mode = "range_v2"
 
-        # is_bb_option: explicit server signal (forced_post + call_need==0)
-        # Auto-detect fallback: BB position + no raises + nothing to call = free check option
-        auto_detect_bb = (position == 'BB' and facing_action == 'none' and to_call == 0)
-        is_big_blind = is_bb_option or auto_detect_bb
+        # Historical name is "is_bb_option", but the upstream signal really
+        # means "hero can check for free" (e.g. forced-post entry spots).  It
+        # must only rescue a would-be fold into check; preflop.decide still
+        # runs normal open/ISO logic first.
+        free_check_option = bool(
+            is_bb_option
+            or (position == 'BB' and facing_action == 'none' and to_call == 0)
+        )
         num_limpers = self._count_limpers(gs, player) if facing_action == 'none' else 0
 
         stack_bb = stack / bb if bb > 0 else 100.0
@@ -179,6 +193,10 @@ class PokerBot:
         squeeze_callers = callers_after_last_raise if facing_action == 'open' else 0
         cold_callers = callers_after_last_raise if facing_action in ('3bet', '4bet') else 0
         sticky_density = self._preflop_sticky_density(gs, player)
+        preflop_villain_stats = None
+        preflop_aggressor_id = gs.last_aggressor_id(player.player_id, street='preflop')
+        if preflop_aggressor_id is not None:
+            preflop_villain_stats = self.opponent_model.get(preflop_aggressor_id)
         fourbet_call_edge_adjust = self._preflop_4bet_call_edge_adjust(
             gs, player, facing_action,
         )
@@ -191,7 +209,7 @@ class PokerBot:
             big_blind=bb,
             stack=stack,
             pot=gs.pot,
-            is_big_blind=is_big_blind,
+            is_big_blind=free_check_option,
             num_limpers=num_limpers,
             equity=self._last_equity,
             to_call=to_call,
@@ -203,6 +221,11 @@ class PokerBot:
             cold_callers=cold_callers,
             squeeze_callers=squeeze_callers,
             fourbet_call_edge_adjust=fourbet_call_edge_adjust,
+            villain_vpip=preflop_villain_stats.vpip if preflop_villain_stats else 0.0,
+            villain_pfr=preflop_villain_stats.pfr if preflop_villain_stats else 0.0,
+            villain_three_bet=preflop_villain_stats.three_bet_pct if preflop_villain_stats else 0.0,
+            villain_af=preflop_villain_stats.aggression_factor if preflop_villain_stats else 1.5,
+            villain_hands_seen=preflop_villain_stats.hands_seen if preflop_villain_stats else 0,
         )
 
         self._last_reasoning = self._preflop_reasoning(
@@ -238,6 +261,9 @@ class PokerBot:
             'sticky_density': sticky_density,
             'cold_callers': cold_callers,
             'squeeze_callers': squeeze_callers,
+            'preflop_villain_vpip': preflop_villain_stats.vpip if preflop_villain_stats else 0.0,
+            'preflop_villain_pfr': preflop_villain_stats.pfr if preflop_villain_stats else 0.0,
+            'preflop_villain_3bet': preflop_villain_stats.three_bet_pct if preflop_villain_stats else 0.0,
             'preflop_expand_reason': preflop_expand_reason,
         }
         return self._to_action(action_str, amount, to_call, stack)
@@ -606,6 +632,7 @@ class PokerBot:
                 villain_nuts_pct = 0.0
 
         villain_vs_hero_dist: Dict[str, float] = {}
+        river_relative_calibration: Dict[str, object] = {}
         if (self.use_range_equity
                 and len(board) >= 5
                 and primary_opp_id is not None
@@ -613,6 +640,27 @@ class PokerBot:
             try:
                 villain_vs_hero_dist = self._range_tracker.get_vs_hero_dist(
                     primary_opp_id, board, list(player.hole_cards),
+                )
+                observed_action = (
+                    self._opp_street_actions.get(primary_opp_id, {}).get(street, '')
+                    if primary_opp_id >= 0 else ''
+                )
+                rel_action_ctx = river_rel_action_ctx_from_decision(
+                    facing_bet=facing_bet,
+                    to_call=to_call,
+                    pot=pot,
+                    observed_action=observed_action,
+                )
+                hmi_rel = _hero_made_info(list(player.hole_cards), list(board))
+                villain_vs_hero_dist = self._river_relative_calibrator.calibrate_dist(
+                    villain_vs_hero_dist,
+                    hero_bucket=hero_bucket,
+                    hero_made_subtype=hmi_rel.subtype,
+                    board_texture=river_rel_board_texture_key(board),
+                    action_ctx=rel_action_ctx,
+                )
+                river_relative_calibration = dict(
+                    self._river_relative_calibrator.last_diagnostic or {}
                 )
             except Exception:
                 log.exception(
@@ -673,6 +721,7 @@ class PokerBot:
             facing_bet=facing_bet,
             num_opponents=num_opponents,
             big_blind=bb,
+            effective_stack=effective_stack,
             opponent_fold_rate=opp_fold_rate,
             fold_to_cbet=fold_to_cbet_val,
             spr=spr,
@@ -713,6 +762,37 @@ class PokerBot:
             equity_mc=raw_mc,
             equity_range=equity,
             decision_seed=engine_seed,
+        )
+        cd_after = self.postflop._last_cbet_detail or {}
+        river_relative_assessment = self._river_relative_assessment(
+            action_str=action_str,
+            facing_bet=facing_bet,
+            pot_odds=pot_odds_pre,
+            rel=villain_vs_hero_dist,
+            calibration=river_relative_calibration,
+            reason=str(cd_after.get('reason') or ''),
+            strategy_gates=list(cd_after.get('strategy_gates') or []),
+        )
+        observed_primary_action = (
+            self._opp_street_actions.get(primary_opp_id, {}).get(street, '')
+            if primary_opp_id >= 0 else ''
+        )
+        street_relative_assessment = self._street_relative_assessment(
+            street=street,
+            action_str=action_str,
+            facing_bet=facing_bet,
+            to_call=to_call,
+            pot=pot,
+            pot_odds=pot_odds_pre,
+            board=board,
+            hero_made_subtype=str(cd_after.get('hero_made_subtype') or ''),
+            hero_bucket=hero_bucket,
+            equity=equity,
+            raw_equity=raw_mc,
+            villain_bucket_dist=v_bucket_dist,
+            observed_action=observed_primary_action,
+            opponent_af=opp_af,
+            n_sticky=n_sticky,
         )
 
         # ── Track my own action for next-street cross-street logic ───────
@@ -812,6 +892,8 @@ class PokerBot:
             fold_to_cbet_val=fold_to_cbet_val,
             exploit_need_adjust=exploit_need_adjust,
             stack=stack,
+            river_relative_assessment=river_relative_assessment,
+            street_relative_assessment=street_relative_assessment,
         )
         self._last_decision_diagnostics = self._build_postflop_diagnostics(
             street=street,
@@ -839,6 +921,9 @@ class PokerBot:
             prev_bet_raised=prev_resistance['raised'],
             prev_bet_was_multiway=prev_resistance['was_multiway'],
             resistance_level=prev_resistance['level'],
+            river_relative_calibration=river_relative_calibration,
+            river_relative_assessment=river_relative_assessment,
+            street_relative_assessment=street_relative_assessment,
         )
         return self._to_action(action_str, amount, to_call, stack)
 
@@ -950,6 +1035,9 @@ class PokerBot:
         prev_bet_raised: bool = False,
         prev_bet_was_multiway: bool = False,
         resistance_level: float = 0.0,
+        river_relative_calibration: Optional[Dict[str, object]] = None,
+        river_relative_assessment: Optional[Dict[str, object]] = None,
+        street_relative_assessment: Optional[Dict[str, object]] = None,
     ) -> dict:
         out = self.postflop._last_output
         candidates = list(getattr(out, 'candidates', []) or [])
@@ -997,6 +1085,9 @@ class PokerBot:
                 k: round(float(v), 4)
                 for k, v in (detail.get('villain_vs_hero_dist') or {}).items()
             },
+            'river_relative_calibration': dict(river_relative_calibration or {}),
+            'river_relative': dict(river_relative_assessment or {}),
+            'street_relative': dict(street_relative_assessment or {}),
             'prev_bet_called_count': int(prev_bet_called_count),
             'prev_bet_raised': bool(prev_bet_raised),
             'prev_bet_was_multiway': bool(prev_bet_was_multiway),
@@ -1197,6 +1288,8 @@ class PokerBot:
         fold_to_cbet_val: float = None,
         exploit_need_adjust: float = 0.0,
         stack: float = 0.0,
+        river_relative_assessment: Optional[Dict[str, object]] = None,
+        street_relative_assessment: Optional[Dict[str, object]] = None,
     ) -> str:
         made = self._made_hand_label_cn(hole_cards, board)
         tag = "【GTOv2·翻后】"
@@ -1335,8 +1428,298 @@ class PokerBot:
         if facing_bet and abs(exploit_need_adjust) > 1e-6:
             details.append(f"need_adj={exploit_need_adjust:+.3f}")
 
+        rel_obs = river_relative_assessment or {}
+        if rel_obs:
+            rel_bits = [
+                f"rel=赢{float(rel_obs.get('win', 0.0)):.0%}/"
+                f"平{float(rel_obs.get('tie', 0.0)):.0%}/"
+                f"输{float(rel_obs.get('loss', 0.0)):.0%}",
+                f"eq{float(rel_obs.get('eq', 0.0)):.0%}",
+                f"评={rel_obs.get('label', '')}",
+            ]
+            if rel_obs.get('gate'):
+                rel_bits.append(f"gate={rel_obs['gate']}")
+            if rel_obs.get('cal_used'):
+                rel_bits.append(
+                    f"校{float(rel_obs.get('raw_eq', 0.0)):.0%}"
+                    f"→{float(rel_obs.get('cal_eq', 0.0)):.0%}"
+                    f"/n{int(rel_obs.get('cal_n', 0) or 0)}"
+                )
+            details.append(" ".join(str(x) for x in rel_bits if x))
+
+        street_obs = street_relative_assessment or {}
+        if street_obs:
+            flags = ",".join(str(x) for x in street_obs.get('board_flags', []) or [])
+            action_flags = ",".join(str(x) for x in street_obs.get('action_flags', []) or [])
+            sr_bits = [
+                f"street_rel={street_obs.get('street', '')}",
+                f"风险{float(street_obs.get('risk', 0.0)):.0%}",
+                f"强+坚{float(street_obs.get('villain_strong_plus', 0.0)):.0%}",
+                f"坚{float(street_obs.get('villain_nuts', 0.0)):.0%}",
+                f"eq{float(street_obs.get('eq', 0.0)):.0%}",
+                f"评={street_obs.get('label', '')}",
+            ]
+            if flags:
+                sr_bits.append(f"board={flags}")
+            if action_flags:
+                sr_bits.append(f"act={action_flags}")
+            details.append(" ".join(str(x) for x in sr_bits if x))
+
         detail_line = "  │  " + "  │  ".join(details) if details else ""
         return main_line + ("\n      " + detail_line if detail_line else "")
+
+    @staticmethod
+    def _board_danger_flags(board: List[Card]) -> List[str]:
+        """Compact board flags used by early-street relative-risk logging."""
+        if len(board) < 3:
+            return []
+
+        flags: List[str] = []
+        ranks = [int(c.rank) for c in board]
+        suits = [int(c.suit) for c in board]
+        if len(set(ranks)) < len(ranks):
+            flags.append("paired")
+
+        flop = board[:3]
+        if len(flop) == 3 and len({int(c.suit) for c in flop}) == 1:
+            flags.append("mono")
+
+        suit_counts: Dict[int, int] = {}
+        for suit in suits:
+            suit_counts[suit] = suit_counts.get(suit, 0) + 1
+        if max(suit_counts.values(), default=0) >= 4:
+            flags.append("4flush")
+
+        rank_set = set(ranks)
+        if 14 in rank_set:
+            rank_set.add(1)
+        for start in range(1, 11):
+            window = set(range(start, start + 5))
+            if len(window & rank_set) >= 4:
+                flags.append("4straight")
+                break
+        return flags
+
+    @staticmethod
+    def _street_relative_assessment(
+        *,
+        street: str,
+        action_str: str,
+        facing_bet: bool,
+        to_call: float,
+        pot: float,
+        pot_odds: float,
+        board: List[Card],
+        hero_made_subtype: str,
+        hero_bucket: str,
+        equity: float,
+        raw_equity: float,
+        villain_bucket_dist: Optional[Dict[str, float]],
+        observed_action: str = "",
+        opponent_af: float = 1.5,
+        n_sticky: int = 0,
+    ) -> Dict[str, object]:
+        """Flop/turn observation layer for fragile made hands on danger boards.
+
+        This is deliberately log-only. It marks hands where relative strength is
+        likely more important than linear equity, without changing the decision.
+        """
+        if street not in ("flop", "turn") or not facing_bet:
+            return {}
+
+        board_flags = PokerBot._board_danger_flags(board)
+        if not board_flags:
+            return {}
+
+        subtype = str(hero_made_subtype or "")
+        fragile_subtypes = {
+            "clean_overpair",
+            "board_pair_pocket_pair",
+            "board_pair_pocket_underpair",
+            "board_pair_hero_pair",
+            "board_pair_kicker",
+            "trips",
+            "trips_top_kicker",
+            "trips_weak_kicker",
+            "board_trips_kicker",
+            "top_pair_weak_kicker",
+        }
+        fragile_made = (
+            subtype in fragile_subtypes
+            or (hero_bucket in {"medium", "strong"} and subtype.startswith("board_pair_"))
+        )
+        if not fragile_made:
+            return {}
+
+        pot_before = max(1.0, float(pot) - float(to_call or 0.0))
+        bet_frac = float(to_call or 0.0) / pot_before if to_call > 0 else 0.0
+        obs = str(observed_action or "")
+        is_raise_like = obs in {"raise", "raise_over"} or bool(obs.startswith("raise"))
+        sticky_or_passive = n_sticky > 0 or opponent_af <= 1.0
+        large_bet = bet_frac >= 0.65
+        danger_action = is_raise_like or large_bet or (sticky_or_passive and bet_frac >= 0.35)
+        if not danger_action:
+            return {}
+
+        vdist = villain_bucket_dist or {}
+        strong_plus = max(0.0, float(vdist.get("strong", 0.0) or 0.0)) + max(
+            0.0, float(vdist.get("nuts", 0.0) or 0.0)
+        )
+        nuts = max(0.0, float(vdist.get("nuts", 0.0) or 0.0))
+
+        flag_pressure = min(1.0, len(board_flags) * 0.18)
+        action_pressure = 0.25 if is_raise_like else 0.0
+        if large_bet:
+            action_pressure += 0.18
+        if sticky_or_passive:
+            action_pressure += 0.12
+        risk = min(1.0, 0.45 * strong_plus + 0.35 * nuts + flag_pressure + action_pressure)
+
+        need = float(pot_odds or 0.0) + 0.05
+        eq_gap = float(equity or 0.0) - need
+        if action_str == "fold":
+            if eq_gap >= 0.12 and risk < 0.55:
+                tag, label = "early_tight_fold_watch", "弃牌偏紧?"
+            else:
+                tag, label = "early_fold_ok", "早街弃牌OK"
+        elif action_str == "call":
+            if risk >= 0.62 and eq_gap <= 0.12:
+                tag, label = "early_call_risk_watch", "跟注险?"
+            else:
+                tag, label = "early_call_watch", "跟注观察"
+        elif action_str == "raise":
+            if risk >= 0.58:
+                tag, label = "early_raise_risk_watch", "加注险?"
+            else:
+                tag, label = "early_raise_watch", "加注观察"
+        else:
+            tag, label = "early_check_watch", "check观察"
+
+        action_flags: List[str] = []
+        if is_raise_like:
+            action_flags.append("raise")
+        if large_bet:
+            action_flags.append("large")
+        if sticky_or_passive:
+            action_flags.append("sticky")
+
+        return {
+            "street": street,
+            "tag": tag,
+            "label": label,
+            "risk": round(risk, 4),
+            "eq": round(float(equity or 0.0), 4),
+            "mc": round(float(raw_equity or 0.0), 4),
+            "need": round(need, 4),
+            "pot_odds": round(float(pot_odds or 0.0), 4),
+            "bet_frac": round(bet_frac, 4),
+            "hero_bucket": hero_bucket,
+            "hero_made_subtype": subtype,
+            "villain_strong_plus": round(min(1.0, strong_plus), 4),
+            "villain_nuts": round(nuts, 4),
+            "board_flags": board_flags,
+            "action_flags": action_flags,
+        }
+
+    @staticmethod
+    def _river_relative_assessment(
+        *,
+        action_str: str,
+        facing_bet: bool,
+        pot_odds: float,
+        rel: Optional[Dict[str, float]],
+        calibration: Optional[Dict[str, object]] = None,
+        reason: str = "",
+        strategy_gates: Optional[List[str]] = None,
+    ) -> Dict[str, object]:
+        """Compact river-relative observation for logs and offline joins."""
+        if not rel:
+            return {}
+        win = max(0.0, float(rel.get('win', 0.0) or 0.0))
+        tie = max(0.0, float(rel.get('tie', 0.0) or 0.0))
+        loss = max(0.0, float(rel.get('loss', 0.0) or 0.0))
+        total = win + tie + loss
+        if total <= 1e-12:
+            return {}
+        win, tie, loss = win / total, tie / total, loss / total
+        eq = river_rel_eq({'win': win, 'tie': tie, 'loss': loss})
+
+        need = pot_odds + 0.05 if facing_bet else 0.50
+        close = abs(win - loss) <= 0.15 or 0.42 <= eq <= 0.58
+        tag = "neutral"
+        label = "观察"
+        if facing_bet:
+            if action_str == 'fold':
+                if win >= 0.65 and loss <= 0.25:
+                    tag, label = "overfold_watch", "弃牌损价值?"
+                elif eq >= need + 0.08:
+                    tag, label = "tight_fold_watch", "弃牌偏紧?"
+                elif loss >= 0.55 or eq < need:
+                    tag, label = "fold_ok", "弃牌OK"
+                else:
+                    tag, label = "close_fold", "边缘弃牌"
+            elif action_str == 'call':
+                if eq >= need:
+                    tag, label = "call_ok", "跟注OK"
+                elif loss >= 0.55:
+                    tag, label = "bad_call_watch", "跟注险?"
+                else:
+                    tag, label = "thin_call_watch", "边缘跟注"
+            elif action_str == 'raise':
+                if win >= 0.70 and loss <= 0.20:
+                    tag, label = "value_raise_ok", "加注OK"
+                elif loss >= 0.35 or eq < need:
+                    tag, label = "raise_risk_watch", "加注险?"
+                else:
+                    tag, label = "thin_raise_watch", "边缘加注"
+        else:
+            if action_str == 'raise':
+                if win >= 0.70 and loss <= 0.20:
+                    tag, label = "value_bet_ok", "价值OK"
+                elif loss >= 0.40 or eq < 0.50:
+                    tag, label = "value_risk_watch", "下注险?"
+                else:
+                    tag, label = "thin_value_watch", "薄价值"
+            elif action_str == 'check':
+                if win >= 0.65 and loss <= 0.25:
+                    tag, label = "miss_value_watch", "少拿?"
+                elif loss >= 0.55 or eq < 0.40:
+                    tag, label = "pot_control_ok", "控池OK"
+                elif close:
+                    tag, label = "close_check_ok", "边缘check"
+                else:
+                    tag, label = "check_watch", "check观察"
+            elif action_str == 'fold':
+                tag, label = "unexpected_fold", "异常弃牌?"
+
+        gate = ""
+        gate_src = " ".join([reason] + list(strategy_gates or []))
+        if 'rel_loss_dominant' in gate_src:
+            gate = "rel_loss"
+        elif 'fragile_rel_eq' in gate_src:
+            gate = "rel_block"
+        elif 'fragile_rel_price' in gate_src:
+            gate = "rel_allow"
+        elif 'relative' in gate_src or 'rel_' in gate_src:
+            gate = "rel"
+
+        cal = calibration or {}
+        return {
+            'win': round(win, 4),
+            'tie': round(tie, 4),
+            'loss': round(loss, 4),
+            'eq': round(eq, 4),
+            'need': round(need, 4),
+            'tag': tag,
+            'label': label,
+            'gate': gate,
+            'cal_used': bool(cal.get('used')),
+            'raw_eq': float(cal.get('raw_eq', eq) or eq),
+            'cal_eq': float(cal.get('cal_eq', eq) or eq),
+            'cal_n': int(cal.get('n', 0) or 0),
+            'cal_key': str(cal.get('key', '') or ''),
+            'action_ctx': str(cal.get('action_ctx', '') or ''),
+        }
 
     @staticmethod
     def _bayes_shrunk_rate(
@@ -1669,7 +2052,7 @@ class PokerBot:
         self, gs: GameState, player: Player, position: str, facing_action: str,
         num_limpers: int = 0,
     ) -> dict | None:
-        """查询翻前 GTO 参考数据，返回 {chart_key, hand, greenline, pekarstas}（展示用已格式化）。"""
+        """查询翻前 GTO 参考数据，返回 {chart_key, hand, greenline}（展示用已格式化）。"""
         try:
             hand = _hand_category(player.hole_cards)
             pos = self._normalize_pos(position)
@@ -1695,7 +2078,6 @@ class PokerBot:
                 "chart_key": chart_key,
                 "hand": hand,
                 "greenline": format_action(refs["greenline"]),
-                "pekarstas": format_action(refs["pekarstas"]),
             }
         except Exception:
             log.exception(

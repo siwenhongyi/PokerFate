@@ -276,6 +276,14 @@ class PokerFateAPI:
                             HeroEquityCalibrator,
                         )
                         self._bot._hero_eq_calibrator = HeroEquityCalibrator.from_dict(heq_data)
+                    river_rel_data = showdown_raw.get('river_relative_calibrator')
+                    if river_rel_data:
+                        from pokerfate.strategy.range_v2.river_relative_calibrator import (
+                            RiverRelativeCalibrator,
+                        )
+                        self._bot._river_relative_calibrator = (
+                            RiverRelativeCalibrator.from_dict(river_rel_data)
+                        )
                 else:
                     # EQR: load ShowdownCalibrator
                     self._bot.range_estimator.showdown_calibrator = ShowdownCalibrator.from_dict(showdown_raw)
@@ -297,8 +305,7 @@ class PokerFateAPI:
         self._street_contribs: Dict[int, float] = {}
         self._last_hand_push_detail: str = ""
         self._last_auto_collect_reasons: list[str] = []
-        self._last_winner_ids: list[int] = []
-        self._last_my_delta: float = 0.0
+        self._runtime_calibration_recorder = None
 
         # ── 2026-04-23: Showdown calibration ──
         # 每次 tracker range 调整时记录预测，手牌结束时对比摊牌实际，写入
@@ -324,6 +331,8 @@ class PokerFateAPI:
                 self._calibrator.record_prediction(**kwargs)
             tracker._prediction_hook = _prediction_hook_filtered
             tracker._name_resolver = lambda pid: self._session_names.get(pid, str(pid))
+            from pokerfate.calibration import RuntimeCalibrationRecorder
+            self._runtime_calibration_recorder = RuntimeCalibrationRecorder()
         else:
             self._calibrator = None
 
@@ -368,8 +377,6 @@ class PokerFateAPI:
         self._action_history = []
         self._last_hand_push_detail = ""
         self._last_auto_collect_reasons = []
-        self._last_winner_ids = []
-        self._last_my_delta = 0.0
         self._decision_index = 0
         self._my_stack_start: float = 0.0  # set after resolving stacks below
 
@@ -848,6 +855,14 @@ class PokerFateAPI:
             equity_mode=getattr(self._bot, "last_equity_mode", None),
             gto_refs=getattr(self._bot, "last_gto_refs", None),
             elapsed_ms=elapsed_ms,
+            river_relative=(
+                getattr(self._bot, "last_decision_diagnostics", {})
+                .get("river_relative", {})
+            ),
+            street_relative=(
+                getattr(self._bot, "last_decision_diagnostics", {})
+                .get("street_relative", {})
+            ),
         )
 
         return decision
@@ -892,12 +907,6 @@ class PokerFateAPI:
         排序规则：按出现频率降序（多张在前），同频率内按点数降序。
         示例：葫芦 → 三张在前+两张在后；两对 → 大对+小对+踢脚；四条 → 四张+踢脚
         """
-        _SUIT_SYM = {'s': '♠', 'h': '♥', 'd': '♦', 'c': '♣'}
-
-        def _fmt_card(c) -> str:
-            s = str(c)          # e.g. "As", "Td"
-            return s[:-1] + _SUIT_SYM.get(s[-1], s[-1])
-
         is_straight = score[0] in (4, 8)  # STRAIGHT or STRAIGHT_FLUSH
         if is_straight:
             # Wheel (A-2-3-4-5): A acts as 1, sort as 5-4-3-2-A
@@ -909,7 +918,7 @@ class PokerFateAPI:
         else:
             counts = Counter(c.rank.value for c in cards)
             sorted_cards = sorted(cards, key=lambda c: (counts[c.rank.value], c.rank.value), reverse=True)
-        return ' '.join(_fmt_card(c) for c in sorted_cards)
+        return ' '.join(_push_card_text(c) for c in sorted_cards)
 
     # Server hand type int → Chinese name (from PKHelper.lua)
     _SERVER_HAND_TYPE_CN = {
@@ -917,6 +926,18 @@ class PokerFateAPI:
         2: '一对', 3: '两对', 4: '三条', 5: '顺子',
         6: '同花', 7: '葫芦', 8: '四条', 9: '同花顺', 10: '皇家同花顺',
     }
+
+    @staticmethod
+    def _server_hand_type_rank(type_int: int | None) -> Optional[HandRank]:
+        if type_int is None:
+            return None
+        try:
+            value = int(type_int)
+        except (TypeError, ValueError):
+            return None
+        if not 1 <= value <= 10:
+            return None
+        return HandRank(value - 1)
 
     def hand_over(
         self,
@@ -983,52 +1004,56 @@ class PokerFateAPI:
                 name = self._session_names.get(pid, str(pid))
                 sd_by_name[name] = [str(c) for c in cards]
 
+        def _fmt_hole(cards) -> str:
+            """底牌格式化（带花色符号），用于 fallback 展示。"""
+            return _push_cards_text(cards)
+
         # 构建每个 showdown 玩家的成品展示：
         #   - 牌型名：优先用服务端 winner_hand_types，否则本地评估
-        #   - 最佳5张：始终本地计算（服务端不下发）
+        #   - 最佳5张：只有总牌数足够时本地计算；异常短公牌 replay 直接降级展示
         wht = winner_hand_types or {}
         hand_combos: dict = {}
         if showdown_hands and self._board:
             for pid, cards in showdown_hands.items():
                 name = self._session_names.get(pid, str(pid))
-                try:
-                    hole = [Card.from_str(c) if isinstance(c, str) else c for c in cards]
-                    score, best5 = HandEvaluator.best_five(hole + self._board)
-                    # 牌型名：服务端优先
-                    server_type = wht.get(pid)
-                    rank_cn = (self._SERVER_HAND_TYPE_CN.get(server_type)
-                               if server_type else None)
-                    if rank_cn is None:
-                        rank_cn = HandRank(score[0]).cn_name()
-                    hand_combos[name] = f"{rank_cn} {self._fmt_best5(score, best5)}"
-                except Exception as e:
-                    print(f"[hand_combos ERROR] pid={pid} cards={cards} board={[str(c) for c in self._board]}")
-                    traceback.print_exc()
+                hole = [Card.from_str(c) if isinstance(c, str) else c for c in cards]
+                server_type = wht.get(pid)
+                server_rank = self._server_hand_type_rank(server_type)
+                rank_cn = server_rank.cn_name() if server_rank is not None else None
+                if len(hole) + len(self._board) >= 5:
+                    try:
+                        score, best5 = HandEvaluator.best_five(hole + self._board)
+                        local_rank = HandRank(score[0])
+                        # 牌型名：服务端优先
+                        if rank_cn is None:
+                            rank_cn = local_rank.cn_name()
+                        hand_combos[name] = f"{rank_cn} {self._fmt_best5(score, best5)}"
+                    except Exception as e:
+                        print(f"[hand_combos ERROR] pid={pid} cards={cards} board={[str(c) for c in self._board]}")
+                        traceback.print_exc()
+                elif rank_cn is not None:
+                    hand_combos[name] = rank_cn
+                else:
+                    hand_combos[name] = _fmt_hole(hole)
         # 兜底：有 winner_hand_types 但没有底牌数据时，至少展示牌型名
         # （包括：preflop 结束 / 对手没有亮牌但服务端下发了牌型）
         if wht:
             for pid, type_int in wht.items():
                 name = self._session_names.get(pid, str(pid))
                 if name not in hand_combos:
-                    rank_cn = self._SERVER_HAND_TYPE_CN.get(type_int)
+                    server_rank = self._server_hand_type_rank(type_int)
+                    rank_cn = server_rank.cn_name() if server_rank is not None else None
                     if rank_cn:
                         hand_combos[name] = rank_cn
 
         # 自己的成品：本地计算（服务端不单独下发我的牌型）
-        _SUIT_SYM = {'s': '♠', 'h': '♥', 'd': '♦', 'c': '♣'}
-        def _fmt_hole(cards) -> str:
-            """底牌格式化（带花色符号），用于 fallback 展示。"""
-            parts = []
-            for c in cards:
-                s = str(c)
-                parts.append(s[:-1] + _SUIT_SYM.get(s[-1], s[-1]) if len(s) >= 2 else s)
-            return ' '.join(parts)
-
         my_combo: str | None = None
-        if self._hole_cards and self._board:
+        my_server_rank = self._server_hand_type_rank(wht.get(self.my_player_id))
+        if self._hole_cards and self._board and len(self._hole_cards) + len(self._board) >= 5:
             try:
                 score, best5 = HandEvaluator.best_five(self._hole_cards + self._board)
-                rank_cn = HandRank(score[0]).cn_name()
+                local_rank = HandRank(score[0])
+                rank_cn = (my_server_rank or local_rank).cn_name()
                 my_combo = f"{rank_cn} {self._fmt_best5(score, best5)}"
             except Exception as e:
                 print(f"[best_five ERROR] hole={[str(c) for c in self._hole_cards]} board={[str(c) for c in self._board]}")
@@ -1047,12 +1072,8 @@ class PokerFateAPI:
             hand_combos=hand_combos or {},
             my_combo=my_combo,
         )
-        self._last_winner_ids = list(winner_ids)
-        self._last_my_delta = float(my_delta)
         self._last_auto_collect_reasons = self._build_auto_collect_reasons(
             winner_ids=winner_ids,
-            my_delta=my_delta,
-            profit_threshold_bb=50.0,
         )
 
         self._log.hand_result(
@@ -1162,19 +1183,44 @@ class PokerFateAPI:
                         )
                         for r in results:
                             rec = r.record
-                            if (rec.predicted_hero_eq_multi is None
-                                    or r.actual_hero_eq_street_multi is None
-                                    or not rec.hero_bucket):
-                                continue
                             action_ctx = classify_action_ctx_from_trigger(rec.trigger)
-                            self._bot._hero_eq_calibrator.record(
-                                bucket=rec.hero_bucket,
-                                street=rec.street,
-                                num_opp=len(rec.active_player_ids),
-                                predicted=rec.predicted_hero_eq_multi,
-                                actual=r.actual_hero_eq_street_multi,
-                                action_ctx=action_ctx,
-                            )
+                            if (
+                                rec.predicted_hero_eq_multi is not None
+                                and r.actual_hero_eq_street_multi is not None
+                                and rec.hero_bucket
+                            ):
+                                self._bot._hero_eq_calibrator.record(
+                                    bucket=rec.hero_bucket,
+                                    street=rec.street,
+                                    num_opp=len(rec.active_player_ids),
+                                    predicted=rec.predicted_hero_eq_multi,
+                                    actual=r.actual_hero_eq_street_multi,
+                                    action_ctx=action_ctx,
+                                )
+                            if (
+                                rec.street == 'river'
+                                and rec.villain_vs_hero_dist
+                                and r.actual_relation
+                                and rec.hero_bucket
+                            ):
+                                self._bot._river_relative_calibrator.record(
+                                    hero_bucket=rec.hero_bucket,
+                                    hero_made_subtype=rec.hero_made_subtype,
+                                    board_texture=rec.board_texture,
+                                    action_ctx=action_ctx,
+                                    predicted_dist=rec.villain_vs_hero_dist,
+                                    actual_relation=r.actual_relation,
+                                )
+                        if self._runtime_calibration_recorder is not None and results:
+                            try:
+                                self._runtime_calibration_recorder.write_results(
+                                    results,
+                                    big_blind=self.big_blind,
+                                    final_board=self._board,
+                                    source="runtime",
+                                )
+                            except Exception:
+                                traceback.print_exc()
         else:
             # ── EQR showdown processing ──
             # Showdown calibration: update range estimator with revealed hands + log
@@ -1212,6 +1258,9 @@ class PokerFateAPI:
                 sd_data = {
                     'range_v2_learner': self._bot._showdown_learner.to_dict(),
                     'hero_eq_calibrator': self._bot._hero_eq_calibrator.to_dict(),
+                    'river_relative_calibrator': (
+                        self._bot._river_relative_calibrator.to_dict()
+                    ),
                 }
             else:
                 sd_data = self._bot.range_estimator.showdown_calibrator.to_dict()
@@ -1224,45 +1273,25 @@ class PokerFateAPI:
         """Return the latest hand detail in a push-friendly compact form."""
         return _fit_utf8(self._last_hand_push_detail, max_bytes)
 
-    def last_auto_collect_reasons(self, profit_threshold_bb: float = 50.0) -> list[str]:
+    def last_auto_collect_reasons(self) -> list[str]:
         """Reasons why the latest hand should be auto-collected."""
-        return self._build_auto_collect_reasons(
-            winner_ids=self._last_winner_ids,
-            my_delta=self._last_my_delta,
-            profit_threshold_bb=profit_threshold_bb,
-        )
+        return list(self._last_auto_collect_reasons)
 
-    def _build_auto_collect_reasons(
-        self,
-        *,
-        winner_ids: List[int],
-        my_delta: float,
-        profit_threshold_bb: float,
-    ) -> list[str]:
-        reasons: list[str] = []
-
-        bb = float(self.big_blind or 0.0)
-        if bb > 0:
-            threshold_bb = max(0.0, float(profit_threshold_bb))
-            if my_delta >= threshold_bb * bb:
-                reasons.append(f"盈利{my_delta / bb:.1f}BB")
-
+    def _build_auto_collect_reasons(self, *, winner_ids: List[int]) -> list[str]:
         if self.my_player_id not in set(winner_ids):
-            return reasons
+            return []
 
         rank = self._my_best_hand_rank()
         if rank is None:
-            return reasons
+            return []
 
         if rank == HandRank.FULL_HOUSE:
             if not self._board_has_rank_trip():
-                reasons.append("葫芦")
-            return reasons
+                return ["葫芦"]
+            return []
 
         label = _AUTO_COLLECT_HAND_RANKS.get(rank)
-        if label:
-            reasons.append(label)
-        return reasons
+        return [label] if label else []
 
     def _my_best_hand_rank(self) -> Optional[HandRank]:
         if not self._hole_cards or len(self._hole_cards) + len(self._board) < 5:
@@ -1298,9 +1327,7 @@ class PokerFateAPI:
         else:
             lines.append("行动: -")
 
-        show_line = self._push_showdown_line(showdown_hands, hand_combos)
-        if show_line:
-            lines.append(show_line)
+        lines.extend(self._push_showdown_lines(showdown_hands, hand_combos, winner_names))
 
         winners = " & ".join(self._short_push_name(n) for n in winner_names) or "-"
         sign = "+" if my_delta >= 0 else ""
@@ -1370,25 +1397,45 @@ class PokerFateAPI:
             return f"{amount_bb:.0f}bb"
         return f"{amount_bb:.1f}bb"
 
-    def _push_showdown_line(
+    def _push_showdown_lines(
         self,
         showdown_hands: Dict[int, List[str]],
         hand_combos: Dict[str, str],
-    ) -> str:
-        if not showdown_hands:
-            return "亮牌: 无"
+        winner_names: List[str],
+    ) -> list[str]:
+        lines: list[str] = []
+        shown_names: set[str] = set()
 
-        parts: list[str] = []
-        for pid in sorted(showdown_hands):
-            raw_name = self._session_names.get(pid, str(pid))
-            who = "我" if pid == self.my_player_id else self._short_push_name(raw_name)
-            cards = _push_cards_text(showdown_hands[pid])
-            combo = hand_combos.get(raw_name, "")
-            text = f"{who}:{cards}"
-            if combo:
-                text += f" {combo}"
-            parts.append(text)
-        return "亮牌: " + "; ".join(parts)
+        if showdown_hands:
+            parts: list[str] = []
+            for pid in sorted(showdown_hands):
+                raw_name = self._session_names.get(pid, str(pid))
+                shown_names.add(raw_name)
+                who = "我" if pid == self.my_player_id else self._short_push_name(raw_name)
+                cards = _push_cards_text(showdown_hands[pid])
+                combo = hand_combos.get(raw_name, "")
+                text = f"{who}:{cards}"
+                if combo:
+                    text += f" {combo}"
+                parts.append(text)
+            lines.append("亮牌: " + "; ".join(parts))
+
+        type_parts: list[str] = []
+        my_name = self._session_names.get(self.my_player_id, str(self.my_player_id))
+        for raw_name in winner_names:
+            if raw_name in shown_names:
+                continue
+            combo = hand_combos.get(raw_name)
+            if not combo:
+                continue
+            who = "我" if raw_name == my_name else self._short_push_name(raw_name)
+            type_parts.append(f"{who}:{combo}")
+        if type_parts:
+            lines.append("赢家牌型: " + "; ".join(type_parts))
+
+        if not lines:
+            lines.append("亮牌: 无")
+        return lines
 
     @staticmethod
     def _short_push_name(name: str, max_chars: int = 10) -> str:

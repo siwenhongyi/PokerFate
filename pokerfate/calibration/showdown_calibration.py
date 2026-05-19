@@ -26,6 +26,11 @@ from pokerfate.core.card import Card
 from pokerfate.core.hand_evaluator import HandEvaluator
 from pokerfate.strategy.range_v2 import hand_categorizer as hcat
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
+from pokerfate.strategy.range_v2.river_relative_calibrator import (
+    board_texture_key,
+    relation_eq,
+    relation_from_actual_eq,
+)
 
 _PRED_EQ_SAMPLES = int(_os.environ.get('PF_CAL_PRED_EQ_SAMPLES', '500'))
 _ACTUAL_EQ_PREFLOP_SAMPLES = int(
@@ -64,6 +69,12 @@ class PredictionRecord:
     # 缺陷 C meta-calibration：按 (hero_bucket, street, n_opp) 累积 (pred,
     # actual) 对，用历史 bias 校正 raw equity。preflop 时为 hero preflop 桶。
     hero_bucket: str = ''
+    hero_made_subtype: str = ''
+    hero_hand_rank: str = ''
+    board_texture: str = ''
+    # River-only hero-relative distribution:
+    # {'win': hero beats villain, 'tie': split, 'loss': villain beats hero}.
+    villain_vs_hero_dist: Dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -85,6 +96,8 @@ class CalibrationResult:
     # 日志展示用：只用亮牌 villain 做模拟（旧行为），反映真实本手结果。
     # 不喂给 calibrator——它有口径偏差，只用于人看。
     actual_hero_eq_street_multi_shown: Optional[float] = None
+    predicted_relation_eq: Optional[float] = None
+    actual_relation: str = ''
 
 
 class ShowdownCalibrator:
@@ -167,8 +180,18 @@ class ShowdownCalibrator:
 
         # Hero 自己在这个板面的桶（meta-calibration 键的一部分）
         hero_bucket = ''
+        hero_made_subtype = ''
+        hero_hand_rank = ''
+        rel_dist: Dict[str, float] = {}
         if hero_cards is not None and len(hero_cards) >= 2:
             hero_bucket = hcat.categorize_cards(list(hero_cards), list(board))
+            hmi = hcat.made_hand_info(list(hero_cards), list(board))
+            hero_made_subtype = hmi.subtype
+            hero_hand_rank = hmi.hand_rank
+            if board and len(board) >= 5:
+                rel_dist = self._compute_vs_hero_dist(
+                    w_norm, list(board), list(hero_cards),
+                )
 
         record = PredictionRecord(
             hand_id=self._hand_id,
@@ -184,6 +207,10 @@ class ShowdownCalibrator:
             predicted_hero_eq_multi=predicted_hero_eq_multi,
             active_player_ids=active_player_ids,
             hero_bucket=hero_bucket,
+            hero_made_subtype=hero_made_subtype,
+            hero_hand_rank=hero_hand_rank,
+            board_texture=board_texture_key(board),
+            villain_vs_hero_dist=rel_dist,
         )
         self._hand_predictions.setdefault(player_id, []).append(record)
 
@@ -328,6 +355,14 @@ class ShowdownCalibrator:
             actual_hero_eq_street_multi=actual_hero_eq_multi,
             eq_prediction_error_street_multi=eq_error_multi,
             actual_hero_eq_street_multi_shown=actual_hero_eq_multi_shown,
+            predicted_relation_eq=(
+                relation_eq(rec.villain_vs_hero_dist)
+                if rec.villain_vs_hero_dist else None
+            ),
+            actual_relation=(
+                relation_from_actual_eq(actual_hero_eq_street)
+                if rec.board and len(rec.board) >= 5 else ''
+            ),
         )
 
     # ---------------- 辅助计算 ----------------
@@ -359,6 +394,40 @@ class ShowdownCalibrator:
         if total > 0:
             buckets = {k: v / total for k, v in buckets.items()}
         return buckets
+
+    @staticmethod
+    def _compute_vs_hero_dist(
+        w_norm: np.ndarray,
+        board: List[Card],
+        hero_cards: List[Card],
+    ) -> Dict[str, float]:
+        if not board or len(board) < 5 or not hero_cards or len(hero_cards) < 2:
+            return {}
+
+        board_ints = {hcm.card_to_int(c) for c in board}
+        hero_ints = {hcm.card_to_int(c) for c in hero_cards}
+        blocked = hcm.blocked_by(board_ints | hero_ints)
+        valid = np.array(w_norm, dtype=np.float64, copy=True)
+        valid[blocked] = 0.0
+        total = float(valid.sum())
+        if total <= 1e-15:
+            return {}
+        valid /= total
+
+        hero_score = HandEvaluator.eval_int(list(hero_cards) + list(board))
+        win_w = tie_w = loss_w = 0.0
+        for idx in np.flatnonzero(valid):
+            c1, c2 = hcm.ALL_COMBOS[idx]
+            opp_cards = [hcm.int_to_card(c1), hcm.int_to_card(c2)]
+            opp_score = HandEvaluator.eval_int(opp_cards + list(board))
+            p = float(valid[idx])
+            if hero_score > opp_score:
+                win_w += p
+            elif hero_score == opp_score:
+                tie_w += p
+            else:
+                loss_w += p
+        return {'win': win_w, 'tie': tie_w, 'loss': loss_w}
 
     @staticmethod
     def _compute_hero_eq(hero_cards: List[Card], board: List[Card],

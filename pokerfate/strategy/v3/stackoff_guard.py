@@ -50,6 +50,15 @@ _FOUR_STRAIGHT_MAX_NUTS = float(
 _FOUR_STRAIGHT_MAX_REL_LOSS = float(
     _os.environ.get('PF_FOUR_STRAIGHT_MAX_REL_LOSS', '0.12')
 )
+_REL_CLEAR_MIN_WIN = float(
+    _os.environ.get('PF_STACKOFF_REL_CLEAR_MIN_WIN', '0.72')
+)
+_REL_CLEAR_MIN_EDGE = float(
+    _os.environ.get('PF_STACKOFF_REL_CLEAR_MIN_EDGE', '0.30')
+)
+_REL_CLEAR_MAX_LOSS = float(
+    _os.environ.get('PF_STACKOFF_REL_CLEAR_MAX_LOSS', '0.18')
+)
 
 _STACKOFF_PURPOSES = {
     'value_jam',
@@ -127,6 +136,25 @@ def _worse_call_mass(ctx: DecisionCtx) -> float:
     )
 
 
+def _relative_clear_value(ctx: DecisionCtx) -> bool:
+    """True when the hero-relative range says this is still clear value.
+
+    Bucket labels can overstate danger on coordinated boards. At stack-off
+    nodes we still guard non-nut hands, but do not block value when the
+    relative distribution says villain holds worse hands overwhelmingly.
+    """
+    rel = ctx.villain_vs_hero_dist or {}
+    if not rel:
+        return False
+    win = float(rel.get('win', 0.0) or 0.0)
+    loss = float(rel.get('loss', 0.0) or 0.0)
+    return (
+        win >= _REL_CLEAR_MIN_WIN
+        and win - loss >= _REL_CLEAR_MIN_EDGE
+        and loss <= _REL_CLEAR_MAX_LOSS
+    )
+
+
 def _is_stackoff_node(ctx: DecisionCtx, purpose_id: str, will_jam: bool) -> bool:
     if purpose_id not in _STACKOFF_PURPOSES:
         return False
@@ -179,6 +207,8 @@ def stackoff_guard_reason(
     subtype = ctx.hero_made_subtype or 'unknown'
     nuts = _villain_nuts(ctx)
     rel_loss = _villain_rel_loss(ctx)
+    if _relative_clear_value(ctx):
+        return None
 
     if (
         _texture_guards_enabled()

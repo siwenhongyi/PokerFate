@@ -63,89 +63,116 @@ class TestAPILifecycle:
         assert "牌面: K♠️ 7♦️ 2♣️ | 9♥️ | 3♣️" in detail
         assert "翻前: Opponent加3bb; 我加10bb; Opponent跟10bb" in detail
         assert "亮牌: Opponent:K♦️ Q♦️" in detail
+        assert "一对 K♦️ K♠️" in detail
         assert "结果: PokerFate 赢池 118，我 +40" in detail
+        assert "我牌型: 一对 A♠️ A♥️" in detail
 
-    def test_auto_collect_reasons_include_big_profit(self):
+    def test_hand_over_push_detail_uses_server_winner_type_without_showdown(self):
         api = make_api()
         start_hand(api)
-        api.deal_hole_cards(["Ac", "Kd"])
+        api.deal_hole_cards(["As", "Qh"])
+        api.deal_board(["Kd", "7d", "2d"], street="flop", pot=20)
+        api.deal_board(["9d"], street="turn", pot=60)
+        api.deal_board(["3c"], street="river", pot=120)
+
+        api.hand_over(
+            winner_ids=[1],
+            pot=118,
+            final_stacks={0: 160, 1: 240},
+            winner_hand_types={1: 6},
+            my_profit_delta=-40,
+        )
+
+        detail = api.last_hand_push_detail()
+        assert "亮牌: 无" not in detail
+        assert "赢家牌型: Opponent:同花" in detail
+        assert "结果: Opponent 赢池 118，我 -40" in detail
+
+    def test_auto_collect_reasons_ignore_profit_only_hands(self):
+        api = make_api()
+        start_hand(api)
+        api.deal_hole_cards(["As", "Ah"])
+        api.deal_board(["Ks", "7d", "2c"], street="flop", pot=20)
+        api.deal_board(["9h"], street="turn", pot=60)
+        api.deal_board(["3c"], street="river", pot=120)
+
+        api.hand_over(
+            winner_ids=[0],
+            pot=400,
+            final_stacks={0: 500, 1: 0},
+            my_profit_delta=300,
+        )
+
+        assert api.last_auto_collect_reasons() == []
+
+    def test_auto_collect_reasons_keep_special_full_house(self):
+        api = make_api()
+        start_hand(api)
+        api.deal_hole_cards(["Ac", "Ks"])
+        api.deal_board(["Ah", "Ad", "7s"], street="flop", pot=20)
+        api.deal_board(["7c"], street="turn", pot=60)
+        api.deal_board(["2d"], street="river", pot=120)
 
         api.hand_over(
             winner_ids=[0],
             pot=120,
-            final_stacks={0: 300, 1: 100},
-            my_profit_delta=100,
+            final_stacks={0: 260, 1: 140},
+            my_profit_delta=60,
         )
 
-        assert api.last_auto_collect_reasons(50) == ["盈利50.0BB"]
+        assert api.last_auto_collect_reasons() == ["葫芦"]
 
-    def test_auto_collect_reasons_include_four_of_a_kind(self):
+    def test_auto_collect_reasons_skip_board_trips_full_house(self):
         api = make_api()
         start_hand(api)
-        api.deal_hole_cards(["Ah", "Ad"])
-        api.deal_board(["Ac", "As", "7d"], street="flop")
-        api.deal_board(["2c"], street="turn")
-        api.deal_board(["3h"], street="river")
+        api.deal_hole_cards(["Kd", "Qs"])
+        api.deal_board(["Ah", "Ad", "As"], street="flop", pot=20)
+        api.deal_board(["Kc"], street="turn", pot=60)
+        api.deal_board(["2d"], street="river", pot=120)
 
         api.hand_over(
             winner_ids=[0],
-            pot=80,
-            final_stacks={0: 240, 1: 160},
-            my_profit_delta=0,
+            pot=120,
+            final_stacks={0: 260, 1: 140},
+            my_profit_delta=60,
         )
 
-        assert api.last_auto_collect_reasons(50) == ["四条"]
+        assert api.last_auto_collect_reasons() == []
 
-    def test_auto_collect_reasons_include_royal_flush(self):
+    def test_hand_over_partial_board_does_not_print_best_five_traceback(self, capsys):
         api = make_api()
         start_hand(api)
-        api.deal_hole_cards(["As", "Ks"])
-        api.deal_board(["Qs", "Js", "Ts"], street="flop")
-        api.deal_board(["2d"], street="turn")
-        api.deal_board(["3c"], street="river")
+        api.deal_hole_cards(["Jd", "7s"])
+        api.deal_board(["Js"], street="flop", pot=20)
 
         api.hand_over(
-            winner_ids=[0],
-            pot=80,
-            final_stacks={0: 240, 1: 160},
-            my_profit_delta=0,
+            winner_ids=[1],
+            pot=20,
+            final_stacks={0: 190, 1: 210},
+            showdown_hands={1: ["Qd", "3s"]},
+            my_profit_delta=-10,
         )
 
-        assert api.last_auto_collect_reasons(50) == ["皇家同花顺"]
+        captured = capsys.readouterr()
+        assert "best_five ERROR" not in captured.out
+        assert "hand_combos ERROR" not in captured.out
+        assert "Traceback" not in captured.out
 
-    def test_auto_collect_reasons_include_full_house_without_board_trips(self):
-        api = make_api()
-        start_hand(api)
-        api.deal_hole_cards(["Ah", "Ad"])
-        api.deal_board(["Ac", "Kd", "Kh"], street="flop")
-        api.deal_board(["2s"], street="turn")
-        api.deal_board(["3c"], street="river")
+    def test_range_calibration_extractor_skips_partial_board_replays(self):
+        from scripts.extract_range_calibration_rows_parallel import _malformed_board_reason
 
-        api.hand_over(
-            winner_ids=[0],
-            pot=80,
-            final_stacks={0: 240, 1: 160},
-            my_profit_delta=0,
-        )
-
-        assert api.last_auto_collect_reasons(50) == ["葫芦"]
-
-    def test_auto_collect_reasons_exclude_board_trip_full_house(self):
-        api = make_api()
-        start_hand(api)
-        api.deal_hole_cards(["Ah", "Kd"])
-        api.deal_board(["7c", "7d", "7h"], street="flop")
-        api.deal_board(["2s"], street="turn")
-        api.deal_board(["2d"], street="river")
-
-        api.hand_over(
-            winner_ids=[0],
-            pot=80,
-            final_stacks={0: 240, 1: 160},
-            my_profit_delta=0,
-        )
-
-        assert api.last_auto_collect_reasons(50) == []
+        assert _malformed_board_reason({
+            "events": [{"type": "board", "street": "flop", "cards": ["Js"]}],
+        }) == "flop_cards=1"
+        assert _malformed_board_reason({
+            "events": [{"type": "board", "street": "river", "cards": ["Qs", "5h"]}],
+        }) == "river_cards=2"
+        assert _malformed_board_reason({
+            "events": [
+                {"type": "board", "street": "turn", "cards": ["Qs"]},
+                {"type": "board", "street": "river", "cards": ["5h"]},
+            ],
+        }) == "partial_board=2"
 
     def test_request_action_returns_decision(self):
         api = make_api()
@@ -174,6 +201,22 @@ class TestAPILifecycle:
         )
         assert decision.action == "raise"
         assert decision.amount > 2.0
+
+    def test_free_check_signal_does_not_override_open_outside_bb(self):
+        api = make_api()
+        start_hand(api)  # Hero is BTN, not BB
+        api.deal_hole_cards(["Ac", "Ad"])
+
+        decision = api.request_action(
+            street="preflop",
+            pot=3.0,
+            current_bet=0.0,
+            to_call=0.0,
+            my_stack=200.0,
+            is_bb_option=True,
+        )
+
+        assert decision.action == "raise"
 
     def test_notify_action_updates_state(self):
         api = make_api()

@@ -219,6 +219,7 @@ class BotBridge:
         self._table_room_id: int = 0
         self._table_tid: int = 1
         self._current_gameid: str = ""
+        self._hand_seq: int = 0
         self._auto_collected_gameids: set[str] = set()
 
         # GameData API: 已拉取过的 uid（本次 proxy 进程内不重复拉）
@@ -341,7 +342,6 @@ class BotBridge:
         elif type_name == "pb.RoundOverBRC":     self._on_round_over(msg)
         elif type_name == "pb.ActionNotifyBRC":  return self._on_action_notify(msg)
         elif type_name == "pb.ShowHandRSP":      self._on_show_hand(msg)
-        elif type_name == "pb.ShowMyCardBRC":    self._on_show_my_card_brc(msg)
         elif type_name == "pb.BlindStatusBRC":   self._on_blind_status(msg)
         elif type_name == "pb.WinnerRSP":        return self._on_winner(msg)
         elif type_name == "pb.LeaveRoomRSP":     return self._on_leave_room_rsp(msg)
@@ -475,7 +475,10 @@ class BotBridge:
             self._profit_lock_award_rebuy_after_enter = False
             self._profit_lock_last_enter_fields = None
         elif self._profit_lock_award_rebuy_after_enter:
-            if code == 0:
+            if self._profit_lock_last_enter_fields is None:
+                log.warning("[BOT] 盈利锁仓：收到 EnterRoomRSP 但没有待确认的 EnterRoomREQ，忽略重进奖励。")
+                self._profit_lock_award_rebuy_after_enter = False
+            elif code == 0:
                 reenter_buyin = _chip_int(
                     (self._profit_lock_last_enter_fields or {}).get("byin_chips", 0),
                     0,
@@ -574,11 +577,14 @@ class BotBridge:
 
         return fallback_inject
 
-    def _profit_lock_quick_start_fallback(self) -> tuple[str, dict, float] | None:
-        """EnterRoom 失败时按大厅 QuickStart 随机配桌（LobbyByinDialog 同款字段）。"""
+    def _profit_lock_quick_start_fallback(
+        self,
+        context: str = "盈利锁仓",
+    ) -> tuple[str, dict, float] | None:
+        """按大厅 QuickStart 随机配桌（LobbyByinDialog 同款字段）。"""
         bb = float(self._bb or 0.0)
         if bb <= 0:
-            log.warning("[BOT] 盈利锁仓：无法 QuickStart 兜底（BB 未知）。")
+            log.warning("[BOT] %s：无法 QuickStart（BB 未知）。", context)
             return None
         gt = self._session_game_type or int(config.PROFIT_LOCK_FALLBACK_GAME_TYPE)
         lc = self._session_lobby_coin or int(config.PROFIT_LOCK_FALLBACK_LOBBY_COIN)
@@ -595,7 +601,8 @@ class BotBridge:
             "ip": "",
         }
         log.warning(
-            "[BOT] 盈利锁仓：%.1fs 后发送 QuickStartREQ 兜底（随机桌，同盲注/100BB）: %s",
+            "[BOT] %s：%.1fs 后发送 QuickStartREQ（随机桌，同盲注/100BB）: %s",
+            context,
             delay,
             fields,
         )
@@ -765,6 +772,7 @@ class BotBridge:
         gameid = str(msg.get("gameid") or "").strip()
         if gameid and gameid != "0":
             self._current_gameid = gameid
+        self._hand_seq += 1
 
         self._stage   = 1
         self._pot     = 0
@@ -850,7 +858,6 @@ class BotBridge:
                 "seat_reserve": seat_reserve,
                 "table_chips": _chip_int(deferred.get("table_chips", 0), 0),
             }
-            self._profit_lock_award_rebuy_after_enter = True
             log.warning(
                 "[BOT] 盈利锁仓：已收到下一手 DealerInfo，现离桌（留座=%s）再以 %d（100BB）重进房间 %d。",
                 seat_reserve,
@@ -1053,26 +1060,6 @@ class BotBridge:
             if cards:
                 self._pending_showdown[int(seat)] = cards
 
-    def _on_show_my_card_brc(self, msg: dict) -> None:
-        """Capture ShowMyCardBRC — cards revealed by players (active or folded showing voluntarily).
-
-        hand_cards is a repeated int32 list; 0 means that card slot is not shown.
-        Card encoding is identical to other messages: code = suit * 256 + rank_num.
-        """
-        for info in msg.get("info", []):
-            seat = info.get("seatid", 0)  # pb omits field when value is 0
-            cards = []
-            for code in info.get("hand_cards", []):
-                if code:
-                    s = _card_str(int(code))
-                    if s:
-                        cards.append(s)
-            if len(cards) >= 2:
-                seat_int = int(seat)
-                existing = self._pending_showdown.get(seat_int, [])
-                if len(cards) > len(existing):
-                    self._pending_showdown[seat_int] = cards
-
     def _on_winner(self, msg: dict) -> tuple[str, dict, float] | None:
         if self._api is None:
             return None
@@ -1149,16 +1136,13 @@ class BotBridge:
         if self._my_seat is not None:
             self._check_hand_swing(my_profit_delta)
 
-        if self._api is not None:
-            reasons = self._api.last_auto_collect_reasons(
-                float(config.AUTO_COLLECT_PROFIT_BB_THRESHOLD)
-            )
-            self._maybe_auto_collect_current_hand(reasons)
+        reasons = self._api.last_auto_collect_reasons()
+        self._maybe_auto_collect_current_hand(reasons)
 
         return self._maybe_profit_lock_leave_reenter(final_stacks)
 
     def _maybe_auto_collect_current_hand(self, reasons: list[str]) -> bool:
-        if not getattr(config, "AUTO_COLLECT_HANDS_ENABLED", True):
+        if not getattr(config, "AUTO_COLLECT_SPECIAL_HANDS_ENABLED", True):
             return False
         if self._is_sng_room or self._is_friend_room:
             log.debug(
@@ -1228,13 +1212,15 @@ class BotBridge:
         hand_detail = ""
         if self._api is not None:
             hand_detail = self._api.last_hand_push_detail()
-        self._notify(
-            "hand_swing",
+        fields = dict(
             profit_delta=int(profit_delta),
             start_chips=start_chips,
             big_blind=int(bb),
             hand_detail=hand_detail,
         )
+        if self._hand_seq > 0:
+            fields["hand_no"] = self._hand_seq
+        self._notify("hand_swing", **fields)
 
     def _maybe_profit_lock_leave_reenter(
         self, final_stacks: dict[int, int]
@@ -1247,7 +1233,7 @@ class BotBridge:
             - 一手一判，不需要累计
           累计盈亏 _session_pnl_chips（仅用于通知显示）：
             - 启动时 0；首次进房买入不扣（~100 BB 偏差）
-            - 触发锁仓时先乐观入账 += 当前桌上筹码（用于当次通知可见）
+            - LeaveRoomRSP 成功时 += 当前桌上筹码
             - 自动续入 -= 100 BB（NoticeRebyRSP → RebyREQ）
             - 盈利锁仓重进 -= 100 BB
         """
@@ -1285,9 +1271,8 @@ class BotBridge:
             "table_chips": my_final,
         }
         self._room_escape_bust_count = 0
-        # 先把触发时桌上筹码计入展示口径，保证当次锁仓通知可见实时盈利。
-        self._session_pnl_chips += float(my_final)
-        pnl_chips = self._session_pnl_chips
+        # 通知展示触发时的预估累计；真正入账等 LeaveRoomRSP 成功，避免离桌失败后重复触发重复累计。
+        pnl_chips = self._session_pnl_chips + float(my_final)
         self._notify(
             "profit_lock_trigger",
             stack_chips=my_final,
@@ -1318,7 +1303,7 @@ class BotBridge:
                 self._room_escape_reenter = None
                 return None
             self._room_escape_reenter = None
-            qs = self._profit_lock_quick_start_fallback()
+            qs = self._profit_lock_quick_start_fallback("房间逃离")
             if qs is None:
                 log.warning("[BOT] 房间逃离：无法 QuickStart（BB 未知）。")
             return qs
@@ -1340,6 +1325,7 @@ class BotBridge:
         self._profit_lock_reenter = None
 
         if table_chips > 0:
+            self._session_pnl_chips += float(table_chips)
             log.warning(
                 "[BOT] 盈利锁仓：离桌成功，累计盈亏 +%d（离桌桌上筹码），当前累计 %s（筹码）",
                 table_chips,
@@ -1350,6 +1336,7 @@ class BotBridge:
         if uid:
             fields["uid"] = int(uid)
         self._profit_lock_last_enter_fields = dict(fields)
+        self._profit_lock_award_rebuy_after_enter = True
         delay = float(config.PROFIT_LOCK_REENTER_DELAY_SEC)
         delay = max(0.0, min(60.0, delay))
         log.info(
@@ -1389,8 +1376,18 @@ class BotBridge:
         if esc_enabled:
             self._room_escape_bust_count += 1
             if self._room_escape_bust_count >= bust_need:
+                bust_count = self._room_escape_bust_count
                 self._clear_room_escape_stats_for_rematch()
                 self._room_escape_reenter = {"quickstart": True}
+                self._notify(
+                    "room_escape",
+                    bust_count=bust_count,
+                    bust_need=bust_need,
+                    byin_chips=rebuy_chips,
+                    room_id=_chip_int(self._table_room_id, 0),
+                    big_blind=int(self._bb or 0),
+                    rebuy_window_sec=reby_left_time,
+                )
                 log.warning(
                     "[BOT] 房间逃离：连续破产 %d 次（中间无盈利锁仓），离桌后 QuickStart 换桌。",
                     bust_need,

@@ -4,11 +4,11 @@ import random
 
 import pytest
 from pokerfate.core.card import Card
+from pokerfate.strategy import preflop as preflop_module
 from pokerfate.strategy.preflop import (
     PreflopStrategy,
     _3BET_CALL_BY_POS,
     _3BET_CALL_DEFAULT,
-    _BB_ISO_RAISE,
     _hand_category,
     _normalize_position,
 )
@@ -16,6 +16,11 @@ from pokerfate.strategy.preflop import (
 
 def cards(*strs):
     return [Card.from_str(s) for s in strs]
+
+
+@pytest.fixture
+def chart_expand_enabled(monkeypatch):
+    monkeypatch.setattr(preflop_module, '_CHART_EXPAND_ENABLED', True)
 
 
 class TestHandCategory:
@@ -221,7 +226,7 @@ class TestOpenRange:
         assert amount == pytest.approx(10.0)
         assert self.strat.last_expand_reason == 'chart_iso:SB-ISO 76s'
 
-    def test_multiway_small_pair_limp_behind_replaces_iso_for_set_mining(self):
+    def test_limp_behind_does_not_replace_small_pair_iso(self):
         action, amount = self.strat.decide(
             hole_cards=cards('4s', '4d'),
             position='BTN',
@@ -236,9 +241,9 @@ class TestOpenRange:
             stack_bb=140.0,
             sticky_density=0.50,
         )
-        assert action == 'call'
-        assert amount == pytest.approx(10.0)
-        assert 'limp_behind:setmine 44' in self.strat.last_expand_reason
+        assert action == 'raise'
+        assert amount == pytest.approx(55.0)
+        assert self.strat.last_expand_reason == 'chart_iso:BTN-ISO 44'
 
     def test_limp_behind_does_not_replace_suited_connector_iso(self):
         action, amount = self.strat.decide(
@@ -259,7 +264,7 @@ class TestOpenRange:
         assert amount == pytest.approx(55.0)
         assert self.strat.last_expand_reason == 'chart_iso:BTN-ISO 76s'
 
-    def test_limp_behind_adds_folded_suited_connector_when_deep_multiway(self):
+    def test_limp_behind_adds_folded_suited_connector_with_one_limper(self):
         action, amount = self.strat.decide(
             hole_cards=cards('5s', '4s'),
             position='MP',
@@ -270,15 +275,15 @@ class TestOpenRange:
             stack=1000.0,
             pot=45.0,
             to_call=10.0,
-            num_limpers=3,
+            num_limpers=1,
             stack_bb=100.0,
-            sticky_density=0.50,
+            sticky_density=0.0,
         )
         assert action == 'call'
         assert amount == pytest.approx(10.0)
         assert 'limp_behind:suited_connector 54s' in self.strat.last_expand_reason
 
-    def test_limp_behind_rejects_shallow_speculative_call(self):
+    def test_limp_behind_allows_moderate_stack_speculative_call(self):
         action, amount = self.strat.decide(
             hole_cards=cards('5s', '4s'),
             position='MP',
@@ -293,7 +298,8 @@ class TestOpenRange:
             stack_bb=35.0,
             sticky_density=0.50,
         )
-        assert (action, amount) == ('fold', 0.0)
+        assert action == 'call'
+        assert amount == pytest.approx(10.0)
 
     def test_btn_iso_allows_chart_raise_for_qto(self):
         action, amount = self.strat.decide(
@@ -341,7 +347,7 @@ class TestOpenRange:
 
 
 class TestBBBigBlindOption:
-    """BB-specific decision logic: free check or iso-raise when no one raised."""
+    """Free-check fallback and BB-specific no-raise behavior."""
 
     strat = PreflopStrategy()
 
@@ -431,22 +437,28 @@ class TestBBBigBlindOption:
         )
         assert size2 == pytest.approx(2.0 * 6)
 
-    def test_bb_iso_range_includes_pairs_and_broadway(self):
-        """BB iso-raise range should include key pocket pairs and broadway hands."""
-        # Pocket pairs
-        assert 'AA' in _BB_ISO_RAISE
-        assert 'KK' in _BB_ISO_RAISE
-        assert 'QQ' in _BB_ISO_RAISE
-        # Suited broadway
-        assert 'AKs' in _BB_ISO_RAISE
-        assert 'AQs' in _BB_ISO_RAISE
-        # Offsuit big hands
-        assert 'AKo' in _BB_ISO_RAISE
+    def test_bb_free_option_uses_iso_chart_before_check_fallback(self):
+        """BB free check is only the fallback after normal BB-ISO logic."""
+        action, amount = self.strat.decide(
+            hole_cards=cards('Kh', 'Th'),
+            position='BB',
+            facing_action='none',
+            open_raise=0,
+            is_ip=False,
+            big_blind=2.0,
+            stack=200.0,
+            pot=7.0,
+            is_big_blind=True,
+            num_limpers=2,
+        )
+        assert action == 'raise'
+        assert amount == pytest.approx(12.0)
+        assert self.strat.last_expand_reason == 'chart_iso:BB-ISO KTs'
 
-    def test_bb_no_iso_with_speculative_hand(self):
-        """BB with speculative hand (e.g. 54s) just checks — not in iso range."""
+    def test_bb_free_option_checks_when_iso_chart_folds(self):
+        """BB with a true fold hand takes the free check instead of folding."""
         action, _ = self.strat.decide(
-            hole_cards=cards('5c', '4c'),
+            hole_cards=cards('7c', '2d'),
             position='BB',
             facing_action='none',
             open_raise=0,
@@ -458,6 +470,38 @@ class TestBBBigBlindOption:
             num_limpers=1,
         )
         assert action == 'check'
+
+    def test_free_check_option_rescues_fold_but_not_open_outside_bb(self):
+        """Forced-post free option must not turn normal RFI hands into checks."""
+        action, amount = self.strat.decide(
+            hole_cards=cards('Ac', 'Ad'),
+            position='MP',
+            facing_action='none',
+            open_raise=0,
+            is_ip=False,
+            big_blind=2.0,
+            stack=200.0,
+            pot=3.0,
+            is_big_blind=True,
+            num_limpers=0,
+        )
+        assert action == 'raise'
+        assert amount > 0
+
+        action, amount = self.strat.decide(
+            hole_cards=cards('7c', '2d'),
+            position='MP',
+            facing_action='none',
+            open_raise=0,
+            is_ip=False,
+            big_blind=2.0,
+            stack=200.0,
+            pot=3.0,
+            is_big_blind=True,
+            num_limpers=0,
+        )
+        assert action == 'check'
+        assert amount == 0.0
 
 
 class TestNormalizePosition:
@@ -573,6 +617,7 @@ class TestFourBetSizeMatrix:
         assert size_ip == pytest.approx(12.0 * 2.15)
 
 
+@pytest.mark.usefixtures('chart_expand_enabled')
 class TestFacingFourBetDefense:
     strat = PreflopStrategy()
 
@@ -595,46 +640,6 @@ class TestFacingFourBetDefense:
         assert action == 'raise'
         assert amount == pytest.approx(1_000.0)
         assert 'greenline' in self.strat.last_expand_reason
-
-    def test_pekarstas_call_overrides_old_aa_jam_fallback(self):
-        action, amount = self.strat.decide(
-            hole_cards=cards('Ac', 'Ad'),
-            position='MP',
-            facing_action='4bet',
-            open_raise=420.0,
-            is_ip=True,
-            big_blind=10.0,
-            stack=1_000.0,
-            pot=500.0,
-            to_call=300.0,
-            equity=0.78,
-            stack_bb=100.0,
-            villain_position='UTG',
-        )
-
-        assert action == 'call'
-        assert amount == pytest.approx(300.0)
-        assert 'pekarstas' in self.strat.last_expand_reason
-
-    def test_pekarstas_allin_overrides_old_qq_call_fallback(self):
-        action, amount = self.strat.decide(
-            hole_cards=cards('Qc', 'Qd'),
-            position='SB',
-            facing_action='4bet',
-            open_raise=420.0,
-            is_ip=False,
-            big_blind=10.0,
-            stack=1_000.0,
-            pot=500.0,
-            to_call=300.0,
-            equity=0.64,
-            stack_bb=100.0,
-            villain_position='BTN',
-        )
-
-        assert action == 'raise'
-        assert amount == pytest.approx(1_000.0)
-        assert 'pekarstas' in self.strat.last_expand_reason
 
     def test_tt_calls_4bet_when_chart_and_equity_edge_are_clear(self):
         action, amount = self.strat.decide(
@@ -694,7 +699,7 @@ class TestFacingFourBetDefense:
         assert action == 'fold'
         assert amount == 0.0
 
-    def test_mixed_chart_4bet_defend_requires_extra_edge(self):
+    def test_missing_greenline_4bet_chart_uses_fallback_only(self):
         action, amount = self.strat.decide(
             hole_cards=cards('Ac', '5c'),
             position='SB',
@@ -710,8 +715,8 @@ class TestFacingFourBetDefense:
             villain_position='UTG',
         )
 
-        assert action == 'call'
-        assert amount == pytest.approx(300.0)
+        assert action == 'fold'
+        assert amount == 0.0
 
         action, amount = self.strat.decide(
             hole_cards=cards('Ac', '5c'),
@@ -747,8 +752,8 @@ class TestFacingFourBetDefense:
             fourbet_call_edge_adjust=-0.02,
         )
 
-        assert action == 'call'
-        assert amount == pytest.approx(300.0)
+        assert action == 'fold'
+        assert amount == 0.0
 
     def test_edge_adjust_only_changes_call_gate_not_hand_pool(self):
         action, amount = self.strat.decide(
@@ -910,6 +915,7 @@ class TestThreeBetCallRangeByPos:
             assert hand in _3BET_CALL_BY_POS['BTN']
 
 
+@pytest.mark.usefixtures('chart_expand_enabled')
 class TestPreflopChartExpandOverlay:
     """Chart-backed overlays only widen baseline folds in guarded spots."""
 
@@ -987,7 +993,339 @@ class TestPreflopChartExpandOverlay:
             equity=0.34,
         )
         assert (action, amount) == ('fold', 0.0)
-        assert self.strat.last_expand_reason == ''
+        assert 'chart_block:low_spr_3bet_call JTs' in self.strat.last_expand_reason
+
+    def test_mid_stack_low_spr_blocks_speculative_chart_3bet_call(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Jd', 'Td'),
+            position='UTG',
+            facing_action='3bet',
+            open_raise=180.0,
+            is_ip=False,
+            big_blind=10.0,
+            stack=600.0,
+            pot=260.0,
+            to_call=160.0,
+            stack_bb=60.0,
+            villain_position='BTN',
+            equity=0.34,
+        )
+
+        assert (action, amount) == ('fold', 0.0)
+        assert 'chart_block:low_spr_3bet_call JTs' in self.strat.last_expand_reason
+
+    def test_chart_call_vetoes_static_tt_4bet(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Th', 'Tc'),
+            position='UTG',
+            facing_action='3bet',
+            open_raise=120_000.0,
+            is_ip=False,
+            big_blind=10_000.0,
+            stack=520_000.0,
+            pot=220_000.0,
+            to_call=90_000.0,
+            stack_bb=52.0,
+            villain_position='BB',
+            equity=0.38,
+        )
+
+        assert action == 'call'
+        assert amount == pytest.approx(90_000.0)
+        assert 'chart_expand:3bet_call greenline UTG-vs-3bet-BB TT' in self.strat.last_expand_reason
+
+    def test_high_cost_chart_4bet_raise_falls_back_to_call_when_hand_can_defend(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('As', 'Qh'),
+            position='SB',
+            facing_action='3bet',
+            open_raise=750_000.0,
+            is_ip=False,
+            big_blind=50_000.0,
+            stack=4_150_000.0,
+            pot=1_400_000.0,
+            to_call=625_000.0,
+            stack_bb=83.0,
+            villain_position='BB',
+            equity=0.37,
+        )
+
+        assert action == 'call'
+        assert amount == pytest.approx(625_000.0)
+        assert 'chart_block:high_cost_4bet AQo' in self.strat.last_expand_reason
+
+    def test_high_cost_chart_4bet_raise_folds_when_hand_cannot_defend(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Ac', '4c'),
+            position='MP',
+            facing_action='3bet',
+            open_raise=600_000.0,
+            is_ip=False,
+            big_blind=50_000.0,
+            stack=5_100_000.0,
+            pot=825_000.0,
+            to_call=450_000.0,
+            stack_bb=102.0,
+            villain_position='BTN',
+            equity=0.36,
+        )
+
+        assert (action, amount) == ('fold', 0.0)
+        assert 'chart_block:high_cost_4bet A4s' in self.strat.last_expand_reason
+
+    def test_chart_allin_short_ako_jams_vs_3bet(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('As', 'Kh'),
+            position='CO',
+            facing_action='3bet',
+            open_raise=110_000.0,
+            is_ip=False,
+            big_blind=10_000.0,
+            stack=120_000.0,
+            pot=264_000.0,
+            to_call=70_000.0,
+            stack_bb=12.0,
+            villain_position='BB',
+            equity=0.42,
+        )
+
+        assert action == 'raise'
+        assert amount == pytest.approx(120_000.0)
+        assert 'chart_expand:3bet_allin greenline CO-vs-3bet-BB AKo' in self.strat.last_expand_reason
+
+    def test_tiny_3bet_price_overrides_chart_fold(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Kc', 'Jh'),
+            position='UTG',
+            facing_action='3bet',
+            open_raise=90.0,   # hero opened 8bb, villain makes it 9bb
+            is_ip=False,
+            big_blind=10.0,
+            stack=1000.0,
+            pot=185.0,
+            to_call=10.0,
+            stack_bb=100.0,
+            villain_position='BB',
+            equity=0.24,
+        )
+
+        assert action == 'call'
+        assert amount == pytest.approx(10.0)
+        assert 'price_call:tiny_3bet KJo' in self.strat.last_expand_reason
+
+    def test_normal_3bet_chart_fold_still_folds(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Kc', 'Jh'),
+            position='UTG',
+            facing_action='3bet',
+            open_raise=240.0,
+            is_ip=False,
+            big_blind=10.0,
+            stack=1000.0,
+            pot=345.0,
+            to_call=160.0,
+            stack_bb=100.0,
+            villain_position='BB',
+            equity=0.24,
+        )
+
+        assert (action, amount) == ('fold', 0.0)
+
+    def test_wide_three_bettor_expands_defend_range(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Ah', 'Jc'),
+            position='UTG',
+            facing_action='3bet',
+            open_raise=120.0,
+            is_ip=False,
+            big_blind=10.0,
+            stack=1000.0,
+            pot=210.0,
+            to_call=90.0,
+            stack_bb=100.0,
+            villain_position='BTN',
+            equity=0.38,
+            villain_vpip=0.48,
+            villain_pfr=0.30,
+            villain_three_bet=0.14,
+            villain_af=1.8,
+            villain_hands_seen=40,
+        )
+
+        assert action == 'call'
+        assert amount == pytest.approx(90.0)
+
+    def test_narrow_three_bettor_does_not_expand_defend_range(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Ah', 'Jc'),
+            position='UTG',
+            facing_action='3bet',
+            open_raise=120.0,
+            is_ip=False,
+            big_blind=10.0,
+            stack=1000.0,
+            pot=210.0,
+            to_call=90.0,
+            stack_bb=100.0,
+            villain_position='BTN',
+            equity=0.38,
+            villain_vpip=0.22,
+            villain_pfr=0.12,
+            villain_three_bet=0.03,
+            villain_af=1.1,
+            villain_hands_seen=40,
+        )
+
+        assert (action, amount) == ('fold', 0.0)
+
+    def test_loose_aggressive_opener_expands_3bet(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Kh', 'Qc'),
+            position='BTN',
+            facing_action='open',
+            open_raise=30.0,
+            is_ip=True,
+            big_blind=10.0,
+            stack=1000.0,
+            pot=45.0,
+            to_call=30.0,
+            stack_bb=100.0,
+            villain_position='CO',
+            equity=0.42,
+            villain_vpip=0.55,
+            villain_pfr=0.32,
+            villain_three_bet=0.10,
+            villain_af=1.7,
+            villain_hands_seen=50,
+        )
+
+        assert action == 'raise'
+        assert amount > 30.0
+        assert 'villain_expand:wide_open_3bet KQo' in self.strat.last_expand_reason
+
+    def test_greenline_vs_open_squeeze_expands_suited_playable(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Jd', '9d'),
+            position='SB',
+            facing_action='open',
+            open_raise=30.0,
+            is_ip=False,
+            big_blind=10.0,
+            stack=1080.0,
+            pot=75.0,
+            to_call=30.0,
+            stack_bb=108.0,
+            villain_position='MP',
+            equity=0.26,
+            squeeze_callers=1,
+            sticky_density=0.40,
+        )
+
+        assert action == 'raise'
+        assert amount > 30.0
+        assert (
+            'chart_expand:greenline_vs_open_squeeze SB-vs-open-MP J9s'
+            in self.strat.last_expand_reason
+        )
+
+    def test_greenline_vs_open_no_caller_expands_normal_open(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Kh', '8h'),
+            position='SB',
+            facing_action='open',
+            open_raise=30.0,
+            is_ip=False,
+            big_blind=10.0,
+            stack=1000.0,
+            pot=45.0,
+            to_call=30.0,
+            stack_bb=100.0,
+            villain_position='MP',
+            equity=0.28,
+        )
+
+        assert action == 'raise'
+        assert amount > 30.0
+        assert (
+            'chart_expand:greenline_vs_open_3bet SB-vs-open-MP K8s'
+            in self.strat.last_expand_reason
+        )
+
+    def test_greenline_vs_open_overlay_ignores_large_open(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Kh', '8h'),
+            position='SB',
+            facing_action='open',
+            open_raise=60.0,
+            is_ip=False,
+            big_blind=10.0,
+            stack=1000.0,
+            pot=75.0,
+            to_call=60.0,
+            stack_bb=100.0,
+            villain_position='MP',
+            equity=0.24,
+        )
+
+        assert (action, amount) == ('fold', 0.0)
+
+    def test_thirty_two_bb_open_size_maps_to_4bet_not_normal_3bet_bluff(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Ac', '5c'),
+            position='BTN',
+            facing_action='open',
+            open_raise=320.0,
+            is_ip=True,
+            big_blind=10.0,
+            stack=1000.0,
+            pot=15.0,
+            to_call=320.0,
+            stack_bb=100.0,
+            villain_position='CO',
+            equity=0.33,
+        )
+
+        assert (action, amount) == ('fold', 0.0)
+        assert 'size_map:open_as_4bet open=32.0bb' in self.strat.last_expand_reason
+
+    def test_huge_open_raise_maps_to_4bet_when_hero_covers(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Ac', '5c'),
+            position='BTN',
+            facing_action='open',
+            open_raise=1500.0,  # 150bb first raise maps to existing 4bet response
+            is_ip=True,
+            big_blind=10.0,
+            stack=3000.0,
+            pot=15.0,
+            to_call=1500.0,
+            stack_bb=300.0,
+            villain_position='CO',
+            equity=0.33,
+        )
+
+        assert (action, amount) == ('fold', 0.0)
+        assert 'size_map:open_as_4bet open=150.0bb' in self.strat.last_expand_reason
+
+    def test_fifteen_bb_open_maps_to_3bet_logic(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('Ac', '5c'),
+            position='BTN',
+            facing_action='open',
+            open_raise=150.0,
+            is_ip=True,
+            big_blind=10.0,
+            stack=3000.0,
+            pot=15.0,
+            to_call=150.0,
+            stack_bb=300.0,
+            villain_position='CO',
+            equity=0.33,
+        )
+
+        assert action == 'raise'
+        assert amount == pytest.approx(322.5)
+        assert 'size_map:open_as_3bet open=15.0bb' in self.strat.last_expand_reason
 
 
 class TestBBDefenseVsOpen:

@@ -121,6 +121,10 @@ _real_server_sni: str = SERVER_HOST       # fallback SNI when Host header is abs
 _host_ok_ip_cache: dict[str, str] = _load_ip_cache()
 _host_dns_cache: dict[str, list[str]] = {}
 _host_connect_locks: dict[str, asyncio.Lock] = {}
+_wss_down_notice_active: bool = False
+_active_wss_session_id: int = 0
+_active_client_ws = None
+_active_server_ws = None
 
 
 def _get_host_lock(hostname: str) -> asyncio.Lock:
@@ -129,6 +133,19 @@ def _get_host_lock(hostname: str) -> asyncio.Lock:
         lock = asyncio.Lock()
         _host_connect_locks[hostname] = lock
     return lock
+
+
+def _is_active_wss_session(session_id: int) -> bool:
+    return session_id == _active_wss_session_id
+
+
+async def _close_ws_quietly(ws, *, code: int = 1001, reason: str = "") -> None:
+    if ws is None:
+        return
+    try:
+        await ws.close(code=code, reason=reason)
+    except Exception as exc:
+        log.debug("[WSS] close ignored: %s", exc)
 
 
 def _dns_query_a(hostname: str, nameserver: str) -> list[str]:
@@ -403,8 +420,13 @@ async def _do_inject(
     bridge: "BotBridge",
     inject: tuple,
     inject_room_id: int,
+    session_id: int,
 ) -> None:
     """Fire-and-forget coroutine: encode and send a bot action to the server."""
+    if not _is_active_wss_session(session_id):
+        log.info("[BOT→S] skip injection from stale WSS session #%s", session_id)
+        return
+
     if len(inject) == 3:
         inject_type, inject_fields, delay_sec = inject
     else:
@@ -413,6 +435,9 @@ async def _do_inject(
 
     if delay_sec and delay_sec > 0:
         await asyncio.sleep(float(delay_sec))
+        if not _is_active_wss_session(session_id):
+            log.info("[BOT→S] skip delayed injection from stale WSS session #%s", session_id)
+            return
 
     pb_body = codec.encode(inject_type, inject_fields)
     if pb_body is None:
@@ -472,6 +497,7 @@ async def _s2c_analysis_worker(
     buf: FrameBuffer,
     bridge: "BotBridge",
     queue: asyncio.Queue,
+    session_id: int,
 ) -> None:
     """Consume raw S2C bytes, parse frames, run bot logic, spawn inject tasks.
 
@@ -483,6 +509,9 @@ async def _s2c_analysis_worker(
     while True:
         raw = await queue.get()
         if raw is None:
+            break
+        if not _is_active_wss_session(session_id):
+            log.info("[WSS] stop analysis for stale session #%s", session_id)
             break
         for frame in buf.feed(raw):
             bridge.note_seen_room_id(frame.room_id)
@@ -503,7 +532,7 @@ async def _s2c_analysis_worker(
             result = bridge.handle(frame.type_name, msg)
             if result is not None:
                 inject_room_id = bridge.room_id_for_c2s(frame.room_id)
-                asyncio.create_task(_do_inject(server_ws, bridge, result, inject_room_id))
+                asyncio.create_task(_do_inject(server_ws, bridge, result, inject_room_id, session_id))
 
 
 async def _pipe_c2s(client_ws, server_ws, buf: FrameBuffer) -> None:
@@ -525,7 +554,7 @@ async def _pipe_c2s(client_ws, server_ws, buf: FrameBuffer) -> None:
         log.info("[WSS] pipe c2s ended; messages=%d", msg_count)
 
 
-async def _pipe_s2c(client_ws, server_ws, buf: FrameBuffer) -> None:
+async def _pipe_s2c(client_ws, server_ws, buf: FrameBuffer, session_id: int) -> None:
     """Real server → game client: forward immediately, analyze + inject asynchronously."""
     bridge = _bot
     if bridge is None:
@@ -533,7 +562,7 @@ async def _pipe_s2c(client_ws, server_ws, buf: FrameBuffer) -> None:
 
     analysis_queue: asyncio.Queue = asyncio.Queue()
     analysis_task = asyncio.create_task(
-        _s2c_analysis_worker(server_ws, buf, bridge, analysis_queue)
+        _s2c_analysis_worker(server_ws, buf, bridge, analysis_queue, session_id)
     )
     msg_count = 0
     use_spoof = (
@@ -565,7 +594,7 @@ async def _pipe_s2c(client_ws, server_ws, buf: FrameBuffer) -> None:
         log.info("[WSS] pipe s2c ended; messages=%d", msg_count)
 
 
-async def _run_wss_pair(client_ws, server_ws) -> None:
+async def _run_wss_pair(client_ws, server_ws, session_id: int) -> None:
     ent_token = None
     if _entertainment is not None:
         ent_token = _entertainment.attach_session(
@@ -574,7 +603,7 @@ async def _run_wss_pair(client_ws, server_ws) -> None:
     try:
         await asyncio.gather(
             _pipe_c2s(client_ws, server_ws, FrameBuffer()),
-            _pipe_s2c(client_ws, server_ws, FrameBuffer()),
+            _pipe_s2c(client_ws, server_ws, FrameBuffer(), session_id),
         )
     finally:
         if _entertainment is not None and ent_token is not None:
@@ -583,8 +612,21 @@ async def _run_wss_pair(client_ws, server_ws) -> None:
 
 async def _handle_wss(client_ws) -> None:
     """Handle one WSS MITM session."""
+    global _wss_down_notice_active, _active_wss_session_id, _active_client_ws, _active_server_ws
+
     client_ssl = _make_client_ssl()
     server_ws = None
+
+    prev_client_ws = _active_client_ws
+    prev_server_ws = _active_server_ws
+    _active_wss_session_id += 1
+    session_id = _active_wss_session_id
+    _active_client_ws = client_ws
+    _active_server_ws = None
+    if prev_client_ws is not None or prev_server_ws is not None:
+        log.info("[WSS] session #%s supersedes previous WSS session", session_id)
+        await _close_ws_quietly(prev_client_ws, reason="superseded by reconnect")
+        await _close_ws_quietly(prev_server_ws, reason="superseded by reconnect")
 
     req = getattr(client_ws, "request", None)
     path = (req.path if req else None) or "/"
@@ -649,8 +691,8 @@ async def _handle_wss(client_ws) -> None:
     upstream_ip = _pick_ip() or upstream_host
 
     log.info(
-        "[WSS] client connected, path=%s → %s (tcp=%s:%d, fwd_headers=%d, subprotocols=%s)",
-        path, upstream_uri, upstream_ip, SERVER_WSS_PORT,
+        "[WSS] session #%s client connected, path=%s → %s (tcp=%s:%d, fwd_headers=%d, subprotocols=%s)",
+        session_id, path, upstream_uri, upstream_ip, SERVER_WSS_PORT,
         len(additional_headers), subprotocols,
     )
     print(f"[proxy] WSS 已连接  {upstream_uri}  (ip={upstream_ip})")
@@ -671,10 +713,17 @@ async def _handle_wss(client_ws) -> None:
     try:
         try:
             async with websockets.connect(upstream_uri, **_connect_kwargs(upstream_ip)) as upstream_ws:
+                if not _is_active_wss_session(session_id):
+                    await _close_ws_quietly(upstream_ws, reason="stale session")
+                    return
                 _host_ok_ip_cache[upstream_host] = upstream_ip
                 _persist_ip_cache()
+                if _wss_down_notice_active:
+                    notify("wss_reconnected")
+                    _wss_down_notice_active = False
                 server_ws = upstream_ws
-                await _run_wss_pair(client_ws, server_ws)
+                _active_server_ws = upstream_ws
+                await _run_wss_pair(client_ws, server_ws, session_id)
         except (OSError, asyncio.TimeoutError) as net_err:
             # Network-level failure (TCP connect / TLS timeout): refresh DNS and retry once.
             log.warning(
@@ -686,10 +735,17 @@ async def _handle_wss(client_ws) -> None:
             if fresh_ip and fresh_ip != upstream_ip:
                 log.info("[WSS] retry with fresh IP: %s → %s", upstream_host, fresh_ip)
                 async with websockets.connect(upstream_uri, **_connect_kwargs(fresh_ip)) as upstream_ws:
+                    if not _is_active_wss_session(session_id):
+                        await _close_ws_quietly(upstream_ws, reason="stale session")
+                        return
                     _host_ok_ip_cache[upstream_host] = fresh_ip
                     _persist_ip_cache()
+                    if _wss_down_notice_active:
+                        notify("wss_reconnected")
+                        _wss_down_notice_active = False
                     server_ws = upstream_ws
-                    await _run_wss_pair(client_ws, server_ws)
+                    _active_server_ws = upstream_ws
+                    await _run_wss_pair(client_ws, server_ws, session_id)
             else:
                 raise
     except websockets.exceptions.ConnectionClosed as exc:
@@ -705,7 +761,8 @@ async def _handle_wss(client_ws) -> None:
         _cc = getattr(client_ws, "close_code", None)
         _uc = getattr(server_ws, "close_code", None) if server_ws is not None else None
         log.info(
-            "[WSS] session ended; client(code=%s reason=%r state=%s) upstream(code=%s reason=%r state=%s)",
+            "[WSS] session #%s ended; client(code=%s reason=%r state=%s) upstream(code=%s reason=%r state=%s)",
+            session_id,
             _cc,
             getattr(client_ws, "close_reason", None),
             getattr(client_ws, "state", None),
@@ -716,8 +773,12 @@ async def _handle_wss(client_ws) -> None:
         abnormal = _wss_close_is_abnormal(_cc) or _wss_close_is_abnormal(_uc)
         print(f"[proxy] WSS 已断开  client_code={_cc}  upstream_code={_uc}"
               + ("  ⚠️ 异常断开" if abnormal else ""))
-        if abnormal:
+        if abnormal and not _wss_down_notice_active:
             notify("wss_disconnected")
+            _wss_down_notice_active = True
+        if _is_active_wss_session(session_id):
+            _active_client_ws = None
+            _active_server_ws = None
 
 
 # ── TCP pass-through (non-WSS ports) ─────────────────────────────────────────
@@ -917,9 +978,10 @@ async def main(
         PROXY_HOST,
         WSS_PORT,
         ssl=server_ssl,
-        # Send WebSocket PING to phone every 20s to prevent NAT idle timeout.
-        ping_interval=20,
-        ping_timeout=10,
+        # The game has its own heartbeat. Avoid proxy-initiated pings killing
+        # the phone side on jittery office Wi-Fi.
+        ping_interval=None,
+        ping_timeout=None,
     )
     log.info("WSS MITM   %s:%d  →  wss://<domain>:%d  (dynamic per-connection)", PROXY_HOST, WSS_PORT, SERVER_WSS_PORT)
     print(f"[proxy] WSS MITM 已启动  {PROXY_HOST}:{WSS_PORT}  →  wss://<domain>:{SERVER_WSS_PORT}")
