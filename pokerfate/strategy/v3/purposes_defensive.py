@@ -7,6 +7,7 @@ from typing import List, Tuple
 
 from pokerfate.strategy.gto import GTOMath
 from pokerfate.strategy.v3.context import DecisionCtx
+from pokerfate.strategy.v3 import early_relative
 from pokerfate.strategy.v3.exploit import AF_PASSIVE_BASELINE, no_fold_equity, sticky_passive
 from pokerfate.strategy.v3.purpose import Purpose, TriggerResult
 from pokerfate.strategy.v3.stackoff_guard import stackoff_guard_reason
@@ -107,6 +108,27 @@ _BLUFF_CATCH_REL_LOSS_SCALE = float(
 _BLUFF_CATCH_HIGH_LEVERAGE_ADD = float(
     _os.environ.get('PF_BLUFF_CATCH_HIGH_LEVERAGE_ADD', '0.06')
 )
+_BLUFF_CATCH_REL_PRICE_MARGIN = float(
+    _os.environ.get('PF_BLUFF_CATCH_REL_PRICE_MARGIN', '0.06')
+)
+_BLUFF_CATCH_REL_PASSIVE_MARGIN_ADD = float(
+    _os.environ.get('PF_BLUFF_CATCH_REL_PASSIVE_MARGIN_ADD', '0.02')
+)
+_BLUFF_CATCH_REL_NUTS_MARGIN_ADD = float(
+    _os.environ.get('PF_BLUFF_CATCH_REL_NUTS_MARGIN_ADD', '0.02')
+)
+_BLUFF_CATCH_REL_NUTS_MARGIN_MIN = float(
+    _os.environ.get('PF_BLUFF_CATCH_REL_NUTS_MARGIN_MIN', '0.35')
+)
+_BLUFF_CATCH_REL_LOSS_DOMINANT_MIN_POT_ODDS = float(
+    _os.environ.get('PF_BLUFF_CATCH_REL_LOSS_DOMINANT_MIN_POT_ODDS', '0.20')
+)
+_BLUFF_CATCH_HIGH_LEVERAGE_COMMIT_MIN = float(
+    _os.environ.get('PF_BLUFF_CATCH_HIGH_LEVERAGE_COMMIT_MIN', '0.35')
+)
+_BLUFF_CATCH_HIGH_LEVERAGE_SPR_MAX = float(
+    _os.environ.get('PF_BLUFF_CATCH_HIGH_LEVERAGE_SPR_MAX', '1.00')
+)
 _VALUE_RAISE_SMALL_BET_MAX_POT_ODDS = float(
     _os.environ.get('PF_VALUE_RAISE_SMALL_BET_MAX_POT_ODDS', '0.18')
 )
@@ -124,6 +146,7 @@ _VALUE_RAISE_SMALL_BET_WEIGHT_ADD = float(
 )
 
 _FRAGILE_BLUFF_CATCH_SUBTYPES = {
+    'pocket_pair',
     'top_pair_weak_kicker',
     'board_pair_kicker',
     'board_pair_hero_pair',
@@ -157,6 +180,39 @@ def _fragile_bluff_catcher(ctx: DecisionCtx) -> bool:
     if subtype in {'board_pair_kicker', 'board_two_pair'} and ctx.street != 'river':
         return False
     return subtype in _FRAGILE_BLUFF_CATCH_SUBTYPES
+
+
+def _high_leverage_call(ctx: DecisionCtx) -> bool:
+    return (
+        ctx.street == 'river'
+        or _stack_commit(ctx) >= _BLUFF_CATCH_HIGH_LEVERAGE_COMMIT_MIN
+        or (ctx.spr > 0 and ctx.spr <= _BLUFF_CATCH_HIGH_LEVERAGE_SPR_MAX)
+    )
+
+
+def _relative_call_ok(ctx: DecisionCtx) -> bool:
+    """Price-aware hero-relative support for high-leverage bluff catches."""
+    rel = ctx.villain_vs_hero_dist or {}
+    if not rel:
+        return True
+    return _relative_showdown_eq(ctx) >= ctx.pot_odds + _relative_call_margin(ctx)
+
+
+def _relative_showdown_eq(ctx: DecisionCtx) -> float:
+    rel = ctx.villain_vs_hero_dist or {}
+    hero_wins = float(rel.get('win', 0.0) or 0.0)
+    ties = float(rel.get('tie', 0.0) or 0.0)
+    return hero_wins + 0.5 * ties
+
+
+def _relative_call_margin(ctx: DecisionCtx) -> float:
+    margin = _BLUFF_CATCH_REL_PRICE_MARGIN
+    if sticky_passive(ctx) or ctx.villain_stats.af < AF_PASSIVE_BASELINE:
+        margin += _BLUFF_CATCH_REL_PASSIVE_MARGIN_ADD
+    nuts = float((ctx.villain_bucket_dist or {}).get('nuts', 0.0) or 0.0)
+    if nuts >= _BLUFF_CATCH_REL_NUTS_MARGIN_MIN:
+        margin += _BLUFF_CATCH_REL_NUTS_MARGIN_ADD
+    return margin
 
 
 def _draw_pressure(ctx: DecisionCtx) -> float:
@@ -281,6 +337,25 @@ class BluffCatchCall(Purpose):
         if _fragile_bluff_catcher(ctx):
             strong_mass = _villain_strong_mass(ctx)
             rel_loss = _villain_rel_loss(ctx)
+            if _high_leverage_call(ctx) and (ctx.villain_vs_hero_dist or {}):
+                rel_eq = _relative_showdown_eq(ctx)
+                rel_need = ctx.pot_odds + _relative_call_margin(ctx)
+                rel = ctx.villain_vs_hero_dist or {}
+                hero_wins = float(rel.get('win', 0.0) or 0.0)
+                villain_wins = float(rel.get('loss', 0.0) or 0.0)
+                loss_dominant_passive_raise = (
+                    ctx.street == 'river'
+                    and ctx.board_sig.paired
+                    and ctx.pot_odds >= _BLUFF_CATCH_REL_LOSS_DOMINANT_MIN_POT_ODDS
+                    and villain_wins >= hero_wins
+                    and (sticky_passive(ctx) or ctx.villain_stats.af < AF_PASSIVE_BASELINE)
+                )
+                if loss_dominant_passive_raise:
+                    return TriggerResult(False)
+                if rel_eq < rel_need:
+                    return TriggerResult(False)
+                w = 0.5 + min(1.0, (rel_eq - rel_need) * 3.0)
+                return TriggerResult(True, max(0.3, w))
             adj += _BLUFF_CATCH_FRAGILE_ADD
             if sticky_passive(ctx) or ctx.villain_stats.af < AF_PASSIVE_BASELINE:
                 adj += _BLUFF_CATCH_PASSIVE_FRAGILE_ADD
@@ -296,6 +371,11 @@ class BluffCatchCall(Purpose):
                 adj += rel_loss * _BLUFF_CATCH_REL_LOSS_SCALE
             if ctx.street == 'river' and (_stack_commit(ctx) >= 0.35 or ctx.spr <= 1.0):
                 adj += _BLUFF_CATCH_HIGH_LEVERAGE_ADD
+
+        # Optional A/B guard: on flop/turn danger boards, fragile made hands
+        # need extra edge before being treated as bluff-catchers. This only
+        # activates when PF_TURN_FLOP_RELATIVE_GUARD=1.
+        adj += early_relative.call_margin_add(ctx)
 
         need = ctx.pot_odds + adj
         if ctx.equity_range < need:
@@ -426,7 +506,10 @@ class ValueRaise(Purpose):
             need = min(need, _VALUE_RAISE_SMALL_BET_MIN_EQ)
         if ctx.equity_range < need:
             return TriggerResult(False)
-        if stackoff_guard_reason(ctx, self.id, will_jam=(ctx.spr <= 4.0)):
+        # The actual raise path only jams value_raise at SPR <= 2.0. Do not
+        # pre-block SPR 2-4 value raises as stack-off nodes; engine will run the
+        # guard again after the concrete raise size is known.
+        if stackoff_guard_reason(ctx, self.id, will_jam=(ctx.spr <= 2.0)):
             return TriggerResult(False)
         # Vote weight grows monotonically past the trigger threshold and
         # sharply past 0.85 to dominate bluff_catch_call at near-nuts equity

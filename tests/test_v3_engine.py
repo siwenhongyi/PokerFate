@@ -122,6 +122,32 @@ class TestCalibrator:
         out = calibrator.calibrate(0.75, ctx, 'polarized_cbet')
         assert out.frac <= 0.50  # capped below 0.75
 
+    def test_value_jam_uses_effective_stack_against_short_target(self):
+        ctx = self._ctx(
+            pot=180_000.0,
+            stack=1_780_000.0,
+            effective_stack=170_000.0,
+            spr=170_000.0 / 180_000.0,
+            hero_bucket='nuts',
+        )
+        out = calibrator.calibrate(2.00, ctx, 'value_jam')
+        assert out.jammed is True
+        assert out.amount == pytest.approx(170_000.0)
+        assert out.frac == pytest.approx(170_000.0 / 180_000.0)
+
+    def test_committed_low_spr_size_is_not_geo_compressed(self):
+        ctx = self._ctx(
+            pot=180_000.0,
+            stack=1_780_000.0,
+            effective_stack=170_000.0,
+            spr=170_000.0 / 180_000.0,
+            hero_bucket='strong',
+        )
+        out = calibrator.calibrate(0.50, ctx, 'range_cbet')
+        assert out.jammed is False
+        assert out.amount == pytest.approx(90_000.0)
+        assert out.frac == pytest.approx(0.50)
+
     def test_river_no_geometric_cap(self):
         ctx = self._ctx(street='river', spr=1.0)
         out = calibrator.calibrate(1.50, ctx, 'polarized_cbet')
@@ -139,6 +165,8 @@ class TestAlphaGate:
         assert alpha_gate.alpha_from_frac(1.0) == pytest.approx(0.5)
         assert alpha_gate.alpha_from_frac(0.5) == pytest.approx(1 / 3, abs=0.01)
         assert alpha_gate.alpha_from_frac(0.0) == 0.0
+        assert alpha_gate.balanced_bluff_share_from_frac(1.0) == pytest.approx(1 / 3)
+        assert alpha_gate.balanced_bluff_share_from_frac(0.5) == pytest.approx(0.25)
 
     def test_merged_purpose_skipped(self):
         ctx = DecisionCtx(
@@ -149,14 +177,25 @@ class TestAlphaGate:
         assert r.passed
         assert r.direction == 'ok'
 
-    def test_polarized_bet_runs_check(self):
+    def test_flop_polarized_bet_is_not_alpha_gated(self):
         ctx = DecisionCtx(
             street='flop', position='BTN', is_pfr=True,
             hole_cards=cards('Ac', 'Ks'), board=cards('Jh', 'Th', '9h'),
         )
         r = alpha_gate.check(ctx, 0.66, 'polarized_cbet')
-        # Just verifies no crash and that target is computed.
-        assert 0 < r.target < 1
+        assert r.passed
+        assert r.target == 0.0
+
+    def test_river_pure_bluff_uses_balanced_bluff_share(self):
+        ctx = DecisionCtx(
+            street='river', position='BTN', is_pfr=True,
+            hero_bucket='air',
+            hole_cards=cards('Ac', '2d'),
+            board=cards('Kh', 'Qh', 'Jc', '8s', '3d'),
+        )
+        r = alpha_gate.check(ctx, 1.0, 'pure_bluff_river')
+        assert r.target == pytest.approx(1 / 3)
+        assert 0 <= r.hero_bluff_share <= 1
 
 
 # ---------------------------------------------------------------------------
@@ -338,17 +377,27 @@ class TestEngineActive:
         out = engine.decide(ctx)
         assert isinstance(out, DecisionOutput)
         assert out.action in ('check', 'bet', 'call', 'raise', 'fold')
+        assert out.candidates
+        assert sum(prob for _, prob in out.candidates) == pytest.approx(1.0)
 
     def test_fresh_seed_is_reproducible(self):
         engine = V3Engine()
-        ctx1 = self._setup_flop_ctx()
-        ctx2 = self._setup_flop_ctx()
+        ctx1 = self._setup_flop_ctx(seed=123456)
+        ctx2 = self._setup_flop_ctx(seed=123456)
         out1 = engine.decide(ctx1)
-        ctx2.rng.seed(out1.seed)
-        # Re-running with the same seed reproduces the random branches.
-        # (ctx2 gets a new seed from the engine, but the underlying RNG was
-        # pinned first — this verifies the seed plumbing.)
-        assert out1.seed >= 0
+        out2 = engine.decide(ctx2)
+
+        assert out1.seed == out2.seed == 123456
+        assert out1.action == out2.action
+        assert out1.purpose == out2.purpose
+        assert out1.amount == pytest.approx(out2.amount)
+        assert out1.frac == pytest.approx(out2.frac)
+        assert [purpose for purpose, _ in out1.candidates] == [
+            purpose for purpose, _ in out2.candidates
+        ]
+        assert [prob for _, prob in out1.candidates] == pytest.approx([
+            prob for _, prob in out2.candidates
+        ])
 
     def test_default_check_when_no_bet_purpose(self):
         # Weak air with no blockers, no good reason to bet.
@@ -371,23 +420,25 @@ class TestEngineActive:
                    if engine.decide(ctx).action in ('bet', 'raise'))
         assert bets >= 30
 
-    def test_nuts_spr2_jams(self):
+    def test_low_spr_nuts_jams_deterministically(self):
         engine = V3Engine()
-        # value_jam (w≈3.1) 与 range_cbet multi_commit (w=1.0) 在 SPR<=2 nuts
-        # 场景下加权竞争（doc 03 §5.2），约 76% 概率采到 value_jam。多次采样
-        # 校验多数 jam，避免单次随机失败。
-        jams = 0
-        total = 200
-        for _ in range(total):
-            ctx = self._setup_flop_ctx(
-                hero_bucket='nuts', equity_mc=0.95, equity_range=0.95,
-                stack=50.0, pot=50.0, spr=1.0,
-            )
-            out = engine.decide(ctx)
-            if out.action in ('bet', 'raise') and out.amount == pytest.approx(ctx.stack, rel=0.01):
-                jams += 1
-        # Theoretical p ≈ 0.756; threshold 60% 留充足边际抗 binomial 方差。
-        assert jams >= 120, f"value_jam should fire majority, got {jams}/{total}"
+        ctx = self._setup_flop_ctx(
+            hole_cards=cards('Ah', 'Ad'),
+            hero_bucket='nuts',
+            equity_mc=0.95,
+            equity_range=0.95,
+            stack=50.0,
+            pot=50.0,
+            spr=1.0,
+        )
+
+        out = engine.decide(ctx)
+
+        assert out.purpose == 'value_jam'
+        assert out.action in ('bet', 'raise')
+        assert out.amount == pytest.approx(ctx.stack, rel=0.01)
+        assert out.arbitration_mode == 'deterministic'
+        assert 'low_spr' in out.leverage_flags
 
 
 # ---------------------------------------------------------------------------
@@ -591,10 +642,10 @@ class TestEngineDefense:
         assert tiny < normal
         assert normal <= large + 1e-9  # large bet saturates at scale=1.0
 
-    def test_h31_delayed_cbet_vs_whale_not_suppressed(self):
+    def test_h31_delayed_cbet_vs_whale_not_alpha_gated(self):
         """H31 regression: UTG AJs, flop 8-T-4 check, turn A (两对 AJ, eq 73%)，
-        villain 是 whale。over_bluff_harmless 应该让 α-gate 放行 delayed_cbet
-        即使 range 层面 bluff_share 超过 α target。
+        villain 是 whale。turn delayed-cbet 是 equity-realizing line，不应该
+        经过 river polarized alpha gate。
         见 gameplay analysis (hand 31 / +179k) 和 H73 类型 log。
         """
         from pokerfate.strategy.v3 import alpha_gate
@@ -618,17 +669,13 @@ class TestEngineDefense:
             villain_stats=vs,
             board_sig=v3_board.analyze(board),
         )
-        # frac 0.50 → alpha target 0.33; filtered bluff share typically >0.52
-        # → without over_bluff_harmless would FAIL; with it should PASS.
         result = alpha_gate.check(ctx, 0.50, 'delayed_cbet')
-        assert result.passed, (
-            f"expected α-gate PASS vs whale (over_bluff_harmless), "
-            f"got direction={result.direction} share={result.hero_bluff_share:.2f}"
-        )
+        assert result.passed
+        assert result.target == 0.0
 
-    def test_delayed_cbet_still_blocked_vs_reg(self):
-        """对称测试：同样的 range 层 over_bluff 场景，vs reg 仍然 FAIL。
-        保证 over_bluff_harmless 不是无脑放行。
+    def test_delayed_cbet_not_alpha_gated_vs_reg(self):
+        """对称测试：即使 vs reg，turn delayed-cbet 也不由 river alpha gate 拦。
+        它应该由 delayed_cbet 自己的 equity / texture / villain gates 决定。
         """
         from pokerfate.strategy.v3 import alpha_gate
         from pokerfate.strategy.v3.context import VillainStats
@@ -652,8 +699,8 @@ class TestEngineDefense:
             board_sig=v3_board.analyze(board),
         )
         result = alpha_gate.check(ctx, 0.50, 'delayed_cbet')
-        # reg 桌 bluff_share > target × 1.30 → FAIL (protect range balance)
-        assert not result.passed and result.direction == 'over_bluff'
+        assert result.passed
+        assert result.target == 0.0
 
     def test_hero_range_subrange_filter_changes_distribution(self):
         """验证 hero_range.distribution() 的 action-history filter 生效。
@@ -757,6 +804,304 @@ class TestPurposeTriggers:
         r = p.trigger(ctx)
         assert r.hit
 
+    def test_medium_protection_bet_enabled_for_stable_medium_hands(self):
+        from pokerfate.strategy.v3 import purposes_active as active
+
+        p = active.ProtectionBet()
+        board = cards('Jh', 'Th', '9c')
+        ctx = self._base_ctx(
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hero_bucket='medium',
+            hero_made_subtype='top_pair_good_kicker',
+            equity_range=0.90,
+            equity_mc=0.90,
+            spr=5.0,
+            villain_bucket_dist={'nuts': 0.0, 'strong': 0.2, 'medium': 0.5, 'air': 0.3},
+        )
+
+        assert active._ACTIVE_PROTECTION_MEDIUM_ENABLED is True
+        assert p.trigger(ctx).hit
+
+        fragile = self._base_ctx(
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hero_bucket='medium',
+            hero_made_subtype='board_pair_pocket_underpair',
+            equity_range=0.90,
+            equity_mc=0.90,
+            spr=5.0,
+            villain_bucket_dist={'nuts': 0.0, 'strong': 0.2, 'medium': 0.5, 'air': 0.3},
+        )
+        assert not p.trigger(fragile).hit
+
+    def test_river_relative_thin_value_uses_small_size(self):
+        from pokerfate.strategy.v3.purposes_active import ThinValueBet
+
+        p = ThinValueBet()
+        board = cards('Qs', '7h', '3s', '8c', 'Jh')
+        ctx = self._base_ctx(
+            street='river',
+            board=board,
+            board_sig=BoardSignals(wetness=0.60, is_wet=True),
+            hero_bucket='medium',
+            equity_range=0.73,
+            equity_mc=0.84,
+            villain_vs_hero_dist={'win': 0.75, 'tie': 0.06, 'loss': 0.19},
+            villain_bucket_dist={'nuts': 0.08, 'strong': 0.10, 'medium': 0.55, 'air': 0.27},
+            villain_stats=VillainStats(vpip=0.50),
+        )
+
+        assert p.trigger(ctx).hit
+        assert max(frac for frac, _ in p.sizer(ctx)) <= 0.55
+        assert min(frac for frac, _ in p.sizer(ctx)) >= 0.45
+
+    def test_river_relative_thin_value_rejects_too_much_loss(self):
+        from pokerfate.strategy.v3.purposes_active import ThinValueBet
+
+        p = ThinValueBet()
+        board = cards('Qs', '7h', '3s', '8c', 'Jh')
+        ctx = self._base_ctx(
+            street='river',
+            board=board,
+            board_sig=BoardSignals(wetness=0.60, is_wet=True),
+            hero_bucket='medium',
+            equity_range=0.73,
+            villain_vs_hero_dist={'win': 0.58, 'tie': 0.02, 'loss': 0.40},
+            villain_bucket_dist={'nuts': 0.08, 'strong': 0.25, 'medium': 0.45, 'air': 0.22},
+            villain_stats=VillainStats(vpip=0.50),
+        )
+
+        assert not p.trigger(ctx).hit
+
+    def test_river_fragile_board_pair_blocks_thick_value(self):
+        from pokerfate.strategy.v3.purposes_active import ThickValueBet
+
+        p = ThickValueBet()
+        board = cards('Ah', 'Qc', '8s', 'Kd', 'Ks')
+        info = made_hand_info(cards('As', '8c'), board)
+        ctx = self._base_ctx(
+            street='river',
+            board=board,
+            board_sig=v3_board.analyze(board),
+            is_ip=False,
+            hero_bucket='strong',
+            hero_made_subtype=info.subtype,
+            hero_hand_rank=info.hand_rank,
+            equity_range=0.66,
+            equity_mc=0.85,
+            spr=2.6,
+            villain_vs_hero_dist={'win': 0.63, 'tie': 0.16, 'loss': 0.21},
+            villain_bucket_dist={'nuts': 0.21, 'strong': 0.50, 'air': 0.29},
+            prev_bet_called_count=1,
+            villain_stats=VillainStats(vpip=0.70, af=0.8, hands_seen=20),
+        )
+
+        assert info.subtype == 'board_pair_hero_pair'
+        assert not p.trigger(ctx).hit
+
+    def test_loss_dominant_passive_river_raise_blocks_bluff_catch(self):
+        from pokerfate.strategy.v3.purposes_defensive import BluffCatchCall
+
+        p = BluffCatchCall()
+        board = cards('Ah', 'Qc', '8s', 'Kd', 'Ks')
+        info = made_hand_info(cards('As', '8c'), board)
+        ctx = self._base_ctx(
+            street='river',
+            board=board,
+            board_sig=v3_board.analyze(board),
+            facing_bet=True,
+            to_call=85.0,
+            pot=235.0,
+            pot_odds=0.27,
+            stack=100.0,
+            spr=0.7,
+            hero_bucket='strong',
+            hero_made_subtype=info.subtype,
+            hero_hand_rank=info.hand_rank,
+            equity_range=0.45,
+            equity_mc=0.85,
+            villain_vs_hero_dist={'win': 0.38, 'tie': 0.13, 'loss': 0.49},
+            villain_bucket_dist={'nuts': 0.49, 'strong': 0.41, 'air': 0.10},
+            villain_stats=VillainStats(vpip=0.70, af=0.6, hands_seen=20),
+        )
+
+        assert not p.trigger(ctx).hit
+
+    def test_resisted_underpair_overcard_blocks_late_value_lines(self):
+        from pokerfate.strategy.v3 import purposes_active as active
+
+        board = cards('Qs', '7h', '3s', '8c', 'Jh')
+        info = made_hand_info(cards('5c', '5d'), board)
+        ctx = self._base_ctx(
+            street='river',
+            hole_cards=cards('5c', '5d'),
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hero_bucket='medium',
+            hero_made_subtype=info.subtype,
+            hero_hand_rank=info.hand_rank,
+            hero_made_rank=info.made_rank,
+            pocket_pair_rank=info.pocket_pair_rank,
+            equity_range=0.82,
+            equity_mc=0.82,
+            spr=1.2,
+            nut_advantage=0.35,
+            prev_bet_called_count=1,
+            my_prev_actions={'flop': 'bet', 'turn': 'bet'},
+            villain_vs_hero_dist={'win': 0.78, 'tie': 0.02, 'loss': 0.20},
+            villain_bucket_dist={'nuts': 0.04, 'strong': 0.12, 'medium': 0.62, 'air': 0.22},
+            villain_stats=VillainStats(vpip=0.50),
+        )
+
+        assert info.subtype == 'pocket_pair'
+        assert not active.ThinValueBet().trigger(ctx).hit
+        assert not active.ThickValueBet().trigger(ctx).hit
+        assert not active.ValueJam().trigger(ctx).hit
+        assert not active.TripleBarrel().trigger(ctx).hit
+
+    def test_underpair_overcard_can_still_value_before_resistance(self):
+        from pokerfate.strategy.v3.purposes_active import ThinValueBet
+
+        board = cards('Qs', '7h', '3s', '8c', 'Jh')
+        info = made_hand_info(cards('5c', '5d'), board)
+        ctx = self._base_ctx(
+            street='river',
+            hole_cards=cards('5c', '5d'),
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hero_bucket='medium',
+            hero_made_subtype=info.subtype,
+            hero_hand_rank=info.hand_rank,
+            hero_made_rank=info.made_rank,
+            pocket_pair_rank=info.pocket_pair_rank,
+            equity_range=0.73,
+            equity_mc=0.84,
+            prev_bet_called_count=0,
+            villain_vs_hero_dist={'win': 0.75, 'tie': 0.06, 'loss': 0.19},
+            villain_bucket_dist={'nuts': 0.08, 'strong': 0.10, 'medium': 0.55, 'air': 0.27},
+            villain_stats=VillainStats(vpip=0.50),
+        )
+
+        assert ThinValueBet().trigger(ctx).hit
+
+    def test_bluff_catch_rejects_fragile_high_leverage_without_relative_support(self):
+        from pokerfate.strategy.v3.purposes_defensive import BluffCatchCall
+
+        p = BluffCatchCall()
+        ctx = self._base_ctx(
+            street='river',
+            facing_bet=True,
+            to_call=80.0,
+            stack=160.0,
+            pot=320.0,
+            pot_odds=0.40,
+            spr=0.5,
+            hero_bucket='medium',
+            hero_made_subtype='board_pair_pocket_underpair',
+            equity_range=0.50,
+            villain_vs_hero_dist={'win': 0.45, 'tie': 0.0, 'loss': 0.55},
+            villain_bucket_dist={'nuts': 0.12, 'strong': 0.30, 'medium': 0.40, 'air': 0.18},
+        )
+
+        assert not p.trigger(ctx).hit
+
+    def test_bluff_catch_treats_unpaired_underpair_as_fragile(self):
+        from pokerfate.strategy.v3.purposes_defensive import BluffCatchCall
+
+        board = cards('Qs', '7h', '3s', '8c', 'Jh')
+        info = made_hand_info(cards('5c', '5d'), board)
+        p = BluffCatchCall()
+        ctx = self._base_ctx(
+            street='river',
+            board=board,
+            board_sig=v3_board.analyze(board),
+            facing_bet=True,
+            to_call=80.0,
+            stack=160.0,
+            pot=320.0,
+            pot_odds=0.40,
+            spr=0.5,
+            hero_bucket='medium',
+            hero_made_subtype=info.subtype,
+            hero_hand_rank=info.hand_rank,
+            pocket_pair_rank=info.pocket_pair_rank,
+            equity_range=0.50,
+            villain_vs_hero_dist={'win': 0.45, 'tie': 0.0, 'loss': 0.55},
+            villain_bucket_dist={'nuts': 0.10, 'strong': 0.25, 'medium': 0.45, 'air': 0.20},
+        )
+
+        assert info.subtype == 'pocket_pair'
+        assert not p.trigger(ctx).hit
+
+    def test_bluff_catch_allows_fragile_high_leverage_with_relative_edge(self):
+        from pokerfate.strategy.v3.purposes_defensive import BluffCatchCall
+
+        p = BluffCatchCall()
+        ctx = self._base_ctx(
+            street='river',
+            facing_bet=True,
+            to_call=80.0,
+            stack=160.0,
+            pot=320.0,
+            pot_odds=0.20,
+            spr=0.5,
+            hero_bucket='medium',
+            hero_made_subtype='board_pair_pocket_underpair',
+            equity_range=0.65,
+            villain_vs_hero_dist={'win': 0.57, 'tie': 0.0, 'loss': 0.43},
+            villain_bucket_dist={'nuts': 0.10, 'strong': 0.25, 'medium': 0.45, 'air': 0.20},
+        )
+
+        assert p.trigger(ctx).hit
+
+    def test_fold_override_rejects_fragile_high_leverage_relative_loss(self):
+        engine = V3Engine()
+        ctx = self._base_ctx(
+            street='river',
+            facing_bet=True,
+            to_call=80.0,
+            stack=160.0,
+            pot=320.0,
+            pot_odds=0.40,
+            spr=0.5,
+            hero_bucket='medium',
+            hero_made_subtype='board_pair_pocket_underpair',
+            equity_range=0.50,
+            villain_vs_hero_dist={'win': 0.45, 'tie': 0.0, 'loss': 0.55},
+            villain_bucket_dist={'nuts': 0.10, 'strong': 0.20, 'medium': 0.50, 'air': 0.20},
+        )
+
+        allowed, reason = engine._fold_override_allowed(ctx, [], blended_eq=0.50)
+        assert not allowed
+        assert 'fragile_rel_eq' in reason
+
+    def test_fragile_high_leverage_call_uses_tie_adjusted_price(self):
+        from pokerfate.strategy.v3.purposes_defensive import BluffCatchCall
+
+        p = BluffCatchCall()
+        ctx = self._base_ctx(
+            street='river',
+            facing_bet=True,
+            to_call=340_000.0,
+            stack=722_777.0,
+            pot=544_446.0,
+            pot_odds=0.28,
+            spr=0.4,
+            hero_bucket='medium',
+            hero_made_subtype='board_pair_hero_pair',
+            equity_range=0.41,
+            equity_mc=0.70,
+            villain_stats=VillainStats(vpip=0.78, af=0.8, hands_seen=20),
+            villain_vs_hero_dist={'win': 0.32, 'tie': 0.16, 'loss': 0.52},
+            villain_bucket_dist={'nuts': 0.40, 'strong': 0.53, 'medium': 0.07},
+        )
+
+        assert p.trigger(ctx).hit
+        allowed, reason = V3Engine()._fold_override_allowed(ctx, [], blended_eq=0.41)
+        assert allowed
+        assert 'fragile_rel_price' in reason
+
     def test_range_cbet_excludes_wet(self):
         from pokerfate.strategy.v3.purposes_active import RangeCbet
         p = RangeCbet()
@@ -836,11 +1181,9 @@ class TestPurposeTriggers:
         )
         assert not p.trigger(ctx).hit
 
-    # 问题 3 反向：低 SPR 仍然开 thick value（被动对手没 polar 加注空间）
-    def test_thick_value_bet_still_fires_on_wet_low_spr(self):
-        from pokerfate.strategy.v3.purposes_active import ThickValueBet
+    def test_thick_value_bet_defers_when_value_jam_is_legal(self):
+        from pokerfate.strategy.v3.purposes_active import ThickValueBet, ValueJam
         from pokerfate.strategy.v3.context import VillainStats
-        p = ThickValueBet()
         wet = cards('Jh', 'Th', '9h')
         whale = VillainStats(
             hands_seen=40,
@@ -856,7 +1199,31 @@ class TestPurposeTriggers:
             spr=1.5,            # < 2.0 → 不触发 gate
             villain_stats=whale,
         )
-        assert p.trigger(ctx).hit
+        assert ValueJam().trigger(ctx).hit
+        assert not ThickValueBet().trigger(ctx).hit
+
+    # 问题 3 反向：低 SPR 且 jam 被 texture guard 挡住时，仍保留 thick value。
+    def test_thick_value_bet_still_fires_when_low_spr_value_jam_is_guarded(self):
+        from pokerfate.strategy.v3.purposes_active import ThickValueBet, ValueJam
+        from pokerfate.strategy.v3.context import VillainStats
+        wet_four_straight = cards('Jh', 'Th', '9h', '8c')
+        whale = VillainStats(
+            hands_seen=40,
+            fold_to_cbet=0.15, fold_to_cbet_opps=10,
+            wtsd=0.42, river_fold_rate=0.22, river_action_count=10,
+            af=1.0,
+        )
+        ctx = self._base_ctx(
+            street='turn',
+            board=wet_four_straight,
+            board_sig=v3_board.analyze(wet_four_straight),
+            hero_made_subtype='set',
+            equity_range=0.75,
+            spr=1.5,
+            villain_stats=whale,
+        )
+        assert not ValueJam().trigger(ctx).hit
+        assert ThickValueBet().trigger(ctx).hit
 
     # 问题 3 反向：干板不触发 gate
     def test_thick_value_bet_still_fires_on_dry_vs_sticky(self):
@@ -878,6 +1245,42 @@ class TestPurposeTriggers:
             spr=5.0,
             is_pfr=False,       # 避开 dry-flop-pfr range_cbet deferral
             villain_stats=whale,
+        )
+        assert p.trigger(ctx).hit
+
+    def test_thick_value_bet_fires_for_strong_value_on_dry_pfr_flop(self):
+        from pokerfate.strategy.v3.purposes_active import ThickValueBet
+        p = ThickValueBet()
+        dry = cards('Kd', '6s', '4c')
+        ctx = self._base_ctx(
+            street='flop',
+            board=dry,
+            board_sig=v3_board.analyze(dry),
+            hero_bucket='strong',
+            equity_range=0.80,
+            equity_mc=0.85,
+            spr=13.0,
+            is_pfr=True,
+        )
+        assert p.trigger(ctx).hit
+
+    def test_thick_value_bet_fires_for_flopped_set_on_dry_pfr_flop(self):
+        from pokerfate.strategy.v3.purposes_active import ThickValueBet
+        p = ThickValueBet()
+        dry = cards('Kd', '6s', '4c')
+        ctx = self._base_ctx(
+            street='flop',
+            hole_cards=cards('6h', '6d'),
+            board=dry,
+            board_sig=v3_board.analyze(dry),
+            hero_bucket='nuts',
+            hero_hand_rank='three_of_a_kind',
+            hero_made_subtype='set',
+            equity_range=0.94,
+            equity_mc=0.95,
+            spr=13.0,
+            is_pfr=True,
+            villain_bucket_dist={'nuts': 0.0, 'strong': 0.05, 'medium': 0.58, 'air': 0.37},
         )
         assert p.trigger(ctx).hit
 
@@ -1411,7 +1814,7 @@ class TestNonNutStackoffGuard:
         assert out.action != 'bet' or out.amount < ctx.stack
         assert out.purpose != 'value_jam'
 
-    def test_jam_sized_thick_value_on_board_pair_downgrades_to_check(self):
+    def test_jam_sized_thick_value_on_board_pair_downsizes_instead_of_check(self):
         board = cards('3h', '5d', '8s', 'Ah', '3c')
         info = made_hand_info(cards('Tc', 'Ts'), board)
         ctx = DecisionCtx(
@@ -1443,8 +1846,45 @@ class TestNonNutStackoffGuard:
             seed=4,
         )
         out = V3Engine().decide(ctx)
-        assert out.action == 'check'
-        assert 'stackoff_guard' in out.reason
+        assert out.action == 'bet'
+        assert out.amount < ctx.stack * 0.45
+        assert 'stackoff_guard downsize' in out.reason
+
+    def test_relative_clear_value_bypasses_completed_flush_guard(self):
+        from pokerfate.strategy.v3.stackoff_guard import stackoff_guard_reason
+
+        board = cards('2s', '4s', '5d', 'Jc', '3s')
+        info = made_hand_info(cards('6s', '6h'), board)
+        ctx = DecisionCtx(
+            street='river',
+            hole_cards=cards('6s', '6h'),
+            board=board,
+            position='MP',
+            is_ip=True,
+            num_opponents=1,
+            pot=8_000_000.0,
+            stack=7_383_394.0,
+            big_blind=50_000.0,
+            spr=3.1,
+            facing_bet=False,
+            hero_bucket='nuts',
+            hero_made_subtype=info.subtype,
+            hero_hand_rank=info.hand_rank,
+            hero_made_rank=info.made_rank,
+            hero_kicker_rank=info.kicker_rank,
+            board_pair_rank=info.board_pair_rank,
+            pocket_pair_rank=info.pocket_pair_rank,
+            equity_mc=0.95,
+            equity_range=0.78,
+            nut_advantage=0.31,
+            board_sig=v3_board.analyze(board),
+            villain_bucket_dist={
+                'nuts': 0.35, 'strong': 0.17, 'medium': 0.35,
+                'draw': 0.0, 'weak_draw': 0.0, 'air': 0.13,
+            },
+            villain_vs_hero_dist={'win': 0.78, 'tie': 0.08, 'loss': 0.14},
+        )
+        assert stackoff_guard_reason(ctx, 'overbet_raise_jam', will_jam=True) is None
 
     def test_completed_flush_non_flush_straight_does_not_overbet_jam(self):
         board = cards('2s', '4s', '5d', 'Jc', '3s')

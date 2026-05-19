@@ -591,16 +591,28 @@ function P:refreshWinRate()
 	else
 		local isNew = false
 		if bee.isNull(self._PKWinRate) then
-			self._PKWinRate = GameModel.layer:playUIEffect("views/table/PK/PKWinRate", self.node.transform, self.ImageWin.transform.localPosition, -1)
+			if bee.isDev or bee.checkVersion("1.5.3") then
+				self._PKWinRate = GameModel.layer:playUIEffect("views/table/PK/PKWinRate2", self.node.transform, self.ImageWin.transform.localPosition, -1)
+			else
+				self._PKWinRate = GameModel.layer:playUIEffect("views/table/PK/PKWinRate", self.node.transform, self.ImageWin.transform.localPosition, -1)
+			end
 			isNew = true
 		end
 		local info = self.data:getPlayer(self.seatid)
 		if info then
 			local TextRate = self:find("AnimRoot/TextRate", self._PKWinRate)
-			if math.floor(info.win_rate) == info.win_rate then
-				bee.setText(TextRate, string.format("%d%%", info.win_rate))
+			if info.win_rate > 0 and info.win_rate < 1 then
+				bee.setText(TextRate, "<1%")
 			else
 				bee.setText(TextRate, string.format("%d%%", math.floor(info.win_rate)))
+			end
+			local TextEqually = self:find("AnimRoot/TextEqually", self._PKWinRate)
+			if TextEqually then
+				if info.equally_rate > 0 and info.equally_rate < 1 then
+					bee.setText(TextEqually, "<1%")
+				else
+					bee.setText(TextEqually, string.format("%d%%", math.floor(info.equally_rate)))
+				end
 			end
 			if not isNew then
 				TextRate.transform.localScale = bee.v3one

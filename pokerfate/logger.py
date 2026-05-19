@@ -65,6 +65,95 @@ def _fmt_cards(cards: List[str], use_color: bool) -> str:
     return "  ".join(_fmt_card(c, use_color) for c in cards)
 
 
+def _card_rank_value(card) -> int:
+    try:
+        return int(card.rank)
+    except Exception:
+        text = str(card)
+        rank = text[:-1].upper() if len(text) > 1 else text.upper()
+        return {
+            "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7,
+            "8": 8, "9": 9, "T": 10, "J": 11, "Q": 12, "K": 13, "A": 14,
+        }.get(rank, 0)
+
+
+def _card_suit_value(card) -> str:
+    try:
+        return str(card.suit)
+    except Exception:
+        text = str(card)
+        return text[-1:].lower()
+
+
+def _early_street_board_flags(board: List[object]) -> List[str]:
+    if len(board) < 3:
+        return []
+    ranks = [_card_rank_value(c) for c in board]
+    suits = [_card_suit_value(c) for c in board]
+    flags: List[str] = []
+    if len(set(ranks)) < len(ranks):
+        flags.append("paired")
+    flop = board[:3]
+    if len(flop) == 3 and len({_card_suit_value(c) for c in flop}) == 1:
+        flags.append("mono")
+    suit_counts: Dict[str, int] = {}
+    for suit in suits:
+        suit_counts[suit] = suit_counts.get(suit, 0) + 1
+    if max(suit_counts.values(), default=0) >= 4:
+        flags.append("4flush")
+    rank_set = set(ranks)
+    if 14 in rank_set:
+        rank_set.add(1)
+    for start in range(1, 11):
+        if len(set(range(start, start + 5)) & rank_set) >= 4:
+            flags.append("4straight")
+            break
+    return flags
+
+
+def _street_relative_calibration_watch(result) -> Optional[Dict]:
+    rec = result.record
+    if rec.street not in {"flop", "turn"}:
+        return None
+    if result.actual_bucket not in {"strong", "nuts"}:
+        return None
+    if not str(rec.trigger or "").startswith("action:"):
+        return None
+    subtype = getattr(rec, "hero_made_subtype", "") or ""
+    fragile = {
+        "clean_overpair",
+        "board_pair_pocket_pair",
+        "board_pair_pocket_underpair",
+        "board_pair_hero_pair",
+        "board_pair_kicker",
+        "trips",
+        "trips_top_kicker",
+        "trips_weak_kicker",
+        "board_trips_kicker",
+        "top_pair_weak_kicker",
+    }
+    if subtype not in fragile and not subtype.startswith("board_pair_"):
+        return None
+    flags = _early_street_board_flags(rec.board)
+    if not flags:
+        return None
+    return {
+        "street": rec.street,
+        "actual_bucket": result.actual_bucket,
+        "predicted_bucket_prob": round(float(result.predicted_bucket_prob or 0.0), 4),
+        "predicted_hero_eq": (
+            round(float(rec.predicted_hero_eq), 4)
+            if rec.predicted_hero_eq is not None else None
+        ),
+        "actual_hero_eq_street": (
+            round(float(result.actual_hero_eq_street), 4)
+            if result.actual_hero_eq_street is not None else None
+        ),
+        "hero_made_subtype": subtype,
+        "board_flags": flags,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Chinese labels
 # ---------------------------------------------------------------------------
@@ -321,6 +410,8 @@ class PokerLogger:
         equity_mode: Optional[str] = None,
         gto_refs: Optional[dict] = None,
         elapsed_ms: Optional[float] = None,
+        river_relative: Optional[Dict] = None,
+        street_relative: Optional[Dict] = None,
     ):
         """Log the bot's own decision."""
         rec: Dict = {
@@ -341,6 +432,10 @@ class PokerLogger:
             rec["equity_mode"] = equity_mode
         if elapsed_ms is not None:
             rec["elapsed_ms"] = round(elapsed_ms, 1)
+        if river_relative:
+            rec["river_relative"] = river_relative
+        if street_relative:
+            rec["street_relative"] = street_relative
         self._file(rec)
         if not self._console:
             return
@@ -383,10 +478,7 @@ class PokerLogger:
             key = gto_refs.get("chart_key", "")
             hand = gto_refs.get("hand", "")
             gl = gto_refs.get("greenline", "—")
-            pk = gto_refs.get("pekarstas", "—")
             self._raw(f"      📊 [Greenline]  {key} {hand} → {gl}", dim=True)
-            if pk != "—":
-                self._raw(f"      📊 [Pekarstas]  {key} {hand} → {pk}", dim=True)
 
     def hand_result(
         self,
@@ -578,7 +670,8 @@ class PokerLogger:
         # 无法形成有效对比（未亮牌/无 hero 卡/阶段实值缺失）时，不写日志
         if rec.predicted_hero_eq is None or result.actual_hero_eq_street is None:
             return
-        self._file({
+        street_rel_watch = _street_relative_calibration_watch(result)
+        payload = {
             "event": "calibration_result",
             "hand": rec.hand_id,
             "street": rec.street,
@@ -589,6 +682,18 @@ class PokerLogger:
             "actual_cards": [str(c) for c in result.actual_cards],
             "actual_bucket": result.actual_bucket,
             "predicted_bucket_prob": round(result.predicted_bucket_prob, 4),
+            "hero_made_subtype": getattr(rec, "hero_made_subtype", ""),
+            "hero_hand_rank": getattr(rec, "hero_hand_rank", ""),
+            "board_texture": getattr(rec, "board_texture", ""),
+            "villain_vs_hero_dist": {
+                k: round(float(v), 4)
+                for k, v in (getattr(rec, "villain_vs_hero_dist", {}) or {}).items()
+            },
+            "predicted_relation_eq": (
+                round(result.predicted_relation_eq, 4)
+                if result.predicted_relation_eq is not None else None
+            ),
+            "actual_relation": result.actual_relation or "",
             "predicted_hero_eq": (round(rec.predicted_hero_eq, 4)
                                   if rec.predicted_hero_eq is not None
                                   else None),
@@ -617,7 +722,10 @@ class PokerLogger:
             "eq_prediction_error": (round(result.eq_prediction_error, 4)
                                     if result.eq_prediction_error is not None
                                     else None),
-        })
+        }
+        if street_rel_watch:
+            payload["street_relative_watch"] = street_rel_watch
+        self._file(payload)
         if not self._console:
             return
 
@@ -661,10 +769,34 @@ class PokerLogger:
 
         bucket_part = (f"实际桶={bucket_str}({actual_cards_str},"
                        f"此桶={result.predicted_bucket_prob:.0%})")
+        rel_part = ""
+        if result.predicted_relation_eq is not None and result.actual_relation:
+            rel_short = {'win': '胜', 'tie': '平', 'loss': '负'}.get(
+                result.actual_relation, result.actual_relation,
+            )
+            rel_part = f" rel预={result.predicted_relation_eq:.0%}/实{rel_short}"
+
+        street_rel_part = ""
+        if street_rel_watch:
+            flags = ",".join(street_rel_watch.get("board_flags", []) or [])
+            actual = _CAT_SHORT.get(
+                street_rel_watch.get("actual_bucket", ""),
+                street_rel_watch.get("actual_bucket", ""),
+            )
+            pred_eq = street_rel_watch.get("predicted_hero_eq")
+            actual_eq = street_rel_watch.get("actual_hero_eq_street")
+            eq_part = ""
+            if pred_eq is not None and actual_eq is not None:
+                eq_part = f" eq{float(pred_eq):.0%}→{float(actual_eq):.0%}"
+            street_rel_part = (
+                f" street_rel校={actual} 桶"
+                f"{float(street_rel_watch.get('predicted_bucket_prob', 0.0)):.0%}"
+                f"{eq_part} board={flags}"
+            )
 
         self._raw(
             f"      ⚖ {rec.street} {rec.player_name} {rec.trigger} "
-            f"{bucket_part} {hu_part}{multi_part}",
+            f"{bucket_part} {hu_part}{multi_part}{rel_part}{street_rel_part}",
             color=color,
         )
 

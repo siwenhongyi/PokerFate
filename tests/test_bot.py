@@ -53,6 +53,7 @@ class TestBotDecisions:
 
     def test_bot_postflop_with_strong_hand(self):
         bot = PokerBot(equity_iterations=300)
+        bot.set_next_decision_seed(20260517)
         gs, _ = self._make_state(
             street=Street.FLOP,
             board=cards('As', 'Kd', '2c'),
@@ -61,7 +62,8 @@ class TestBotDecisions:
         )
         action = bot.decide(gs, player_id=0)
         # With top set, should bet (not check/fold)
-        assert action.action_type in (ActionType.RAISE, ActionType.CHECK)
+        assert action.action_type == ActionType.RAISE
+        assert action.amount > 0
 
     def test_bot_postflop_facing_bet(self):
         bot = PokerBot(equity_iterations=300)

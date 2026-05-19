@@ -70,11 +70,15 @@ class GTOMath:
         """Effective depth in big blinds (preflop / general)."""
         bb = max(big_blind, 1e-9)
         s = stack / bb
-        if s < 22.0:
+        if s < 20.0:
             return "短码"
-        if s < 45.0:
-            return "标准"
+        if s < 40.0:
+            return "浅码"
+        if s < 70.0:
+            return "中浅码"
         if s < 100.0:
+            return "标准码"
+        if s < 150.0:
             return "深码"
         return "超深"
 

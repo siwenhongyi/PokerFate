@@ -26,7 +26,9 @@ _FE = "https://cdn.jsdelivr.net/gh/microsoft/fluentui-emoji@main/assets"
 
 BARK_EVENT_ICONS: dict[str, str] = {
     "wss_disconnected": f"{_FE}/Exploding%20Head/3D/exploding_head_3d.png",
+    "wss_reconnected": f"{_FE}/Exploding%20Head/3D/exploding_head_3d.png",
     "auto_rebuy": f"{_FE}/Money%20with%20Wings/3D/money_with_wings_3d.png",
+    "room_escape": f"{_FE}/Money%20with%20Wings/3D/money_with_wings_3d.png",
     "profit_lock_trigger": f"{_FE}/Gem%20Stone/3D/gem_stone_3d.png",
     "chips_below_50bb": f"{_FE}/Face%20Screaming%20in%20Fear/3D/face_screaming_in_fear_3d.png",
     "hand_swing_up": f"{_FE}/Chart%20Increasing/3D/chart_increasing_3d.png",
@@ -34,6 +36,8 @@ BARK_EVENT_ICONS: dict[str, str] = {
     "gamedata_no_history": f"{_FE}/Ghost/3D/ghost_3d.png",
     "token_captured": f"{_FE}/Key/3D/key_3d.png",
 }
+
+_WSS_NOTICE_ID = "pokerfate-wss-disconnected"
 
 
 def _fit_utf8(text: str, max_bytes: int, suffix: str = "...") -> str:
@@ -79,6 +83,9 @@ def format_bark_message(event: str, fields: dict[str, Any]) -> tuple[str, str, s
     if event == "wss_disconnected":
         return "WSS 异常断开", "", icon
 
+    if event == "wss_reconnected":
+        return "WSS 已恢复", "", icon
+
     if event == "auto_rebuy":
         pnl = fields.get("pnl_chips", fields.get("pnl_bb", 0))
         if isinstance(pnl, (int, float)):
@@ -91,6 +98,17 @@ def format_bark_message(event: str, fields: dict[str, Any]) -> tuple[str, str, s
             f"续入筹码: {fields.get('rebuy_chips')}\n"
             f"rebuy 窗口: {fields.get('rebuy_window_sec')} 秒\n"
             f"累计盈亏: {pnl_str}（筹码）"
+        )
+        return title, body, icon
+
+    if event == "room_escape":
+        title = "筹码清零 · 换桌"
+        body = (
+            f"连续破产: {fields.get('bust_count')}/{fields.get('bust_need')} 次\n"
+            f"动作: 离桌后 QuickStart 换桌\n"
+            f"预计买入: {fields.get('byin_chips')}（100BB）\n"
+            f"房间 room_id={fields.get('room_id')}  BB={fields.get('big_blind')}\n"
+            f"rebuy 窗口: {fields.get('rebuy_window_sec')} 秒"
         )
         return title, body, icon
 
@@ -124,8 +142,17 @@ def format_bark_message(event: str, fields: dict[str, Any]) -> tuple[str, str, s
         start_bb = start_f / bb_f
         sign = "+" if is_up else ""
         icon = BARK_EVENT_ICONS.get("hand_swing_up" if is_up else "hand_swing_down") or icon
+        hand_no = fields.get("hand_no")
+        hand_no_line = ""
+        try:
+            hand_no_i = int(hand_no)
+            if hand_no_i > 0:
+                hand_no_line = f"第几手: 第{hand_no_i}手\n"
+        except (TypeError, ValueError):
+            hand_no_line = ""
         title = f"单手波动 · {sign}{delta_bb:.1f} BB"
         body = (
+            f"{hand_no_line}"
             f"本手盈亏: {sign}{int(delta_f)}（{sign}{delta_bb:.1f} BB）\n"
             f"开局筹码: {int(start_f)}（{start_bb:.1f} BB，占比 {sign}{pct:.1f}%）\n"
             f"BB = {int(bb_f)}"
@@ -145,3 +172,14 @@ def format_bark_message(event: str, fields: dict[str, Any]) -> tuple[str, str, s
     title = str(fields.get("title", event))
     body = fields.get("body") or json.dumps(fields, ensure_ascii=False, default=str)
     return title, str(body), icon
+
+
+def format_bark_options(event: str, fields: dict[str, Any]) -> dict[str, Any]:
+    """Bark non-content options used for notification updating."""
+    if event == "wss_disconnected":
+        return {"id": _WSS_NOTICE_ID}
+
+    if event == "wss_reconnected":
+        return {"id": _WSS_NOTICE_ID, "delete": 1}
+
+    return {}

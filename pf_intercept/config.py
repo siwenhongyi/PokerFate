@@ -96,14 +96,11 @@ PROFIT_LOCK_QUICKSTART_DELAY_SEC = 0.5
 ROOM_ESCAPE_ENABLED = True
 ROOM_ESCAPE_CONSECUTIVE_BUSTS = 2
 
-# 自动收藏牌局：WinnerRSP 结算后，满足条件就调用 /collCard/update。
+# 自动收藏牌局：WinnerRSP 结算后，仅对我方获胜的特殊牌型调用 /collCard/update。
 # 与盈利锁仓一致，SNG / 好友局会跳过。
-# 条件：
-#   1) 单手盈利 >= AUTO_COLLECT_PROFIT_BB_THRESHOLD BB
-#   2) 我方获胜且最终牌型为四条 / 同花顺 / 皇家同花顺 / 葫芦
-#      其中葫芦会排除“公共牌本身三条/葫芦”导致的排面葫芦。
-AUTO_COLLECT_HANDS_ENABLED = True
-AUTO_COLLECT_PROFIT_BB_THRESHOLD = 50
+# 条件：葫芦（公共牌不能已经三条）/ 四条 / 同花顺 / 皇家同花顺。
+AUTO_COLLECT_SPECIAL_HANDS_ENABLED = True
+
 GAME_HTTP_VERSION = "1.5.1"
 
 # ── GameData API (30-day player stats) ───────────────────────────────────────
@@ -121,6 +118,8 @@ WATCH_S2C = {
     "pb.EnterRoomRSP",
     "pb.SitDownRSP",
     "pb.SitDownBRC",    # player name updates when someone sits down
+    "pb.OtherEnterRoomBRC",  # room population update; includes rb_num robot count
+    "pb.OtherLeaveRoomBRC",  # room population update; includes rb_num robot count
     # Hand lifecycle
     "pb.DealerInfoRSP",
     "pb.HandCardRSP",

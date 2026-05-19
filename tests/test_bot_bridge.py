@@ -35,7 +35,6 @@ class TestBotBridgeActionAmounts:
         assert b._api.events[0].action == "call"
         assert b._api.events[0].amount == 6
 
-
 class TestBotBridgeProfitLock:
     def _next_hand_dealer(self, bridge: BotBridge, gameid: str = "t_next"):
         """盈利锁仓达标后需再收到一手 DealerInfo 才会注入 LeaveRoomREQ。"""
@@ -139,7 +138,7 @@ class TestBotBridgeProfitLock:
         assert b._profit_lock_reenter is not None
         assert b._profit_lock_reenter["roomid"] == rid
         assert b._profit_lock_reenter["byin_chips"] == int(100 * bb)
-        assert b._profit_lock_award_rebuy_after_enter
+        assert not b._profit_lock_award_rebuy_after_enter
 
         out2 = b.handle("pb.LeaveRoomRSP", {"code": 0})
         assert out2[0] == "pb.EnterRoomREQ"
@@ -204,6 +203,35 @@ class TestBotBridgeProfitLock:
         assert b._profit_lock_reenter is None
         assert not b._profit_lock_award_rebuy_after_enter
         assert b._max_auto_rebuy == 3
+        assert b._session_pnl_chips == 0.0
+
+    def test_enter_room_rsp_before_leave_success_does_not_award(self) -> None:
+        b = BotBridge(max_auto_rebuy=3)
+        b._my_uid = "99"
+        self._bootstrap_table(b)
+        b._uid_to_seat["99"] = 0
+        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * 2.0)
+        b.handle(
+            "pb.WinnerRSP",
+            {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
+        )
+        self._next_hand_dealer(b)
+
+        out = b.handle(
+            "pb.EnterRoomRSP",
+            {
+                "code": 0,
+                "roomid": 20242379,
+                "game_type": 10010101,
+                "room_info": {"bb": 2.0, "sb": 1.0, "lobby_coin": 10100001},
+                "table_status": {"seat": []},
+            },
+        )
+
+        assert out is None
+        assert b._max_auto_rebuy == 3
+        assert b._session_pnl_chips == 0.0
+        assert not b._profit_lock_award_rebuy_after_enter
 
     def test_enter_room_fail_no_award(self) -> None:
         b = BotBridge(max_auto_rebuy=3)
@@ -700,51 +728,58 @@ def test_hand_swing_includes_last_hand_detail(monkeypatch) -> None:
     b._my_seat = 0
     b._bb = 50.0
     b._hand_start_chips[0] = 100_000
+    b._hand_seq = 12
     b._api = FakeAPI()
 
     b._check_hand_swing(1_000)
 
     assert notified[0][1]["hand_detail"] == "手牌: A♠ A♥\n行动:\n翻前: 我加10bb"
+    assert notified[0][1]["hand_no"] == 12
+    assert "game_id" not in notified[0][1]
 
 
-def test_auto_collect_current_hand_calls_collcard_once(monkeypatch) -> None:
+def test_auto_collect_special_hand_calls_collcard(monkeypatch) -> None:
     import pf_intercept.bot as bot_mod
 
     calls = []
     monkeypatch.setattr(
         bot_mod,
         "_sync_collect_game",
-        lambda gameid, *, roomid=0, tid=1, reason="": calls.append(
-            (gameid, roomid, tid, reason)
-        ),
+        lambda gameid, **kwargs: calls.append((gameid, kwargs)) or {"code": 0},
     )
 
     b = BotBridge(max_auto_rebuy=3)
-    b._current_gameid = "g123"
+    b._current_gameid = "g-special"
     b._table_room_id = 42
-    b._table_tid = 7
+    b._table_tid = 1
 
     assert b._maybe_auto_collect_current_hand(["四条"]) is True
-    assert b._maybe_auto_collect_current_hand(["盈利50.0BB"]) is False
-    assert calls == [("g123", 42, 7, "四条")]
+    assert calls == [
+        (
+            "g-special",
+            {"roomid": 42, "tid": 1, "reason": "四条"},
+        )
+    ]
 
 
-def test_special_rooms_skip_auto_collect(monkeypatch) -> None:
+def test_auto_collect_special_hand_skips_sng_and_friend(monkeypatch) -> None:
     import pf_intercept.bot as bot_mod
 
     calls = []
     monkeypatch.setattr(
         bot_mod,
         "_sync_collect_game",
-        lambda gameid, *, roomid=0, tid=1, reason="": calls.append(gameid),
+        lambda gameid, **kwargs: calls.append((gameid, kwargs)) or {"code": 0},
     )
 
-    for attr in ("_is_sng_room", "_is_friend_room"):
-        b = BotBridge(max_auto_rebuy=3)
-        b._current_gameid = "g123"
-        setattr(b, attr, True)
-        assert b._maybe_auto_collect_current_hand(["四条"]) is False
+    b = BotBridge(max_auto_rebuy=3)
+    b._current_gameid = "g-sng"
+    b._is_sng_room = True
+    assert b._maybe_auto_collect_current_hand(["葫芦"]) is False
 
+    b._is_sng_room = False
+    b._is_friend_room = True
+    assert b._maybe_auto_collect_current_hand(["皇家同花顺"]) is False
     assert calls == []
 
 
@@ -753,8 +788,17 @@ def test_profit_lock_threshold_in_config() -> None:
     assert config.PROFIT_LOCK_BB_THRESHOLD >= 1
 
 
-def test_room_escape_two_busts_then_quickstart() -> None:
+def test_room_escape_two_busts_then_quickstart(monkeypatch) -> None:
     """连续破产 2 次（仍可自动续入）：第二弹离桌并以 QuickStart 换桌。"""
+    import pf_intercept.bot as bot_mod
+
+    notified = []
+    monkeypatch.setattr(
+        bot_mod,
+        "notify",
+        lambda event, **fields: notified.append((event, fields)),
+    )
+
     b = BotBridge(max_auto_rebuy=5)
     b._my_seat = 0
     b._bb = 1000.0
@@ -771,6 +815,17 @@ def test_room_escape_two_busts_then_quickstart() -> None:
     assert r2[0] == "pb.LeaveRoomREQ"
     assert r2[1]["seat_reserve"] is False
     assert b._room_escape_reenter == {"quickstart": True}
+    assert notified[-1] == (
+        "room_escape",
+        {
+            "bust_count": 2,
+            "bust_need": 2,
+            "byin_chips": 100_000,
+            "room_id": 42,
+            "big_blind": 1000,
+            "rebuy_window_sec": 30,
+        },
+    )
     r3 = b.handle("pb.LeaveRoomRSP", {"code": 0})
     assert r3 is not None
     assert r3[0] == "pb.QuickStartREQ"

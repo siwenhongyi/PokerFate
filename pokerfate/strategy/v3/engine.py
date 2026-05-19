@@ -15,7 +15,7 @@ import struct
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from pokerfate.strategy.v3 import alpha_gate, calibrator, exploit
+from pokerfate.strategy.v3 import alpha_gate, calibrator, early_relative, exploit
 from pokerfate.strategy.v3.context import DecisionCtx
 from pokerfate.strategy.v3.purpose import Purpose, PurposeRegistry, TriggerResult
 from pokerfate.strategy.v3.purposes_active import all_active, monster_value_plan_kind
@@ -75,6 +75,27 @@ _FOLD_OVERRIDE_FRAGILE_STRONG_MAX = float(
 _FOLD_OVERRIDE_FRAGILE_COMMIT_MIN = float(
     os.environ.get('PF_FOLD_OVERRIDE_FRAGILE_COMMIT_MIN', '0.25')
 )
+_FOLD_OVERRIDE_REL_PRICE_MARGIN = float(
+    os.environ.get('PF_BLUFF_CATCH_REL_PRICE_MARGIN', '0.06')
+)
+_FOLD_OVERRIDE_REL_PASSIVE_MARGIN_ADD = float(
+    os.environ.get('PF_BLUFF_CATCH_REL_PASSIVE_MARGIN_ADD', '0.02')
+)
+_FOLD_OVERRIDE_REL_NUTS_MARGIN_ADD = float(
+    os.environ.get('PF_BLUFF_CATCH_REL_NUTS_MARGIN_ADD', '0.02')
+)
+_FOLD_OVERRIDE_REL_NUTS_MARGIN_MIN = float(
+    os.environ.get('PF_BLUFF_CATCH_REL_NUTS_MARGIN_MIN', '0.35')
+)
+_FOLD_OVERRIDE_HIGH_LEVERAGE_COMMIT_MIN = float(
+    os.environ.get('PF_BLUFF_CATCH_HIGH_LEVERAGE_COMMIT_MIN', '0.35')
+)
+_FOLD_OVERRIDE_HIGH_LEVERAGE_SPR_MAX = float(
+    os.environ.get('PF_BLUFF_CATCH_HIGH_LEVERAGE_SPR_MAX', '1.00')
+)
+_FOLD_OVERRIDE_REL_LOSS_DOMINANT_MIN_POT_ODDS = float(
+    os.environ.get('PF_BLUFF_CATCH_REL_LOSS_DOMINANT_MIN_POT_ODDS', '0.20')
+)
 _FOLD_OVERRIDE_STICKY_MC_EXTRA_PENALTY = float(
     os.environ.get('PF_FOLD_OVERRIDE_STICKY_MC_EXTRA_PENALTY', '0.10')
 )
@@ -87,11 +108,18 @@ _OVERBET_RAISE_JAM_FORCE = os.environ.get('PF_OVERBET_RAISE_JAM_FORCE', '1') != 
 _OVERBET_RAISE_JAM_FORCE_MIN_WEIGHT = float(
     os.environ.get('PF_OVERBET_RAISE_JAM_FORCE_MIN_WEIGHT', '0.0')
 )
+_STACKOFF_GUARD_ACTIVE_FALLBACK_FRACS_RAW = os.environ.get(
+    'PF_STACKOFF_GUARD_ACTIVE_FALLBACK_FRACS', '0.50,0.40,0.33,0.25'
+)
+_STACKOFF_GUARD_ACTIVE_FALLBACK_MAX_COMMIT = float(
+    os.environ.get('PF_STACKOFF_GUARD_ACTIVE_FALLBACK_MAX_COMMIT', '0.45')
+)
 _LEVERAGE_TOP_GAP = float(os.environ.get('PF_LEVERAGE_TOP_GAP', '0.18'))
 _LEVERAGE_MIN_TOP = float(os.environ.get('PF_LEVERAGE_MIN_TOP', '0.48'))
 _LEVERAGE_DETERMINISTIC = os.environ.get('PF_LEVERAGE_DETERMINISTIC', '1') != '0'
 
 _FRAGILE_FOLD_OVERRIDE_SUBTYPES = {
+    'pocket_pair',
     'top_pair_weak_kicker',
     'board_pair_kicker',
     'board_pair_hero_pair',
@@ -100,6 +128,26 @@ _FRAGILE_FOLD_OVERRIDE_SUBTYPES = {
     'trips_weak_kicker',
     'board_trips_kicker',
 }
+
+
+def _parse_frac_list(raw: str) -> Tuple[float, ...]:
+    values: List[float] = []
+    for part in raw.split(','):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            value = float(part)
+        except ValueError:
+            continue
+        if value > 0:
+            values.append(value)
+    return tuple(values or (0.50, 0.40, 0.33, 0.25))
+
+
+_STACKOFF_GUARD_ACTIVE_FALLBACK_FRACS = _parse_frac_list(
+    _STACKOFF_GUARD_ACTIVE_FALLBACK_FRACS_RAW
+)
 
 
 @dataclass
@@ -244,6 +292,26 @@ class V3Engine:
             flags.append('facing_large_bet')
         return flags
 
+    def _fold_override_relative_eq_need(self, ctx: DecisionCtx) -> Tuple[float, float]:
+        rel = ctx.villain_vs_hero_dist or {}
+        rel_eq = float(rel.get('win', 0.0) or 0.0) + 0.5 * float(rel.get('tie', 0.0) or 0.0)
+        margin = _FOLD_OVERRIDE_REL_PRICE_MARGIN
+        vs = ctx.villain_stats
+        stickyish = (
+            vs.af < 1.2
+            or (
+                vs.hands_seen >= 10
+                and vs.vpip >= 0.40
+                and (vs.wtsd >= 0.32 or vs.fold_to_cbet <= 0.30)
+            )
+        )
+        if stickyish:
+            margin += _FOLD_OVERRIDE_REL_PASSIVE_MARGIN_ADD
+        nuts = float((ctx.villain_bucket_dist or {}).get('nuts', 0.0) or 0.0)
+        if nuts >= _FOLD_OVERRIDE_REL_NUTS_MARGIN_MIN:
+            margin += _FOLD_OVERRIDE_REL_NUTS_MARGIN_ADD
+        return rel_eq, ctx.pot_odds + margin
+
     def _fold_override_allowed(
         self,
         ctx: DecisionCtx,
@@ -274,8 +342,39 @@ class V3Engine:
                 or ctx.pot_odds >= 0.25
                 or ctx.spr <= 1.5
             )
+            rel_price_ok = False
+            rel_high_leverage = (
+                ctx.street == 'river'
+                or stack_commit >= _FOLD_OVERRIDE_HIGH_LEVERAGE_COMMIT_MIN
+                or (ctx.spr > 0 and ctx.spr <= _FOLD_OVERRIDE_HIGH_LEVERAGE_SPR_MAX)
+            )
+            rel = ctx.villain_vs_hero_dist or {}
+            if rel_high_leverage and rel:
+                rel_eq, rel_need = self._fold_override_relative_eq_need(ctx)
+                hero_wins = float(rel.get('win', 0.0) or 0.0)
+                villain_wins = float(rel.get('loss', 0.0) or 0.0)
+                loss_dominant_passive_raise = (
+                    ctx.street == 'river'
+                    and ctx.board_sig.paired
+                    and ctx.pot_odds >= _FOLD_OVERRIDE_REL_LOSS_DOMINANT_MIN_POT_ODDS
+                    and villain_wins >= hero_wins
+                    and ctx.villain_stats.af < 1.5
+                )
+                if loss_dominant_passive_raise:
+                    return False, (
+                        f'fold-only guard: rel_loss_dominant '
+                        f'loss {villain_wins:.2f} >= win {hero_wins:.2f}'
+                    )
+                rel_price_ok = rel_eq >= rel_need
+                if not rel_price_ok:
+                    return False, (
+                        f'fold-only guard: fragile_rel_eq {rel_eq:.2f} '
+                        f'< {rel_need:.2f}'
+                    )
+
             if (
                 fragile_high_leverage
+                and not rel_price_ok
                 and (
                     strong_mass >= _FOLD_OVERRIDE_FRAGILE_STRONG_MAX
                     or range_edge < _FOLD_OVERRIDE_FRAGILE_EDGE_MIN
@@ -286,6 +385,17 @@ class V3Engine:
                     f'fold-only guard: fragile {ctx.hero_made_subtype} '
                     f'edge {range_edge:.2f} strong {strong_mass:.2f}'
                 )
+            if rel_price_ok:
+                rel_eq, rel_need = self._fold_override_relative_eq_need(ctx)
+                return True, f'fragile_rel_price eq {rel_eq:.2f} >= {rel_need:.2f}'
+
+        early_rel_need = early_relative.fold_override_need(ctx)
+        if early_rel_need > 0 and blended_eq < early_rel_need:
+            return False, (
+                f'fold-only guard: early_rel_risk '
+                f'blended_eq {blended_eq:.2f} < {early_rel_need:.2f}; '
+                f'{early_relative.describe(ctx)}'
+            )
 
         cheap_range_call = (
             ctx.pot_odds <= _FOLD_OVERRIDE_CHEAP_CALL_MAX_POT_ODDS
@@ -452,8 +562,9 @@ class V3Engine:
                 reason='no bet purpose selected',
             )
 
-        # Sample size → calibrate → α gate (chain A only; chain B is implicit
-        # trust-long-run per doc 03 §7.3 revision)
+        # Sample size → calibrate → river polar bluff-share gate.  The alpha
+        # gate is intentionally narrow now: non-river / non-polar purposes are
+        # no-op passes inside alpha_gate.check().
         frac = self._sample_size(chosen, ctx)
         return self._finalize_bet(
             ctx, chosen, frac, seed, cand_probs, deltas,
@@ -486,6 +597,14 @@ class V3Engine:
                                    reason='calibrator produced 0')
         guard = stackoff_guard_reason(ctx, purpose.id, will_jam=cal.jammed)
         if guard:
+            fallback = self._guarded_active_bet_fallback(
+                ctx, purpose, frac, guard, seed, cand_probs, deltas,
+                arbitration_mode=arbitration_mode,
+                top_gap=top_gap,
+                leverage_flags=leverage_flags,
+            )
+            if fallback is not None:
+                return fallback
             return DecisionOutput(
                 action='check', amount=0.0, purpose=purpose.id, frac=0.0,
                 seed=seed, candidates=cand_probs, exploit_deltas=deltas,
@@ -497,31 +616,21 @@ class V3Engine:
         # α gate on the calibrated frac
         check = alpha_gate.check(ctx, cal.frac, purpose.id)
 
-        if not check.passed and check.direction == 'over_bluff' and fallback_depth < 2:
-            # Chain A: pick next smaller sizer tier, re-run calibrator+gate.
-            sizes = purpose.sizer(ctx)
-            smaller = [f for f, _ in sizes if f < frac]
-            if smaller:
-                smaller.sort()
-                return self._finalize_bet(
-                    ctx, purpose, smaller[0], seed, cand_probs, deltas,
-                    fallback_depth + 1,
-                    arbitration_mode=arbitration_mode,
-                    top_gap=top_gap,
-                    leverage_flags=leverage_flags,
-                )
-            # No smaller tier available → check.
+        if not check.passed and check.direction == 'over_bluff':
+            # River polar balance is a combo-frequency constraint.  If this
+            # combo makes the bluff share too high, the correct fallback is to
+            # remove this bluff combo, not to downsize: smaller bets support an
+            # even lower balanced bluff share.
             return DecisionOutput(
                 action='check', amount=0.0, purpose=purpose.id, frac=0.0,
                 seed=seed, candidates=cand_probs, exploit_deltas=deltas,
                 alpha=check, downgraded_to_check=True,
                 arbitration_mode=arbitration_mode, top_gap=top_gap,
                 leverage_flags=leverage_flags,
-                reason='α-gate chain A downsize exhausted → check',
+                reason='α-gate river polar over-bluff → check',
             )
-        # Chain B (under_bluff) already handled inside alpha_gate.check via
-        # exploit.under_bluff_allowed. If it still failed here, doc 03 §7.3
-        # says "accept current bet; trust long-run balance". Proceed.
+        # Under-bluff still proceeds: in weak pools, betting too value-heavy is
+        # usually an exploit, and otherwise it is not a reason to block value.
 
         action = 'raise' if ctx.facing_bet else 'bet'
         return DecisionOutput(
@@ -541,6 +650,72 @@ class V3Engine:
                    + (" (jammed)" if cal.jammed else ""),
         )
 
+    def _guarded_active_bet_fallback(
+        self,
+        ctx: DecisionCtx,
+        purpose: Purpose,
+        current_frac: float,
+        guard_reason: str,
+        seed: int,
+        cand_probs: List[Tuple[str, float]],
+        deltas: Dict[str, float],
+        *,
+        arbitration_mode: str,
+        top_gap: float,
+        leverage_flags: List[str],
+    ) -> Optional[DecisionOutput]:
+        """Downsize guarded active value before giving up the street."""
+        if ctx.facing_bet:
+            return None
+
+        guard_pid = 'thick_value_bet' if purpose.id == 'value_jam' else purpose.id
+        raw_fracs = [f for f, _ in purpose.sizer(ctx)]
+        raw_fracs.extend(_STACKOFF_GUARD_ACTIVE_FALLBACK_FRACS)
+
+        seen = set()
+        candidates: List[float] = []
+        for frac in raw_fracs:
+            if frac <= 0 or frac >= current_frac - 1e-9:
+                continue
+            key = round(frac, 4)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(frac)
+        candidates.sort(reverse=True)
+
+        for frac in candidates:
+            cal = calibrator.calibrate(frac, ctx, guard_pid)
+            if cal.amount <= 0 or cal.jammed:
+                continue
+            if (
+                ctx.stack > 0
+                and cal.amount / ctx.stack > _STACKOFF_GUARD_ACTIVE_FALLBACK_MAX_COMMIT
+            ):
+                continue
+            if stackoff_guard_reason(ctx, guard_pid, will_jam=False):
+                continue
+            check = alpha_gate.check(ctx, cal.frac, guard_pid)
+            if not check.passed and check.direction == 'over_bluff':
+                continue
+            flags = list(dict.fromkeys(leverage_flags + ['stackoff_guard_downsize']))
+            return DecisionOutput(
+                action='bet',
+                amount=cal.amount,
+                purpose=purpose.id,
+                frac=cal.frac,
+                seed=seed,
+                candidates=cand_probs,
+                alpha=check,
+                exploit_deltas=deltas,
+                jammed=False,
+                arbitration_mode=arbitration_mode,
+                top_gap=top_gap,
+                leverage_flags=flags,
+                reason=f'stackoff_guard downsize {guard_reason}; frac={cal.frac:.2f}',
+            )
+        return None
+
     # ------------------------------------------------------------------
     # Defense branch (facing a bet)
     # ------------------------------------------------------------------
@@ -553,7 +728,9 @@ class V3Engine:
                 ctx.equity_range - (ctx.equity_uncertainty or 0.0),
                 ctx.equity_mc - mc_penalty,
             )
-            if blended_eq >= ctx.pot_odds + _FOLD_OVERRIDE_MARGIN:
+            early_add = early_relative.call_margin_add(ctx)
+            need = ctx.pot_odds + _FOLD_OVERRIDE_MARGIN + early_add
+            if blended_eq >= need:
                 return DecisionOutput(
                     action='call', amount=min(ctx.to_call, ctx.stack),
                     purpose='bluff_catch_call', seed=seed,
@@ -561,7 +738,9 @@ class V3Engine:
                     top_gap=1.0,
                     leverage_flags=self._leverage_flags(ctx) or ['all_in'],
                     reason=f'all-in robust call (blended_eq {blended_eq:.2f} '
-                           f'≥ pot_odds {ctx.pot_odds:.2f})',
+                           f'≥ need {need:.2f}'
+                           + (f'; {early_relative.describe(ctx)}' if early_add > 0 else '')
+                           + ')',
                 )
             return DecisionOutput(
                 action='fold', amount=0.0, purpose='fold', seed=seed,
@@ -569,7 +748,9 @@ class V3Engine:
                 top_gap=1.0,
                 leverage_flags=self._leverage_flags(ctx) or ['all_in'],
                 reason=f'all-in robust fold (blended_eq {blended_eq:.2f} '
-                       f'< pot_odds {ctx.pot_odds:.2f})',
+                       f'< need {need:.2f}'
+                       + (f'; {early_relative.describe(ctx)}' if early_add > 0 else '')
+                       + ')',
             )
 
         # 2026-04-25：fold 作为独立 purpose 参与投票（见 FoldPurpose.trigger）。

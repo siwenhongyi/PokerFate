@@ -20,6 +20,14 @@ class TrapSlowPlay(Purpose):
             return TriggerResult(False)
         if ctx.spr < 4:
             return TriggerResult(False)
+        # Trap is allowed as a single-street mix only. If flop/turn already
+        # checked through, keep building value instead of giving two free cards.
+        if ctx.street == 'turn' and (ctx.flop_checked_through
+                                     or ctx.my_prev_actions.get('flop') == 'check'):
+            return TriggerResult(False)
+        if ctx.street == 'river' and (ctx.turn_checked_through
+                                      or ctx.my_prev_actions.get('turn') == 'check'):
+            return TriggerResult(False)
         vs = ctx.villain_stats
         # 慢打的唯一前提：对手会替你下注。
         #   - bluff_win_rate > 0.25（≥5 手 bet 样本）直接实锤爱诈唬
@@ -72,6 +80,26 @@ class PotControl(Purpose):
         if ctx.facing_bet:
             return TriggerResult(False)
         if ctx.hero_bucket != 'medium':
+            return TriggerResult(False)
+        if ctx.street == 'river' and ctx.villain_vs_hero_dist:
+            rel = ctx.villain_vs_hero_dist or {}
+            hero_wins = float(rel.get('win', 0.0) or 0.0)
+            ties = float(rel.get('tie', 0.0) or 0.0)
+            villain_wins = float(rel.get('loss', 0.0) or 0.0)
+            rel_eq = hero_wins + 0.5 * ties
+            nuts = (ctx.villain_bucket_dist or {}).get('nuts', 0.0)
+            if hero_wins >= 0.58 and rel_eq >= 0.58 and villain_wins <= 0.28 and nuts <= 0.25:
+                return TriggerResult(False)
+        vs = ctx.villain_stats
+        sticky_value_target = (
+            ctx.n_sticky >= 1
+            or vs.vpip >= 0.40
+            or (vs.hands_seen >= 20 and vs.wtsd > 0.28)
+            or (vs.fold_to_cbet_opps >= 5 and vs.fold_to_cbet < 0.35)
+            or (vs.river_action_count >= 5 and vs.river_fold_rate < 0.45)
+            or (vs.hands_seen >= 20 and vs.af < 1.3)
+        )
+        if sticky_value_target and ctx.equity_range >= 0.58 and ctx.board_sig.wetness < 0.70:
             return TriggerResult(False)
         if ctx.board_sig.wetness < 0.55 and ctx.spr < 6:
             return TriggerResult(False)
