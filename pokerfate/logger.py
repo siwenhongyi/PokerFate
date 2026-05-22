@@ -231,8 +231,7 @@ class PokerLogger:
             p = pathlib.Path(log_file)
             text_path = p.with_name(p.stem + "_console" + p.suffix)
             text_path.parent.mkdir(parents=True, exist_ok=True)
-            _rotate_log(str(text_path))
-            self._text_log = open(text_path, "w", encoding="utf-8", buffering=1)
+            self._text_log = open(text_path, "a", encoding="utf-8", buffering=1)
 
         self._robot_log = None
         if robot_log_file:

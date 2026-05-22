@@ -42,10 +42,26 @@ from pf_notify import notify, set_bark_key, load_bark_key_file
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_BARK_KEY_FILE = _PROJECT_ROOT / "data" / "bark_key.txt"
+_POKERFATE_CONSOLE_LOG = _PROJECT_ROOT / "pokerfate" / "logs" / "pokerfate_console.log"
 
 
 def _wss_close_is_abnormal(code: int | None) -> bool:
     return code is not None and code not in (1000, 1001)
+
+
+def _archive_pokerfate_console_log_on_startup() -> None:
+    path = _POKERFATE_CONSOLE_LOG
+    if not path.exists() or path.stat().st_size <= 0:
+        return
+    bak = path.with_name(path.stem + ".bak" + path.suffix)
+    bak.parent.mkdir(parents=True, exist_ok=True)
+    with bak.open("a", encoding="utf-8") as dst, path.open("r", encoding="utf-8") as src:
+        data = src.read()
+        if data:
+            dst.write(data)
+            if not data.endswith("\n"):
+                dst.write("\n")
+    path.write_text("", encoding="utf-8")
 
 
 _LOGS_DIR = Path(__file__).parent / "logs"
@@ -951,6 +967,7 @@ async def main(
     entertainment_web_port: int | None = config.ENTERTAINMENT_WEB_PORT,
 ) -> None:
     global _bot, _entertainment
+    _archive_pokerfate_console_log_on_startup()
     _load_bark_key_from_file()
     if not Path(SERVER_CERT).exists():
         print("ERROR: certs not found. Run:  python -m pf_intercept.gen_cert")

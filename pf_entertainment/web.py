@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from pf_entertainment.color_strategy import ColorMartingaleConfig
+from pf_entertainment.hand_preview import hand_detail_payload, hand_list_payload
 from pf_entertainment.records import JsonRecordStore
 
 
@@ -124,6 +125,24 @@ class EntertainmentWebServer:
                     "summary": self.store.summary(),
                 }
             )
+        if request.method == "GET" and request.path == "/api/hands":
+            return self._json_response(
+                {
+                    "ok": True,
+                    **hand_list_payload(
+                        position=self._str_query(request, "position", "all"),
+                        vpip=self._str_query(request, "vpip", "all"),
+                        result=self._str_query(request, "result", "all"),
+                        bb_k=self._str_query(request, "bb_k", "all"),
+                    ),
+                }
+            )
+        if request.method == "GET" and request.path == "/api/hand":
+            hand_id = self._int_query(request, "id", 0)
+            try:
+                return self._json_response({"ok": True, **hand_detail_payload(hand_id)})
+            except KeyError as exc:
+                return self._json_response({"ok": False, "error": str(exc)}, status=404)
         if request.method == "POST" and request.path == "/api/color/run":
             return await self._start_color_run(request)
         if request.method == "POST" and request.path == "/api/color/stop":
@@ -233,6 +252,12 @@ class EntertainmentWebServer:
         except ValueError:
             return default
 
+    def _str_query(self, request: _HttpRequest, name: str, default: str = "") -> str:
+        values = request.query.get(name)
+        if not values:
+            return default
+        return str(values[0])
+
     def _html_response(self, html: str) -> tuple[int, dict[str, str], bytes]:
         return (
             200,
@@ -287,7 +312,7 @@ INDEX_HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PokerFate 小游戏</title>
+  <title>PokerFate 控制台</title>
   <style>
     :root {
       color-scheme: light;
@@ -322,6 +347,29 @@ INDEX_HTML = r"""<!doctype html>
     }
     h1 { font-size: 20px; margin: 0; letter-spacing: 0; }
     main { max-width: 1280px; margin: 0 auto; padding: 20px 24px 40px; }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .tab-btn {
+      height: 38px;
+      border: 1px solid transparent;
+      border-bottom: 0;
+      border-radius: 8px 8px 0 0;
+      padding: 0 16px;
+      color: var(--muted);
+      background: transparent;
+    }
+    .tab-btn.active {
+      color: var(--text);
+      background: #fff;
+      border-color: var(--line);
+      transform: translateY(1px);
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
     section {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -364,6 +412,18 @@ INDEX_HTML = r"""<!doctype html>
     button.secondary { background: #3f4756; }
     button.danger { background: var(--danger); }
     button:disabled { opacity: .5; cursor: not-allowed; }
+    button.tab-btn {
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid transparent;
+      border-bottom: 0;
+    }
+    button.tab-btn:hover { background: #eef4fb; }
+    button.tab-btn.active {
+      color: var(--text);
+      background: #fff;
+      border-color: var(--line);
+    }
     .metrics {
       display: grid;
       grid-template-columns: repeat(5, minmax(120px, 1fr));
@@ -390,11 +450,15 @@ INDEX_HTML = r"""<!doctype html>
     }
     .pos { color: var(--ok); }
     .neg { color: var(--danger); }
+    .zero { color: var(--muted); }
     .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
     table { width: 100%; border-collapse: collapse; min-width: 1040px; background: #fff; }
     th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
     th { font-size: 12px; color: var(--muted); background: #f8fafc; position: sticky; top: 0; }
     tr:last-child td { border-bottom: 0; }
+    .clickable { cursor: pointer; }
+    .clickable:hover td { background: #f8fbff; }
+    .clickable.active td { background: #eef6ff; }
     .swatch { display: inline-flex; align-items: center; gap: 6px; margin-right: 5px; }
     .ball { width: 12px; height: 12px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,.12); }
     .c101 { background: #f4c542; }
@@ -413,18 +477,78 @@ INDEX_HTML = r"""<!doctype html>
       border-bottom: 1px solid var(--line);
     }
     .history-item:last-child { border-bottom: 0; }
+    .hand-filters {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 12px;
+      align-items: end;
+    }
+    .hand-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 16px;
+    }
+    .cards { display: inline-flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+    .card {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+      height: 30px;
+      padding: 0 6px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .card.red { color: #d12929; border-color: #f0b4b4; background: #fff7f7; }
+    .card.black { color: #1f2937; }
+    .hand-detail-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .hand-detail-title h2 { font-size: 16px; margin: 0; }
+    .log-detail {
+      margin: 0;
+      max-height: 620px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0f1720;
+      color: #e6edf3;
+      padding: 14px;
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .log-detail .card {
+      height: 20px;
+      min-width: 22px;
+      padding: 0 4px;
+      border-color: rgba(255,255,255,.18);
+      background: rgba(255,255,255,.05);
+      font-size: 12px;
+    }
+    .log-detail .card.red { color: #ff8b8b; background: rgba(255,80,80,.08); }
+    .log-detail .card.black { color: #e6edf3; }
     @media (max-width: 860px) {
       header { align-items: flex-start; flex-direction: column; padding: 14px 16px; }
       main { padding: 14px 16px 28px; }
       form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .history-item { grid-template-columns: 1fr 1fr; }
+      .hand-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
   </style>
 </head>
 <body>
   <header>
-    <h1>小游戏控制台</h1>
+    <h1>PokerFate 控制台</h1>
     <div class="status">
       <span id="session-dot" class="dot"></span><span id="session-text">WSS -</span>
       <span id="job-dot" class="dot"></span><span id="job-text">任务 -</span>
@@ -432,6 +556,12 @@ INDEX_HTML = r"""<!doctype html>
     </div>
   </header>
   <main>
+    <div class="tabs" role="tablist">
+      <button class="tab-btn active" type="button" data-tab="color">彩球集</button>
+      <button class="tab-btn" type="button" data-tab="hands">对局列表</button>
+    </div>
+
+    <div id="tab-color" class="tab-panel active">
     <section>
       <form id="run-form">
         <label>起始筹码
@@ -516,6 +646,80 @@ INDEX_HTML = r"""<!doctype html>
       </div>
       <div id="history" class="history muted">暂无记录</div>
     </section>
+    </div>
+
+    <div id="tab-hands" class="tab-panel">
+      <section>
+        <div class="hand-filters">
+          <label>位置
+            <select id="hand-position">
+              <option value="all">全部</option>
+            </select>
+          </label>
+          <label>是否入池
+            <select id="hand-vpip">
+              <option value="all">全部</option>
+              <option value="yes" selected>入池</option>
+              <option value="no">未入池</option>
+            </select>
+          </label>
+          <label>是否盈利
+            <select id="hand-result">
+              <option value="all">全部</option>
+              <option value="profit">盈利</option>
+              <option value="loss">亏损</option>
+              <option value="zero">持平</option>
+              <option value="incomplete">未结束</option>
+            </select>
+          </label>
+          <label>BB(k)
+            <select id="hand-bb">
+              <option value="all">全部</option>
+            </select>
+          </label>
+          <button id="hands-refresh-btn" class="secondary" type="button">刷新对局</button>
+        </div>
+        <div class="metrics">
+          <div class="metric"><span>当前日志手数</span><b id="hands-total">0</b></div>
+          <div class="metric"><span>筛选结果</span><b id="hands-count">0</b></div>
+          <div class="metric"><span>当前日志</span><b id="hands-log">-</b></div>
+          <div class="metric"><span>已选手牌</span><b id="hands-selected">-</b></div>
+          <div class="metric"><span>详情行号</span><b id="hands-lines">-</b></div>
+        </div>
+      </section>
+
+      <section>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>手数</th>
+                <th>时间</th>
+                <th>位置</th>
+                <th>BB</th>
+                <th>底牌</th>
+                <th>排面</th>
+                <th>入池</th>
+                <th>结果</th>
+                <th>最后动作</th>
+                <th>赢家 / 我的牌型</th>
+              </tr>
+            </thead>
+            <tbody id="hands-body">
+              <tr><td colspan="10" class="muted">暂无对局</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <div class="hand-detail-title">
+          <h2 id="hand-detail-title">对局详情</h2>
+          <span id="hand-detail-meta" class="muted">选择一手查看完整日志</span>
+        </div>
+        <pre id="hand-detail" class="log-detail">暂无详情</pre>
+      </section>
+    </div>
   </main>
 
   <script>
@@ -526,7 +730,40 @@ INDEX_HTML = r"""<!doctype html>
       return `${v > 0 ? "+" : ""}${v.toLocaleString()}`;
     };
     const moneyClass = (n) => Number(n || 0) >= 0 ? "pos" : "neg";
+    const handMoneyClass = (n) => Number(n || 0) > 0 ? "pos" : (Number(n || 0) < 0 ? "neg" : "zero");
     const swatch = (item) => `<span class="swatch"><i class="ball c${item.id}"></i>${colorName(item)}</span>`;
+    let activeTab = "color";
+    let selectedHandId = null;
+    let handFilterOptionsReady = false;
+
+    function escapeHtml(text) {
+      return String(text ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function cardHtml(card) {
+      const text = String(card || "");
+      if (!text) return "";
+      const suit = text.slice(-1);
+      const cls = (suit === "♥" || suit === "♦") ? "red" : "black";
+      return `<span class="card ${cls}">${escapeHtml(text)}</span>`;
+    }
+
+    function cardsHtml(cards) {
+      const arr = Array.isArray(cards) ? cards : [];
+      if (!arr.length) return '<span class="muted">-</span>';
+      return `<span class="cards">${arr.map(cardHtml).join("")}</span>`;
+    }
+
+    function colorizeLog(text) {
+      return escapeHtml(text).replace(/([2-9TJQKA])([♠♥♦♣])️?/g, (_m, rank, suit) => {
+        return cardHtml(`${rank}${suit}`);
+      });
+    }
 
     function formPayload() {
       const payload = {};
@@ -646,6 +883,120 @@ INDEX_HTML = r"""<!doctype html>
       $("h-net").className = moneyClass(summary.net_profit);
     }
 
+    function resultText(hand) {
+      if (!hand.complete) return "未结束";
+      if (hand.pnl > 0) return `盈利 ${signed(hand.pnl_bb)}bb`;
+      if (hand.pnl < 0) return `亏损 ${signed(hand.pnl_bb)}bb`;
+      return "持平";
+    }
+
+    function streetText(street) {
+      return {
+        preflop: "翻前",
+        flop: "翻牌",
+        turn: "转牌",
+        river: "河牌",
+      }[street] || street || "-";
+    }
+
+    function actionText(action) {
+      return {
+        fold: "弃牌",
+        check: "过牌",
+        call: "跟注",
+        raise: "加注",
+        bet: "下注",
+        jam: "全下",
+      }[action] || action || "-";
+    }
+
+    function syncHandFilterOptions(data) {
+      if (!handFilterOptionsReady) {
+        const posSelect = $("hand-position");
+        const bbSelect = $("hand-bb");
+        const selectedPos = posSelect.value;
+        const selectedBb = bbSelect.value;
+        posSelect.innerHTML = '<option value="all">全部</option>' +
+          (data.positions || []).map((pos) => `<option value="${escapeHtml(pos)}">${escapeHtml(pos)}</option>`).join("");
+        bbSelect.innerHTML = '<option value="all">全部</option>' +
+          (data.bb_k_values || []).map((bb) => `<option value="${bb}">${bb}k</option>`).join("");
+        posSelect.value = selectedPos || "all";
+        bbSelect.value = selectedBb || "all";
+        handFilterOptionsReady = true;
+      }
+    }
+
+    function renderHands(data) {
+      syncHandFilterOptions(data);
+      $("hands-total").textContent = Number(data.total || 0).toLocaleString();
+      $("hands-count").textContent = Number(data.count || 0).toLocaleString();
+      $("hands-log").textContent = (data.log_path || "").split("/").slice(-1)[0] || "-";
+      const hands = data.hands || [];
+      if (!hands.length) {
+        $("hands-body").innerHTML = '<tr><td colspan="10" class="muted">暂无对局</td></tr>';
+        selectedHandId = null;
+        $("hand-detail").textContent = "暂无详情";
+        return;
+      }
+      if (!selectedHandId || !hands.some((h) => h.id === selectedHandId)) {
+        selectedHandId = hands[0].id;
+      }
+      $("hands-body").innerHTML = hands.map((hand) => {
+        const rowClass = hand.id === selectedHandId ? "clickable active" : "clickable";
+        const winner = hand.winner_text || "-";
+        const combo = hand.hero_combo ? `<br><span class="muted">我: ${escapeHtml(hand.hero_combo)}</span>` : "";
+        return `<tr class="${rowClass}" data-hand-id="${hand.id}">
+          <td>第 ${hand.hand_no} 手<br><span class="muted">#${hand.seq}</span></td>
+          <td>${escapeHtml(hand.time || "-")}</td>
+          <td>${escapeHtml(hand.position || "-")}</td>
+          <td>${hand.bb_k || "-"}k</td>
+          <td>${cardsHtml(hand.hole_cards)}</td>
+          <td>${cardsHtml(hand.board)}</td>
+          <td>${hand.vpip ? "是" : "否"}</td>
+          <td class="${handMoneyClass(hand.pnl)}">${resultText(hand)}</td>
+          <td>${streetText(hand.final_street)} ${actionText(hand.final_action)}</td>
+          <td>${escapeHtml(winner)}${combo}</td>
+        </tr>`;
+      }).join("");
+      document.querySelectorAll("#hands-body tr[data-hand-id]").forEach((row) => {
+        row.addEventListener("click", () => selectHand(Number(row.dataset.handId)));
+      });
+      if (selectedHandId) {
+        selectHand(selectedHandId, false);
+      }
+    }
+
+    async function refreshHands() {
+      const params = new URLSearchParams({
+        position: $("hand-position").value || "all",
+        vpip: $("hand-vpip").value || "all",
+        result: $("hand-result").value || "all",
+        bb_k: $("hand-bb").value || "all",
+      });
+      const data = await api(`/api/hands?${params.toString()}`);
+      renderHands(data);
+    }
+
+    async function selectHand(id, refreshList = true) {
+      selectedHandId = id;
+      if (refreshList) {
+        document.querySelectorAll("#hands-body tr[data-hand-id]").forEach((row) => {
+          row.classList.toggle("active", Number(row.dataset.handId) === id);
+        });
+      }
+      const data = await api(`/api/hand?id=${encodeURIComponent(id)}`);
+      const hand = data.hand || {};
+      $("hands-selected").textContent = hand.hand_no ? `第 ${hand.hand_no} 手` : "-";
+      $("hands-lines").textContent = hand.start_line ? `${hand.start_line}-${hand.end_line}` : "-";
+      $("hand-detail-title").textContent = hand.hand_no ? `第 ${hand.hand_no} 手` : "对局详情";
+      $("hand-detail-meta").textContent = [
+        hand.position || "-",
+        hand.bb_k ? `${hand.bb_k}k` : "",
+        resultText(hand),
+      ].filter(Boolean).join("  ·  ");
+      $("hand-detail").innerHTML = colorizeLog(data.log_text || "");
+    }
+
     async function refresh() {
       try {
         const status = await api("/api/status");
@@ -681,8 +1032,38 @@ INDEX_HTML = r"""<!doctype html>
       }
     });
     $("refresh-btn").addEventListener("click", refresh);
+    $("hands-refresh-btn").addEventListener("click", () => {
+      handFilterOptionsReady = false;
+      refreshHands().catch((err) => setNotice(err.message));
+    });
+    ["hand-position", "hand-vpip", "hand-result", "hand-bb"].forEach((id) => {
+      $(id).addEventListener("change", () => {
+        selectedHandId = null;
+        refreshHands().catch((err) => setNotice(err.message));
+      });
+    });
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        activeTab = btn.dataset.tab;
+        document.querySelectorAll(".tab-btn").forEach((item) => {
+          item.classList.toggle("active", item === btn);
+        });
+        document.querySelectorAll(".tab-panel").forEach((panel) => {
+          panel.classList.toggle("active", panel.id === `tab-${activeTab}`);
+        });
+        if (activeTab === "hands") {
+          refreshHands().catch((err) => setNotice(err.message));
+        }
+      });
+    });
     refresh();
+    refreshHands().catch(() => {});
     setInterval(refresh, 1000);
+    setInterval(() => {
+      if (activeTab === "hands") {
+        refreshHands().catch((err) => setNotice(err.message));
+      }
+    }, 4000);
   </script>
 </body>
 </html>
