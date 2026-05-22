@@ -28,6 +28,7 @@ _EXPERIMENT_FLAG_DEFAULTS = {
     "PF_BUCKET_ML_50K": "off",
     "PF_BUCKET_ML_DEFAULT": "off",
     "PF_BUCKET_ML_TAG": "20260522_riskblend",
+    "PF_POSTFLOP_PROFIT_EXPAND_V1": "0",
 }
 
 

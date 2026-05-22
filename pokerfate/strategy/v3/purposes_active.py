@@ -108,6 +108,12 @@ _BLUFF_CONTEXT_DELAYED_MIN = 0.55
 _BLUFF_CONTEXT_PROBE_FLOAT_MIN = 0.50
 _BLUFF_CONTEXT_BARREL_MIN = 0.58
 _BLUFF_CONTEXT_RIVER_MIN = 0.48
+_PROFIT_EXPAND_V1 = _os.environ.get('PF_POSTFLOP_PROFIT_EXPAND_V1', '0') == '1'
+_PE_FLOP_MAX_NUTS = float(_os.environ.get('PF_PE_FLOP_MAX_NUTS', '0.22'))
+_PE_FLOP_MAX_STRONG_NUTS = float(_os.environ.get('PF_PE_FLOP_MAX_STRONG_NUTS', '0.55'))
+_PE_TURN_MAX_NUTS = float(_os.environ.get('PF_PE_TURN_MAX_NUTS', '0.18'))
+_PE_TURN_MAX_STRONG_NUTS = float(_os.environ.get('PF_PE_TURN_MAX_STRONG_NUTS', '0.52'))
+_PE_PAID_VALUE_MAX_NUTS = float(_os.environ.get('PF_PE_PAID_VALUE_MAX_NUTS', '0.26'))
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +392,82 @@ def _realizable_no_fe_draw(ctx: DecisionCtx) -> bool:
         and ctx.num_opponents == 1
         and ctx.equity_range >= 0.38
     )
+
+
+def _profit_expand_board_ok(ctx: DecisionCtx) -> bool:
+    if not _PROFIT_EXPAND_V1:
+        return False
+    if ctx.board_sig.monotone:
+        return False
+    if ctx.board_sig.wetness >= 0.65:
+        return False
+    if _villain_nuts(ctx) > _PE_FLOP_MAX_NUTS:
+        return False
+    if _bucket_mass(ctx, 'strong', 'nuts') > _PE_FLOP_MAX_STRONG_NUTS:
+        return False
+    return (
+        ctx.board_sig.is_dry
+        or ctx.board_sig.high_card_rank >= 11
+        or ctx.is_ip
+        or _bucket_mass(ctx, 'air', 'weak_draw') >= 0.35
+    )
+
+
+def _profit_expand_capped_turn(ctx: DecisionCtx) -> bool:
+    if not _PROFIT_EXPAND_V1:
+        return False
+    if _villain_nuts(ctx) > _PE_TURN_MAX_NUTS:
+        return False
+    if _bucket_mass(ctx, 'strong', 'nuts') > _PE_TURN_MAX_STRONG_NUTS:
+        return False
+    if ctx.board_sig.monotone and ctx.hero_bucket in ('air', 'weak_draw'):
+        return False
+    return True
+
+
+def _profit_expand_paid_value_ok(ctx: DecisionCtx) -> bool:
+    if not _PROFIT_EXPAND_V1:
+        return False
+    if ctx.facing_bet or ctx.street not in ('turn', 'river'):
+        return False
+    if ctx.prev_bet_called_count <= 0 or ctx.prev_bet_raised:
+        return False
+    if ctx.hero_bucket not in ('medium', 'strong', 'nuts'):
+        return False
+    if _fragile_underpair_after_resistance(ctx):
+        return False
+    if ctx.hero_bucket == 'medium' and not _safe_medium_protection_hand(ctx):
+        return False
+    nuts = _villain_nuts(ctx)
+    if ctx.hero_bucket != 'nuts' and nuts > _PE_PAID_VALUE_MAX_NUTS:
+        return False
+
+    hero_wins, _ties, villain_wins, rel_eq = _relative_hero_wins(ctx)
+    if ctx.villain_vs_hero_dist:
+        if _dangerous_non_nut_value_spot(ctx):
+            return (
+                hero_wins >= 0.62
+                and rel_eq >= 0.66
+                and villain_wins <= 0.28
+            )
+        return (
+            hero_wins >= 0.52
+            and rel_eq >= 0.56
+            and villain_wins <= 0.40
+        )
+
+    if _dangerous_non_nut_value_spot(ctx):
+        return (
+            ctx.hero_bucket in ('strong', 'nuts')
+            and ctx.equity_range >= 0.68
+            and nuts <= 0.18
+        )
+    if ctx.hero_bucket == 'medium':
+        return (
+            ctx.equity_range >= 0.52
+            and (_paying_bucket_mass(ctx) >= 0.30 or _draw_pressure_mass(ctx) >= 0.12)
+        )
+    return ctx.equity_range >= 0.55
 
 
 def _no_fe_value_pressure(ctx: DecisionCtx) -> bool:
@@ -1611,12 +1693,188 @@ class DefaultStab(Purpose):
 
 
 # ---------------------------------------------------------------------------
+# 20. profit expansion v1 (default-off)
+# ---------------------------------------------------------------------------
+
+
+class ProfitFlopCbet(Purpose):
+    """Default-off PFR small c-bet expansion.
+
+    Scope: heads-up / 3-way PFR pots where the board is not highly connected
+    or monotone and villain's range is not already strong-heavy.  This is a
+    range-realization bet, not a value jam path.
+    """
+
+    id = 'profit_flop_cbet'
+    street_gate = ('flop',)
+
+    def trigger(self, ctx: DecisionCtx) -> TriggerResult:
+        if not _PROFIT_EXPAND_V1:
+            return TriggerResult(False)
+        if ctx.facing_bet or not ctx.is_pfr:
+            return TriggerResult(False)
+        if ctx.num_opponents > 2 or ctx.spr < 3.0:
+            return TriggerResult(False)
+        if not _profit_expand_board_ok(ctx):
+            return TriggerResult(False)
+
+        blf = bluff_context.evaluate(ctx)
+        if ctx.hero_bucket in ('air', 'weak_draw'):
+            if no_fold_equity(ctx):
+                return TriggerResult(False)
+            if ctx.equity_range < 0.16:
+                return TriggerResult(False)
+            if not (
+                blf.score >= 0.42
+                or ctx.board_sig.is_dry
+                or ctx.board_sig.high_card_rank >= 12
+            ):
+                return TriggerResult(False)
+            return TriggerResult(True, 0.55 + 0.25 * blf.score)
+
+        if ctx.hero_bucket == 'draw':
+            if no_fold_equity(ctx) and not _realizable_no_fe_draw(ctx):
+                return TriggerResult(False)
+            if ctx.equity_range < 0.22:
+                return TriggerResult(False)
+            return TriggerResult(True, 0.70 + 0.20 * blf.score)
+
+        if ctx.hero_bucket == 'medium':
+            if ctx.equity_range < 0.35 and not _safe_medium_protection_hand(ctx):
+                return TriggerResult(False)
+            return TriggerResult(True, 0.75 + _no_fe_value_weight_add(ctx))
+
+        return TriggerResult(False)
+
+    def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
+        if ctx.hero_bucket in ('air', 'weak_draw'):
+            if ctx.board_sig.is_dry:
+                return [(0.25, 0.35), (0.33, 0.50), (0.40, 0.15)]
+            return [(0.33, 0.55), (0.40, 0.45)]
+        if ctx.hero_bucket == 'draw':
+            return [(0.40, 0.45), (0.50, 0.55)]
+        return [(0.40, 0.35), (0.50, 0.45), (0.60, 0.20)]
+
+    def alpha_target(self, ctx: DecisionCtx, frac: float) -> Optional[float]:
+        return None
+
+
+class ProfitDelayedProbe(Purpose):
+    """Default-off turn stab after flop checks through.
+
+    Covers both PFR delayed c-bet and OOP probe after the aggressor checked
+    back, but only against capped ranges and only with either fold equity,
+    blockers/draw equity, or real showdown/value.
+    """
+
+    id = 'profit_delayed_probe'
+    street_gate = ('turn',)
+
+    def trigger(self, ctx: DecisionCtx) -> TriggerResult:
+        if not _PROFIT_EXPAND_V1:
+            return TriggerResult(False)
+        if ctx.facing_bet or not ctx.flop_checked_through:
+            return TriggerResult(False)
+        delayed_path = ctx.is_pfr
+        probe_path = (not ctx.is_pfr and not ctx.is_ip)
+        if not (delayed_path or probe_path):
+            return TriggerResult(False)
+        if ctx.num_opponents > 2 or ctx.spr < 2.5:
+            return TriggerResult(False)
+        if not _profit_expand_capped_turn(ctx):
+            return TriggerResult(False)
+
+        blf = bluff_context.evaluate(ctx)
+        if ctx.hero_bucket in ('air', 'weak_draw'):
+            if no_fold_equity(ctx):
+                return TriggerResult(False)
+            if ctx.equity_range < 0.16 or blf.score < 0.55:
+                return TriggerResult(False)
+            if not (ctx.blockers.count() > 0 or ctx.draw.overcards or ctx.draw.gutshot):
+                return TriggerResult(False)
+            return TriggerResult(True, 0.52 + 0.38 * blf.score)
+
+        if ctx.hero_bucket == 'draw':
+            if no_fold_equity(ctx) and not _realizable_no_fe_draw(ctx):
+                return TriggerResult(False)
+            if ctx.equity_range < 0.28:
+                return TriggerResult(False)
+            return TriggerResult(True, 0.62 + 0.25 * blf.score)
+
+        if ctx.hero_bucket == 'medium':
+            if ctx.equity_range < 0.38 and not _safe_medium_protection_hand(ctx):
+                return TriggerResult(False)
+            return TriggerResult(True, 0.68 + _no_fe_value_weight_add(ctx))
+
+        if ctx.hero_bucket in ('strong', 'nuts'):
+            return TriggerResult(True, 0.78 + _no_fe_value_weight_add(ctx))
+
+        return TriggerResult(False)
+
+    def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
+        if ctx.hero_bucket in ('air', 'weak_draw'):
+            return [(0.33, 0.45), (0.45, 0.40), (0.55, 0.15)]
+        if ctx.hero_bucket == 'draw':
+            return [(0.45, 0.40), (0.55, 0.45), (0.66, 0.15)]
+        if ctx.hero_bucket in ('strong', 'nuts'):
+            if _no_fe_value_pressure(ctx) or _sticky_value_target(ctx):
+                return [(0.66, 0.45), (0.80, 0.55)]
+            return [(0.55, 0.45), (0.66, 0.55)]
+        return [(0.45, 0.45), (0.55, 0.40), (0.66, 0.15)]
+
+    def alpha_target(self, ctx: DecisionCtx, frac: float) -> Optional[float]:
+        return None
+
+
+class ProfitPaidValueContinue(Purpose):
+    """Default-off multi-street value continuation after a prior call.
+
+    This purpose does not reduce losing hands.  It only adds a high-priority
+    value candidate when villain has already paid a bet and hero still has a
+    value edge under bucket/relative-strength checks.
+    """
+
+    id = 'profit_paid_value_continue'
+    street_gate = ('turn', 'river')
+
+    def trigger(self, ctx: DecisionCtx) -> TriggerResult:
+        if not _profit_expand_paid_value_ok(ctx):
+            return TriggerResult(False)
+        base = 1.10
+        if ctx.hero_bucket == 'nuts':
+            base += 0.35
+        elif ctx.hero_bucket == 'strong':
+            base += 0.20
+        if _sticky_value_target(ctx):
+            base += 0.20
+        if ctx.prev_bet_called_count >= 2:
+            base += 0.15
+        return TriggerResult(True, min(1.80, base))
+
+    def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
+        sticky = _sticky_value_target(ctx) or ctx.n_sticky >= 1
+        if ctx.street == 'river':
+            if ctx.hero_bucket == 'nuts' and sticky:
+                return [(0.75, 0.35), (0.90, 0.45), (1.00, 0.20)]
+            if sticky:
+                return [(0.66, 0.35), (0.75, 0.45), (0.90, 0.20)]
+            return [(0.55, 0.35), (0.66, 0.45), (0.75, 0.20)]
+        if sticky:
+            return [(0.66, 0.35), (0.75, 0.45), (0.85, 0.20)]
+        return [(0.55, 0.35), (0.66, 0.45), (0.75, 0.20)]
+
+    def alpha_target(self, ctx: DecisionCtx, frac: float) -> Optional[float]:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # All active purposes
 # ---------------------------------------------------------------------------
 
 
 def all_active() -> list:
     return [
+        ProfitFlopCbet(), ProfitDelayedProbe(), ProfitPaidValueContinue(),
         RangeCbet(), PolarizedCbet(), ProtectionBet(),
         ThinValueBet(),
         MonsterValuePlan(), ThickValueBet(), BlockBet(),

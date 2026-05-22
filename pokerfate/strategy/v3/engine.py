@@ -166,8 +166,11 @@ _ACTIVE_VALUE_PURPOSES = {
     'delayed_cbet',
     'double_barrel',
     'default_stab',
+    'profit_paid_value_continue',
+    'profit_delayed_probe',
+    'profit_flop_cbet',
 }
-_ACTIVE_CBET_PURPOSES = {'range_cbet', 'polarized_cbet'}
+_ACTIVE_CBET_PURPOSES = {'range_cbet', 'polarized_cbet', 'profit_flop_cbet'}
 def _parse_frac_list(raw: str) -> Tuple[float, ...]:
     values: List[float] = []
     for part in raw.split(','):

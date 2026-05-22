@@ -449,6 +449,7 @@ def _bluff_context_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
         'semi_bluff', 'pure_bluff_river', 'delayed_cbet', 'probe_bet',
         'float_bet', 'double_barrel', 'triple_barrel', 'stop_and_go',
         'default_stab', 'semi_bluff_raise',
+        'profit_flop_cbet', 'profit_delayed_probe',
     }
     selected = out.purpose.split("→", 1)[0] if out.purpose else ''
     if selected not in watched and not (ids & watched):

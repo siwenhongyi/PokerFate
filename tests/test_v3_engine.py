@@ -6,6 +6,8 @@ selection, defense branch. For integration tests see test_bot.py.
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
 
 from pokerfate.core.card import Card
@@ -884,6 +886,66 @@ class TestPurposeTriggers:
         ctx = self._base_ctx()
         r = p.trigger(ctx)
         assert r.hit
+
+    def test_profit_expand_purposes_default_off(self):
+        from pokerfate.strategy.v3 import purposes_active as active
+
+        ctx = self._base_ctx(
+            hero_bucket='air',
+            equity_range=0.20,
+            villain_bucket_dist={'air': 0.50, 'weak_draw': 0.20, 'medium': 0.20, 'strong': 0.08, 'nuts': 0.02},
+            villain_stats=VillainStats(fold_to_cbet=0.60, fold_to_cbet_opps=10),
+        )
+
+        assert not active.ProfitFlopCbet().trigger(ctx).hit
+        assert not active.ProfitDelayedProbe().trigger(ctx).hit
+        assert not active.ProfitPaidValueContinue().trigger(ctx).hit
+
+    def test_profit_expand_purposes_trigger_when_enabled(self, monkeypatch):
+        monkeypatch.setenv('PF_POSTFLOP_PROFIT_EXPAND_V1', '1')
+        from pokerfate.strategy.v3 import purposes_active as active
+
+        active = importlib.reload(active)
+        try:
+            villain_dist = {'air': 0.45, 'weak_draw': 0.25, 'medium': 0.20, 'strong': 0.08, 'nuts': 0.02}
+            loose_folder = VillainStats(fold_to_cbet=0.62, fold_to_cbet_opps=10)
+            flop_ctx = self._base_ctx(
+                hero_bucket='air',
+                equity_range=0.20,
+                villain_bucket_dist=villain_dist,
+                villain_stats=loose_folder,
+            )
+            assert active.ProfitFlopCbet().trigger(flop_ctx).hit
+
+            turn_board = cards('Ac', '7d', '2s', 'Jc')
+            turn_ctx = self._base_ctx(
+                street='turn',
+                board=turn_board,
+                board_sig=v3_board.analyze(turn_board),
+                hero_bucket='draw',
+                equity_range=0.34,
+                draw=DrawProfile(flush_draw=True, overcards=True),
+                blockers=BlockerSet(nut_flush_blocker=True),
+                flop_checked_through=True,
+                villain_bucket_dist=villain_dist,
+                villain_stats=loose_folder,
+            )
+            assert active.ProfitDelayedProbe().trigger(turn_ctx).hit
+
+            paid_value_ctx = self._base_ctx(
+                street='turn',
+                board=turn_board,
+                board_sig=v3_board.analyze(turn_board),
+                hero_bucket='strong',
+                equity_range=0.72,
+                prev_bet_called_count=1,
+                villain_bucket_dist={'air': 0.10, 'weak_draw': 0.20, 'draw': 0.15, 'medium': 0.35, 'strong': 0.15, 'nuts': 0.05},
+                villain_vs_hero_dist={'win': 0.68, 'tie': 0.02, 'loss': 0.30},
+            )
+            assert active.ProfitPaidValueContinue().trigger(paid_value_ctx).hit
+        finally:
+            monkeypatch.delenv('PF_POSTFLOP_PROFIT_EXPAND_V1', raising=False)
+            importlib.reload(active)
 
     def test_medium_protection_bet_enabled_for_stable_medium_hands(self):
         from pokerfate.strategy.v3 import purposes_active as active

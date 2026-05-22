@@ -30,11 +30,15 @@ _VALUE_PROTECTION_PURPOSES = {
     'float_bet',
     'turn_donk',
     'double_barrel',
+    'profit_flop_cbet',
+    'profit_delayed_probe',
+    'profit_paid_value_continue',
 }
 _SMART_VALUE_PURPOSES = {
     'thick_value_bet',
     'monster_value_plan',
     'overbet_value',
+    'profit_paid_value_continue',
 }
 
 
