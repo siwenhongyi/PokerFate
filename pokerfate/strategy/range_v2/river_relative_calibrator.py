@@ -120,6 +120,92 @@ def _shift_relation_eq(dist: Dict[str, float], target_eq: float) -> Dict[str, fl
     }
 
 
+def exact_relation_bounds(
+    hero_cards: Iterable[Card] | None,
+    board: Iterable[Card] | None,
+) -> Dict[str, bool]:
+    """Return which river outcomes are mathematically possible vs any hand.
+
+    This is independent of villain range weights.  A calibration layer may
+    learn biases in estimated ranges, but it must not create impossible poker
+    outcomes, e.g. lowering a royal flush or nut-lock hand below 100%.
+    """
+    hero = list(hero_cards or [])
+    board_l = list(board or [])
+    if len(hero) < 2 or len(board_l) < 5:
+        return {}
+
+    from pokerfate.core.hand_evaluator import HandEvaluator
+    from pokerfate.strategy.range_v2 import hand_combo_map as hcm
+
+    known = {hcm.card_to_int(c) for c in hero + board_l}
+    hero_score = HandEvaluator.eval_int(hero + board_l)
+    possible = {'win': False, 'tie': False, 'loss': False}
+    for c1, c2 in hcm.ALL_COMBOS:
+        if c1 in known or c2 in known:
+            continue
+        opp = [hcm.int_to_card(c1), hcm.int_to_card(c2)]
+        opp_score = HandEvaluator.eval_int(opp + board_l)
+        if hero_score > opp_score:
+            possible['win'] = True
+        elif hero_score == opp_score:
+            possible['tie'] = True
+        else:
+            possible['loss'] = True
+        if possible['win'] and possible['tie'] and possible['loss']:
+            break
+    return possible
+
+
+def clamp_relation_to_bounds(
+    dist: Dict[str, float] | None,
+    bounds: Dict[str, bool] | None,
+) -> Dict[str, float]:
+    """Remove impossible win/tie/loss mass and renormalize."""
+    rel = normalize_relation(dist)
+    if not rel or not bounds:
+        return rel
+    for key in ('win', 'tie', 'loss'):
+        if bounds.get(key) is False:
+            rel[key] = 0.0
+    total = sum(rel.values())
+    if total > 1e-12:
+        return {k: v / total for k, v in rel.items()}
+
+    possible = [k for k in ('win', 'tie', 'loss') if bounds.get(k)]
+    if len(possible) == 1:
+        return {
+            'win': 1.0 if possible[0] == 'win' else 0.0,
+            'tie': 1.0 if possible[0] == 'tie' else 0.0,
+            'loss': 1.0 if possible[0] == 'loss' else 0.0,
+        }
+    return rel
+
+
+def clamp_equity_to_bounds(
+    equity: float,
+    bounds: Dict[str, bool] | None,
+) -> float:
+    """Clamp scalar river equity to mathematical outcome bounds."""
+    eq = _clamp01(equity)
+    if not bounds:
+        return eq
+    win = bool(bounds.get('win'))
+    tie = bool(bounds.get('tie'))
+    loss = bool(bounds.get('loss'))
+    if win and not tie and not loss:
+        return 1.0
+    if loss and not win and not tie:
+        return 0.0
+    if tie and not win and not loss:
+        return 0.5
+    if not loss:
+        eq = max(eq, 0.5 if tie else 1.0)
+    if not win:
+        eq = min(eq, 0.5 if tie else 0.0)
+    return _clamp01(eq)
+
+
 class RiverRelativeCalibrator:
     """Online bias calibrator for river relative showdown equity."""
 
@@ -158,13 +244,29 @@ class RiverRelativeCalibrator:
         hero_made_subtype: str,
         board_texture: str,
         action_ctx: str,
+        exact_bounds: Dict[str, bool] | None = None,
     ) -> Dict[str, float]:
-        rel = normalize_relation(dist)
+        rel = clamp_relation_to_bounds(dist, exact_bounds)
         if not rel:
             self.last_diagnostic = {}
             return {}
 
         raw_eq = relation_eq(rel)
+        if exact_bounds:
+            hard_eq = clamp_equity_to_bounds(raw_eq, exact_bounds)
+            if abs(hard_eq - raw_eq) > 1e-9 or (
+                sum(1 for k in ('win', 'tie', 'loss') if exact_bounds.get(k)) == 1
+            ):
+                rel = clamp_relation_to_bounds(rel, exact_bounds)
+                self.last_diagnostic = {
+                    'used': False,
+                    'raw_eq': round(raw_eq, 4),
+                    'cal_eq': round(relation_eq(rel), 4),
+                    'action_ctx': action_ctx,
+                    'hard_bound': True,
+                }
+                return rel
+
         key, n, bias = self._best_bias(
             hero_bucket=hero_bucket,
             hero_made_subtype=hero_made_subtype,
@@ -182,8 +284,8 @@ class RiverRelativeCalibrator:
         shift = max(-_MAX_SHIFT, min(_MAX_SHIFT, bias))
         if _SHRINK_K > 0:
             shift *= n / (n + _SHRINK_K)
-        target = _clamp01(raw_eq + shift)
-        out = _shift_relation_eq(rel, target)
+        target = clamp_equity_to_bounds(_clamp01(raw_eq + shift), exact_bounds)
+        out = clamp_relation_to_bounds(_shift_relation_eq(rel, target), exact_bounds)
         self.last_diagnostic = {
             'used': True,
             'key': key,

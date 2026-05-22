@@ -59,7 +59,7 @@ def reg_stats(**over) -> VillainStats:
     return VillainStats(**base)
 
 
-def test_strong_commit_spot_keeps_value_jam_as_top_purpose() -> None:
+def test_strong_commit_spot_keeps_thick_value_as_top_purpose() -> None:
     board = cards('Ac', '7d', '2s')
     ctx = DecisionCtx(
         street='flop',
@@ -84,7 +84,7 @@ def test_strong_commit_spot_keeps_value_jam_as_top_purpose() -> None:
     out = V3Engine().decide(ctx)
     purpose, prob = top_candidate(out)
 
-    assert purpose == 'value_jam'
+    assert purpose == 'thick_value_bet'
     assert prob >= 0.60
     assert candidate_prob(out, 'default_check') == 0.0
     assert out.arbitration_mode == 'deterministic'

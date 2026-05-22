@@ -11,15 +11,35 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import time
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from pokerfate.calibration.showdown_calibration import CalibrationResult
 
+_SCHEMA = "runtime_range_calibration_v2"
+_RIVER_VALUE_SIZING_SCHEMA = "runtime_river_value_sizing_v1"
+_EXPERIMENT_FLAG_DEFAULTS = {
+    "PF_TURN_FLOP_RELATIVE_GUARD": "1",
+    "PF_RUNTIME_RANGE_CALIBRATION": "0",
+    "PF_BUCKET_CALIBRATION": "1",
+}
+
 
 def _cards_str(cards: Iterable[Any] | None) -> list[str]:
     return [str(c) for c in (cards or [])]
+
+
+def _json_safe(value: Any) -> Any:
+    """Return a value that can be safely appended to JSONL."""
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
 
 
 def _bb_key(big_blind: float) -> str:
@@ -35,6 +55,53 @@ def _bb_key(big_blind: float) -> str:
 
 def _default_root() -> Path:
     return Path(__file__).resolve().parents[2] / "data" / "runtime_calibration"
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _git_output(args: list[str]) -> str:
+    try:
+        out = subprocess.check_output(
+            ["git", "-C", str(_repo_root()), *args],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2.0,
+        )
+    except Exception:
+        return ""
+    return out.strip()
+
+
+def _git_meta() -> dict[str, Any]:
+    commit = _git_output(["rev-parse", "--short=12", "HEAD"]) or "unknown"
+    status = _git_output(["status", "--porcelain"])
+    diff = _git_output(["diff", "--no-ext-diff", "--no-color"])
+    dirty = bool(status)
+    diff_hash = hashlib.sha1(diff.encode("utf-8")).hexdigest()[:10] if diff else ""
+    strategy_version = commit
+    if dirty:
+        strategy_version += f"+dirty.{diff_hash or 'status'}"
+    return {
+        "git_commit": commit,
+        "git_dirty": dirty,
+        "git_diff_hash": diff_hash,
+        "strategy_version": os.environ.get("PF_STRATEGY_VERSION", strategy_version),
+    }
+
+
+def _experiment_flags() -> dict[str, str]:
+    flags = {
+        key: str(os.environ.get(key, default))
+        for key, default in _EXPERIMENT_FLAG_DEFAULTS.items()
+    }
+    # Keep explicitly supplied PF_* overrides visible without turning the row
+    # into a dump of unrelated process environment.
+    for key, value in os.environ.items():
+        if key.startswith("PF_") and key not in flags:
+            flags[key] = str(value)
+    return dict(sorted(flags.items()))
 
 
 class RuntimeCalibrationRecorder:
@@ -54,6 +121,10 @@ class RuntimeCalibrationRecorder:
         self.root = Path(root) if root is not None else _default_root()
         self.session_id = session_id or f"{int(time.time())}-{os.getpid()}"
         self.val_ratio = min(max(float(val_ratio), 0.0), 0.9)
+        git_meta = _git_meta()
+        self.strategy_version = str(git_meta["strategy_version"])
+        self.experiment_flags = _experiment_flags()
+        self.git_meta = git_meta
 
     def write_results(
         self,
@@ -85,6 +156,46 @@ class RuntimeCalibrationRecorder:
                     f.write("\n")
         return count
 
+    def write_river_value_sizing(
+        self,
+        row: dict[str, Any],
+        *,
+        big_blind: float,
+        hand_id: int,
+        source: str = "runtime",
+    ) -> int:
+        """Append one river value sizing training row.
+
+        This is intentionally separate from range/bucket calibration rows:
+        those rows learn "what did villain have", while this row learns
+        "when hero used this value size, did worse hands pay or did the bet
+        only fold out worse / get raised by better".
+        """
+        split = self._split_for_hand(hand_id, big_blind)
+        bb_bucket = _bb_key(big_blind)
+        out = {
+            "schema": _RIVER_VALUE_SIZING_SCHEMA,
+            "source": source,
+            "session_id": self.session_id,
+            "recorded_at": int(time.time()),
+            "strategy_version": self.strategy_version,
+            "experiment_flags": dict(self.experiment_flags),
+            "git_commit": self.git_meta.get("git_commit", "unknown"),
+            "git_dirty": bool(self.git_meta.get("git_dirty", False)),
+            "git_diff_hash": self.git_meta.get("git_diff_hash", ""),
+            "split": split,
+            "bb": float(big_blind or 0.0),
+            "bb_bucket": bb_bucket,
+            "hand": int(hand_id),
+        }
+        out.update(_json_safe(row))
+        path = self.root / bb_bucket / f"river_value_sizing.{split}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(out, ensure_ascii=False, sort_keys=True))
+            f.write("\n")
+        return 1
+
     def _split_for_hand(self, hand_id: int, big_blind: float) -> str:
         key = f"{self.session_id}|{_bb_key(big_blind)}|{int(hand_id)}"
         digest = hashlib.sha1(key.encode("utf-8")).hexdigest()
@@ -102,10 +213,16 @@ class RuntimeCalibrationRecorder:
         rec = result.record
         split = self._split_for_hand(rec.hand_id, big_blind)
         return {
-            "schema": "runtime_range_calibration_v1",
+            "schema": _SCHEMA,
             "source": source,
             "session_id": self.session_id,
             "recorded_at": int(time.time()),
+            "strategy_version": self.strategy_version,
+            "experiment_flags": dict(self.experiment_flags),
+            "calibration_enabled": True,
+            "git_commit": self.git_meta.get("git_commit", "unknown"),
+            "git_dirty": bool(self.git_meta.get("git_dirty", False)),
+            "git_diff_hash": self.git_meta.get("git_diff_hash", ""),
             "split": split,
             "bb": float(big_blind or 0.0),
             "bb_bucket": _bb_key(big_blind),

@@ -15,11 +15,13 @@ import struct
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from pokerfate.strategy.v3 import alpha_gate, calibrator, early_relative, exploit
+from pokerfate.strategy.v3 import (
+    alpha_gate, calibrator, early_relative, exploit, river_value_sizing,
+)
 from pokerfate.strategy.v3.context import DecisionCtx
 from pokerfate.strategy.v3.purpose import Purpose, PurposeRegistry, TriggerResult
 from pokerfate.strategy.v3.purposes_active import all_active, monster_value_plan_kind
-from pokerfate.strategy.v3.purposes_defensive import all_defensive
+from pokerfate.strategy.v3.purposes_defensive import all_defensive, passive_value_bet_dominates
 from pokerfate.strategy.v3.purposes_passive import all_passive
 from pokerfate.strategy.v3.stackoff_guard import stackoff_guard_reason
 
@@ -117,6 +119,29 @@ _STACKOFF_GUARD_ACTIVE_FALLBACK_MAX_COMMIT = float(
 _LEVERAGE_TOP_GAP = float(os.environ.get('PF_LEVERAGE_TOP_GAP', '0.18'))
 _LEVERAGE_MIN_TOP = float(os.environ.get('PF_LEVERAGE_MIN_TOP', '0.48'))
 _LEVERAGE_DETERMINISTIC = os.environ.get('PF_LEVERAGE_DETERMINISTIC', '1') != '0'
+_ACTIVE_VALUE_DETERMINISTIC_MIN_TOP = float(
+    os.environ.get('PF_ACTIVE_VALUE_DETERMINISTIC_MIN_TOP', '0.50')
+)
+_ACTIVE_CBET_DETERMINISTIC_MIN_TOP = float(
+    os.environ.get('PF_ACTIVE_CBET_DETERMINISTIC_MIN_TOP', '0.65')
+)
+_ALLIN_WEAK_DRAW_MARGIN = float(os.environ.get('PF_ALLIN_WEAK_DRAW_MARGIN', '0.06'))
+_ALLIN_DIRTY_FLUSH_DRAW_MARGIN = float(
+    os.environ.get('PF_ALLIN_DIRTY_FLUSH_DRAW_MARGIN', '0.12')
+)
+_ALLIN_AIR_MARGIN = float(os.environ.get('PF_ALLIN_AIR_MARGIN', '0.10'))
+_ALLIN_FRAGILE_MADE_MARGIN = float(os.environ.get('PF_ALLIN_FRAGILE_MADE_MARGIN', '0.06'))
+_ALLIN_PASSIVE_PRESSURE_MARGIN = float(
+    os.environ.get('PF_ALLIN_PASSIVE_PRESSURE_MARGIN', '0.04')
+)
+_ALLIN_MULTIWAY_MARGIN = float(os.environ.get('PF_ALLIN_MULTIWAY_MARGIN', '0.03'))
+_ALLIN_MODEL_GAP_MARGIN = float(os.environ.get('PF_ALLIN_MODEL_GAP_MARGIN', '0.03'))
+_ALLIN_NUTS_MARGIN_SCALE = float(os.environ.get('PF_ALLIN_NUTS_MARGIN_SCALE', '0.12'))
+_ALLIN_NUTS_MARGIN_CAP = float(os.environ.get('PF_ALLIN_NUTS_MARGIN_CAP', '0.06'))
+_ALLIN_STRONG_MARGIN_SCALE = float(os.environ.get('PF_ALLIN_STRONG_MARGIN_SCALE', '0.10'))
+_ALLIN_STRONG_MARGIN_CAP = float(os.environ.get('PF_ALLIN_STRONG_MARGIN_CAP', '0.04'))
+_ALLIN_CONSERVATIVE_RISK_MIN = float(os.environ.get('PF_ALLIN_CONSERVATIVE_RISK_MIN', '0.06'))
+_ALLIN_DIRTY_FLUSH_MAX_RANK = int(float(os.environ.get('PF_ALLIN_DIRTY_FLUSH_MAX_RANK', '9')))
 
 _FRAGILE_FOLD_OVERRIDE_SUBTYPES = {
     'pocket_pair',
@@ -128,8 +153,21 @@ _FRAGILE_FOLD_OVERRIDE_SUBTYPES = {
     'trips_weak_kicker',
     'board_trips_kicker',
 }
-
-
+_ACTIVE_VALUE_PURPOSES = {
+    'protection_bet',
+    'thin_value_bet',
+    'monster_value_plan',
+    'thick_value_bet',
+    'overbet_value',
+    'value_jam',
+    'probe_bet',
+    'float_bet',
+    'turn_donk',
+    'delayed_cbet',
+    'double_barrel',
+    'default_stab',
+}
+_ACTIVE_CBET_PURPOSES = {'range_cbet', 'polarized_cbet'}
 def _parse_frac_list(raw: str) -> Tuple[float, ...]:
     values: List[float] = []
     for part in raw.split(','):
@@ -160,7 +198,7 @@ class DecisionOutput:
     candidates: List[Tuple[str, float]] = field(default_factory=list)  # (id, prob)
     alpha: Optional[alpha_gate.AlphaCheckResult] = None
     exploit_deltas: Dict[str, float] = field(default_factory=dict)
-    jammed: bool = False                       # jam round-up fired in calibrator
+    jammed: bool = False                       # final amount naturally consumes stack
     downgraded_to_check: bool = False          # bet purpose selected but α-gate → check
     reason: str = ''
     arbitration_mode: str = 'mixed'
@@ -234,7 +272,7 @@ class V3Engine:
         pool: List[Purpose],
         ctx: DecisionCtx,
     ) -> Tuple[List[Tuple[Purpose, float]], Dict[str, float]]:
-        """Run triggers. Returns (candidates, exploit_deltas_by_id)."""
+        """Run triggers. Returns candidates plus exploit multipliers."""
         out: List[Tuple[Purpose, float]] = []
         deltas: Dict[str, float] = {}
         for p in pool:
@@ -274,6 +312,124 @@ class V3Engine:
         if ctx.equity_mc - ctx.equity_range < _MC_RANGE_DIVERGENCE_MIN:
             return penalty
         return penalty + _MC_RANGE_DIVERGENCE_EXTRA_PENALTY
+
+    def _hero_flush_draw_rank(self, ctx: DecisionCtx) -> int:
+        """Highest hero card in the board's live flush suit, 0 if unknown."""
+        if not ctx.draw.flush_draw or not ctx.hole_cards or not ctx.board:
+            return 0
+        counts: Dict[int, int] = {}
+        for card in ctx.board:
+            suit = int(card.suit)
+            counts[suit] = counts.get(suit, 0) + 1
+        if not counts:
+            return 0
+        draw_suits = {suit for suit, count in counts.items() if count >= 2}
+        if not draw_suits:
+            draw_suits = {max(counts, key=counts.get)}
+        ranks = [
+            int(card.rank)
+            for card in ctx.hole_cards
+            if int(card.suit) in draw_suits
+        ]
+        return max(ranks, default=0)
+
+    def _all_in_risk_margin(self, ctx: DecisionCtx) -> Tuple[float, List[str]]:
+        """Extra edge required before committing the last chip.
+
+        The all-in branch is deterministic by design, but it must distinguish
+        clean equity from dirty equity.  Low flush draws on made-flush boards,
+        fragile made hands, and passive high-pressure lines need more than a
+        bare pot-odds edge.
+        """
+        margin = 0.0
+        flags: List[str] = []
+        bucket = ctx.hero_bucket or ''
+        subtype = ctx.hero_made_subtype or ''
+
+        if bucket in {'draw', 'weak_draw'}:
+            d = ctx.draw
+            if bucket == 'weak_draw':
+                margin += _ALLIN_WEAK_DRAW_MARGIN
+                flags.append('weak_draw')
+            elif not (d.flush_draw or d.oesd):
+                margin += _ALLIN_WEAK_DRAW_MARGIN * 0.7
+                flags.append('thin_draw')
+
+            flush_rank = self._hero_flush_draw_rank(ctx)
+            dirty_flush = (
+                d.flush_draw
+                and ctx.board_sig.flush_possible
+                and not ctx.blockers.nut_flush_blocker
+                and (flush_rank == 0 or flush_rank <= _ALLIN_DIRTY_FLUSH_MAX_RANK)
+            )
+            if dirty_flush:
+                margin += _ALLIN_DIRTY_FLUSH_DRAW_MARGIN
+                flags.append(f'dirty_flush_draw{flush_rank or ""}')
+            elif d.flush_draw and ctx.board_sig.monotone and not ctx.blockers.nut_flush_blocker:
+                margin += _ALLIN_WEAK_DRAW_MARGIN
+                flags.append('non_nut_flush_draw')
+        elif bucket == 'air':
+            margin += _ALLIN_AIR_MARGIN
+            flags.append('air')
+        elif subtype in _FRAGILE_FOLD_OVERRIDE_SUBTYPES:
+            margin += _ALLIN_FRAGILE_MADE_MARGIN
+            flags.append(f'fragile_{subtype}')
+
+        vs = ctx.worst_villain_stats if ctx.worst_villain_stats.hands_seen else ctx.villain_stats
+        passive_pressure = (
+            vs.hands_seen >= 10
+            and vs.af <= 1.2
+            and (vs.wtsd >= 0.30 or vs.fold_to_cbet <= 0.35)
+        )
+        if passive_pressure:
+            margin += _ALLIN_PASSIVE_PRESSURE_MARGIN
+            flags.append('passive_pressure')
+        if ctx.num_opponents > 1:
+            margin += _ALLIN_MULTIWAY_MARGIN
+            flags.append('multiway')
+
+        nuts = float((ctx.villain_bucket_dist or {}).get('nuts', 0.0) or 0.0)
+        strong = nuts + float((ctx.villain_bucket_dist or {}).get('strong', 0.0) or 0.0)
+        if nuts > 0.25:
+            margin += min(_ALLIN_NUTS_MARGIN_CAP, (nuts - 0.25) * _ALLIN_NUTS_MARGIN_SCALE)
+            flags.append(f'nuts{nuts:.2f}')
+        if strong > 0.55:
+            margin += min(_ALLIN_STRONG_MARGIN_CAP, (strong - 0.55) * _ALLIN_STRONG_MARGIN_SCALE)
+            flags.append(f'strong{strong:.2f}')
+
+        if abs(ctx.equity_mc - ctx.equity_range) >= _MC_RANGE_DIVERGENCE_MIN:
+            margin += _ALLIN_MODEL_GAP_MARGIN
+            flags.append('model_gap')
+
+        return margin, flags
+
+    def _all_in_blended_equity(
+        self,
+        ctx: DecisionCtx,
+        *,
+        mc_penalty: float,
+        risk_margin: float,
+    ) -> Tuple[float, str]:
+        range_eq = max(0.0, ctx.equity_range - (ctx.equity_uncertainty or 0.0))
+        mc_eq = max(0.0, ctx.equity_mc - mc_penalty)
+
+        if risk_margin >= _ALLIN_CONSERVATIVE_RISK_MIN or ctx.hero_bucket in {'draw', 'weak_draw', 'air'}:
+            if abs(range_eq - mc_eq) >= 0.10:
+                blended = min(range_eq, mc_eq)
+                mode = 'min'
+            else:
+                blended = 0.5 * (range_eq + mc_eq)
+                mode = 'avg'
+        else:
+            blended = max(range_eq, mc_eq)
+            mode = 'max'
+
+        rel = ctx.villain_vs_hero_dist or {}
+        if rel and (risk_margin > 0 or ctx.street == 'river'):
+            rel_eq = float(rel.get('win', 0.0) or 0.0) + 0.5 * float(rel.get('tie', 0.0) or 0.0)
+            blended = min(blended, rel_eq)
+            mode += f'/rel{rel_eq:.2f}'
+        return blended, mode
 
     def _leverage_flags(self, ctx: DecisionCtx) -> List[str]:
         flags: List[str] = []
@@ -337,6 +493,9 @@ class V3Engine:
                 fragile = False
 
         if fragile:
+            if passive_value_bet_dominates(ctx):
+                return False, 'fold-only guard: passive_value_bet_dominates'
+
             fragile_high_leverage = (
                 stack_commit >= _FOLD_OVERRIDE_FRAGILE_COMMIT_MIN
                 or ctx.pot_odds >= 0.25
@@ -508,6 +667,21 @@ class V3Engine:
         top_prob = top_w / total
         second_prob = second_w / total
         top_gap = top_prob - second_prob
+        if (
+            not ctx.facing_bet
+            and top_p.emits_bet
+            and ctx.hero_bucket in {'medium', 'strong', 'nuts'}
+        ):
+            if (
+                top_p.id in _ACTIVE_VALUE_PURPOSES
+                and top_prob >= _ACTIVE_VALUE_DETERMINISTIC_MIN_TOP
+            ):
+                return top_p, cand_probs, 'deterministic', top_gap, flags
+            if (
+                top_p.id in _ACTIVE_CBET_PURPOSES
+                and top_prob >= _ACTIVE_CBET_DETERMINISTIC_MIN_TOP
+            ):
+                return top_p, cand_probs, 'deterministic', top_gap, flags
         if (_LEVERAGE_DETERMINISTIC and flags
                 and top_prob >= _LEVERAGE_MIN_TOP
                 and top_gap >= _LEVERAGE_TOP_GAP):
@@ -520,7 +694,6 @@ class V3Engine:
 
     def decide(self, ctx: DecisionCtx) -> DecisionOutput:
         seed = self._fresh_seed(ctx)
-
         if ctx.facing_bet:
             return self._decide_defense(ctx, seed)
         return self._decide_active(ctx, seed)
@@ -529,7 +702,11 @@ class V3Engine:
     # Active branch (no facing bet)
     # ------------------------------------------------------------------
 
-    def _decide_active(self, ctx: DecisionCtx, seed: int) -> DecisionOutput:
+    def _decide_active(
+        self,
+        ctx: DecisionCtx,
+        seed: int,
+    ) -> DecisionOutput:
         active_pool = [p for p in self.registry.all()
                        if not p.facing_bet and p.default_action != 'fold']
         candidates, deltas = self._collect_candidates(active_pool, ctx)
@@ -547,8 +724,10 @@ class V3Engine:
         # Replace default_check entry from candidates (if present) with adaptive weight.
         candidates = [(p, w) for p, w in candidates if p.id != 'default_check']
         default_check = self.registry.by_id('default_check')
-        candidates.append((default_check, baseline))
+        if default_check is not None:
+            candidates.append((default_check, baseline))
 
+        cand_probs = self._candidate_probs(candidates)
         chosen, cand_probs, arb_mode, top_gap, flags = self._choose_purpose(candidates, ctx)
 
         if chosen is None or not chosen.emits_bet:
@@ -566,9 +745,20 @@ class V3Engine:
         # gate is intentionally narrow now: non-river / non-polar purposes are
         # no-op passes inside alpha_gate.check().
         frac = self._sample_size(chosen, ctx)
+        sizing_reason = ''
+        ev_size = river_value_sizing.choose(
+            ctx,
+            chosen.id,
+            frac,
+        )
+        if ev_size is not None:
+            frac = ev_size.frac
+            sizing_reason = ev_size.reason
+            flags = list(dict.fromkeys((flags or []) + ['value_ev_size']))
         return self._finalize_bet(
             ctx, chosen, frac, seed, cand_probs, deltas,
             arbitration_mode=arb_mode, top_gap=top_gap, leverage_flags=flags,
+            sizing_reason=sizing_reason,
         )
 
     def _finalize_bet(
@@ -579,13 +769,17 @@ class V3Engine:
         seed: int,
         cand_probs: List[Tuple[str, float]],
         deltas: Dict[str, float],
-        fallback_depth: int = 0,
         arbitration_mode: str = 'mixed',
         top_gap: float = 0.0,
         leverage_flags: Optional[List[str]] = None,
+        sizing_reason: str = '',
     ) -> DecisionOutput:
         leverage_flags = leverage_flags or []
-        cal = calibrator.calibrate(frac, ctx, purpose.id)
+        cal = calibrator.calibrate(
+            frac,
+            ctx,
+            purpose.id,
+        )
         if cal.amount <= 0:
             return DecisionOutput(action='check', amount=0.0,
                                    purpose=purpose.id, frac=0.0, seed=seed,
@@ -647,7 +841,8 @@ class V3Engine:
             top_gap=top_gap,
             leverage_flags=leverage_flags,
             reason=f"{purpose.id} frac={cal.frac:.2f}"
-                   + (" (jammed)" if cal.jammed else ""),
+                   + (" (jammed)" if cal.jammed else "")
+                   + (f"; {sizing_reason}" if sizing_reason else ""),
         )
 
     def _guarded_active_bet_fallback(
@@ -668,7 +863,7 @@ class V3Engine:
         if ctx.facing_bet:
             return None
 
-        guard_pid = 'thick_value_bet' if purpose.id == 'value_jam' else purpose.id
+        guard_pid = purpose.id
         raw_fracs = [f for f, _ in purpose.sizer(ctx)]
         raw_fracs.extend(_STACKOFF_GUARD_ACTIVE_FALLBACK_FRACS)
 
@@ -685,7 +880,13 @@ class V3Engine:
         candidates.sort(reverse=True)
 
         for frac in candidates:
-            cal = calibrator.calibrate(frac, ctx, guard_pid)
+            if frac <= 0:
+                continue
+            cal = calibrator.calibrate(
+                frac,
+                ctx,
+                guard_pid,
+            )
             if cal.amount <= 0 or cal.jammed:
                 continue
             if (
@@ -720,25 +921,33 @@ class V3Engine:
     # Defense branch (facing a bet)
     # ------------------------------------------------------------------
 
-    def _decide_defense(self, ctx: DecisionCtx, seed: int) -> DecisionOutput:
+    def _decide_defense(
+        self,
+        ctx: DecisionCtx,
+        seed: int,
+    ) -> DecisionOutput:
         # All-in first
         if ctx.to_call >= ctx.stack:
             mc_penalty = self._mc_range_divergence_penalty(ctx)
-            blended_eq = max(
-                ctx.equity_range - (ctx.equity_uncertainty or 0.0),
-                ctx.equity_mc - mc_penalty,
+            risk_add, risk_flags = self._all_in_risk_margin(ctx)
+            blended_eq, blend_mode = self._all_in_blended_equity(
+                ctx,
+                mc_penalty=mc_penalty,
+                risk_margin=risk_add,
             )
             early_add = early_relative.call_margin_add(ctx)
-            need = ctx.pot_odds + _FOLD_OVERRIDE_MARGIN + early_add
+            need = ctx.pot_odds + _FOLD_OVERRIDE_MARGIN + early_add + risk_add
+            flags = list(dict.fromkeys((self._leverage_flags(ctx) or ['all_in']) + risk_flags))
+            risk_note = f' risk+{risk_add:.2f}({",".join(risk_flags)})' if risk_flags else ''
             if blended_eq >= need:
                 return DecisionOutput(
                     action='call', amount=min(ctx.to_call, ctx.stack),
-                    purpose='bluff_catch_call', seed=seed,
+                    purpose='allin_equity_call', seed=seed,
                     arbitration_mode='deterministic',
                     top_gap=1.0,
-                    leverage_flags=self._leverage_flags(ctx) or ['all_in'],
-                    reason=f'all-in robust call (blended_eq {blended_eq:.2f} '
-                           f'≥ need {need:.2f}'
+                    leverage_flags=flags,
+                    reason=f'all-in robust call (eq {blended_eq:.2f}/{blend_mode} '
+                           f'≥ need {need:.2f}{risk_note}'
                            + (f'; {early_relative.describe(ctx)}' if early_add > 0 else '')
                            + ')',
                 )
@@ -746,9 +955,9 @@ class V3Engine:
                 action='fold', amount=0.0, purpose='fold', seed=seed,
                 arbitration_mode='deterministic',
                 top_gap=1.0,
-                leverage_flags=self._leverage_flags(ctx) or ['all_in'],
-                reason=f'all-in robust fold (blended_eq {blended_eq:.2f} '
-                       f'< need {need:.2f}'
+                leverage_flags=flags,
+                reason=f'all-in robust fold (eq {blended_eq:.2f}/{blend_mode} '
+                       f'< need {need:.2f}{risk_note}'
                        + (f'; {early_relative.describe(ctx)}' if early_add > 0 else '')
                        + ')',
             )

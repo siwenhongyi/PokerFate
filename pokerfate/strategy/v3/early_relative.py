@@ -13,7 +13,13 @@ from typing import List
 
 from pokerfate.strategy.v3.context import DecisionCtx
 
-ENABLED = os.environ.get("PF_TURN_FLOP_RELATIVE_GUARD", "0") == "1"
+ENABLED = os.environ.get("PF_TURN_FLOP_RELATIVE_GUARD", "1") not in {
+    "0",
+    "false",
+    "False",
+    "no",
+    "NO",
+}
 
 _MIN_RISK = float(os.environ.get("PF_TFR_MIN_RISK", "0.58"))
 _CALL_MAX_ADD = float(os.environ.get("PF_TFR_CALL_MAX_ADD", "0.10"))
@@ -184,7 +190,7 @@ def fold_override_need(ctx: DecisionCtx) -> float:
     return ctx.pot_odds + max(add, _FOLD_OVERRIDE_MIN_EDGE)
 
 
-def value_jam_eq_add(ctx: DecisionCtx) -> float:
+def active_value_eq_add(ctx: DecisionCtx) -> float:
     risk = risk_score(ctx, active_value=True)
     if risk < _MIN_RISK:
         return 0.0

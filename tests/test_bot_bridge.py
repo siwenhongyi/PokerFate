@@ -35,6 +35,30 @@ class TestBotBridgeActionAmounts:
         assert b._api.events[0].action == "call"
         assert b._api.events[0].amount == 6
 
+
+def test_dealer_info_passes_global_hand_seq_to_api(monkeypatch) -> None:
+    calls = []
+
+    class FakeAPI:
+        def new_hand(self, **kwargs):
+            calls.append(kwargs)
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._hand_seq = 41
+    monkeypatch.setattr(b, "_ensure_api", lambda: True)
+
+    b._on_dealer_info(
+        {
+            "dealer": 0,
+            "start_info": [{"seatid": 0, "chips": 200}],
+            "gameid": "t42",
+        }
+    )
+
+    assert calls[0]["hand_number"] == 42
+
+
 class TestBotBridgeProfitLock:
     def _next_hand_dealer(self, bridge: BotBridge, gameid: str = "t_next"):
         """盈利锁仓达标后需再收到一手 DealerInfo 才会注入 LeaveRoomREQ。"""

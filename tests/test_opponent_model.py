@@ -41,6 +41,8 @@ class TestPlayerTypePriority:
 
     def test_calling_station_moderate_pfr(self):
         s = self._stats(50, 22, 11, 5, 5, 60, 30)  # 44% VPIP, 22% PFR, AF low
+        s.flop_seen_count = 20
+        s.showdown_count = 7
         assert s.player_type() == "calling_station"
 
 
@@ -278,10 +280,9 @@ class TestSparseSampleNoFakeAggression:
         s.hands_seen = 15
         s.call_count = 10        # 有 10 次 postflop call，AF=0 但样本够
         adj = model.exploit_adjustments(1)
-        # 此时 af=0（低），AF 兜底启用，base_bluff = 0.55 - (0-1.5)*0.2 = 0.85
-        # 但 sticky_score 仍为 0（无 fold_to_cbet_opps/wtsd/river 样本）
-        # → 最终 bluff_ag_scale = 0.85（不再是 baseline）
-        assert adj.get('bluff_ag_scale', 0.55) > 0.70
+        # 此时 af=0（低），AF 兜底启用，但低 AF 代表 check/call 多，
+        # 不能反向当成"更好诈唬"。没有 fold_to_cbet 证据时应低于 baseline。
+        assert adj.get('bluff_ag_scale', 0.55) < 0.40
 
 
 class TestOpponentStatsToVillainStats:

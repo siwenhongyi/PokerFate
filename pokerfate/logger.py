@@ -213,12 +213,17 @@ class PokerLogger:
         log_file: Optional[str] = _DEFAULT_LOG_FILE,
         console: bool = True,
         hand_number_ref: Optional[list] = None,
+        robot_log_file: Optional[str] = None,
     ):
         self._console = console
         self._writer = _JsonlWriter(log_file) if log_file else None
         self._hand_num = hand_number_ref if hand_number_ref is not None else [0]
         self._color = not _no_color()
         self._bot_name = "PokerFate"
+        self._current_hand_lines: List[str] = []
+        self._recording_hand = False
+        self._robot_hand_pending = False
+        self._robot_hand_meta: List[Dict] = []
 
         # Plain-text mirror of console output (no ANSI codes)
         self._text_log = None
@@ -228,6 +233,12 @@ class PokerLogger:
             text_path.parent.mkdir(parents=True, exist_ok=True)
             _rotate_log(str(text_path))
             self._text_log = open(text_path, "w", encoding="utf-8", buffering=1)
+
+        self._robot_log = None
+        if robot_log_file:
+            robot_path = pathlib.Path(robot_log_file)
+            robot_path.parent.mkdir(parents=True, exist_ok=True)
+            self._robot_log = open(robot_path, "a", encoding="utf-8", buffering=1)
 
     # ------------------------------------------------------------------
     # Public event methods
@@ -241,6 +252,10 @@ class PokerLogger:
         big_blind: float = 1.0,
     ):
         self._hand_num[0] = hand_number
+        self._current_hand_lines = []
+        self._recording_hand = True
+        self._robot_hand_pending = False
+        self._robot_hand_meta = []
         self._file({
             "event": "hand_start",
             "hand": hand_number,
@@ -477,7 +492,12 @@ class PokerLogger:
         if gto_refs:
             key = gto_refs.get("chart_key", "")
             hand = gto_refs.get("hand", "")
+            pg = gto_refs.get("pokergto", "—")
+            pg_key = gto_refs.get("pokergto_chart_key") or key
             gl = gto_refs.get("greenline", "—")
+            source = gto_refs.get("primary_source", "")
+            source_note = f" 主={source}" if source else ""
+            self._raw(f"      📊 [PokerGTO]  {pg_key} {hand} → {pg}{source_note}", dim=True)
             self._raw(f"      📊 [Greenline]  {key} {hand} → {gl}", dim=True)
 
     def hand_result(
@@ -533,6 +553,51 @@ class PokerLogger:
         self._raw("")
         self._raw(f"  ✔ {winners_str} 赢得 {pot:.0f}    {delta_str}{my_combo_str}{stacks_str}",
                   color=color, bold=True)
+
+    def mark_robot_showdown_hand(self, robot_players: List[Dict]) -> None:
+        """Mark the current hand for copy-out to the robot hand log.
+
+        The actual write is delayed until the API finishes all end-of-hand
+        logging, so showdown learner / calibration lines are copied too.
+        """
+        if not robot_players:
+            return
+        self._robot_hand_pending = True
+        self._robot_hand_meta = [dict(p) for p in robot_players]
+
+    def flush_robot_hand_if_needed(self) -> None:
+        if not self._robot_hand_pending:
+            return
+        self._robot_hand_pending = False
+        if not self._robot_log or not self._current_hand_lines:
+            return
+
+        hand = self._hand_num[0]
+        ts = datetime.now().astimezone().isoformat(timespec="seconds")
+        players = []
+        for p in self._robot_hand_meta:
+            name = str(p.get("name") or p.get("player_id") or "")
+            uid = str(p.get("uid") or "")
+            seat = p.get("seat")
+            if seat is None:
+                seat = p.get("player_id")
+            cards = p.get("cards") or []
+            card_text = " ".join(str(c) for c in cards)
+            if uid:
+                players.append(f"{name}({uid}) {card_text}".strip())
+            elif seat is not None:
+                players.append(f"{name}(seat{seat}) {card_text}".strip())
+            else:
+                players.append(f"{name} {card_text}".strip())
+        meta = "；".join(x for x in players if x)
+
+        self._robot_log.write("\n")
+        self._robot_log.write("━" * _W + "\n")
+        self._robot_log.write(f"[{ts}] 第 {hand} 手  机器人摊牌: {meta}\n")
+        self._robot_log.write("━" * _W + "\n")
+        for line in self._current_hand_lines:
+            self._robot_log.write(line + "\n")
+        self._robot_log.write("\n")
 
     def showdown_calibration(
         self,
@@ -829,10 +894,13 @@ class PokerLogger:
         self._file(event)
 
     def close(self):
+        self.flush_robot_hand_if_needed()
         if self._writer:
             self._writer.close()
         if self._text_log:
             self._text_log.close()
+        if self._robot_log:
+            self._robot_log.close()
 
     def __enter__(self):
         return self
@@ -866,10 +934,14 @@ class PokerLogger:
         bold: bool = False,
         dim: bool = False,
     ):
+        plain = _strip_ansi(msg)
+        if self._recording_hand:
+            self._current_hand_lines.append(plain)
+
         # Write plain text to file (always, regardless of console setting)
         if self._text_log:
             ts = datetime.now().strftime("%H:%M:%S")
-            self._text_log.write(f"[{ts}] {_strip_ansi(msg)}\n")
+            self._text_log.write(f"[{ts}] {plain}\n")
 
         if not self._console:
             return

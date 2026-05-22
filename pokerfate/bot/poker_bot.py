@@ -30,6 +30,8 @@ from pokerfate.strategy.range_v2.river_relative_calibrator import (
     RiverRelativeCalibrator,
     action_ctx_from_decision as river_rel_action_ctx_from_decision,
     board_texture_key as river_rel_board_texture_key,
+    clamp_equity_to_bounds as river_rel_clamp_equity_to_bounds,
+    exact_relation_bounds as river_rel_exact_relation_bounds,
     relation_eq as river_rel_eq,
 )
 from pokerfate.strategy.range_v2.hand_categorizer import (
@@ -197,9 +199,6 @@ class PokerBot:
         preflop_aggressor_id = gs.last_aggressor_id(player.player_id, street='preflop')
         if preflop_aggressor_id is not None:
             preflop_villain_stats = self.opponent_model.get(preflop_aggressor_id)
-        fourbet_call_edge_adjust = self._preflop_4bet_call_edge_adjust(
-            gs, player, facing_action,
-        )
         action_str, amount = self.preflop.decide(
             hole_cards=player.hole_cards,
             position=position,
@@ -220,7 +219,6 @@ class PokerBot:
             sticky_density=sticky_density,
             cold_callers=cold_callers,
             squeeze_callers=squeeze_callers,
-            fourbet_call_edge_adjust=fourbet_call_edge_adjust,
             villain_vpip=preflop_villain_stats.vpip if preflop_villain_stats else 0.0,
             villain_pfr=preflop_villain_stats.pfr if preflop_villain_stats else 0.0,
             villain_three_bet=preflop_villain_stats.three_bet_pct if preflop_villain_stats else 0.0,
@@ -255,7 +253,6 @@ class PokerBot:
             'facing_action': facing_action,
             'action': action_str,
             'amount': amount,
-            'fourbet_call_edge_adjust': fourbet_call_edge_adjust,
             'position': position,
             'num_active_opponents': num_opponents,
             'sticky_density': sticky_density,
@@ -337,36 +334,6 @@ class PokerBot:
         _, _, _, _, n_sticky = aggregate_villain_stats(stats)
         return max(0.0, min(1.0, n_sticky / max(1, len(stats))))
 
-    def _preflop_4bet_call_edge_adjust(
-        self, gs: GameState, player: Player, facing_action: str,
-    ) -> float:
-        """Adjustment to 4bet-call edge gates; negative loosens, positive tightens."""
-        if facing_action != '4bet':
-            return 0.0
-        opp_id = gs.last_aggressor_id(player.player_id, street='preflop')
-        if opp_id is None:
-            return 0.0
-        stats = self.opponent_model.get(opp_id)
-        if stats.hands_seen < MIN_HANDS_FOR_CLASSIFICATION:
-            return 0.0
-
-        vpip = stats.vpip
-        pfr = stats.pfr
-        af = stats.aggression_factor
-        three_bet = stats.three_bet_pct
-        gap = vpip - pfr
-        ptype = stats.player_type()
-
-        if ptype == 'maniac' or three_bet >= 0.14 or (pfr >= 0.28 and af >= 1.6):
-            return -0.03
-        if three_bet >= 0.10 or (vpip >= 0.34 and pfr >= 0.22 and af >= 1.3):
-            return -0.02
-        if pfr <= 0.12 and af < 1.3:
-            return 0.03
-        if pfr <= 0.16 and gap >= 0.18:
-            return 0.02
-        return 0.0
-
     # ------------------------------------------------------------------
     # Postflop logic
     # ------------------------------------------------------------------
@@ -397,6 +364,12 @@ class PokerBot:
         raw_mc = self._get_equity(
             player.hole_cards, board, max(num_opponents, 1), seed=raw_seed,
         )
+        river_exact_bounds: Dict[str, bool] = {}
+        if len(board) >= 5:
+            river_exact_bounds = river_rel_exact_relation_bounds(
+                player.hole_cards, board,
+            )
+            raw_mc = river_rel_clamp_equity_to_bounds(raw_mc, river_exact_bounds)
         self._last_equity_random = raw_mc
 
         if self.use_range_equity and bool(board) and opp_ids:
@@ -440,6 +413,9 @@ class PokerBot:
                 range_eq, hero_bucket, street, len(opp_ids),
                 action_ctx=action_ctx,
             )
+            range_eq = river_rel_clamp_equity_to_bounds(
+                range_eq, river_exact_bounds,
+            )
             call_equity = range_eq
             discount = 1.0
             min_rf = self._range_tracker.get_effective_range_pct(target_opp)
@@ -453,6 +429,9 @@ class PokerBot:
             call_equity = max(
                 0.0,
                 raw_mc - (1.0 - discount) * (1.0 - raw_mc),
+            )
+            call_equity = river_rel_clamp_equity_to_bounds(
+                call_equity, river_exact_bounds,
             )
             self._last_equity_mode = "mc_eqr"
 
@@ -658,6 +637,7 @@ class PokerBot:
                     hero_made_subtype=hmi_rel.subtype,
                     board_texture=river_rel_board_texture_key(board),
                     action_ctx=rel_action_ctx,
+                    exact_bounds=river_exact_bounds,
                 )
                 river_relative_calibration = dict(
                     self._river_relative_calibrator.last_diagnostic or {}
@@ -846,8 +826,6 @@ class PokerBot:
                 sig_parts.append(f"纯价值(value_ag×{value_ag:.2f})")
             elif bluff_ag >= 0.90:
                 sig_parts.append(f"高频cbet(bluff_ag×{bluff_ag:.2f})")
-            if adj.get('value_sizing_scale', 1.0) >= 1.10:
-                sig_parts.append(f"加大注码×{adj['value_sizing_scale']:.2f}")
             scale = adj.get('aggression_scale', 1.0)
             if scale != 1.0:
                 sig_parts.append(f"ag×{scale:.2f}")
@@ -1102,6 +1080,7 @@ class PokerBot:
                 for p, prob in candidates
             ],
             'final_purpose': getattr(out, 'purpose', ''),
+            'frac': round(float(getattr(out, 'frac', 0.0) or 0.0), 4),
             'final_action': action,
             'final_amount': amount,
             'decision_reason': getattr(out, 'reason', ''),
@@ -1928,6 +1907,13 @@ class PokerBot:
         if player_id not in self._opp_street_actions:
             self._opp_street_actions[player_id] = {}
         self._opp_street_actions[player_id][street] = act
+        self.postflop.observe_action(
+            action=act,
+            street=street,
+            amount=bet_amount,
+            pot=pot,
+            is_raise_over=is_raise_over,
+        )
 
     def observe_showdown(self, player_id: int, cards, name: str = "", board=None) -> None:
         """在 showdown 时记录对手底牌，校准范围估算。
@@ -1967,8 +1953,7 @@ class PokerBot:
         # Reset cross-street action trackers for each new hand
         self._my_street_actions.clear()
         self._opp_street_actions.clear()
-        self.postflop._last_bet_frac = 0.0
-        self.postflop._last_bet_street = ""
+        self.postflop.reset_hand()
         self._current_board = []  # track board for Range V2 observe_action
         self._v2_action_history: Dict[int, list] = {}  # player_id → [(street, action)]
         if self.use_range_equity:
@@ -2052,7 +2037,7 @@ class PokerBot:
         self, gs: GameState, player: Player, position: str, facing_action: str,
         num_limpers: int = 0,
     ) -> dict | None:
-        """查询翻前 GTO 参考数据，返回 {chart_key, hand, greenline}（展示用已格式化）。"""
+        """查询翻前 GTO 参考数据，返回格式化后的 PokerGTO / Greenline 对照。"""
         try:
             hand = _hand_category(player.hole_cards)
             pos = self._normalize_pos(position)
@@ -2077,7 +2062,10 @@ class PokerBot:
             return {
                 "chart_key": chart_key,
                 "hand": hand,
+                "pokergto_chart_key": refs.get("pokergto_chart_key"),
+                "pokergto": format_action(refs["pokergto"]),
                 "greenline": format_action(refs["greenline"]),
+                "primary_source": refs.get("primary_source") or "",
             }
         except Exception:
             log.exception(

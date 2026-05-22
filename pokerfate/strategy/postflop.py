@@ -383,36 +383,26 @@ def _protection_bet_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
 
 
 def _value_jam_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
-    active = out.purpose == 'value_jam' or 'value_jam' in ids
-    near = (
-        not ctx.facing_bet
-        and ctx.hero_bucket in ('strong', 'nuts')
-        and ctx.spr <= 4.0
-        and ctx.equity_range >= 0.50
-    )
-    if not active and not near:
+    if out.purpose != 'value_jam' and 'value_jam' not in ids:
         return None
-    rel_add = _v3_early_relative.value_jam_eq_add(ctx)
+    rel_add = _v3_early_relative.active_value_eq_add(ctx)
     need = _v3_active.commit_value_eq(ctx.spr) + _v3_active._river_danger_add(ctx) + rel_add
     tag = 'ok' if ctx.equity_range >= need else f"eq<{_pct(need)}"
+    jam_frac = (ctx.stack / ctx.pot) if ctx.pot > 0 else 0.0
     rel = f" erel+{_pct(rel_add)}" if rel_add > 0 else ""
-    return f"VJ-{tag} eq={_pct(ctx.equity_range)}/{_pct(need)} spr={ctx.spr:.1f}{rel}"
+    return f"VJ-{tag} eq={_pct(ctx.equity_range)}/{_pct(need)} spr={ctx.spr:.1f} jam={jam_frac:.2f}pot{rel}"
 
 
 def _early_relative_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
     call_add = _v3_early_relative.call_margin_add(ctx)
-    jam_add = _v3_early_relative.value_jam_eq_add(ctx)
-    if call_add <= 0 and jam_add <= 0:
+    if call_add <= 0:
         return None
-    if call_add > 0 and out.purpose not in {
+    if out.purpose not in {
         'bluff_catch_call', 'fold_override_call', 'fold',
     }:
         return None
-    if jam_add > 0 and out.purpose != 'value_jam' and 'value_jam' not in ids:
-        return None
-    desc = _v3_early_relative.describe(ctx, active_value=jam_add > 0)
-    add = call_add if call_add > 0 else jam_add
-    return f"ER add={_pct(add)} {desc}"
+    desc = _v3_early_relative.describe(ctx)
+    return f"ER add={_pct(call_add)} {desc}"
 
 
 def _stackoff_guard_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
@@ -635,6 +625,23 @@ class PostflopStrategy:
         if action_out == 'bet':
             action_out = 'raise'
         return action_out, out.amount
+
+    def reset_hand(self) -> None:
+        """Reset cross-street postflop memo."""
+        self._last_bet_frac = 0.0
+        self._last_bet_street = ""
+
+    def observe_action(
+        self,
+        *,
+        action: str,
+        street: str,
+        amount: float = 0.0,
+        pot: float = 0.0,
+        is_raise_over: bool = False,
+    ) -> None:
+        """Compatibility hook; postflop V3 no longer keeps action-plan state."""
+        return None
 
     # ------------------------------------------------------------------
     # ctx construction

@@ -21,9 +21,11 @@ maniac — VPIP > 33%，且 (AF > 2.5) 或（flop 下注+被动 ≥ 12 且 flop 
 
 whale — (VPIP > 55% 且 AF < 1.2) 或（48% ≤ VPIP ≤ 55%、AF < 1.25、flop_seen ≥ 15、WTSD ≥ 31%）。
 
-fish — VPIP > 30%、PFR < 17%、且 (VPIP−PFR) ≥ 6%。
+fish — VPIP > 35%、PFR < 17%、且 (VPIP−PFR) ≥ 10%。
 
-calling_station — VPIP > 40% 且 AF < 1.5，且满足以下任一：flop_seen ≥ 15 且 WTSD ≥ 26%；或 PFR ≥ 17%；或 (VPIP−PFR) ≤ 14%。
+calling_station — VPIP > 40% 且 AF < 1.5，且有摊牌/弃牌证据支撑：
+flop_seen ≥ 15 且 WTSD ≥ 30%；或 fold_to_cbet 样本 ≥ 5 且 fold_to_cbet ≤ 35%；
+或 river 面对下注样本 ≥ 5 且 river_fold_rate ≤ 35%。
 
 unknown — 以上皆不满足。
 """
@@ -256,14 +258,20 @@ class OpponentStats:
             and wtsd >= 0.31
         ):
             return 'whale'
-        # 5) fish — 松、主动加注少、VPIP−PFR 偏大（跛进/跟注型）
-        if vpip > 0.30 and pfr < 0.17 and gap >= 0.06:
+        # 5) fish — 松、主动加注少、VPIP−PFR 偏大（跛进/跟注型）。
+        # 旧阈值 VPIP>30/gap>=6 在 loose 桌会把大量边缘样本都标成 fish。
+        # 标签只用于展示，但过宽标签会误导复盘，因此收紧到真正 loose-passive。
+        if vpip > 0.35 and pfr < 0.17 and gap >= 0.10:
             return 'fish'
-        # 6) calling_station — 松、被动；或 WTSD 偏高印证爱跟到摊牌
+        # 6) calling_station — 松、被动，且必须有 call-down / 不弃牌证据。
+        # 不再用 "PFR≥17 或 gap≤14" 这类反向 proxy；它会把只是松、偶尔 open
+        # 的玩家误标成跟注站。
         if vpip > 0.40 and af < 1.5:
-            if flop_seen >= 15 and wtsd >= 0.26:
+            if flop_seen >= 15 and wtsd >= 0.30:
                 return 'calling_station'
-            if pfr >= 0.17 or gap <= 0.14:
+            if self.fold_to_cbet_opps >= 5 and self.fold_to_cbet <= 0.35:
+                return 'calling_station'
+            if self.river_facing_bet_opps >= 5 and self.river_fold_rate <= 0.35:
                 return 'calling_station'
         return 'unknown'
 
@@ -518,8 +526,6 @@ class OpponentModel:
         输出字段：
           value_ag_scale      ∈ [0.30, 1.00]  价值下注频率乘子
           bluff_ag_scale      ∈ [0.08, 1.15]  诈唬下注频率乘子
-          value_sizing_scale  ∈ [1.00, 1.35]  价值注码放大倍率
-          aggression_scale    ∈ [0.35, 1.30]  PWI 驱动整体攻击性
           river_bluff_likely  bool            对手河牌偏向诈唬（提升跟注意愿）
           river_bet_rare      bool            对手河牌下注罕见（下注=强手）
           flop_float_favorable bool           对手翻牌激进但可浮牌剥削
@@ -528,8 +534,8 @@ class OpponentModel:
         连续化要点：
           1. sticky 对手（whale/station/fish）原来由 ptype 枚举触发
              bluff_freq='none'。现在由 fold_to_cbet/wtsd/river_fold_rate
-             三路指标共同下压 bluff_ag_scale 至 0.08-0.15；同时 sticky
-             越深 value_sizing_scale 越大（连续插值而非 0/1.30 二档）。
+             三路指标共同下压 bluff_ag_scale 至 0.08-0.15；价值下注强度由
+             value_ag_scale 与 V3 purpose 内部尺寸档位共同处理。
           2. maniac 的慢打（原 value_ag_scale=0.45 硬值）现在由 AF + bwr
              驱动：AF 2.5→0.75, AF 3.0→0.60, AF 3.5+bwr 0.40→0.45。
           3. nit 的多诈唬（原 'high'）由 fold_to_cbet 本身驱动 bluff_ag
@@ -541,7 +547,6 @@ class OpponentModel:
         if s.hands_seen < MIN_HANDS_FOR_CLASSIFICATION:
             return adj
 
-        pwi = s.pwi()
         af = s.aggression_factor
 
         # ──────────────────────────────────────────────────────────────
@@ -613,8 +618,12 @@ class OpponentModel:
             # fold_to_cbet 0.20→0.40, 0.40→0.80, 0.60→1.10, 0.75→1.15(cap)
             base_bluff = _clip(s.fold_to_cbet / 0.50, 0.25, 1.15)
         elif action_samples >= 10:
-            # af 高 = 激进 = 我方诈唬易被反加 → 低；af 低 = 被动 = 但爱跟 → 也低
-            base_bluff = _clip(0.55 - (af - 1.5) * 0.20, 0.15, 1.10)
+            # AF 兜底只在缺 fold_to_cbet 时使用。AF 低不是"更容易被诈唬"，
+            # 它通常意味着 check/call 多；AF 过高则容易被反加。两端都降，
+            # 只有 fold_lean 的真实弃牌证据才能把 bluff_ag 拉高。
+            passive_penalty = max(0.0, (1.20 - af) / 1.20) * 0.30
+            aggro_penalty = max(0.0, (af - 2.20) / 1.50) * 0.25
+            base_bluff = _clip(0.55 - passive_penalty - aggro_penalty, 0.20, 0.90)
         else:
             base_bluff = 0.55  # baseline
         # sticky 下压（可至 0.08）：sticky_score=1 时从 base 减 0.40，但不低于 0.08。
@@ -633,38 +642,10 @@ class OpponentModel:
         base_bluff = _clip(base_bluff + fold_lean_score * 0.20, 0.08, 1.15)
         adj['bluff_ag_scale'] = base_bluff
 
-        # ──────────────────────────────────────────────────────────────
-        # value_sizing_scale：价值注码放大倍率
-        # ──────────────────────────────────────────────────────────────
-        #   驱动：sticky（不弃牌+爱摊牌）→ 加大价值注码。
-        #   上限从旧 1.30 提到 1.35（sticky_score=1 + WMSD 证据可加满）。
-        fold_w = _clip((0.45 - s.fold_to_cbet) / 0.30, 0.0, 1.0) \
-                 if s.fold_to_cbet_opps >= 5 else 0.5
-        wtsd_w = _clip((s.wtsd - 0.20) / 0.20, 0.0, 1.0) \
-                 if (s.flop_seen_count >= 15 or s.server_wtsd_prior > 0) else 0.5
-        sizing = 1.0 + 0.30 * fold_w * wtsd_w
-        # WTSD 极端高加满（原代码 hardcoded 1.30，现在保留但在新上限范围内）
-        if (s.flop_seen_count >= 15 or s.server_wtsd_prior > 0) and s.wtsd > 0.38:
-            sizing = max(sizing, 1.30)
-        if s.showdown_count >= 8 and s.wmsd < 0.45 and s.wtsd > 0.35:
-            sizing = max(sizing, 1.32)
-        adj['value_sizing_scale'] = min(1.35, sizing)
-
-        # ──────────────────────────────────────────────────────────────
-        # aggression_scale：PWI 连续映射（原分档保留，驱动指标本来就连续）
-        # ──────────────────────────────────────────────────────────────
-        if pwi >= 60:
-            adj['aggression_scale'] = 0.35
-        elif pwi >= 40:
-            adj['aggression_scale'] = 0.55
-        elif pwi >= 20:
-            adj['aggression_scale'] = 0.75
-        elif pwi >= 0:
-            adj['aggression_scale'] = 0.90
-        elif pwi >= -10:
-            adj['aggression_scale'] = 1.10
-        else:
-            adj['aggression_scale'] = 1.30
+        # 不再输出 aggression_scale。PWI 是"好剥削程度"，不是"整体少进攻"
+        # 的可靠信号；V3 决策层已经用 value_lean / bluff_lean / trap_lean
+        # 分 purpose 加权。保留一个全局 ag×0.35 只会让日志和复盘误以为
+        # loose-passive 桌应整体缩手。
 
         # ──────────────────────────────────────────────────────────────
         # Boolean 派生信号（单一指标阈值 → 语义 flag，用于 log 与特定策略钩子）

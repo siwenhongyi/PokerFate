@@ -24,6 +24,15 @@ import numpy as np
 from lightgbm import LGBMClassifier, LGBMRegressor
 from sklearn.feature_extraction import DictVectorizer
 
+from scripts.range_calibration_meta import (
+    filter_rows_by_meta,
+    limit_rows,
+    meta_summary,
+    parse_flag_filters,
+    row_experiment_profile,
+    row_strategy_version,
+)
+
 
 CAT_ORDER = ("nuts", "strong", "medium", "draw", "weak_draw", "air")
 CAT_IDX = {cat: i for i, cat in enumerate(CAT_ORDER)}
@@ -156,6 +165,8 @@ def _features(
         "texture=" + _board_texture(row): 1,
         "hero_bucket=" + str(row.get("hero_bucket") or "?"): 1,
         "top_bucket=" + CAT_ORDER[int(np.argmax(p))]: 1,
+        "strategy_version=" + row_strategy_version(row): 1,
+        "experiment_profile=" + row_experiment_profile(row): 1,
         "range_pct": float(row.get("range_pct") or 0.0),
         "board_len": min(len(row.get("board") or []), 5) / 5.0,
         "top_prob": float(ordered[0]),
@@ -313,14 +324,50 @@ def main() -> None:
     ap.add_argument("--skip-bucket", action="store_true")
     ap.add_argument("--skip-equity", action="store_true")
     ap.add_argument("--skip-river-relative", action="store_true")
+    ap.add_argument("--train-strategy-version")
+    ap.add_argument("--val-strategy-version")
+    ap.add_argument("--train-experiment-flag", action="append", default=[])
+    ap.add_argument("--val-experiment-flag", action="append", default=[])
     args = ap.parse_args()
 
-    train_rows = _load_rows(args.train_rows, args.max_train_rows)
-    val_rows = _load_rows(args.val_rows, args.max_val_rows)
+    raw_train_rows = _load_rows(args.train_rows)
+    raw_val_rows = _load_rows(args.val_rows)
+    train_flag_filter = parse_flag_filters(args.train_experiment_flag)
+    val_flag_filter = parse_flag_filters(args.val_experiment_flag)
+    train_rows = limit_rows(
+        filter_rows_by_meta(
+            raw_train_rows,
+            strategy_version=args.train_strategy_version,
+            experiment_flags=train_flag_filter,
+        ),
+        args.max_train_rows,
+    )
+    val_rows = limit_rows(
+        filter_rows_by_meta(
+            raw_val_rows,
+            strategy_version=args.val_strategy_version,
+            experiment_flags=val_flag_filter,
+        ),
+        args.max_val_rows,
+    )
     report: dict[str, Any] = {
         "meta": {
             "train_rows": len(train_rows),
             "val_rows": len(val_rows),
+            "row_filters": {
+                "train_strategy_version": args.train_strategy_version,
+                "val_strategy_version": args.val_strategy_version,
+                "train_experiment_flags": train_flag_filter,
+                "val_experiment_flags": val_flag_filter,
+            },
+            "data_meta_before_filter": {
+                "train": meta_summary(raw_train_rows),
+                "val": meta_summary(raw_val_rows),
+            },
+            "data_meta": {
+                "train": meta_summary(train_rows),
+                "val": meta_summary(val_rows),
+            },
             "n_estimators": args.n_estimators,
             "learning_rate": args.learning_rate,
             "num_leaves": args.num_leaves,

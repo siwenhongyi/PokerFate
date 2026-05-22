@@ -24,8 +24,10 @@ stage (RoundStartBRC):
 from __future__ import annotations
 import asyncio
 import functools
+import json
 import logging
 import random
+from pathlib import Path
 
 from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
 from pf_intercept import config
@@ -39,6 +41,22 @@ from pf_notify.templates import format_chips_km_signed
 log = logging.getLogger("pf_bot")
 
 _MAX_INJECT_DELAY = float(config.ACTION_INJECT_DELAY_MAX_SEC)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_ROBOT_PLAYERS_FILE = _PROJECT_ROOT / "data" / "robot_players.json"
+
+
+def _load_known_robot_uids() -> set[str]:
+    try:
+        data = json.loads(_ROBOT_PLAYERS_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return set()
+    except Exception:
+        log.exception("[ROBOT] failed to load %s", _ROBOT_PLAYERS_FILE)
+        return set()
+    robots = data.get("robots") if isinstance(data, dict) else {}
+    if not isinstance(robots, dict):
+        return set()
+    return {str(uid) for uid in robots if str(uid)}
 
 
 def _inject_delay_before_action(
@@ -237,6 +255,9 @@ class BotBridge:
         # uid (str) → seat_id; built from EnterRoomRSP/SitDownBRC; used to
         # resolve WinnerRSP entries that carry uid but no seatid.
         self._uid_to_seat: dict[str, int] = {}
+        self._seat_uids: dict[int, str] = {}
+        self._current_hand_robot_seats: set[int] = set()
+        self._current_hand_robot_uids: dict[int, str] = {}
 
         # Per-hand state
         self._stage:    int       = 0
@@ -631,7 +652,28 @@ class BotBridge:
         if seat >= 0 and name:
             self._seat_names[seat] = name
         if seat >= 0 and uid is not None:
-            self._uid_to_seat[str(uid)] = seat
+            uid_str = str(uid)
+            self._uid_to_seat[uid_str] = seat
+            self._seat_uids[seat] = uid_str
+
+    def _snapshot_current_hand_robots(self, seats: list[int]) -> None:
+        """Freeze robot seats for this hand so later joins/leaves do not mutate it."""
+        known_robot_uids = _load_known_robot_uids()
+        self._current_hand_robot_seats = set()
+        self._current_hand_robot_uids = {}
+        if not known_robot_uids:
+            return
+        for seat in seats:
+            uid = self._seat_uids.get(seat)
+            if uid and uid in known_robot_uids:
+                self._current_hand_robot_seats.add(seat)
+                self._current_hand_robot_uids[seat] = uid
+        if self._current_hand_robot_seats:
+            details = ", ".join(
+                f"seat{seat}:{self._seat_names.get(seat, '')}({self._current_hand_robot_uids.get(seat, '')})"
+                for seat in sorted(self._current_hand_robot_seats)
+            )
+            log.info("[ROBOT] current hand has known robot(s): %s", details)
 
     def _trigger_gamedata_fetch(self, seat_status: dict) -> None:
         """Fire-and-forget async fetch of 30-day server stats for one seat."""
@@ -798,6 +840,7 @@ class BotBridge:
 
         start_info.sort(key=lambda si: si["seatid"])
         self._all_seats = [si["seatid"] for si in start_info]
+        self._snapshot_current_hand_robots(self._all_seats)
         self._seat_chips = {}
         self._hand_start_chips = {}
 
@@ -842,7 +885,11 @@ class BotBridge:
                     )
             self._pending_seeds.clear()
 
-        self._api.new_hand(players=players, dealer_id=msg.get("dealer", 0))
+        self._api.new_hand(
+            players=players,
+            dealer_id=msg.get("dealer", 0),
+            hand_number=self._hand_seq,
+        )
 
         # 盈利锁仓：上一手 Winner 已达标则等到本手 DealerInfo（下一手开始）再离桌
         deferred = self._profit_lock_deferred
@@ -1129,6 +1176,8 @@ class BotBridge:
             showdown_hands=self._pending_showdown or None,
             winner_hand_types=self._pending_winner_types or None,
             my_profit_delta=my_profit_delta,
+            robot_player_ids=self._current_hand_robot_seats,
+            robot_player_uids=self._current_hand_robot_uids,
         )
         self._pending_showdown = {}
         self._pending_winner_types = {}

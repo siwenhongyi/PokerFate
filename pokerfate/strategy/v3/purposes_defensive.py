@@ -144,6 +144,24 @@ _VALUE_RAISE_SMALL_BET_MAX_NUTS = float(
 _VALUE_RAISE_SMALL_BET_WEIGHT_ADD = float(
     _os.environ.get('PF_VALUE_RAISE_SMALL_BET_WEIGHT_ADD', '0.8')
 )
+_VALUE_RAISE_LOW_SPR_NUTS_MAX_SPR = float(
+    _os.environ.get('PF_VALUE_RAISE_LOW_SPR_NUTS_MAX_SPR', '1.0')
+)
+_VALUE_RAISE_LOW_SPR_NUTS_MIN_EQ = float(
+    _os.environ.get('PF_VALUE_RAISE_LOW_SPR_NUTS_MIN_EQ', '0.76')
+)
+_VALUE_RAISE_LOW_SPR_NUTS_MAX_NUTS = float(
+    _os.environ.get('PF_VALUE_RAISE_LOW_SPR_NUTS_MAX_NUTS', '0.18')
+)
+_VALUE_RAISE_LOW_SPR_NUTS_WEIGHT_ADD = float(
+    _os.environ.get('PF_VALUE_RAISE_LOW_SPR_NUTS_WEIGHT_ADD', '1.2')
+)
+_PASSIVE_VALUE_BET_MIN_POT_ODDS = float(
+    _os.environ.get('PF_PASSIVE_VALUE_BET_MIN_POT_ODDS', '0.20')
+)
+_PASSIVE_VALUE_BET_MIN_COMMIT = float(
+    _os.environ.get('PF_PASSIVE_VALUE_BET_MIN_COMMIT', '0.25')
+)
 
 _FRAGILE_BLUFF_CATCH_SUBTYPES = {
     'pocket_pair',
@@ -172,7 +190,8 @@ def _villain_rel_loss(ctx: DecisionCtx) -> float:
 
 
 def _stack_commit(ctx: DecisionCtx) -> float:
-    return (ctx.to_call / ctx.stack) if ctx.stack > 0 else 0.0
+    stack = ctx.effective_stack if ctx.effective_stack > 0 else ctx.stack
+    return (ctx.to_call / stack) if stack > 0 else 0.0
 
 
 def _fragile_bluff_catcher(ctx: DecisionCtx) -> bool:
@@ -213,6 +232,40 @@ def _relative_call_margin(ctx: DecisionCtx) -> float:
     if nuts >= _BLUFF_CATCH_REL_NUTS_MARGIN_MIN:
         margin += _BLUFF_CATCH_REL_NUTS_MARGIN_ADD
     return margin
+
+
+def passive_value_bet_dominates(ctx: DecisionCtx) -> bool:
+    """True when a passive/sticky bet is too value-heavy for fragile bluff catch.
+
+    This is deliberately not a blanket "tighten up" rule. It only applies on
+    turn/river high-leverage calls with fragile made hands. If hero-relative
+    enumeration clearly says worse hands dominate, value raises/calls remain
+    available.
+    """
+    if not ctx.facing_bet or ctx.street not in ('turn', 'river'):
+        return False
+    if ctx.hero_bucket == 'nuts' or not _fragile_bluff_catcher(ctx):
+        return False
+    if not (sticky_passive(ctx) or ctx.villain_stats.af < AF_PASSIVE_BASELINE):
+        return False
+    if (
+        ctx.pot_odds < _PASSIVE_VALUE_BET_MIN_POT_ODDS
+        and _stack_commit(ctx) < _PASSIVE_VALUE_BET_MIN_COMMIT
+        and ctx.spr > _BLUFF_CATCH_HIGH_LEVERAGE_SPR_MAX
+    ):
+        return False
+
+    rel = ctx.villain_vs_hero_dist or {}
+    if not rel:
+        return False
+
+    hero_wins = float(rel.get('win', 0.0) or 0.0)
+    villain_wins = float(rel.get('loss', 0.0) or 0.0)
+    rel_eq = _relative_showdown_eq(ctx)
+    rel_need = ctx.pot_odds + _relative_call_margin(ctx)
+    if rel_eq >= rel_need:
+        return False
+    return villain_wins >= hero_wins
 
 
 def _draw_pressure(ctx: DecisionCtx) -> float:
@@ -299,6 +352,27 @@ def _small_bet_value_raise_spot(ctx: DecisionCtx) -> bool:
     return paying >= 0.45
 
 
+def _low_spr_nuts_value_raise_spot(ctx: DecisionCtx) -> bool:
+    """Low-SPR nuts should not turn a value raise into a passive bluff-catch.
+
+    At SPR <= 1 a raise is already a commitment decision. If hero is in the
+    nuts bucket, villain's modeled nuts density is not dominant, and range
+    equity is only a few points under the generic passive-bet threshold, this
+    is a value extraction spot rather than a bluff-catch spot.
+    """
+    return (
+        ctx.hero_bucket == 'nuts'
+        and ctx.spr > 0
+        and ctx.spr <= _VALUE_RAISE_LOW_SPR_NUTS_MAX_SPR
+        and ctx.pot_odds <= 0.35
+        and (ctx.villain_bucket_dist or {}).get('nuts', 0.0) <= _VALUE_RAISE_LOW_SPR_NUTS_MAX_NUTS
+        and (
+            ctx.equity_range >= _VALUE_RAISE_LOW_SPR_NUTS_MIN_EQ
+            or ctx.equity_mc >= _VALUE_RAISE_LOW_SPR_NUTS_MIN_EQ + 0.04
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # bluff_catch_call
 # ---------------------------------------------------------------------------
@@ -335,6 +409,8 @@ class BluffCatchCall(Purpose):
             adj += 0.03
 
         if _fragile_bluff_catcher(ctx):
+            if passive_value_bet_dominates(ctx):
+                return TriggerResult(False)
             strong_mass = _villain_strong_mass(ctx)
             rel_loss = _villain_rel_loss(ctx)
             if _high_leverage_call(ctx) and (ctx.villain_vs_hero_dist or {}):
@@ -373,8 +449,8 @@ class BluffCatchCall(Purpose):
                 adj += _BLUFF_CATCH_HIGH_LEVERAGE_ADD
 
         # Optional A/B guard: on flop/turn danger boards, fragile made hands
-        # need extra edge before being treated as bluff-catchers. This only
-        # activates when PF_TURN_FLOP_RELATIVE_GUARD=1.
+        # need extra edge before being treated as bluff-catchers. Enabled by
+        # default; set PF_TURN_FLOP_RELATIVE_GUARD=0 to disable.
         adj += early_relative.call_margin_add(ctx)
 
         need = ctx.pot_odds + adj
@@ -502,8 +578,11 @@ class ValueRaise(Purpose):
             return TriggerResult(False)
         need = 0.72 + _opp_raise_premium(ctx)
         small_bet_value = _small_bet_value_raise_spot(ctx)
+        low_spr_nuts = _low_spr_nuts_value_raise_spot(ctx)
         if small_bet_value:
             need = min(need, _VALUE_RAISE_SMALL_BET_MIN_EQ)
+        if low_spr_nuts:
+            need = min(need, _VALUE_RAISE_LOW_SPR_NUTS_MIN_EQ)
         if ctx.equity_range < need:
             return TriggerResult(False)
         # The actual raise path only jams value_raise at SPR <= 2.0. Do not
@@ -523,6 +602,8 @@ class ValueRaise(Purpose):
         w = 1.5 + 22.0 * max(0.0, eq - 0.72) + 30.0 * max(0.0, eq - 0.85)
         if small_bet_value:
             w += _VALUE_RAISE_SMALL_BET_WEIGHT_ADD
+        if low_spr_nuts:
+            w += _VALUE_RAISE_LOW_SPR_NUTS_WEIGHT_ADD
         return TriggerResult(True, w)
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
@@ -556,12 +637,14 @@ class SemiBluffRaise(Purpose):
             return TriggerResult(False)
         if ctx.hero_bucket == 'weak_draw' and ctx.equity_range < 0.22:
             return TriggerResult(False)
-        if not (ctx.blockers.nut_flush_blocker or ctx.blockers.straight_blocker):
+        d = ctx.draw
+        strong_draw = d.flush_draw or d.oesd or (d.gutshot and d.overcards)
+        if (
+            not (ctx.blockers.nut_flush_blocker or ctx.blockers.straight_blocker)
+        ):
             return TriggerResult(False)
         if ctx.spr < 2.5:
             return TriggerResult(False)
-        d = ctx.draw
-        strong_draw = d.flush_draw or d.oesd or (d.gutshot and d.overcards)
         weak_bluff = not strong_draw
         if weak_bluff:
             if sticky_passive(ctx) or ctx.n_sticky >= 1:

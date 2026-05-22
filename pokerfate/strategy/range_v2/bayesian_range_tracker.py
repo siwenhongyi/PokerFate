@@ -19,8 +19,10 @@ References:
 
 from __future__ import annotations
 
+import json
 import logging
 import os as _os
+from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 import numpy as np
@@ -49,6 +51,16 @@ _BUCKET_CAL_MIN_FACTOR = float(_os.environ.get('PF_BUCKET_CAL_MIN_FACTOR', '0.25
 _BUCKET_CAL_MAX_FACTOR = float(_os.environ.get('PF_BUCKET_CAL_MAX_FACTOR', '8.0'))
 _BUCKET_CAL_CATS = ('nuts', 'strong', 'medium', 'draw', 'weak_draw', 'air')
 _BUCKET_CAL_IDX = {cat: i for i, cat in enumerate(_BUCKET_CAL_CATS)}
+_RUNTIME_RANGE_CALIBRATION_ENABLED = (
+    _os.environ.get('PF_RUNTIME_RANGE_CALIBRATION', '0').lower()
+    not in ('0', 'false', 'no', '')
+)
+_RUNTIME_RANGE_CALIBRATION_TAG = '20260520_riskgate'
+_RUNTIME_RANGE_CALIBRATION_ROOT = (
+    Path(__file__).resolve().parents[3] / 'data' / 'runtime_calibration'
+)
+_RUNTIME_BUCKET_CAL_CACHE: Dict[str, Optional[Dict[str, tuple[float, Dict[str, float]]]]] = {}
+_RUNTIME_BUCKET_CAL_WARNED: Set[str] = set()
 
 # Safe subset fitted on 2-5 logs and cross-validated on 6 logs with full
 # bucket-distribution rows (2026-05-16). We only keep contexts where validation
@@ -90,6 +102,65 @@ _BUCKET_CALIBRATION: Dict[str, tuple[float, Dict[str, float]]] = {
         {'air': -0.3667, 'medium': 0.7555, 'nuts': -0.3807},
     ),
 }
+
+
+def _bb_key(big_blind: Optional[float]) -> str:
+    bb = float(big_blind or 0.0)
+    rounded = round(bb)
+    if abs(bb - rounded) < 1e-6:
+        bb_int = int(rounded)
+        if bb_int >= 1000 and bb_int % 1000 == 0:
+            return f'bb_{bb_int // 1000}k'
+        return f'bb_{bb_int}'
+    return 'bb_' + str(bb).replace('.', '_')
+
+
+def _load_runtime_bucket_calibration(
+    big_blind: Optional[float],
+) -> Optional[Dict[str, tuple[float, Dict[str, float]]]]:
+    if not _RUNTIME_RANGE_CALIBRATION_ENABLED:
+        return None
+    key = _bb_key(big_blind)
+    if key in _RUNTIME_BUCKET_CAL_CACHE:
+        return _RUNTIME_BUCKET_CAL_CACHE[key]
+
+    path = (
+        _RUNTIME_RANGE_CALIBRATION_ROOT
+        / key
+        / f'runtime_bucket_params_{_RUNTIME_RANGE_CALIBRATION_TAG}.json'
+    )
+    if not path.exists():
+        if key not in _RUNTIME_BUCKET_CAL_WARNED:
+            log.warning('runtime bucket calibration not found for %s: %s', key, path)
+            _RUNTIME_BUCKET_CAL_WARNED.add(key)
+        _RUNTIME_BUCKET_CAL_CACHE[key] = None
+        return None
+
+    try:
+        raw = json.loads(path.read_text(encoding='utf-8'))
+        parsed: Dict[str, tuple[float, Dict[str, float]]] = {}
+        for context_key, params in (raw or {}).items():
+            theta_raw = params.get('theta', {}) or {}
+            parsed[str(context_key)] = (
+                float(params.get('gamma', 1.0)),
+                {
+                    cat: float(v)
+                    for cat, v in theta_raw.items()
+                    if cat in _BUCKET_CAL_IDX
+                },
+            )
+        _RUNTIME_BUCKET_CAL_CACHE[key] = parsed
+        log.info(
+            'runtime bucket calibration loaded for %s: %s contexts from %s',
+            key,
+            len(parsed),
+            path,
+        )
+        return parsed
+    except Exception:
+        log.exception('runtime bucket calibration load failed for %s: %s', key, path)
+        _RUNTIME_BUCKET_CAL_CACHE[key] = None
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +346,7 @@ class BayesianRangeTracker:
     def __init__(self, action_model: ActionModel):
         self.action_model = action_model
         self._weights: Dict[int, np.ndarray] = {}  # player_id → w[1326]
+        self._big_blind: Optional[float] = None
         self._known_cards: Set[int] = set()        # my hole cards (set once per hand)
         # Per-hand folded set. Used to exclude folded villains from the
         # multi-way active set passed to the calibration hook. Cleared in
@@ -300,6 +372,9 @@ class BayesianRangeTracker:
         # Review 01_bayesian_tracker §2.3 + §4.8: 50%+ CPU saving expected.
         self._cat_cache_key: Optional[tuple] = None
         self._cat_cache: Optional[List[str]] = None
+
+    def set_big_blind(self, big_blind: float) -> None:
+        self._big_blind = float(big_blind or 0.0)
 
     def set_known_cards(self, cards: List[Card]) -> None:
         """Call once per hand with bot's hole cards."""
@@ -337,7 +412,9 @@ class BayesianRangeTracker:
             return
         if not board or len(board) < 3:
             return
-        params = _BUCKET_CALIBRATION.get(f'{street} {trigger}')
+        context_key = f'{street} {trigger}'
+        runtime_params = _load_runtime_bucket_calibration(self._big_blind) or {}
+        params = runtime_params.get(context_key) or _BUCKET_CALIBRATION.get(context_key)
         if params is None:
             return
         w = self._weights.get(player_id)

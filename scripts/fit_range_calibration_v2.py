@@ -26,6 +26,12 @@ from typing import Any, Iterable, Optional
 
 import numpy as np
 
+from scripts.range_calibration_meta import (
+    filter_rows_by_meta,
+    meta_summary,
+    parse_flag_filters,
+)
+
 
 CAT_ORDER = ("nuts", "strong", "medium", "draw", "weak_draw", "air")
 CAT_IDX = {cat: idx for idx, cat in enumerate(CAT_ORDER)}
@@ -198,6 +204,8 @@ def _bucket_metrics(
             "n": 0, "nll": 0.0, "actual_bucket_avg_pct": 0.0,
             "under_10_pct": 0.0, "top1_pct": 0.0,
             "strong_nuts_under_20_pct": 0.0,
+            "strong_nuts_combo_under_20_pct": 0.0,
+            "strong_nuts_combo_avg_pct": 0.0,
         }
     y = np.array([_label_idx(r) for r in rows], dtype=np.int64)
     probs = []
@@ -213,8 +221,15 @@ def _bucket_metrics(
     ], dtype=bool)
     if bool(strong_nuts_mask.any()):
         strong_nuts_under = float(np.mean(py[strong_nuts_mask] < 0.20) * 100.0)
+        strong_nuts_combo = q[:, CAT_IDX["strong"]] + q[:, CAT_IDX["nuts"]]
+        strong_nuts_combo_under = float(
+            np.mean(strong_nuts_combo[strong_nuts_mask] < 0.20) * 100.0
+        )
+        strong_nuts_combo_avg = float(np.mean(strong_nuts_combo[strong_nuts_mask]) * 100.0)
     else:
         strong_nuts_under = 0.0
+        strong_nuts_combo_under = 0.0
+        strong_nuts_combo_avg = 0.0
     return {
         "n": len(rows),
         "nll": round(float(-np.mean(np.log(np.clip(py, EPS, 1.0)))), 5),
@@ -222,6 +237,8 @@ def _bucket_metrics(
         "under_10_pct": round(float(np.mean(py < 0.10) * 100.0), 2),
         "top1_pct": round(float(np.mean(np.argmax(q, axis=1) == y) * 100.0), 2),
         "strong_nuts_under_20_pct": round(strong_nuts_under, 2),
+        "strong_nuts_combo_under_20_pct": round(strong_nuts_combo_under, 2),
+        "strong_nuts_combo_avg_pct": round(strong_nuts_combo_avg, 2),
     }
 
 
@@ -288,6 +305,8 @@ def fit_bucket(
     l2_theta: float,
     l2_gamma: float,
     min_nll_gain: float,
+    max_strong_nuts_under_worsen_pp: float,
+    max_strong_nuts_combo_under_worsen_pp: float,
 ) -> dict[str, Any]:
     train_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     val_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -325,6 +344,19 @@ def fit_bucket(
         base_val = _bucket_metrics(val, None, context_level=context_level)
         fit_val = _bucket_metrics(val, {key: params}, context_level=context_level)
         val_gain = float(base_val["nll"] - fit_val["nll"])
+        strong_nuts_under_delta = (
+            float(fit_val["strong_nuts_under_20_pct"])
+            - float(base_val["strong_nuts_under_20_pct"])
+        )
+        strong_nuts_combo_under_delta = (
+            float(fit_val["strong_nuts_combo_under_20_pct"])
+            - float(base_val["strong_nuts_combo_under_20_pct"])
+        )
+        risk_gate_ok = (
+            strong_nuts_under_delta <= max_strong_nuts_under_worsen_pp
+            and strong_nuts_combo_under_delta <= max_strong_nuts_combo_under_worsen_pp
+        )
+        nll_gate_ok = val_gain >= min_nll_gain
         item = {
             "context": key,
             **params,
@@ -333,9 +365,29 @@ def fit_bucket(
             "val_base": base_val,
             "val_fit": fit_val,
             "val_nll_gain": round(val_gain, 5),
+            "val_strong_nuts_under_20_delta_pp": round(strong_nuts_under_delta, 2),
+            "val_strong_nuts_combo_under_20_delta_pp": round(
+                strong_nuts_combo_under_delta, 2
+            ),
+            "accepted": bool(nll_gate_ok and risk_gate_ok),
+            "reject_reasons": [
+                reason
+                for reason, failed in (
+                    ("nll_gain", not nll_gate_ok),
+                    (
+                        "strong_nuts_under_20",
+                        strong_nuts_under_delta > max_strong_nuts_under_worsen_pp,
+                    ),
+                    (
+                        "strong_nuts_combo_under_20",
+                        strong_nuts_combo_under_delta > max_strong_nuts_combo_under_worsen_pp,
+                    ),
+                )
+                if failed
+            ],
         }
         contexts.append(item)
-        if val_gain >= min_nll_gain:
+        if item["accepted"]:
             accepted[key] = params
 
     contexts.sort(key=lambda x: (x["val_nll_gain"], x["val_base"]["n"]), reverse=True)
@@ -575,7 +627,10 @@ def _print_summary(report: dict[str, Any]) -> None:
             f"  {item['context']:<45} "
             f"nll_gain={item['val_nll_gain']:+.4f} "
             f"top1 {item['val_base']['top1_pct']:.1f}->{item['val_fit']['top1_pct']:.1f} "
-            f"under10 {item['val_base']['under_10_pct']:.1f}->{item['val_fit']['under_10_pct']:.1f}"
+            f"under10 {item['val_base']['under_10_pct']:.1f}->{item['val_fit']['under_10_pct']:.1f} "
+            f"SN<20 {item['val_strong_nuts_under_20_delta_pp']:+.1f}pp "
+            f"SNcombo<20 {item['val_strong_nuts_combo_under_20_delta_pp']:+.1f}pp "
+            f"{'ok' if item.get('accepted') else 'reject:' + ','.join(item.get('reject_reasons') or [])}"
         )
     print()
     print("=== Equity ===")
@@ -640,16 +695,43 @@ def main() -> None:
     ap.add_argument("--bucket-l2-theta", type=float, default=0.02)
     ap.add_argument("--bucket-l2-gamma", type=float, default=0.12)
     ap.add_argument("--min-bucket-nll-gain", type=float, default=0.015)
+    ap.add_argument("--max-bucket-strong-nuts-under-worsen-pp", type=float, default=0.0)
+    ap.add_argument("--max-bucket-strong-nuts-combo-under-worsen-pp",
+                    type=float, default=0.0)
     ap.add_argument("--min-equity-mae-gain-pp", type=float, default=1.0)
     ap.add_argument("--min-relative-mae-gain-pp", type=float, default=1.0)
     ap.add_argument("--equity-shrink-k", type=float, default=80.0)
     ap.add_argument("--relative-shrink-k", type=float, default=35.0)
     ap.add_argument("--skip-river-relative", action="store_true")
+    ap.add_argument("--train-strategy-version")
+    ap.add_argument("--val-strategy-version")
+    ap.add_argument("--test-strategy-version")
+    ap.add_argument("--train-experiment-flag", action="append", default=[])
+    ap.add_argument("--val-experiment-flag", action="append", default=[])
+    ap.add_argument("--test-experiment-flag", action="append", default=[])
     args = ap.parse_args()
 
-    train_rows = _load_rows(args.train_rows)
-    val_rows = _load_rows(args.val_rows)
-    test_rows = _load_rows(args.test_rows) if args.test_rows else []
+    raw_train_rows = _load_rows(args.train_rows)
+    raw_val_rows = _load_rows(args.val_rows)
+    raw_test_rows = _load_rows(args.test_rows) if args.test_rows else []
+    train_flag_filter = parse_flag_filters(args.train_experiment_flag)
+    val_flag_filter = parse_flag_filters(args.val_experiment_flag)
+    test_flag_filter = parse_flag_filters(args.test_experiment_flag)
+    train_rows = filter_rows_by_meta(
+        raw_train_rows,
+        strategy_version=args.train_strategy_version,
+        experiment_flags=train_flag_filter,
+    )
+    val_rows = filter_rows_by_meta(
+        raw_val_rows,
+        strategy_version=args.val_strategy_version,
+        experiment_flags=val_flag_filter,
+    )
+    test_rows = filter_rows_by_meta(
+        raw_test_rows,
+        strategy_version=args.test_strategy_version,
+        experiment_flags=test_flag_filter,
+    )
 
     bucket = fit_bucket(
         train_rows,
@@ -662,6 +744,10 @@ def main() -> None:
         l2_theta=args.bucket_l2_theta,
         l2_gamma=args.bucket_l2_gamma,
         min_nll_gain=args.min_bucket_nll_gain,
+        max_strong_nuts_under_worsen_pp=args.max_bucket_strong_nuts_under_worsen_pp,
+        max_strong_nuts_combo_under_worsen_pp=(
+            args.max_bucket_strong_nuts_combo_under_worsen_pp
+        ),
     )
     current = _current_bucket_params()
     if args.bucket_context == "simple" and current:
@@ -698,7 +784,31 @@ def main() -> None:
             "train_rows": len(train_rows),
             "val_rows": len(val_rows),
             "test_rows": len(test_rows),
+            "row_filters": {
+                "train_strategy_version": args.train_strategy_version,
+                "val_strategy_version": args.val_strategy_version,
+                "test_strategy_version": args.test_strategy_version,
+                "train_experiment_flags": train_flag_filter,
+                "val_experiment_flags": val_flag_filter,
+                "test_experiment_flags": test_flag_filter,
+            },
+            "data_meta_before_filter": {
+                "train": meta_summary(raw_train_rows),
+                "val": meta_summary(raw_val_rows),
+                "test": meta_summary(raw_test_rows),
+            },
+            "data_meta": {
+                "train": meta_summary(train_rows),
+                "val": meta_summary(val_rows),
+                "test": meta_summary(test_rows),
+            },
             "bucket_context": args.bucket_context,
+            "bucket_max_strong_nuts_under_worsen_pp": (
+                args.max_bucket_strong_nuts_under_worsen_pp
+            ),
+            "bucket_max_strong_nuts_combo_under_worsen_pp": (
+                args.max_bucket_strong_nuts_combo_under_worsen_pp
+            ),
             "equity_context": args.equity_context,
             "equity_target": args.equity_target,
             "relative_context": args.relative_context,

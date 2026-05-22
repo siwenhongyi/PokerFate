@@ -35,6 +35,21 @@ class TestAPILifecycle:
         api.deal_hole_cards(["Ac", "Ad"])
         assert len(api._hole_cards) == 2
 
+    def test_new_hand_accepts_external_hand_number(self):
+        api = make_api()
+        api.new_hand(
+            players=[
+                PlayerInfo(0, "PokerFate", 200.0, "BTN"),
+                PlayerInfo(1, "Opponent", 200.0, "BB"),
+            ],
+            dealer_id=0,
+            hand_number=42,
+        )
+        assert api._hand_number == 42
+
+        start_hand(api)
+        assert api._hand_number == 43
+
     def test_hand_over_builds_push_detail(self):
         api = make_api()
         start_hand(api)

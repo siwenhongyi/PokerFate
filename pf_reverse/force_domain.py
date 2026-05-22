@@ -20,6 +20,7 @@ if str(_REPO_ROOT) not in sys.path:
 from pf_intercept.config import PREFERRED_WSS_HOSTS, SERVER_WSS_PORT  # single source of truth
 
 _DISCOVERED_FILE = _REPO_ROOT / "pf_intercept" / "discovered_server.json"
+_ORIGINAL_RESPONSE_FILE = _REPO_ROOT / "data" / "force_domain_original_response.json"
 _TOKEN_FILE = _REPO_ROOT / "data" / "auth_token.txt"
 _IP_PATTERN = re.compile(r"wss?://\d+\.\d+\.\d+\.\d+")
 _PREFERRED_HOSTS = set(PREFERRED_WSS_HOSTS)
@@ -88,6 +89,17 @@ class ForceDomain:
         else:
             print(f"[force_domain] 无满足条件的服务器（需在证书范围内且端口={SERVER_WSS_PORT}），不修改")
             return
+
+        # Save the untouched response just before rewriting the server list.
+        try:
+            _ORIGINAL_RESPONSE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _ORIGINAL_RESPONSE_FILE.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            print(f"[force_domain] 原始响应已写入 {_ORIGINAL_RESPONSE_FILE.name}")
+        except Exception as e:
+            print(f"[force_domain] 原始响应写入失败: {e}")
 
         # Keep preferred domain servers in response (domain hijack mode).
         data["server"]["server"] = domain_servers

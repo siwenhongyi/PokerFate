@@ -20,6 +20,15 @@ from typing import Any, Iterable
 
 import numpy as np
 
+from scripts.range_calibration_meta import (
+    filter_rows_by_meta,
+    limit_rows,
+    meta_summary,
+    parse_flag_filters,
+    row_experiment_profile,
+    row_strategy_version,
+)
+
 
 CAT_ORDER = ("nuts", "strong", "medium", "draw", "weak_draw", "air")
 CAT_IDX = {cat: i for i, cat in enumerate(CAT_ORDER)}
@@ -32,6 +41,8 @@ CAT_FIELDS = (
     "texture",
     "hero_bucket",
     "top_bucket",
+    "strategy_version",
+    "experiment_profile",
 )
 RELATIVE_CAT_FIELDS = (
     "hero_made_subtype",
@@ -154,6 +165,8 @@ def _categorical_values(
         "texture": _board_texture(row),
         "hero_bucket": str(row.get("hero_bucket") or "?"),
         "top_bucket": _top_bucket(row),
+        "strategy_version": row_strategy_version(row),
+        "experiment_profile": row_experiment_profile(row),
     }
     if include_relative:
         board_texture = str(row.get("board_texture") or "") or _board_texture(row)
@@ -710,14 +723,50 @@ def main() -> None:
     ap.add_argument("--skip-bucket", action="store_true")
     ap.add_argument("--skip-equity", action="store_true")
     ap.add_argument("--skip-river-relative", action="store_true")
+    ap.add_argument("--train-strategy-version")
+    ap.add_argument("--val-strategy-version")
+    ap.add_argument("--train-experiment-flag", action="append", default=[])
+    ap.add_argument("--val-experiment-flag", action="append", default=[])
     args = ap.parse_args()
 
-    train_rows = _load_rows(args.train_rows, args.max_train_rows)
-    val_rows = _load_rows(args.val_rows, args.max_val_rows)
+    raw_train_rows = _load_rows(args.train_rows)
+    raw_val_rows = _load_rows(args.val_rows)
+    train_flag_filter = parse_flag_filters(args.train_experiment_flag)
+    val_flag_filter = parse_flag_filters(args.val_experiment_flag)
+    train_rows = limit_rows(
+        filter_rows_by_meta(
+            raw_train_rows,
+            strategy_version=args.train_strategy_version,
+            experiment_flags=train_flag_filter,
+        ),
+        args.max_train_rows,
+    )
+    val_rows = limit_rows(
+        filter_rows_by_meta(
+            raw_val_rows,
+            strategy_version=args.val_strategy_version,
+            experiment_flags=val_flag_filter,
+        ),
+        args.max_val_rows,
+    )
     report: dict[str, Any] = {
         "meta": {
             "train_rows": len(train_rows),
             "val_rows": len(val_rows),
+            "row_filters": {
+                "train_strategy_version": args.train_strategy_version,
+                "val_strategy_version": args.val_strategy_version,
+                "train_experiment_flags": train_flag_filter,
+                "val_experiment_flags": val_flag_filter,
+            },
+            "data_meta_before_filter": {
+                "train": meta_summary(raw_train_rows),
+                "val": meta_summary(raw_val_rows),
+            },
+            "data_meta": {
+                "train": meta_summary(train_rows),
+                "val": meta_summary(val_rows),
+            },
             "rank": args.rank,
             "epochs": args.epochs,
             "batch_size": args.batch_size,

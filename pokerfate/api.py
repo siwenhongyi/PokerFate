@@ -32,7 +32,7 @@ import time
 import traceback
 from collections import Counter
 from dataclasses import dataclass
-from typing import List, Optional, Dict
+from typing import Any, List, Optional, Dict
 from pathlib import Path
 
 _UNSET = object()  # sentinel for log_file default
@@ -56,6 +56,7 @@ from pokerfate.data import init as _init_data
 _init_data()
 
 _DEFAULT_LOG_FILE    = str(Path(__file__).resolve().parent / "logs" / "pokerfate.log")
+_DEFAULT_ROBOT_LOG_FILE = str(Path(__file__).resolve().parent / "logs" / "bot.log")
 _DEFAULT_OPPONENTS   = str(Path(__file__).resolve().parent / "data" / "opponents.json")
 
 _PUSH_STREET_LABELS = {
@@ -75,6 +76,12 @@ _AUTO_COLLECT_HAND_RANKS = {
     HandRank.FOUR_OF_A_KIND: "四条",
     HandRank.STRAIGHT_FLUSH: "同花顺",
     HandRank.ROYAL_FLUSH: "皇家同花顺",
+}
+_RIVER_VALUE_SIZING_PURPOSES = {
+    "thin_value_bet",
+    "thick_value_bet",
+    "monster_value_plan",
+    "overbet_value",
 }
 
 
@@ -207,6 +214,7 @@ class PokerFateAPI:
         equity_iterations: int = 800,
         autosave_path: Optional[str] = _UNSET,
         log_file: Optional[str] = _UNSET,
+        robot_log_file: Optional[str] = _UNSET,
         verbose: bool = False,
         use_range_equity: bool = True,
         enable_showdown_calibration: bool = True,
@@ -246,7 +254,13 @@ class PokerFateAPI:
         self.autosave_path = autosave_path
         if log_file is _UNSET:
             log_file = None if _in_test else _DEFAULT_LOG_FILE
-        self._log = PokerLogger(log_file=log_file, console=True)
+        if robot_log_file is _UNSET:
+            robot_log_file = None if _in_test else _DEFAULT_ROBOT_LOG_FILE
+        self._log = PokerLogger(
+            log_file=log_file,
+            console=True,
+            robot_log_file=robot_log_file,
+        )
         self._default_stack = 100.0 * big_blind  # fallback when stack is unknown
 
         self._bot = PokerBot(
@@ -254,6 +268,7 @@ class PokerFateAPI:
             equity_iterations=equity_iterations,
             use_range_equity=use_range_equity,
         )
+        self._bot._range_tracker.set_big_blind(self.big_blind)
 
         # Auto-load opponent data (+ embedded showdown/learner data) from disk on startup
         if autosave_path:
@@ -305,6 +320,7 @@ class PokerFateAPI:
         self._street_contribs: Dict[int, float] = {}
         self._last_hand_push_detail: str = ""
         self._last_auto_collect_reasons: list[str] = []
+        self._pending_river_value_sizing_rows: list[dict[str, Any]] = []
         self._runtime_calibration_recorder = None
 
         # ── 2026-04-23: Showdown calibration ──
@@ -341,6 +357,7 @@ class PokerFateAPI:
         self.big_blind = float(big_blind)
         self.small_blind = float(small_blind)
         self._default_stack = 100.0 * self.big_blind
+        self._bot._range_tracker.set_big_blind(self.big_blind)
 
     # ------------------------------------------------------------------
     # Hand lifecycle events
@@ -350,6 +367,7 @@ class PokerFateAPI:
         self,
         players: List[PlayerInfo],
         dealer_id: int,
+        hand_number: Optional[int] = None,
     ) -> None:
         """Call at the start of each new hand.
 
@@ -362,6 +380,9 @@ class PokerFateAPI:
             a conservative default for brand-new opponents.
         dealer_id : int
             player_id of the dealer/button.
+        hand_number : int, optional
+            External monotonically increasing hand number. When omitted,
+            the API keeps its existing local counter behavior.
 
         Notes
         -----
@@ -370,13 +391,17 @@ class PokerFateAPI:
         - If a previously busted player is replaced by a new player_id,
           the old model is automatically abandoned (keyed by player_id).
         """
-        self._hand_number += 1
+        if hand_number is None:
+            self._hand_number += 1
+        else:
+            self._hand_number = int(hand_number)
         self._dealer_id = dealer_id
         self._hole_cards = []
         self._board = []
         self._action_history = []
         self._last_hand_push_detail = ""
         self._last_auto_collect_reasons = []
+        self._pending_river_value_sizing_rows = []
         self._decision_index = 0
         self._my_stack_start: float = 0.0  # set after resolving stacks below
 
@@ -616,6 +641,12 @@ class PokerFateAPI:
             opp_position=opp_pos,
             is_raise_over=is_raise_over,
         )
+        self._record_river_value_sizing_response(
+            event=event,
+            action_name=action_name,
+            amount_added=amount_added,
+            total_bet_after=total_bet_after,
+        )
 
         pobj = self._get_player(event.player_id)
         name = pobj.name if pobj else str(event.player_id)
@@ -822,6 +853,8 @@ class PokerFateAPI:
         # （不影响决策，决策内部已根据短码 effective pot_odds 自行判断；
         # 仅修日志误导：原来显示 "跟注 825000" 但 hero 只有 100000，实际 all-in）
         effective_to_call = min(effective_to_call, float(my_stack))
+        amount_added = 0.0
+        total_bet_after = float(my_current_bet_this_street)
         if my_live:
             if decision.action == 'raise':
                 total_bet_after = max(
@@ -864,8 +897,257 @@ class PokerFateAPI:
                 .get("street_relative", {})
             ),
         )
-
+        self._maybe_record_river_value_sizing_decision(
+            street_key=street_key,
+            decision=decision,
+            pot=pot,
+            current_bet=current_bet,
+            effective_to_call=effective_to_call,
+            my_stack=my_stack,
+            my_current_bet_this_street=my_current_bet_this_street,
+            amount_added=amount_added,
+            total_bet_after=total_bet_after,
+        )
         return decision
+
+    def _maybe_record_river_value_sizing_decision(
+        self,
+        *,
+        street_key: str,
+        decision: BotDecision,
+        pot: float,
+        current_bet: float,
+        effective_to_call: float,
+        my_stack: float,
+        my_current_bet_this_street: float,
+        amount_added: float,
+        total_bet_after: float,
+    ) -> None:
+        if self._runtime_calibration_recorder is None:
+            return
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return
+        if street_key != "river" or decision.action != "raise":
+            return
+        # This sizing dataset is for proactive river value bets. Facing-bet
+        # raises answer a different question: raise/call/fold defense.
+        if effective_to_call > 1e-9 or current_bet > my_current_bet_this_street + 1e-9:
+            return
+        diag = getattr(self._bot, "last_decision_diagnostics", {}) or {}
+        purpose_raw = str(diag.get("final_purpose") or "")
+        purpose = purpose_raw.split("→", 1)[0].strip()
+        if purpose not in _RIVER_VALUE_SIZING_PURPOSES:
+            return
+
+        primary_opp_id = int(diag.get("primary_opp_id") or -1)
+        row = {
+            "street": "river",
+            "decision_index": int(getattr(self, "_decision_index", 0) or 0),
+            "hero_action": decision.action,
+            "purpose": purpose,
+            "purpose_raw": purpose_raw,
+            "is_value_purpose": True,
+            "amount_added": float(amount_added or 0.0),
+            "total_bet_after": float(total_bet_after or 0.0),
+            "bet_frac_pot": (
+                float(amount_added or 0.0) / float(pot)
+                if float(pot or 0.0) > 0 else 0.0
+            ),
+            "engine_frac": float(diag.get("frac") or 0.0),
+            "pot_before": float(pot or 0.0),
+            "stack_before": float(my_stack or 0.0),
+            "my_current_bet_before": float(my_current_bet_this_street or 0.0),
+            "hole_cards": [str(c) for c in self._hole_cards],
+            "board": [str(c) for c in self._board],
+            "hero_bucket": str(diag.get("hero_bucket") or ""),
+            "hero_made_subtype": str(diag.get("hero_made_subtype") or ""),
+            "hero_hand_rank": str(diag.get("hero_hand_rank") or ""),
+            "equity_range": float(diag.get("equity_range") or 0.0),
+            "equity_mc": float(diag.get("equity_mc") or 0.0),
+            "pot_odds": float(diag.get("pot_odds") or 0.0),
+            "spr": float(diag.get("spr") or 0.0),
+            "decision_reason": str(diag.get("decision_reason") or ""),
+            "purpose_candidates": list(diag.get("purpose_candidates") or []),
+            "villain_bucket_dist": dict(diag.get("villain_bucket_dist") or {}),
+            "villain_vs_hero_dist": dict(diag.get("villain_vs_hero_dist") or {}),
+            "river_relative": dict(diag.get("river_relative") or {}),
+            "river_relative_calibration": dict(diag.get("river_relative_calibration") or {}),
+            "primary_opp_id": primary_opp_id,
+            "primary_opp_name": self._session_names.get(primary_opp_id, str(primary_opp_id))
+                                if primary_opp_id >= 0 else "",
+            "primary_opp_stats": self._opponent_stats_snapshot(primary_opp_id),
+            "active_opponents": [
+                {
+                    "player_id": p.player_id,
+                    "name": self._session_names.get(p.player_id, p.name),
+                    "stack": float(p.stack or 0.0),
+                }
+                for p in self._players
+                if p.player_id != self.my_player_id and not p.is_folded
+            ],
+            "responses": [],
+        }
+        self._pending_river_value_sizing_rows.append(row)
+
+    def _record_river_value_sizing_response(
+        self,
+        *,
+        event: ActionEvent,
+        action_name: str,
+        amount_added: float,
+        total_bet_after: float,
+    ) -> None:
+        if not self._pending_river_value_sizing_rows:
+            return
+        if event.street.lower() != "river":
+            return
+        response = {
+            "player_id": int(event.player_id),
+            "name": self._session_names.get(event.player_id, str(event.player_id)),
+            "action": action_name,
+            "amount_added": float(amount_added or 0.0),
+            "total_bet_after": float(total_bet_after or 0.0),
+        }
+        for row in self._pending_river_value_sizing_rows:
+            if row.get("finalized"):
+                continue
+            row.setdefault("responses", []).append(dict(response))
+
+    def _flush_river_value_sizing_rows(
+        self,
+        *,
+        winner_ids: List[int],
+        winner_names: List[str],
+        pot: float,
+        my_delta: float,
+        final_stacks: Dict[int, float],
+        showdown_hands: Dict[int, List[str]],
+        hand_combos: Dict[str, str],
+    ) -> None:
+        if not self._pending_river_value_sizing_rows:
+            return
+        try:
+            for row in self._pending_river_value_sizing_rows:
+                if row.get("finalized"):
+                    continue
+                responses = list(row.get("responses") or [])
+                actions = [str(r.get("action") or "") for r in responses]
+                if "raise" in actions:
+                    response_kind = "raised"
+                elif "call" in actions:
+                    response_kind = "called"
+                elif responses:
+                    response_kind = "fold_all"
+                else:
+                    response_kind = "no_response"
+                paid_amount = sum(
+                    float(r.get("amount_added") or 0.0)
+                    for r in responses
+                    if str(r.get("action") or "") in {"call", "raise"}
+                )
+                row.update({
+                    "finalized": True,
+                    "response_kind": response_kind,
+                    "paid": response_kind in {"called", "raised"},
+                    "paid_amount": paid_amount,
+                    "folded_by": [
+                        r.get("name", "")
+                        for r in responses
+                        if str(r.get("action") or "") == "fold"
+                    ],
+                    "called_by": [
+                        r.get("name", "")
+                        for r in responses
+                        if str(r.get("action") or "") == "call"
+                    ],
+                    "raised_by": [
+                        r.get("name", "")
+                        for r in responses
+                        if str(r.get("action") or "") == "raise"
+                    ],
+                    "winner_ids": [int(x) for x in winner_ids],
+                    "winner_names": list(winner_names),
+                    "hero_won": self.my_player_id in set(winner_ids),
+                    "pot_final": float(pot or 0.0),
+                    "my_delta": float(my_delta or 0.0),
+                    "my_delta_bb": (
+                        float(my_delta or 0.0) / float(self.big_blind)
+                        if float(self.big_blind or 0.0) > 0 else 0.0
+                    ),
+                    "final_stack": float((final_stacks or {}).get(self.my_player_id, 0.0) or 0.0),
+                    "showdown_hands": {
+                        self._session_names.get(pid, str(pid)): [str(c) for c in cards]
+                        for pid, cards in (showdown_hands or {}).items()
+                    },
+                    "hand_combos": dict(hand_combos or {}),
+                    "actual_relation_by_player": self._actual_relations_vs_showdown(
+                        showdown_hands or {}
+                    ),
+                })
+                if self._runtime_calibration_recorder is not None:
+                    self._runtime_calibration_recorder.write_river_value_sizing(
+                        row,
+                        big_blind=self.big_blind,
+                        hand_id=self._hand_number,
+                        source="runtime",
+                    )
+        except Exception:
+            traceback.print_exc()
+        finally:
+            self._pending_river_value_sizing_rows = []
+
+    def _actual_relations_vs_showdown(
+        self,
+        showdown_hands: Dict[int, List[str]],
+    ) -> dict[str, str]:
+        if not showdown_hands or len(self._board) < 5 or len(self._hole_cards) < 2:
+            return {}
+        try:
+            hero_score = HandEvaluator.evaluate(list(self._hole_cards) + list(self._board))
+        except Exception:
+            return {}
+        out: dict[str, str] = {}
+        for pid, cards in showdown_hands.items():
+            if pid == self.my_player_id:
+                continue
+            try:
+                hole = [
+                    c if isinstance(c, Card) else Card.from_str(str(c))
+                    for c in list(cards)[:2]
+                ]
+                villain_score = HandEvaluator.evaluate(hole + list(self._board))
+                cmp = HandEvaluator.compare(hero_score, villain_score)
+                relation = "win" if cmp > 0 else "loss" if cmp < 0 else "tie"
+            except Exception:
+                relation = "unknown"
+            out[self._session_names.get(pid, str(pid))] = relation
+        return out
+
+    def _opponent_stats_snapshot(self, player_id: int) -> dict[str, Any]:
+        if player_id is None or player_id < 0:
+            return {}
+        try:
+            stats = self._bot.opponent_model.get(player_id)
+            return {
+                "hands_seen": int(stats.hands_seen),
+                "vpip": float(stats.vpip),
+                "pfr": float(stats.pfr),
+                "three_bet_pct": float(stats.three_bet_pct),
+                "fold_to_3bet": float(stats.fold_to_3bet),
+                "fold_to_cbet": float(stats.fold_to_cbet),
+                "af": float(stats.aggression_factor),
+                "wtsd": float(stats.wtsd),
+                "wmsd": float(stats.wmsd),
+                "bluff_win_rate": float(stats.bluff_win_rate),
+                "river_fold_rate": float(stats.river_fold_rate),
+                "river_bet_frequency": float(stats.river_bet_frequency),
+                "river_action_count": int(stats.river_action_count),
+                "pwi": float(stats.pwi()),
+                "player_type": stats.player_type(),
+            }
+        except Exception:
+            traceback.print_exc()
+            return {}
 
     def _next_decision_seed(
         self,
@@ -947,6 +1229,8 @@ class PokerFateAPI:
         showdown_hands: Optional[Dict[int, List[str]]] = None,
         winner_hand_types: Optional[Dict[int, int]] = None,
         my_profit_delta: Optional[float] = None,
+        robot_player_ids: Optional[List[int] | set[int]] = None,
+        robot_player_uids: Optional[Dict[int, str]] = None,
     ) -> None:
         """Notify the bot that the hand is over.
 
@@ -972,6 +1256,12 @@ class PokerFateAPI:
             because stack diff is wrong on profit_lock leave-reenter
             cycles (stack drops to 100 BB re-buy while the hand itself
             may have been a normal win/loss/chop).
+        robot_player_ids : list/set, optional
+            Player IDs known to be robots in this hand. If any of them has
+            revealed cards, the complete formatted hand log is copied to
+            pokerfate/logs/bot.log after all end-of-hand logs are emitted.
+        robot_player_uids : dict, optional
+            Optional player_id → uid mapping for the bot.log header.
         """
         if final_stacks:
             for pid, stack in final_stacks.items():
@@ -1003,6 +1293,18 @@ class PokerFateAPI:
             for pid, cards in showdown_hands.items():
                 name = self._session_names.get(pid, str(pid))
                 sd_by_name[name] = [str(c) for c in cards]
+        robot_ids = {int(pid) for pid in (robot_player_ids or [])}
+        robot_showdown_players = []
+        if showdown_hands and robot_ids:
+            robot_uids = robot_player_uids or {}
+            for pid in sorted(set(showdown_hands) & robot_ids):
+                robot_showdown_players.append({
+                    "player_id": pid,
+                    "seat": pid,
+                    "uid": robot_uids.get(pid, ""),
+                    "name": self._session_names.get(pid, str(pid)),
+                    "cards": [str(c) for c in showdown_hands.get(pid, [])],
+                })
 
         def _fmt_hole(cards) -> str:
             """底牌格式化（带花色符号），用于 fallback 展示。"""
@@ -1087,6 +1389,16 @@ class PokerFateAPI:
             showdown_hands=sd_by_name or None,
             hand_combos=hand_combos or None,
             my_combo=my_combo,
+        )
+        self._log.mark_robot_showdown_hand(robot_showdown_players)
+        self._flush_river_value_sizing_rows(
+            winner_ids=winner_ids,
+            winner_names=winner_names,
+            pot=pot,
+            my_delta=my_delta,
+            final_stacks=final_stacks or {},
+            showdown_hands=showdown_hands or {},
+            hand_combos=hand_combos or {},
         )
 
         # Track showdown stats (WTSD / WMSD)
@@ -1251,6 +1563,8 @@ class PokerFateAPI:
                         self._log.showdown_calibration(
                             player_name=name, cards=card_strs, streets=street_entries,
                         )
+
+        self._log.flush_robot_hand_if_needed()
 
         # Auto-save opponent model + showdown/learner data into one file
         if self.autosave_path:
@@ -1538,7 +1852,7 @@ class PokerFateAPI:
         # ── 新信号：我方主动决策时的手牌质量信号 ──
         # 原本用 bluff_freq=='none' 离散判断；改为 bluff_ag_scale 连续阈值。
         if s.showdown_count >= 8:
-            if adj.get("value_sizing_scale", 1.0) >= 1.10 and adj.get("bluff_ag_scale", 0.55) <= 0.18:
+            if adj.get("bluff_ag_scale", 0.55) <= 0.18 and s.wtsd >= 0.35:
                 self._log.opponent_pattern(
                     name, "calling_station",
                     s.wmsd, f"wtsd={s.wtsd:.0%} thin_value+no_bluff")

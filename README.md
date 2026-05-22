@@ -135,7 +135,7 @@ request_action()
 在 `C:\Windows\System32\drivers\etc\hosts` 添加：
 
 ```
-127.0.0.1  zga-entry.poker-fate.net
+127.0.0.1  ga-foreign.poker-fate.com
 ```
 
 **Android**（DNS 模式）：

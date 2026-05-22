@@ -3,7 +3,7 @@ from pathlib import Path
 
 # ── Real game server ─────────────────────────────────────────────────────────
 # Fill in the actual hostname from your mitmproxy capture.
-SERVER_HOST      = "zga-entry.poker-fate.net"
+SERVER_HOST      = "ga-foreign.poker-fate.com"
 SERVER_WSS_PORT  = 9012
 EXTERNAL_DNS_SERVERS = [
     "223.5.5.5",   # AliDNS (CN)
@@ -40,8 +40,6 @@ SERVER_KEY  = CERTS_DIR / "server.key"
 #   gen_cert.py (SAN), proxy.py (preferred host filter), force_domain.py.
 # Keep aligned with the login response server list.
 PREFERRED_WSS_HOSTS: list[str] = [
-    "zga-entry.poker-fate.net",
-    "zga-entry.allinmoe.com",
     "ga-foreign.poker-fate.com",
 ]
 CERT_ALT_HOSTS = PREFERRED_WSS_HOSTS  # alias used by gen_cert.py

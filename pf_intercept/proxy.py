@@ -36,6 +36,7 @@ from pf_intercept.config import (
 )
 from pf_intercept.framing import Frame, FrameBuffer, encode_frame
 from pf_intercept.bot import BotBridge
+from pf_intercept.robot_tracker import RobotTracker
 from pf_entertainment import EntertainmentRuntime
 from pf_notify import notify, set_bark_key, load_bark_key_file
 
@@ -112,6 +113,7 @@ from pf_intercept import codec, config
 # ── Bot singleton (constructed in main() with CLI options) ────────────────────
 _bot: BotBridge | None = None
 _entertainment: EntertainmentRuntime | None = None
+_robot_tracker = RobotTracker(_DATA_DIR)
 
 # Set from pb.SelfUserInfoRSP.brief.uid so pb.EnterRoomRSP can patch table_status.seat[].player
 _spoof_account_uid: str | None = None
@@ -148,9 +150,20 @@ async def _close_ws_quietly(ws, *, code: int = 1001, reason: str = "") -> None:
         log.debug("[WSS] close ignored: %s", exc)
 
 
+def _peer_is_loopback(peer) -> bool:
+    if not peer:
+        return False
+    host = peer[0] if isinstance(peer, tuple) and peer else str(peer)
+    return host == "::1" or host.startswith("127.")
+
+
 def _dns_query_a(hostname: str, nameserver: str) -> list[str]:
     """Direct UDP DNS A-record query bypassing OS resolver / hosts file."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    except OSError as exc:
+        log.warning("[DNS] socket create failed for %s via %s: %s", hostname, nameserver, exc)
+        return []
     sock.settimeout(3.0)
     ips: list[str] = []
     try:
@@ -528,6 +541,7 @@ async def _s2c_analysis_worker(
             if msg is None:
                 log.warning("[S→C] %s  (decode failed — run gen_pb2.sh first)", frame.type_name)
                 continue
+            _robot_tracker.observe(frame.type_name, msg, room_id=frame.room_id)
             log.info("[S→C] %s  %s", frame.type_name, msg)
             result = bridge.handle(frame.type_name, msg)
             if result is not None:
@@ -803,6 +817,15 @@ async def _handle_passthrough(
     real_port: int,
 ) -> None:
     peer = client_writer.get_extra_info("peername")
+    if _peer_is_loopback(peer):
+        tcp_log.info("[TCP] drop loopback passthrough from %s on port %d", peer, real_port)
+        client_writer.close()
+        try:
+            await client_writer.wait_closed()
+        except Exception:
+            pass
+        return
+
     initial = b""
     try:
         initial = await asyncio.wait_for(client_reader.read(4096), timeout=0.2)

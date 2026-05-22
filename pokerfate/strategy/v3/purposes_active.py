@@ -98,6 +98,12 @@ _RIVER_FRAGILE_VALUE_MAX_LOSS = float(
 _RIVER_FRAGILE_VALUE_MIN_REL_EQ = float(
     _os.environ.get('PF_RIVER_FRAGILE_VALUE_MIN_REL_EQ', '0.72')
 )
+_RIVER_MEDIUM_JAM_MIN_WIN = 0.75
+_RIVER_MEDIUM_JAM_MAX_LOSS = 0.20
+_RIVER_MEDIUM_DANGER_JAM_MIN_WIN = 0.82
+_RIVER_MEDIUM_DANGER_JAM_MAX_LOSS = 0.15
+_RIVER_MEDIUM_PROBE_MIN_REL_EQ = 0.55
+_RIVER_MEDIUM_PROBE_MIN_WIN_GAP = 0.10
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +258,14 @@ def _fragile_underpair_after_resistance(ctx: DecisionCtx) -> bool:
     return ctx.hero_made_subtype in {'pocket_pair', 'board_pair_pocket_underpair'}
 
 
+def _high_card_underpair(ctx: DecisionCtx) -> bool:
+    if ctx.pocket_pair_rank <= 0 or ctx.board_sig.high_card_rank <= ctx.pocket_pair_rank:
+        return False
+    if ctx.hero_hand_rank not in {'one_pair', 'two_pair'}:
+        return False
+    return ctx.hero_made_subtype in {'pocket_pair', 'board_pair_pocket_underpair'}
+
+
 def _river_fragile_relative_value_block(ctx: DecisionCtx, eq_need: float) -> bool:
     """River board-pair value needs enough worse-hand mass, not just raw equity."""
     if ctx.street != 'river' or not ctx.villain_vs_hero_dist:
@@ -346,12 +360,220 @@ def _barrel_resistance_eq_add(ctx: DecisionCtx) -> float:
     return add
 
 
-def _value_jam_eq_need(ctx: DecisionCtx) -> float:
+def _strong_draw_profile(ctx: DecisionCtx) -> bool:
+    d = ctx.draw
+    return bool(d.flush_draw or d.oesd)
+
+
+def _realizable_no_fe_draw(ctx: DecisionCtx) -> bool:
+    """Draws worth betting when villain is unlikely to fold.
+
+    Against calling stations, fold equity is not the income source. Keep firing
+    only with draws that can improve cleanly enough when called; gutter/overcard
+    hands are allowed only as a flop one-street pressure spot with enough equity.
+    """
+    d = ctx.draw
+    if _strong_draw_profile(ctx):
+        return ctx.equity_range >= 0.35
+    return (
+        ctx.street == 'flop'
+        and d.gutshot
+        and d.overcards
+        and ctx.num_opponents == 1
+        and ctx.equity_range >= 0.38
+    )
+
+
+def _no_fe_value_pressure(ctx: DecisionCtx) -> bool:
+    """Sticky/no-fold opponent: shift chips from bluffs into value/protection."""
+    if not no_fold_equity(ctx):
+        return False
+    if ctx.hero_bucket not in ('medium', 'strong', 'nuts'):
+        return False
+    if ctx.hero_bucket == 'nuts':
+        return True
+    if _fragile_underpair_after_resistance(ctx):
+        return False
+
+    hero_wins, _ties, villain_wins, rel_eq = _relative_hero_wins(ctx)
+    if ctx.villain_vs_hero_dist:
+        if _dangerous_non_nut_value_spot(ctx):
+            return rel_eq >= 0.62 and hero_wins >= 0.55 and villain_wins <= 0.35
+        return rel_eq >= 0.58 and hero_wins >= 0.50 and villain_wins <= 0.42
+
+    if _dangerous_non_nut_value_spot(ctx):
+        return ctx.equity_range >= 0.70 and _villain_nuts(ctx) <= 0.18
+    if ctx.hero_bucket == 'medium':
+        return (
+            ctx.equity_range >= 0.55
+            and (
+                _paying_bucket_mass(ctx) >= 0.30
+                or _draw_pressure_mass(ctx) >= 0.12
+                or ctx.street in ('flop', 'turn')
+            )
+        )
+    return ctx.equity_range >= 0.58
+
+
+def _no_fe_value_weight_add(ctx: DecisionCtx) -> float:
+    if not _no_fe_value_pressure(ctx):
+        return 0.0
+    if ctx.hero_bucket == 'medium':
+        return 0.20
+    return 0.30
+
+
+def _river_relative_value_ok(ctx: DecisionCtx) -> bool:
+    if ctx.street != 'river' or not ctx.villain_vs_hero_dist:
+        return False
+    if ctx.hero_bucket not in ('medium', 'strong', 'nuts'):
+        return False
+    hero_wins, _ties, villain_wins, rel_eq = _relative_hero_wins(ctx)
+    nuts = _villain_nuts(ctx)
+    if ctx.hero_bucket == 'nuts':
+        return rel_eq >= 0.55
+    if _dangerous_non_nut_value_spot(ctx):
+        return (
+            hero_wins >= 0.65
+            and rel_eq >= 0.65
+            and villain_wins <= 0.30
+            and nuts <= _RIVER_THIN_VALUE_MAX_NUTS
+        )
+    return (
+        hero_wins >= _RIVER_THIN_VALUE_MIN_WORSE
+        and rel_eq >= 0.58
+        and villain_wins <= _RIVER_THIN_VALUE_MAX_LOSS
+        and nuts <= _RIVER_THIN_VALUE_MAX_NUTS
+    )
+
+
+def _river_medium_probe_ok(ctx: DecisionCtx) -> bool:
+    if ctx.street != 'river' or ctx.hero_bucket != 'medium':
+        return True
+    if not ctx.villain_vs_hero_dist:
+        return True
+    hero_wins, _ties, villain_wins, rel_eq = _relative_hero_wins(ctx)
+    return (
+        rel_eq >= _RIVER_MEDIUM_PROBE_MIN_REL_EQ
+        and hero_wins >= villain_wins + _RIVER_MEDIUM_PROBE_MIN_WIN_GAP
+    )
+
+
+def _river_medium_value_jam_ok(ctx: DecisionCtx) -> bool:
+    if ctx.street != 'river' or ctx.hero_bucket != 'medium':
+        return True
+
+    if ctx.hero_hand_rank in {'high_card', 'one_pair'}:
+        return False
+
+    hero_wins, _ties, villain_wins, rel_eq = _relative_hero_wins(ctx)
+    if ctx.villain_vs_hero_dist:
+        min_win = _RIVER_MEDIUM_JAM_MIN_WIN
+        max_loss = _RIVER_MEDIUM_JAM_MAX_LOSS
+        if _dangerous_non_nut_value_spot(ctx):
+            min_win = _RIVER_MEDIUM_DANGER_JAM_MIN_WIN
+            max_loss = _RIVER_MEDIUM_DANGER_JAM_MAX_LOSS
+        return (
+            hero_wins >= min_win
+            and rel_eq >= min_win
+            and villain_wins <= max_loss
+            and _villain_nuts(ctx) <= _RIVER_THIN_VALUE_MAX_NUTS
+        )
+
+    if _dangerous_non_nut_value_spot(ctx):
+        return False
+    return ctx.equity_range >= 0.80 and _villain_nuts(ctx) <= 0.15
+
+
+def _low_spr_made_hand_value_pressure(ctx: DecisionCtx) -> bool:
+    if ctx.facing_bet or ctx.street not in ('flop', 'turn'):
+        return False
+    if ctx.spr <= 0 or ctx.spr > 1.8:
+        return False
+    if ctx.hero_bucket not in ('medium', 'strong'):
+        return False
+    if _fragile_underpair_after_resistance(ctx):
+        return False
+    if ctx.hero_bucket == 'medium' and _high_card_underpair(ctx):
+        return False
+    nuts = _villain_nuts(ctx)
+    if ctx.hero_bucket == 'strong':
+        return (
+            nuts <= 0.22
+            and (
+                ctx.equity_range >= _commit_value_eq_need(ctx) - 0.015
+                or ctx.equity_mc >= 0.62
+                or _paying_bucket_mass(ctx) + _draw_pressure_mass(ctx) >= 0.45
+            )
+        )
+    if _dangerous_non_nut_value_spot(ctx):
+        return False
+    return (
+        nuts <= 0.15
+        and (
+            ctx.equity_mc >= 0.58
+            or _paying_bucket_mass(ctx) + _draw_pressure_mass(ctx) >= 0.55
+        )
+    )
+
+
+def _resisted_barrel_spot(ctx: DecisionCtx) -> bool:
+    return (
+        ctx.street == 'turn'
+        and (
+            getattr(ctx, 'prev_bet_called_count', 0) > 0
+            or getattr(ctx, 'prev_bet_raised', False)
+            or getattr(ctx, 'resistance_level', 0.0) >= 0.20
+        )
+    )
+
+
+def _commit_value_eq_need(ctx: DecisionCtx) -> float:
     return (
         commit_value_eq(ctx.spr)
         + _river_danger_add(ctx)
-        + early_relative.value_jam_eq_add(ctx)
+        + early_relative.active_value_eq_add(ctx)
     )
+
+
+def _value_jam_frac(ctx: DecisionCtx) -> float:
+    if ctx.pot <= 0 or ctx.stack <= 0:
+        return 0.0
+    return float(ctx.stack) / float(ctx.pot)
+
+
+def _value_jam_payment_ok(ctx: DecisionCtx) -> bool:
+    vs = ctx.villain_stats
+    if ctx.prev_bet_called_count > 0 or ctx.prev_bet_raised:
+        return True
+    if ctx.n_sticky >= 1:
+        return True
+    if vs.vpip >= 0.45:
+        return True
+    if vs.hands_seen >= 20 and (vs.wtsd >= 0.32 or vs.af <= 1.1):
+        return True
+    if vs.fold_to_cbet_opps >= 5 and vs.fold_to_cbet <= 0.30:
+        return True
+    if vs.river_action_count >= 5 and vs.river_fold_rate <= 0.30:
+        return True
+    if _paying_bucket_mass(ctx) >= 0.42:
+        return True
+    if ctx.hero_bucket == 'nuts' and _bucket_mass(ctx, 'strong', 'medium') >= 0.35:
+        return True
+    return False
+
+
+def _value_jam_relative_ok(ctx: DecisionCtx) -> bool:
+    hero_wins, _ties, villain_wins, rel_eq = _relative_hero_wins(ctx)
+    if not ctx.villain_vs_hero_dist:
+        if _dangerous_non_nut_value_spot(ctx):
+            return ctx.equity_range >= 0.82 and _villain_nuts(ctx) <= 0.14
+        return ctx.equity_range >= 0.74 and _villain_nuts(ctx) <= 0.20
+    if _dangerous_non_nut_value_spot(ctx):
+        return hero_wins >= 0.80 and rel_eq >= 0.80 and villain_wins <= 0.15
+    if ctx.hero_bucket == 'nuts':
+        return rel_eq >= 0.72 and villain_wins <= 0.24
+    return hero_wins >= 0.72 and rel_eq >= 0.72 and villain_wins <= 0.22
 
 
 def _value_jam_legal(ctx: DecisionCtx) -> bool:
@@ -359,9 +581,26 @@ def _value_jam_legal(ctx: DecisionCtx) -> bool:
         return False
     if _fragile_underpair_after_resistance(ctx):
         return False
-    if ctx.spr > 2.4:
+    if not _river_medium_value_jam_ok(ctx):
         return False
-    if ctx.equity_range < _value_jam_eq_need(ctx):
+    if ctx.hero_bucket not in ('strong', 'nuts'):
+        return False
+    if ctx.spr <= 0 or ctx.spr > 2.4:
+        return False
+    # Jam is a candidate only when the actual all-in size is not an oversized
+    # overbet. A 2.78-pot side-pot shove like H69 should stay in normal value
+    # sizing, not become value_jam.
+    jam_frac = _value_jam_frac(ctx)
+    if jam_frac <= 0 or jam_frac > 2.00:
+        return False
+    if not _value_jam_payment_ok(ctx):
+        return False
+    if (
+        ctx.equity_range < _commit_value_eq_need(ctx)
+        and not _low_spr_made_hand_value_pressure(ctx)
+    ):
+        return False
+    if not _value_jam_relative_ok(ctx):
         return False
     return not stackoff_guard_reason(ctx, 'value_jam', will_jam=True)
 
@@ -430,10 +669,13 @@ class RangeCbet(Purpose):
         else:
             # multi_commit: 权重由 equity 相对 multi_eq_need 的 margin 驱动
             w = min(1.0, 0.4 + (ctx.equity_range - multi_eq_need) * 1.5)
+        w += _no_fe_value_weight_add(ctx)
         return TriggerResult(True, w)
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
         if ctx.hero_bucket in ('medium', 'strong', 'nuts'):
+            if _no_fe_value_pressure(ctx):
+                return [(0.50, 0.45), (0.60, 0.55)]
             return [(0.40, 0.45), (0.50, 0.55)]
         if ctx.board_sig.is_wet and ctx.hero_bucket in ('air', 'weak_draw'):
             return [(0.25, 0.55), (0.33, 0.45)]
@@ -515,9 +757,15 @@ class ProtectionBet(Purpose):
             protection_need += _PROTECTION_MULTIWAY_EQ_ADD
         if ctx.equity_range < protection_need:
             return TriggerResult(False)
-        return TriggerResult(True, 0.9)
+        return TriggerResult(True, 0.9 + _no_fe_value_weight_add(ctx))
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
+        if _no_fe_value_pressure(ctx):
+            if ctx.board_sig.wetness >= 0.55:
+                if ctx.hero_bucket == 'medium':
+                    return [(0.60, 0.40), (0.75, 0.60)]
+                return [(0.66, 0.35), (0.85, 0.65)]
+            return [(0.60, 0.45), (0.75, 0.55)]
         if ctx.board_sig.wetness >= 0.55:
             if ctx.hero_bucket == 'medium':
                 return [(0.50, 0.45), (0.60, 0.55)]
@@ -540,16 +788,7 @@ class ThinValueBet(Purpose):
 
     @staticmethod
     def _river_relative_value(ctx: DecisionCtx) -> bool:
-        if ctx.street != 'river' or not ctx.villain_vs_hero_dist:
-            return False
-        hero_wins, _ties, villain_wins, _rel_eq = _relative_hero_wins(ctx)
-        nuts = _villain_nuts(ctx)
-        return (
-            ctx.equity_range >= _RIVER_THIN_VALUE_MIN_EQ
-            and hero_wins >= _RIVER_THIN_VALUE_MIN_WORSE
-            and villain_wins <= _RIVER_THIN_VALUE_MAX_LOSS
-            and nuts <= _RIVER_THIN_VALUE_MAX_NUTS
-        )
+        return _river_relative_value_ok(ctx)
 
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
         if ctx.facing_bet:
@@ -590,9 +829,17 @@ class ThinValueBet(Purpose):
             bonus += min(0.25, (ctx.equity_range - _RIVER_THIN_VALUE_MIN_EQ) * 1.5)
             if _paying_bucket_mass(ctx) < 0.30 and ctx.equity_range < 0.65:
                 return TriggerResult(False)
-        return TriggerResult(True, max(0.3, min(0.9, base + bonus)))
+        bonus += _no_fe_value_weight_add(ctx)
+        cap = 1.10 if _no_fe_value_pressure(ctx) else 0.9
+        return TriggerResult(True, max(0.3, min(cap, base + bonus)))
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
+        if _no_fe_value_pressure(ctx):
+            if self._river_relative_value(ctx):
+                return [(0.55, 0.45), (0.66, 0.55)]
+            if ctx.street == 'turn':
+                return [(0.60, 0.40), (0.75, 0.60)]
+            return [(0.55, 0.35), (0.66, 0.45), (0.75, 0.20)]
         if self._river_relative_value(ctx):
             return [(0.45, 0.55), (0.55, 0.45)]
         if ctx.street == 'turn':
@@ -690,8 +937,6 @@ class ThickValueBet(Purpose):
             return TriggerResult(False)
         if _fragile_underpair_after_resistance(ctx):
             return TriggerResult(False)
-        if _value_jam_legal(ctx):
-            return TriggerResult(False)
         if _monster_value_kind(ctx):
             return TriggerResult(False)
         # Equity 门槛按 SPR commitment 动态化（不再固定 0.70）：低 SPR
@@ -715,7 +960,8 @@ class ThickValueBet(Purpose):
                 eq_need = min(eq_need, 0.48)
             elif ctx.spr <= 10.0:
                 eq_need = min(eq_need, 0.55)
-        if ctx.equity_range < eq_need:
+        low_spr_pressure = _low_spr_made_hand_value_pressure(ctx)
+        if ctx.equity_range < eq_need and not low_spr_pressure:
             return TriggerResult(False)
         if _river_fragile_relative_value_block(ctx, eq_need):
             return TriggerResult(False)
@@ -751,12 +997,27 @@ class ThickValueBet(Purpose):
             ):
                 return TriggerResult(False)
         # 权重基准从 eq_need 起算而非固定 0.70，确保 low SPR 下早触发的
-        # hand 权重不会因为 (eq - 0.70) 为负而崩塌。
-        w = 0.8 + (ctx.equity_range - eq_need) * 3.0
-        return TriggerResult(True, min(2.0, max(0.4, w)))
+        # hand 权重不会因为 (eq - 0.70) 为负而崩塌。低 SPR 成牌压力由 MC/
+        # 支付桶补充 raw range equity，避免接近 commit 时只剩 check。
+        if low_spr_pressure:
+            w = 1.0
+        else:
+            w = 0.8 + (ctx.equity_range - eq_need) * 3.0
+        w += _no_fe_value_weight_add(ctx)
+        return TriggerResult(True, min(2.2, max(0.4, w)))
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
         resisted = ctx.prev_bet_called_count > 0 or ctx.prev_bet_raised
+        if _no_fe_value_pressure(ctx):
+            if ctx.street == 'river':
+                if resisted:
+                    return [(0.85, 0.40), (1.00, 0.60)]
+                return [(0.75, 0.40), (0.90, 0.40), (1.00, 0.20)]
+            if ctx.street == 'turn':
+                if resisted:
+                    return [(0.80, 0.40), (1.00, 0.60)]
+                return [(0.75, 0.45), (0.90, 0.55)]
+            return [(0.66, 0.35), (0.80, 0.65)]
         if ctx.street == 'river':
             if resisted:
                 return [(0.75, 0.45), (1.00, 0.55)]
@@ -821,7 +1082,7 @@ class OverbetValue(Purpose):
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
         if not _can_overbet_value(ctx):
             return TriggerResult(False)
-        w = 1.2 * (0.5 + ctx.nut_advantage)
+        w = 1.2 * (0.5 + ctx.nut_advantage) + _no_fe_value_weight_add(ctx)
         return TriggerResult(True, w)
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
@@ -859,7 +1120,7 @@ class SemiBluff(Purpose):
         # FE 人为抬到 35%，误判 +EV（实战手 204：hero JT gutshot eq 19%
         # vs ftc=0% station 连打两街 -287680）。
         low_fe = no_fold_equity(ctx)
-        if low_fe and not (ctx.hero_bucket == 'draw' and ctx.equity_range >= 0.35):
+        if low_fe and not (ctx.hero_bucket == 'draw' and _realizable_no_fe_draw(ctx)):
             return TriggerResult(False)
         # EV gate: FE + (1-FE)*(eq*(1+bet) - (1-eq)*bet) >= 0 at 0.66 bet.
         bet = 0.66
@@ -930,9 +1191,17 @@ class DelayedCbet(Purpose):
             return TriggerResult(False)
         if ctx.equity_range < 0.45:
             return TriggerResult(False)
-        return TriggerResult(True, 0.6 + 0.4 * ctx.equity_range)
+        if (
+            no_fold_equity(ctx)
+            and ctx.hero_bucket in ('air', 'weak_draw', 'draw')
+            and not _realizable_no_fe_draw(ctx)
+        ):
+            return TriggerResult(False)
+        return TriggerResult(True, 0.6 + 0.4 * ctx.equity_range + _no_fe_value_weight_add(ctx))
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
+        if _no_fe_value_pressure(ctx):
+            return [(0.60, 0.35), (0.75, 0.45), (0.85, 0.20)]
         if ctx.hero_bucket in ('medium', 'strong', 'nuts') or ctx.equity_range >= 0.60:
             return [(0.50, 0.30), (0.66, 0.45), (0.75, 0.25)]
         return [(0.50, 0.45), (0.66, 0.55)]
@@ -960,13 +1229,17 @@ class ProbeBet(Purpose):
         # 是 +EV 的（他会 call 更弱）。
         if no_fold_equity(ctx) and ctx.hero_bucket in ('air', 'weak_draw'):
             return TriggerResult(False)
+        if not _river_medium_probe_ok(ctx):
+            return TriggerResult(False)
         if ctx.street == 'river':
             w = 0.5 + 0.3 * (1 - ctx.villain_stats.river_fold_rate)
         else:
             w = 0.5 + 0.15
-        return TriggerResult(True, w)
+        return TriggerResult(True, w + _no_fe_value_weight_add(ctx))
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
+        if _no_fe_value_pressure(ctx):
+            return [(0.60, 0.40), (0.75, 0.60)]
         if ctx.hero_bucket in ('medium', 'strong', 'nuts'):
             return [(0.50, 0.45), (0.66, 0.55)]
         return [(0.40, 0.35), (0.50, 0.45), (0.66, 0.20)]
@@ -995,9 +1268,12 @@ class FloatBet(Purpose):
         # value bucket 保留 —— IP 对 station 的薄价值 stab 仍 +EV。
         if no_fold_equity(ctx) and ctx.hero_bucket in ('air', 'weak_draw'):
             return TriggerResult(False)
-        return TriggerResult(True, 0.5 + 0.3 * ctx.villain_stats.bluff_win_rate)
+        return TriggerResult(True, 0.5 + 0.3 * ctx.villain_stats.bluff_win_rate
+                             + _no_fe_value_weight_add(ctx))
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
+        if _no_fe_value_pressure(ctx):
+            return [(0.60, 0.40), (0.75, 0.60)]
         if ctx.hero_bucket in ('medium', 'strong', 'nuts', 'draw'):
             return [(0.50, 0.40), (0.66, 0.60)]
         return [(0.40, 0.45), (0.50, 0.55)]
@@ -1022,9 +1298,11 @@ class TurnDonk(Purpose):
             return TriggerResult(False)
         if ctx.hero_bucket not in ('strong', 'nuts', 'draw'):
             return TriggerResult(False)
-        return TriggerResult(True, 0.6)
+        return TriggerResult(True, 0.6 + _no_fe_value_weight_add(ctx))
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
+        if _no_fe_value_pressure(ctx) and ctx.hero_bucket in ('strong', 'nuts'):
+            return [(0.75, 0.45), (0.90, 0.55)]
         if ctx.hero_bucket in ('strong', 'nuts'):
             return [(0.60, 0.45), (0.75, 0.55)]
         return [(0.40, 0.35), (0.60, 0.50), (0.75, 0.15)]
@@ -1047,17 +1325,25 @@ class DoubleBarrel(Purpose):
         if _fragile_underpair_after_resistance(ctx):
             return TriggerResult(False)
         need = 0.45 + _barrel_resistance_eq_add(ctx)
+        if (
+            no_fold_equity(ctx)
+            and ctx.hero_bucket in ('air', 'weak_draw', 'draw')
+            and not _realizable_no_fe_draw(ctx)
+        ):
+            return TriggerResult(False)
         if ctx.hero_bucket in ('air', 'weak_draw', 'draw') and ctx.equity_range < need:
             return TriggerResult(False)
         # good barrel card = high (A/K/Q) turn or equity >= need
         if ctx.equity_range < need and ctx.board_sig.high_card_rank < 12:
             return TriggerResult(False)
-        weight = 0.7 + 0.5 * ctx.equity_range
+        weight = 0.7 + 0.5 * ctx.equity_range + _no_fe_value_weight_add(ctx)
         if ctx.hero_bucket in ('air', 'weak_draw', 'draw') and getattr(ctx, 'resistance_level', 0.0) > 0:
             weight *= _BARREL_RESIST_WEIGHT_MULT
         return TriggerResult(True, weight)
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
+        if _no_fe_value_pressure(ctx):
+            return [(0.66, 0.35), (0.80, 0.45), (0.90, 0.20)]
         return [(0.55, 0.3), (0.66, 0.5), (0.75, 0.2)]
 
 
@@ -1149,32 +1435,37 @@ class StopAndGo(Purpose):
 
 
 # ---------------------------------------------------------------------------
-# 18. value_jam (SPR <= 2.4 with strong hand — bypass normal sizing)
+# 18. value_jam
 # ---------------------------------------------------------------------------
 
 
 class ValueJam(Purpose):
+    """Explicit value all-in candidate.
+
+    This is not a sizing round-up. It only emits an all-in when the all-in
+    amount itself is a reasonable value size (<= 2pot) and the opponent has
+    shown payment evidence.
+    """
+
     id = 'value_jam'
 
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
         if not _value_jam_legal(ctx):
             return TriggerResult(False)
-        # Equity 门按 SPR commitment threshold：SPR ≤ 2.4 时 commit_value_eq
-        # 返回 0.55，即"被 call 赢 > 50%" Janda 最小 value 标准。原 0.70
-        # 硬门在 SPR 1-2.4 的 commit 区把大量合法 value_jam（两对/顶对顶踢）
-        # 挡在门外。
-        eq_need = _value_jam_eq_need(ctx)
-        # 权重按 eq margin over commit 动态增长，保证在 SPR ≤ 2 与
-        # ThickValueBet（cap 2.0）的 overlap 区 ValueJam 主导：jam 是
-        # commit 节点 value 最大化的正确决策（fold equity + 避免被 villain
-        # 后续控 pot）。eq=0.55 边界时 w=1.5；eq=0.95（nuts）w=3.1。
-        w = 1.5 + 4.0 * (ctx.equity_range - eq_need)
-        return TriggerResult(True, max(1.5, w))
+        eq_need = _commit_value_eq_need(ctx)
+        jam_frac = _value_jam_frac(ctx)
+        payment_bonus = 0.25 if (ctx.prev_bet_called_count > 0 or ctx.prev_bet_raised) else 0.0
+        payment_bonus += min(0.30, ctx.n_sticky * 0.10)
+        w = 0.9 + 2.6 * (ctx.equity_range - eq_need) + payment_bonus
+        if jam_frac <= 1.0:
+            w += 0.25
+        return TriggerResult(True, max(0.45, min(2.2, w)))
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
-        # Special: all-in → sizer returns a frac large enough to trigger
-        # jam round-up in calibrator.
-        return [(2.00, 1.0)]
+        jam_frac = _value_jam_frac(ctx)
+        if jam_frac <= 0:
+            return []
+        return [(min(2.0, jam_frac), 1.0)]
 
 
 # ---------------------------------------------------------------------------
@@ -1217,9 +1508,20 @@ class DefaultStab(Purpose):
             return TriggerResult(False)
         if ctx.num_opponents >= 2 and ctx.equity_range < max(0.40, _DS_AIR_MIN_EQ):
             return TriggerResult(False)
-        if no_fold_equity(ctx) and ctx.equity_range < _DS_LOWFE_MIN_EQ:
-            return TriggerResult(False)
-        if ctx.hero_bucket in ('air', 'weak_draw') and no_fold_equity(ctx) and _DS_LOWFE_MULT <= 0:
+        low_fe = no_fold_equity(ctx)
+        if ctx.hero_bucket in ('air', 'weak_draw', 'draw'):
+            if _resisted_barrel_spot(ctx):
+                if low_fe and not _realizable_no_fe_draw(ctx):
+                    return TriggerResult(False)
+                resisted_need = 0.45 if ctx.hero_bucket in ('air', 'weak_draw') else 0.40
+                if ctx.equity_range < resisted_need + _barrel_resistance_eq_add(ctx):
+                    return TriggerResult(False)
+            if low_fe:
+                if not _realizable_no_fe_draw(ctx):
+                    return TriggerResult(False)
+                if ctx.equity_range < _DS_LOWFE_MIN_EQ:
+                    return TriggerResult(False)
+        if ctx.hero_bucket in ('air', 'weak_draw') and low_fe and _DS_LOWFE_MULT <= 0:
             return TriggerResult(False)
         # 2026-04-28 P0.5：HU/多人 权重 env 可调。原 0.45 永远输给 thick_value(0.8+)
         # 和 range_cbet(0.8)，PFR check-frequency 实战 > 60%，远偏离业界 cbet ~55%。
@@ -1228,10 +1530,13 @@ class DefaultStab(Purpose):
             w *= _DS_LOWFE_MULT
         if ctx.hero_bucket in ('air', 'weak_draw', 'draw') and getattr(ctx, 'resistance_level', 0.0) > 0:
             w *= _BARREL_RESIST_WEIGHT_MULT
+        w += _no_fe_value_weight_add(ctx)
         return TriggerResult(True, w)
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
         if ctx.hero_bucket in ('medium', 'strong', 'nuts'):
+            if _no_fe_value_pressure(ctx):
+                return [(0.55, 0.40), (0.66, 0.45), (0.75, 0.15)]
             return [(0.40, 0.45), (0.55, 0.55)]
         if ctx.street == 'turn':
             return [(0.40, 0.45), (0.55, 0.55)]
@@ -1253,6 +1558,5 @@ def all_active() -> list:
         OverbetValue(), SemiBluff(), PureBluffRiver(),
         DelayedCbet(), ProbeBet(), FloatBet(),
         TurnDonk(), DoubleBarrel(), TripleBarrel(),
-        StopAndGo(), ValueJam(),
-        DefaultStab(),
+        StopAndGo(), ValueJam(), DefaultStab(),
     ]

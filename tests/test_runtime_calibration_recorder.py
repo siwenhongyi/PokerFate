@@ -55,8 +55,48 @@ def test_runtime_calibration_recorder_writes_bb_split_rows(tmp_path):
     rows = [json.loads(line) for line in row_path.read_text().splitlines()]
     assert len(rows) == 1
     row = rows[0]
+    assert row["schema"] == "runtime_range_calibration_v2"
     assert row["bb_bucket"] == "bb_50k"
     assert row["split"] == "train"
     assert row["actual_bucket"] == "strong"
     assert row["bucket_dist"]["strong"] == 0.4
     assert row["active_player_count"] == 2
+    assert row["strategy_version"]
+    assert row["experiment_flags"]["PF_TURN_FLOP_RELATIVE_GUARD"] == "1"
+    assert row["experiment_flags"]["PF_BUCKET_CALIBRATION"] == "1"
+
+
+def test_runtime_calibration_recorder_writes_river_value_sizing_rows(tmp_path):
+    recorder = RuntimeCalibrationRecorder(
+        root=tmp_path,
+        session_id="test-session",
+        val_ratio=0.0,
+    )
+
+    written = recorder.write_river_value_sizing(
+        {
+            "street": "river",
+            "purpose": "overbet_value",
+            "amount_added": 62500,
+            "bet_frac_pot": 1.25,
+            "response_kind": "called",
+            "paid": True,
+            "my_delta_bb": 18.5,
+            "villain_vs_hero_dist": {"win": 0.98, "tie": 0.0, "loss": 0.02},
+        },
+        big_blind=50000,
+        hand_id=43,
+    )
+
+    assert written == 1
+    row_path = tmp_path / "bb_50k" / "river_value_sizing.train.jsonl"
+    rows = [json.loads(line) for line in row_path.read_text().splitlines()]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["schema"] == "runtime_river_value_sizing_v1"
+    assert row["bb_bucket"] == "bb_50k"
+    assert row["split"] == "train"
+    assert row["hand"] == 43
+    assert row["purpose"] == "overbet_value"
+    assert row["paid"] is True
+    assert row["villain_vs_hero_dist"]["win"] == 0.98
