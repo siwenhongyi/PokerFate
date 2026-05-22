@@ -11,6 +11,15 @@ from collections import Counter
 from typing import Any, Iterable
 
 LEGACY_VERSION = "legacy"
+_PROFILE_DEFAULTS = {
+    "PF_TURN_FLOP_RELATIVE_GUARD": "1",
+    "PF_RUNTIME_RANGE_CALIBRATION": "1",
+    "PF_BUCKET_CALIBRATION": "1",
+    "PF_BUCKET_ML_10K": "off",
+    "PF_BUCKET_ML_50K": "off",
+    "PF_BUCKET_ML_DEFAULT": "off",
+    "PF_BUCKET_ML_TAG": "20260522_riskblend",
+}
 
 
 def row_strategy_version(row: dict[str, Any]) -> str:
@@ -28,12 +37,10 @@ def row_experiment_profile(row: dict[str, Any]) -> str:
     flags = row_experiment_flags(row)
     if not flags:
         return LEGACY_VERSION
-    keys = (
-        "PF_TURN_FLOP_RELATIVE_GUARD",
-        "PF_RUNTIME_RANGE_CALIBRATION",
-        "PF_BUCKET_CALIBRATION",
+    return "|".join(
+        f"{key}={flags.get(key, default)}"
+        for key, default in _PROFILE_DEFAULTS.items()
     )
-    return "|".join(f"{key}={flags.get(key, '')}" for key in keys)
 
 
 def parse_flag_filters(values: Iterable[str] | None) -> dict[str, str]:

@@ -272,17 +272,186 @@ def _bucket_metrics(rows: list[dict[str, Any]], probs: np.ndarray) -> dict[str, 
     }
 
 
+def _bucket_risk_summary(raw: dict[str, Any], fit: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "strong_nuts_under_20_delta_pp": round(
+            float(fit.get("strong_nuts_under_20_pct", 0.0))
+            - float(raw.get("strong_nuts_under_20_pct", 0.0)),
+            2,
+        ),
+        "strong_nuts_combo_under_20_delta_pp": round(
+            float(fit.get("strong_nuts_combo_under_20_pct", 0.0))
+            - float(raw.get("strong_nuts_combo_under_20_pct", 0.0)),
+            2,
+        ),
+        "strong_nuts_combo_avg_delta_pp": round(
+            float(fit.get("strong_nuts_combo_avg_pct", 0.0))
+            - float(raw.get("strong_nuts_combo_avg_pct", 0.0)),
+            2,
+        ),
+    }
+
+
+def _select_bucket_blend(
+    rows: list[dict[str, Any]],
+    raw_probs: np.ndarray,
+    model_probs: np.ndarray,
+    *,
+    min_bucket_nll_gain: float,
+    max_strong_nuts_under_worsen_pp: float,
+    max_strong_nuts_combo_under_worsen_pp: float,
+) -> dict[str, Any]:
+    raw_m = _bucket_metrics(rows, raw_probs)
+    best: dict[str, Any] | None = None
+    for alpha in np.linspace(0.05, 1.0, 20):
+        blended = (1.0 - float(alpha)) * raw_probs + float(alpha) * model_probs
+        blended = np.clip(blended, EPS, 1.0)
+        blended /= blended.sum(axis=1, keepdims=True)
+        metrics = _bucket_metrics(rows, blended)
+        risk = _bucket_risk_summary(raw_m, metrics)
+        nll_gain = round(float(raw_m["nll"] - metrics["nll"]), 5)
+        usable = (
+            nll_gain >= min_bucket_nll_gain
+            and risk["strong_nuts_under_20_delta_pp"] <= max_strong_nuts_under_worsen_pp
+            and risk["strong_nuts_combo_under_20_delta_pp"] <= max_strong_nuts_combo_under_worsen_pp
+        )
+        candidate = {
+            "alpha": round(float(alpha), 2),
+            "metrics": metrics,
+            "risk": risk,
+            "nll_gain": nll_gain,
+            "usable": usable,
+        }
+        if usable and (
+            best is None
+            or candidate["nll_gain"] > best["nll_gain"]
+            or (
+                candidate["nll_gain"] == best["nll_gain"]
+                and candidate["alpha"] > best["alpha"]
+            )
+        ):
+            best = candidate
+    if best is not None:
+        return best
+    return {
+        "alpha": 0.0,
+        "metrics": raw_m,
+        "risk": _bucket_risk_summary(raw_m, raw_m),
+        "nll_gain": 0.0,
+        "usable": False,
+    }
+
+
 def _equity_metrics(items: list[tuple[dict[str, Any], float, float]], pred: np.ndarray) -> dict[str, Any]:
     if not items:
         return {"n": 0}
     y = np.array([actual for _row, _pred, actual in items], dtype=np.float64)
     err = pred - y
+    high_mask = y >= 0.75
+    low_mask = y <= 0.25
     return {
         "n": len(items),
         "mae_pp": round(float(np.mean(np.abs(err)) * 100.0), 2),
         "rmse_pp": round(float(math.sqrt(np.mean(err * err))) * 100.0, 2),
         "bias_pp": round(float(np.mean(err) * 100.0), 2),
         "ece_pp": round(_ece(pred, y) * 100.0, 2),
+        "high_actual_under_50_pct": round(
+            float(np.mean(pred[high_mask] < 0.50) * 100.0)
+            if bool(high_mask.any()) else 0.0,
+            2,
+        ),
+        "high_actual_avg_pred_pct": round(
+            float(np.mean(pred[high_mask]) * 100.0)
+            if bool(high_mask.any()) else 0.0,
+            2,
+        ),
+        "low_actual_over_50_pct": round(
+            float(np.mean(pred[low_mask] > 0.50) * 100.0)
+            if bool(low_mask.any()) else 0.0,
+            2,
+        ),
+        "low_actual_avg_pred_pct": round(
+            float(np.mean(pred[low_mask]) * 100.0)
+            if bool(low_mask.any()) else 0.0,
+            2,
+        ),
+    }
+
+
+def _equity_risk_summary(raw: dict[str, Any], fit: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "high_actual_under_50_delta_pp": round(
+            float(fit.get("high_actual_under_50_pct", 0.0))
+            - float(raw.get("high_actual_under_50_pct", 0.0)),
+            2,
+        ),
+        "high_actual_avg_pred_delta_pp": round(
+            float(fit.get("high_actual_avg_pred_pct", 0.0))
+            - float(raw.get("high_actual_avg_pred_pct", 0.0)),
+            2,
+        ),
+        "low_actual_over_50_delta_pp": round(
+            float(fit.get("low_actual_over_50_pct", 0.0))
+            - float(raw.get("low_actual_over_50_pct", 0.0)),
+            2,
+        ),
+        "low_actual_avg_pred_delta_pp": round(
+            float(fit.get("low_actual_avg_pred_pct", 0.0))
+            - float(raw.get("low_actual_avg_pred_pct", 0.0)),
+            2,
+        ),
+    }
+
+
+def _select_equity_blend(
+    items: list[tuple[dict[str, Any], float, float]],
+    raw_pred: np.ndarray,
+    model_pred: np.ndarray,
+    *,
+    min_mae_gain_pp: float,
+    max_high_actual_under_worsen_pp: float,
+    max_low_actual_over_worsen_pp: float,
+) -> dict[str, Any]:
+    raw_m = _equity_metrics(items, raw_pred)
+    best: dict[str, Any] | None = None
+    for alpha in np.linspace(0.05, 1.0, 20):
+        blended = np.clip(
+            (1.0 - float(alpha)) * raw_pred + float(alpha) * model_pred,
+            0.0,
+            1.0,
+        )
+        metrics = _equity_metrics(items, blended)
+        risk = _equity_risk_summary(raw_m, metrics)
+        gain = round(float(raw_m["mae_pp"] - metrics["mae_pp"]), 3)
+        usable = (
+            gain >= min_mae_gain_pp
+            and risk["high_actual_under_50_delta_pp"] <= max_high_actual_under_worsen_pp
+            and risk["low_actual_over_50_delta_pp"] <= max_low_actual_over_worsen_pp
+        )
+        candidate = {
+            "alpha": round(float(alpha), 2),
+            "metrics": metrics,
+            "risk": risk,
+            "mae_gain_pp": gain,
+            "usable": usable,
+        }
+        if usable and (
+            best is None
+            or candidate["mae_gain_pp"] > best["mae_gain_pp"]
+            or (
+                candidate["mae_gain_pp"] == best["mae_gain_pp"]
+                and candidate["alpha"] > best["alpha"]
+            )
+        ):
+            best = candidate
+    if best is not None:
+        return best
+    return {
+        "alpha": 0.0,
+        "metrics": raw_m,
+        "risk": _equity_risk_summary(raw_m, raw_m),
+        "mae_gain_pp": 0.0,
+        "usable": False,
     }
 
 
@@ -310,6 +479,7 @@ def main() -> None:
     ap.add_argument("--train-rows", type=Path, action="append", required=True)
     ap.add_argument("--val-rows", type=Path, action="append", required=True)
     ap.add_argument("--report-out", type=Path)
+    ap.add_argument("--bucket-model-out", type=Path)
     ap.add_argument("--bucket-streets", default="flop,turn,river")
     ap.add_argument("--equity-target", choices=("multi", "hu"), default="multi")
     ap.add_argument("--include-player", action="store_true")
@@ -320,7 +490,15 @@ def main() -> None:
     ap.add_argument("--num-leaves", type=int, default=15)
     ap.add_argument("--min-child-samples", type=int, default=35)
     ap.add_argument("--reg-lambda", type=float, default=5.0)
-    ap.add_argument("--bucket-strong-nuts-weight", type=float, default=1.0)
+    ap.add_argument("--bucket-strong-nuts-weight", type=float, default=2.0)
+    ap.add_argument("--min-bucket-nll-gain", type=float, default=0.001)
+    ap.add_argument("--max-strong-nuts-under-worsen-pp", type=float, default=0.0)
+    ap.add_argument("--max-strong-nuts-combo-under-worsen-pp", type=float, default=0.0)
+    ap.add_argument("--equity-high-actual-weight", type=float, default=1.5)
+    ap.add_argument("--equity-low-actual-weight", type=float, default=1.25)
+    ap.add_argument("--min-equity-mae-gain-pp", type=float, default=0.01)
+    ap.add_argument("--max-high-actual-under-worsen-pp", type=float, default=0.0)
+    ap.add_argument("--max-low-actual-over-worsen-pp", type=float, default=0.0)
     ap.add_argument("--skip-bucket", action="store_true")
     ap.add_argument("--skip-equity", action="store_true")
     ap.add_argument("--skip-river-relative", action="store_true")
@@ -374,6 +552,14 @@ def main() -> None:
             "min_child_samples": args.min_child_samples,
             "reg_lambda": args.reg_lambda,
             "bucket_strong_nuts_weight": args.bucket_strong_nuts_weight,
+            "min_bucket_nll_gain": args.min_bucket_nll_gain,
+            "max_strong_nuts_under_worsen_pp": args.max_strong_nuts_under_worsen_pp,
+            "max_strong_nuts_combo_under_worsen_pp": args.max_strong_nuts_combo_under_worsen_pp,
+            "equity_high_actual_weight": args.equity_high_actual_weight,
+            "equity_low_actual_weight": args.equity_low_actual_weight,
+            "min_equity_mae_gain_pp": args.min_equity_mae_gain_pp,
+            "max_high_actual_under_worsen_pp": args.max_high_actual_under_worsen_pp,
+            "max_low_actual_over_worsen_pp": args.max_low_actual_over_worsen_pp,
             "include_player": args.include_player,
         }
     }
@@ -414,20 +600,49 @@ def main() -> None:
             raw_va = np.vstack([_bucket_vec(r) for r in va])
             lgb_tr = _full_class_proba(clf, clf.predict_proba(x_tr))
             lgb_va = _full_class_proba(clf, clf.predict_proba(x_va))
+            raw_val_m = _bucket_metrics(va, raw_va)
+            lgb_val_m = _bucket_metrics(va, lgb_va)
+            val_risk = _bucket_risk_summary(raw_val_m, lgb_val_m)
+            val_nll_gain = round(raw_val_m["nll"] - lgb_val_m["nll"], 5)
+            selected = _select_bucket_blend(
+                va,
+                raw_va,
+                lgb_va,
+                min_bucket_nll_gain=args.min_bucket_nll_gain,
+                max_strong_nuts_under_worsen_pp=args.max_strong_nuts_under_worsen_pp,
+                max_strong_nuts_combo_under_worsen_pp=args.max_strong_nuts_combo_under_worsen_pp,
+            )
+            runtime_usable = bool(selected["usable"])
+            if args.bucket_model_out is not None:
+                _write_json(args.bucket_model_out, {
+                    "type": "bucket_lgbm_calibration",
+                    "cat_order": list(CAT_ORDER),
+                    "feature_names": list(vec.feature_names_),
+                    "classes": [int(c) for c in clf.classes_],
+                    "blend_alpha": selected["alpha"],
+                    "runtime_usable": runtime_usable,
+                    "model_str": clf.booster_.model_to_string(),
+                    "selected_blend": selected,
+                })
             report["bucket"] = {
                 "features": len(vec.feature_names_),
                 "train_raw": _bucket_metrics(tr, raw_tr),
                 "train_lgbm": _bucket_metrics(tr, lgb_tr),
-                "val_raw": _bucket_metrics(va, raw_va),
-                "val_lgbm": _bucket_metrics(va, lgb_va),
-                "val_nll_gain": round(
-                    _bucket_metrics(va, raw_va)["nll"] - _bucket_metrics(va, lgb_va)["nll"],
-                    5,
-                ),
+                "val_raw": raw_val_m,
+                "val_lgbm": lgb_val_m,
+                "val_nll_gain": val_nll_gain,
                 "val_brier_gain": round(
-                    _bucket_metrics(va, raw_va)["brier"] - _bucket_metrics(va, lgb_va)["brier"],
+                    raw_val_m["brier"] - lgb_val_m["brier"],
                     5,
                 ),
+                "val_risk": val_risk,
+                "selected_blend": selected,
+                "runtime_usable": runtime_usable,
+                "usable_gate": {
+                    "min_bucket_nll_gain": args.min_bucket_nll_gain,
+                    "max_strong_nuts_under_worsen_pp": args.max_strong_nuts_under_worsen_pp,
+                    "max_strong_nuts_combo_under_worsen_pp": args.max_strong_nuts_combo_under_worsen_pp,
+                },
             }
         else:
             report["bucket"] = {"error": "no bucket rows after filtering"}
@@ -461,19 +676,49 @@ def main() -> None:
                 random_state=43,
                 verbose=-1,
             )
-            reg.fit(x_tr, y_tr)
+            fit_kwargs: dict[str, Any] = {}
+            if args.equity_high_actual_weight > 1.0 or args.equity_low_actual_weight > 1.0:
+                weights = np.ones(len(y_tr), dtype=np.float64)
+                if args.equity_high_actual_weight > 1.0:
+                    weights[y_tr >= 0.75] = float(args.equity_high_actual_weight)
+                if args.equity_low_actual_weight > 1.0:
+                    weights[y_tr <= 0.25] = np.maximum(
+                        weights[y_tr <= 0.25],
+                        float(args.equity_low_actual_weight),
+                    )
+                fit_kwargs["sample_weight"] = weights
+            reg.fit(x_tr, y_tr, **fit_kwargs)
             pred_tr = np.clip(reg.predict(x_tr), 0.0, 1.0)
             pred_va = np.clip(reg.predict(x_va), 0.0, 1.0)
             raw_val_m = _equity_metrics(va_items, raw_va)
             lgb_val_m = _equity_metrics(va_items, pred_va)
+            val_risk = _equity_risk_summary(raw_val_m, lgb_val_m)
+            val_mae_gain_pp = round(raw_val_m["mae_pp"] - lgb_val_m["mae_pp"], 3)
+            selected = _select_equity_blend(
+                va_items,
+                raw_va,
+                pred_va,
+                min_mae_gain_pp=args.min_equity_mae_gain_pp,
+                max_high_actual_under_worsen_pp=args.max_high_actual_under_worsen_pp,
+                max_low_actual_over_worsen_pp=args.max_low_actual_over_worsen_pp,
+            )
+            runtime_usable = bool(selected["usable"])
             report["equity"] = {
                 "features": len(vec.feature_names_),
                 "train_raw": _equity_metrics(tr_items, raw_tr),
                 "train_lgbm": _equity_metrics(tr_items, pred_tr),
                 "val_raw": raw_val_m,
                 "val_lgbm": lgb_val_m,
-                "val_mae_gain_pp": round(raw_val_m["mae_pp"] - lgb_val_m["mae_pp"], 3),
+                "val_mae_gain_pp": val_mae_gain_pp,
                 "val_ece_gain_pp": round(raw_val_m["ece_pp"] - lgb_val_m["ece_pp"], 3),
+                "val_risk": val_risk,
+                "selected_blend": selected,
+                "runtime_usable": runtime_usable,
+                "usable_gate": {
+                    "min_mae_gain_pp": args.min_equity_mae_gain_pp,
+                    "max_high_actual_under_worsen_pp": args.max_high_actual_under_worsen_pp,
+                    "max_low_actual_over_worsen_pp": args.max_low_actual_over_worsen_pp,
+                },
             }
         else:
             report["equity"] = {"error": "no equity rows after filtering"}
@@ -507,19 +752,49 @@ def main() -> None:
                 random_state=44,
                 verbose=-1,
             )
-            reg.fit(x_tr, y_tr)
+            fit_kwargs = {}
+            if args.equity_high_actual_weight > 1.0 or args.equity_low_actual_weight > 1.0:
+                weights = np.ones(len(y_tr), dtype=np.float64)
+                if args.equity_high_actual_weight > 1.0:
+                    weights[y_tr >= 0.75] = float(args.equity_high_actual_weight)
+                if args.equity_low_actual_weight > 1.0:
+                    weights[y_tr <= 0.25] = np.maximum(
+                        weights[y_tr <= 0.25],
+                        float(args.equity_low_actual_weight),
+                    )
+                fit_kwargs["sample_weight"] = weights
+            reg.fit(x_tr, y_tr, **fit_kwargs)
             pred_tr = np.clip(reg.predict(x_tr), 0.0, 1.0)
             pred_va = np.clip(reg.predict(x_va), 0.0, 1.0)
             raw_val_m = _equity_metrics(va_items, raw_va)
             lgb_val_m = _equity_metrics(va_items, pred_va)
+            val_risk = _equity_risk_summary(raw_val_m, lgb_val_m)
+            val_mae_gain_pp = round(raw_val_m["mae_pp"] - lgb_val_m["mae_pp"], 3)
+            selected = _select_equity_blend(
+                va_items,
+                raw_va,
+                pred_va,
+                min_mae_gain_pp=args.min_equity_mae_gain_pp,
+                max_high_actual_under_worsen_pp=args.max_high_actual_under_worsen_pp,
+                max_low_actual_over_worsen_pp=args.max_low_actual_over_worsen_pp,
+            )
+            runtime_usable = bool(selected["usable"])
             report["river_relative"] = {
                 "features": len(vec.feature_names_),
                 "train_raw": _equity_metrics(tr_items, raw_tr),
                 "train_lgbm": _equity_metrics(tr_items, pred_tr),
                 "val_raw": raw_val_m,
                 "val_lgbm": lgb_val_m,
-                "val_mae_gain_pp": round(raw_val_m["mae_pp"] - lgb_val_m["mae_pp"], 3),
+                "val_mae_gain_pp": val_mae_gain_pp,
                 "val_ece_gain_pp": round(raw_val_m["ece_pp"] - lgb_val_m["ece_pp"], 3),
+                "val_risk": val_risk,
+                "selected_blend": selected,
+                "runtime_usable": runtime_usable,
+                "usable_gate": {
+                    "min_mae_gain_pp": args.min_equity_mae_gain_pp,
+                    "max_high_actual_under_worsen_pp": args.max_high_actual_under_worsen_pp,
+                    "max_low_actual_over_worsen_pp": args.max_low_actual_over_worsen_pp,
+                },
             }
         else:
             report["river_relative"] = {"error": "no river relative rows after filtering"}

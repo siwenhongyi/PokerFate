@@ -19,10 +19,8 @@ References:
 
 from __future__ import annotations
 
-import json
 import logging
 import os as _os
-from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 import numpy as np
@@ -38,6 +36,8 @@ from pokerfate.strategy.range_v2.action_model import (
     GTO_VPIP,
     PlayerProfile,
 )
+from pokerfate.strategy.range_v2.bucket_ml_calibration import calibrate_bucket_probs
+from pokerfate.strategy.range_v2.runtime_formula_calibration import load_params
 
 log = logging.getLogger(__name__)
 
@@ -51,16 +51,7 @@ _BUCKET_CAL_MIN_FACTOR = float(_os.environ.get('PF_BUCKET_CAL_MIN_FACTOR', '0.25
 _BUCKET_CAL_MAX_FACTOR = float(_os.environ.get('PF_BUCKET_CAL_MAX_FACTOR', '8.0'))
 _BUCKET_CAL_CATS = ('nuts', 'strong', 'medium', 'draw', 'weak_draw', 'air')
 _BUCKET_CAL_IDX = {cat: i for i, cat in enumerate(_BUCKET_CAL_CATS)}
-_RUNTIME_RANGE_CALIBRATION_ENABLED = (
-    _os.environ.get('PF_RUNTIME_RANGE_CALIBRATION', '0').lower()
-    not in ('0', 'false', 'no', '')
-)
-_RUNTIME_RANGE_CALIBRATION_TAG = '20260520_riskgate'
-_RUNTIME_RANGE_CALIBRATION_ROOT = (
-    Path(__file__).resolve().parents[3] / 'data' / 'runtime_calibration'
-)
 _RUNTIME_BUCKET_CAL_CACHE: Dict[str, Optional[Dict[str, tuple[float, Dict[str, float]]]]] = {}
-_RUNTIME_BUCKET_CAL_WARNED: Set[str] = set()
 
 # Safe subset fitted on 2-5 logs and cross-validated on 6 logs with full
 # bucket-distribution rows (2026-05-16). We only keep contexts where validation
@@ -104,40 +95,44 @@ _BUCKET_CALIBRATION: Dict[str, tuple[float, Dict[str, float]]] = {
 }
 
 
-def _bb_key(big_blind: Optional[float]) -> str:
-    bb = float(big_blind or 0.0)
-    rounded = round(bb)
-    if abs(bb - rounded) < 1e-6:
-        bb_int = int(rounded)
-        if bb_int >= 1000 and bb_int % 1000 == 0:
-            return f'bb_{bb_int // 1000}k'
-        return f'bb_{bb_int}'
-    return 'bb_' + str(bb).replace('.', '_')
+def _nopp_bin(n: int) -> str:
+    if n <= 1:
+        return '1'
+    if n == 2:
+        return '2'
+    return '3+'
+
+
+def _board_texture_key(board: List[Card]) -> str:
+    if len(board) < 3:
+        return 'pre'
+    ranks = [c.rank for c in board]
+    suits = [c.suit for c in board]
+    paired = len(set(ranks)) < len(ranks)
+    if len(suits) >= 3 and len(set(suits[:3])) == 1:
+        flush = 'mono'
+    elif len(suits) >= 3 and max(suits[:3].count(s) for s in set(suits[:3])) >= 2:
+        flush = 'fd'
+    else:
+        flush = 'rainbow'
+    return ('paired' if paired else 'unpaired') + ':' + flush
 
 
 def _load_runtime_bucket_calibration(
     big_blind: Optional[float],
 ) -> Optional[Dict[str, tuple[float, Dict[str, float]]]]:
-    if not _RUNTIME_RANGE_CALIBRATION_ENABLED:
-        return None
-    key = _bb_key(big_blind)
+    from pokerfate.strategy.range_v2.runtime_formula_calibration import bb_key
+
+    key = bb_key(big_blind)
     if key in _RUNTIME_BUCKET_CAL_CACHE:
         return _RUNTIME_BUCKET_CAL_CACHE[key]
 
-    path = (
-        _RUNTIME_RANGE_CALIBRATION_ROOT
-        / key
-        / f'runtime_bucket_params_{_RUNTIME_RANGE_CALIBRATION_TAG}.json'
-    )
-    if not path.exists():
-        if key not in _RUNTIME_BUCKET_CAL_WARNED:
-            log.warning('runtime bucket calibration not found for %s: %s', key, path)
-            _RUNTIME_BUCKET_CAL_WARNED.add(key)
+    raw = load_params('bucket', big_blind)
+    if raw is None:
         _RUNTIME_BUCKET_CAL_CACHE[key] = None
         return None
 
     try:
-        raw = json.loads(path.read_text(encoding='utf-8'))
         parsed: Dict[str, tuple[float, Dict[str, float]]] = {}
         for context_key, params in (raw or {}).items():
             theta_raw = params.get('theta', {}) or {}
@@ -150,15 +145,9 @@ def _load_runtime_bucket_calibration(
                 },
             )
         _RUNTIME_BUCKET_CAL_CACHE[key] = parsed
-        log.info(
-            'runtime bucket calibration loaded for %s: %s contexts from %s',
-            key,
-            len(parsed),
-            path,
-        )
         return parsed
     except Exception:
-        log.exception('runtime bucket calibration load failed for %s: %s', key, path)
+        log.exception('runtime bucket calibration parse failed for %s', key)
         _RUNTIME_BUCKET_CAL_CACHE[key] = None
         return None
 
@@ -412,68 +401,109 @@ class BayesianRangeTracker:
             return
         if not board or len(board) < 3:
             return
-        context_key = f'{street} {trigger}'
         runtime_params = _load_runtime_bucket_calibration(self._big_blind) or {}
-        params = runtime_params.get(context_key) or _BUCKET_CALIBRATION.get(context_key)
-        if params is None:
-            return
+        base_key = f'{street} {trigger}'
+        active_count = sum(1 for pid in self._weights if pid not in self._folded)
+        rich_key = (
+            f'{base_key} nopp={_nopp_bin(active_count)} '
+            f'tex={_board_texture_key(board)}'
+        )
+        nopp_key = f'{base_key} nopp={_nopp_bin(active_count)}'
+        params = (
+            runtime_params.get(rich_key)
+            or runtime_params.get(nopp_key)
+            or runtime_params.get(base_key)
+            or _BUCKET_CALIBRATION.get(base_key)
+        )
         w = self._weights.get(player_id)
         if w is None:
             return
 
-        gamma, theta_dict = params
         board_ints = {hcm.card_to_int(c) for c in board}
         categories = self._get_categories(board)
-        bucket_mass = np.zeros(len(_BUCKET_CAL_CATS), dtype=np.float64)
 
-        for idx in range(1326):
-            if w[idx] <= 1e-12:
-                continue
-            c1, c2 = hcm.ALL_COMBOS[idx]
-            if c1 in board_ints or c2 in board_ints:
-                continue
-            cat_idx = _BUCKET_CAL_IDX.get(categories[idx])
-            if cat_idx is not None:
-                bucket_mass[cat_idx] += float(w[idx])
+        def _bucket_mass_vec() -> np.ndarray:
+            bucket_mass = np.zeros(len(_BUCKET_CAL_CATS), dtype=np.float64)
+            for combo_idx in range(1326):
+                if w[combo_idx] <= 1e-12:
+                    continue
+                c1, c2 = hcm.ALL_COMBOS[combo_idx]
+                if c1 in board_ints or c2 in board_ints:
+                    continue
+                cat_i = _BUCKET_CAL_IDX.get(categories[combo_idx])
+                if cat_i is not None:
+                    bucket_mass[cat_i] += float(w[combo_idx])
+            return bucket_mass
+
+        def _apply_target(target: np.ndarray, source: np.ndarray) -> bool:
+            factors = np.ones(len(_BUCKET_CAL_CATS), dtype=np.float64)
+            live = source > 1e-8
+            factors[live] = target[live] / source[live]
+            np.clip(factors, _BUCKET_CAL_MIN_FACTOR, _BUCKET_CAL_MAX_FACTOR,
+                    out=factors)
+            changed_local = False
+            for combo_idx in range(1326):
+                if w[combo_idx] <= 1e-12:
+                    continue
+                c1, c2 = hcm.ALL_COMBOS[combo_idx]
+                if c1 in board_ints or c2 in board_ints:
+                    continue
+                cat_i = _BUCKET_CAL_IDX.get(categories[combo_idx])
+                if cat_i is None:
+                    continue
+                factor = float(factors[cat_i])
+                if abs(factor - 1.0) > 1e-9:
+                    w[combo_idx] *= factor
+                    changed_local = True
+            if changed_local:
+                s_local = float(w.sum())
+                if s_local > 1e-15:
+                    w[:] = w / s_local
+            return changed_local
+
+        bucket_mass = _bucket_mass_vec()
 
         total = float(bucket_mass.sum())
         if total <= 1e-15:
             return
         p = bucket_mass / total
-        theta = np.array(
-            [float(theta_dict.get(cat, 0.0)) for cat in _BUCKET_CAL_CATS],
-            dtype=np.float64,
+        if params is not None:
+            gamma, theta_dict = params
+            theta = np.array(
+                [float(theta_dict.get(cat, 0.0)) for cat in _BUCKET_CAL_CATS],
+                dtype=np.float64,
+            )
+            logits = gamma * np.log(np.clip(p, 1e-6, 1.0)) + theta
+            logits -= float(logits.max())
+            q = np.exp(logits)
+            q /= float(q.sum())
+            if _apply_target(q, p):
+                bucket_mass = _bucket_mass_vec()
+                total = float(bucket_mass.sum())
+                if total <= 1e-15:
+                    return
+                p = bucket_mass / total
+
+        range_threshold = (1.0 / 1326) * 0.1
+        range_pct = float((w > range_threshold).sum()) / 1326
+        ml_target, _diag = calibrate_bucket_probs(
+            {cat: float(val) for cat, val in zip(_BUCKET_CAL_CATS, p)},
+            big_blind=self._big_blind,
+            street=street,
+            trigger=trigger,
+            active_count=active_count,
+            board=list(board),
+            range_pct=range_pct,
+            known_cards=self._known_cards,
         )
-        logits = gamma * np.log(np.clip(p, 1e-6, 1.0)) + theta
-        logits -= float(logits.max())
-        q = np.exp(logits)
-        q /= float(q.sum())
-
-        factors = np.ones(len(_BUCKET_CAL_CATS), dtype=np.float64)
-        live = p > 1e-8
-        factors[live] = q[live] / p[live]
-        np.clip(factors, _BUCKET_CAL_MIN_FACTOR, _BUCKET_CAL_MAX_FACTOR,
-                out=factors)
-
-        changed = False
-        for idx in range(1326):
-            if w[idx] <= 1e-12:
-                continue
-            c1, c2 = hcm.ALL_COMBOS[idx]
-            if c1 in board_ints or c2 in board_ints:
-                continue
-            cat_idx = _BUCKET_CAL_IDX.get(categories[idx])
-            if cat_idx is None:
-                continue
-            factor = float(factors[cat_idx])
-            if abs(factor - 1.0) > 1e-9:
-                w[idx] *= factor
-                changed = True
-
-        if changed:
-            s = float(w.sum())
-            if s > 1e-15:
-                w /= s
+        if ml_target:
+            target = np.array(
+                [float(ml_target.get(cat, 0.0) or 0.0) for cat in _BUCKET_CAL_CATS],
+                dtype=np.float64,
+            )
+            target_sum = float(target.sum())
+            if target_sum > 1e-15:
+                _apply_target(target / target_sum, p)
 
     def reset_hand(self, player_id: int, position: str,
                    profile: PlayerProfile) -> None:

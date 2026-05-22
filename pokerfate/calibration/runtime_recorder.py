@@ -22,8 +22,12 @@ _SCHEMA = "runtime_range_calibration_v2"
 _RIVER_VALUE_SIZING_SCHEMA = "runtime_river_value_sizing_v1"
 _EXPERIMENT_FLAG_DEFAULTS = {
     "PF_TURN_FLOP_RELATIVE_GUARD": "1",
-    "PF_RUNTIME_RANGE_CALIBRATION": "0",
+    "PF_RUNTIME_RANGE_CALIBRATION": "1",
     "PF_BUCKET_CALIBRATION": "1",
+    "PF_BUCKET_ML_10K": "off",
+    "PF_BUCKET_ML_50K": "off",
+    "PF_BUCKET_ML_DEFAULT": "off",
+    "PF_BUCKET_ML_TAG": "20260522_riskblend",
 }
 
 

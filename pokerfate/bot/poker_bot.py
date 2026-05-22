@@ -412,6 +412,8 @@ class PokerBot:
             range_eq = self._hero_eq_calibrator.calibrate(
                 range_eq, hero_bucket, street, len(opp_ids),
                 action_ctx=action_ctx,
+                big_blind=bb,
+                board_texture=river_rel_board_texture_key(board),
             )
             range_eq = river_rel_clamp_equity_to_bounds(
                 range_eq, river_exact_bounds,

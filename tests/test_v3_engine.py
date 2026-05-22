@@ -916,6 +916,108 @@ class TestPurposeTriggers:
         )
         assert not p.trigger(fragile).hit
 
+    def test_river_pure_bluff_uses_bucket_context_to_fire(self):
+        from pokerfate.strategy.v3.purposes_active import PureBluffRiver
+
+        board = cards('Kh', 'Jh', '7c', '2s', '3d')
+        ctx = self._base_ctx(
+            street='river',
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hole_cards=cards('Ah', '9s'),
+            hero_bucket='air',
+            equity_range=0.05,
+            blockers=BlockerSet(nut_flush_blocker=True, straight_blocker=True),
+            villain_stats=VillainStats(
+                fold_to_cbet=0.70,
+                fold_to_cbet_opps=10,
+                river_fold_rate=0.75,
+                river_action_count=10,
+                hands_seen=30,
+            ),
+            villain_bucket_dist={
+                'air': 0.35, 'weak_draw': 0.20, 'draw': 0.10,
+                'medium': 0.28, 'strong': 0.05, 'nuts': 0.02,
+            },
+            villain_vs_hero_dist={'win': 0.02, 'tie': 0.0, 'loss': 0.98},
+        )
+
+        assert PureBluffRiver().trigger(ctx).hit
+
+    def test_river_pure_bluff_bucket_context_blocks_nuts_heavy_range(self):
+        from pokerfate.strategy.v3.purposes_active import PureBluffRiver
+
+        board = cards('Kh', 'Jh', '7c', '2s', '3d')
+        ctx = self._base_ctx(
+            street='river',
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hole_cards=cards('Ah', '9s'),
+            hero_bucket='air',
+            equity_range=0.05,
+            blockers=BlockerSet(nut_flush_blocker=True, straight_blocker=True),
+            villain_stats=VillainStats(
+                fold_to_cbet=0.70,
+                fold_to_cbet_opps=10,
+                river_fold_rate=0.75,
+                river_action_count=10,
+                hands_seen=30,
+            ),
+            villain_bucket_dist={
+                'air': 0.10, 'weak_draw': 0.08, 'draw': 0.06,
+                'medium': 0.16, 'strong': 0.34, 'nuts': 0.26,
+            },
+            villain_vs_hero_dist={'win': 0.02, 'tie': 0.0, 'loss': 0.98},
+        )
+
+        assert not PureBluffRiver().trigger(ctx).hit
+
+    def test_delayed_cbet_low_equity_bluff_uses_capped_bucket_context(self):
+        from pokerfate.strategy.v3.purposes_active import DelayedCbet
+
+        board = cards('Ah', 'Kd', '7c', '2s')
+        ctx = self._base_ctx(
+            street='turn',
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hole_cards=cards('Qh', '9s'),
+            hero_bucket='air',
+            equity_range=0.22,
+            flop_checked_through=True,
+            villain_stats=VillainStats(
+                fold_to_cbet=0.75,
+                fold_to_cbet_opps=10,
+                hands_seen=30,
+            ),
+            villain_bucket_dist={
+                'air': 0.35, 'weak_draw': 0.25, 'draw': 0.10,
+                'medium': 0.25, 'strong': 0.03, 'nuts': 0.02,
+            },
+            villain_vs_hero_dist={'win': 0.03, 'tie': 0.0, 'loss': 0.97},
+        )
+
+        assert DelayedCbet().trigger(ctx).hit
+
+    def test_semi_bluff_weak_draw_respects_nuts_heavy_bucket_context(self):
+        from pokerfate.strategy.v3.purposes_active import SemiBluff
+
+        board = cards('Jh', 'Ts', '4c')
+        ctx = self._base_ctx(
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hole_cards=cards('Qh', '9s'),
+            hero_bucket='weak_draw',
+            equity_range=0.30,
+            spr=8.0,
+            draw=DrawProfile(gutshot=True, overcards=True),
+            villain_bucket_dist={
+                'air': 0.05, 'weak_draw': 0.05, 'draw': 0.10,
+                'medium': 0.15, 'strong': 0.30, 'nuts': 0.35,
+            },
+        )
+
+        assert not SemiBluff().trigger(ctx).hit
+
     def test_river_relative_thin_value_uses_small_size(self):
         from pokerfate.strategy.v3.purposes_active import ThinValueBet
 

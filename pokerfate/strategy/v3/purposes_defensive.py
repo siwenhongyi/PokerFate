@@ -7,7 +7,7 @@ from typing import List, Tuple
 
 from pokerfate.strategy.gto import GTOMath
 from pokerfate.strategy.v3.context import DecisionCtx
-from pokerfate.strategy.v3 import early_relative
+from pokerfate.strategy.v3 import bluff_context, early_relative
 from pokerfate.strategy.v3.exploit import AF_PASSIVE_BASELINE, no_fold_equity, sticky_passive
 from pokerfate.strategy.v3.purpose import Purpose, TriggerResult
 from pokerfate.strategy.v3.stackoff_guard import stackoff_guard_reason
@@ -639,15 +639,22 @@ class SemiBluffRaise(Purpose):
             return TriggerResult(False)
         d = ctx.draw
         strong_draw = d.flush_draw or d.oesd or (d.gutshot and d.overcards)
+        blf = bluff_context.evaluate(ctx)
         if (
             not (ctx.blockers.nut_flush_blocker or ctx.blockers.straight_blocker)
         ):
+            return TriggerResult(False)
+        if ctx.hero_bucket == 'weak_draw' and blf.nuts >= 0.30:
+            return TriggerResult(False)
+        if not strong_draw and blf.strong_nuts >= 0.60:
             return TriggerResult(False)
         if ctx.spr < 2.5:
             return TriggerResult(False)
         weak_bluff = not strong_draw
         if weak_bluff:
             if sticky_passive(ctx) or ctx.n_sticky >= 1:
+                return TriggerResult(False)
+            if blf.score < 0.55 or blf.blocker_score < 0.45:
                 return TriggerResult(False)
             if (
                 ctx.villain_stats.fold_to_cbet_opps < 5
@@ -668,7 +675,7 @@ class SemiBluffRaise(Purpose):
                 and ctx.equity_range < 0.45
             ):
                 return TriggerResult(False)
-        return TriggerResult(True, 0.3 + 0.3 * ctx.equity_range)
+        return TriggerResult(True, 0.3 + 0.3 * ctx.equity_range + 0.15 * blf.score)
 
 
 # ---------------------------------------------------------------------------

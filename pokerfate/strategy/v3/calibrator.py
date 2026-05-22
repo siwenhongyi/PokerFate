@@ -105,6 +105,8 @@ def _smart_value_min_frac(ctx: DecisionCtx, purpose_id: str, raw_frac: float) ->
         return 0.0
     if ctx.hero_bucket not in {'strong', 'nuts'}:
         return 0.0
+    if _dangerous_non_nut_value_spot(ctx):
+        return 0.0
     if not _payment_target(ctx):
         return 0.0
     return 0.75

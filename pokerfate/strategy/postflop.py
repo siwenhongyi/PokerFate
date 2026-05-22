@@ -28,6 +28,7 @@ from pokerfate.strategy.v3 import (
     BlockerSet, DecisionCtx, DrawProfile, V3Engine, VillainStats,
 )
 from pokerfate.strategy.v3 import engine as _v3_engine
+from pokerfate.strategy.v3 import bluff_context as _v3_bluff_context
 from pokerfate.strategy.v3 import early_relative as _v3_early_relative
 from pokerfate.strategy.v3 import purposes_active as _v3_active
 from pokerfate.strategy.v3 import purposes_defensive as _v3_defensive
@@ -443,6 +444,20 @@ def _resistance_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
     return f"R call={ctx.prev_bet_called_count}{raised} lvl={ctx.resistance_level:.2f}"
 
 
+def _bluff_context_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
+    watched = {
+        'semi_bluff', 'pure_bluff_river', 'delayed_cbet', 'probe_bet',
+        'float_bet', 'double_barrel', 'triple_barrel', 'stop_and_go',
+        'default_stab', 'semi_bluff_raise',
+    }
+    selected = out.purpose.split("→", 1)[0] if out.purpose else ''
+    if selected not in watched and not (ids & watched):
+        return None
+    if ctx.hero_bucket not in ('air', 'weak_draw', 'draw'):
+        return None
+    return _v3_bluff_context.describe(ctx)
+
+
 def _strategy_gate_notes(ctx: DecisionCtx, out) -> list[str]:
     ids = _candidate_ids(out)
     notes = [
@@ -453,6 +468,7 @@ def _strategy_gate_notes(ctx: DecisionCtx, out) -> list[str]:
         _stackoff_guard_note(ctx, out, ids),
         _value_jam_note(ctx, out, ids),
         _early_relative_note(ctx, out, ids),
+        _bluff_context_note(ctx, out, ids),
         _resistance_note(ctx, out, ids),
     ]
     return [n for n in notes if n][:3]

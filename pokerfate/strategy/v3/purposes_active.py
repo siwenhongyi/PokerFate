@@ -14,7 +14,7 @@ from __future__ import annotations
 import os as _os
 from typing import List, Optional, Tuple
 
-from pokerfate.strategy.v3 import early_relative
+from pokerfate.strategy.v3 import bluff_context, early_relative
 from pokerfate.strategy.v3.context import DecisionCtx
 from pokerfate.strategy.v3.exploit import no_fold_equity, sticky_passive
 from pokerfate.strategy.v3.purpose import Purpose, TriggerResult
@@ -104,6 +104,10 @@ _RIVER_MEDIUM_DANGER_JAM_MIN_WIN = 0.82
 _RIVER_MEDIUM_DANGER_JAM_MAX_LOSS = 0.15
 _RIVER_MEDIUM_PROBE_MIN_REL_EQ = 0.55
 _RIVER_MEDIUM_PROBE_MIN_WIN_GAP = 0.10
+_BLUFF_CONTEXT_DELAYED_MIN = 0.55
+_BLUFF_CONTEXT_PROBE_FLOAT_MIN = 0.50
+_BLUFF_CONTEXT_BARREL_MIN = 0.58
+_BLUFF_CONTEXT_RIVER_MIN = 0.48
 
 
 # ---------------------------------------------------------------------------
@@ -1109,10 +1113,17 @@ class SemiBluff(Purpose):
             return TriggerResult(False)
         # weak_draw 默认要求 eq ≥ 0.22；PFR/IP 或单挑时允许 0.20 的卡顺+
         # overcard 小频率下注，否则这些边缘 equity 全部免费放弃。
+        blf = bluff_context.evaluate(ctx)
         weak_min = 0.22
         if ctx.is_pfr and (ctx.is_ip or ctx.num_opponents == 1):
             weak_min = 0.20
+        if ctx.hero_bucket == 'weak_draw' and blf.air_weak >= 0.35 and blf.score >= 0.50:
+            weak_min = max(0.18, weak_min - 0.02)
         if ctx.hero_bucket == 'weak_draw' and ctx.equity_range < weak_min:
+            return TriggerResult(False)
+        if ctx.hero_bucket == 'weak_draw' and blf.nuts >= 0.30:
+            return TriggerResult(False)
+        if ctx.hero_bucket == 'weak_draw' and blf.strong_nuts >= 0.65:
             return TriggerResult(False)
         # Sticky 对手硬门：semi-bluff 是 draw-only bucket 的纯 bluff 线，
         # EV 公式以 fold_equity 为主项，FE≈0 时结构性负。原 EV gate 用
@@ -1133,7 +1144,10 @@ class SemiBluff(Purpose):
         if ev <= 0 and ctx.equity_range < 0.40:
             return TriggerResult(False)
         _ = fe  # retained for doc clarity
-        w = 0.4 + 0.5 * ctx.equity_range
+        bucket_delta = 0.0
+        if ctx.villain_bucket_dist:
+            bucket_delta = max(-0.10, min(0.18, (blf.score - 0.45) * 0.35))
+        w = 0.4 + 0.5 * ctx.equity_range + bucket_delta
         return TriggerResult(True, w)
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
@@ -1154,11 +1168,19 @@ class PureBluffRiver(Purpose):
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
         if ctx.facing_bet or ctx.hero_bucket != 'air':
             return TriggerResult(False)
-        if not (ctx.blockers.nut_flush_blocker or ctx.blockers.straight_blocker):
+        blf = bluff_context.evaluate(ctx)
+        blocker_need = 0.35 if blf.air_weak >= 0.35 else 0.45
+        if blf.blocker_score < blocker_need:
             return TriggerResult(False)
-        if _bluff_catcher_density(ctx) < _PURE_BLUFF_CATCHER_MIN:
+        if blf.nuts > 0.18 or blf.strong_nuts > 0.55:
             return TriggerResult(False)
-        if ctx.villain_stats.river_fold_rate <= _PURE_BLUFF_RIVER_FOLD_MIN:
+        if (
+            _bluff_catcher_density(ctx) < _PURE_BLUFF_CATCHER_MIN
+            and blf.air_weak < 0.35
+            and blf.medium < 0.35
+        ):
+            return TriggerResult(False)
+        if ctx.villain_stats.river_fold_rate <= _PURE_BLUFF_RIVER_FOLD_MIN and blf.score < 0.66:
             return TriggerResult(False)
         # Sticky 对手硬门：pure bluff 的 EV 主项完全依赖 FE；river_fold_rate
         # 已有 > 0.40 门，但 river_fold 与 fold_to_cbet 不同 street——对
@@ -1168,7 +1190,9 @@ class PureBluffRiver(Purpose):
             return TriggerResult(False)
         if ctx.num_opponents != 1:
             return TriggerResult(False)
-        w = ctx.villain_stats.river_fold_rate * ctx.blockers.count() * 0.5
+        if blf.score < _BLUFF_CONTEXT_RIVER_MIN:
+            return TriggerResult(False)
+        w = 0.25 + 0.75 * blf.score + 0.20 * blf.blocker_score
         return TriggerResult(True, max(0.2, w))
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
@@ -1189,7 +1213,17 @@ class DelayedCbet(Purpose):
             return TriggerResult(False)
         if not ctx.flop_checked_through:
             return TriggerResult(False)
-        if ctx.equity_range < 0.45:
+        blf = bluff_context.evaluate(ctx)
+        delayed_bluff = (
+            ctx.hero_bucket in ('air', 'weak_draw')
+            and ctx.equity_range >= 0.18
+            and ctx.num_opponents <= 2
+            and (ctx.is_ip or ctx.num_opponents == 1)
+            and blf.score >= _BLUFF_CONTEXT_DELAYED_MIN
+            and blf.nuts <= 0.20
+            and blf.strong_nuts <= 0.55
+        )
+        if ctx.equity_range < 0.45 and not delayed_bluff:
             return TriggerResult(False)
         if (
             no_fold_equity(ctx)
@@ -1197,6 +1231,8 @@ class DelayedCbet(Purpose):
             and not _realizable_no_fe_draw(ctx)
         ):
             return TriggerResult(False)
+        if delayed_bluff:
+            return TriggerResult(True, 0.45 + 0.45 * blf.score)
         return TriggerResult(True, 0.6 + 0.4 * ctx.equity_range + _no_fe_value_weight_add(ctx))
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
@@ -1221,7 +1257,16 @@ class ProbeBet(Purpose):
             return TriggerResult(False)
         if not ctx.flop_checked_through:
             return TriggerResult(False)
-        if ctx.equity_range < 0.40:
+        blf = bluff_context.evaluate(ctx)
+        probe_bluff = (
+            ctx.hero_bucket in ('air', 'weak_draw')
+            and ctx.equity_range >= 0.18
+            and ctx.num_opponents <= 2
+            and blf.score >= _BLUFF_CONTEXT_PROBE_FLOAT_MIN
+            and blf.nuts <= 0.20
+            and blf.strong_nuts <= 0.55
+        )
+        if ctx.equity_range < 0.40 and not probe_bluff:
             return TriggerResult(False)
         # Sticky 对手 + 无 showdown value（air/weak_draw）时 probe 是
         # 结构性 -EV：FE ≈ 0 无法靠下注赢 pot，hero 又没有叫到摊牌的 eq。
@@ -1235,6 +1280,8 @@ class ProbeBet(Purpose):
             w = 0.5 + 0.3 * (1 - ctx.villain_stats.river_fold_rate)
         else:
             w = 0.5 + 0.15
+        if probe_bluff:
+            w += 0.25 * blf.score
         return TriggerResult(True, w + _no_fe_value_weight_add(ctx))
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
@@ -1262,14 +1309,23 @@ class FloatBet(Purpose):
             return TriggerResult(False)
         if ctx.opp_prev_actions.get(prev_street) != 'check':
             return TriggerResult(False)
-        if ctx.equity_range < 0.30:
+        blf = bluff_context.evaluate(ctx)
+        float_bluff = (
+            ctx.hero_bucket in ('air', 'weak_draw')
+            and ctx.equity_range >= 0.16
+            and ctx.num_opponents <= 2
+            and blf.score >= _BLUFF_CONTEXT_PROBE_FLOAT_MIN
+            and blf.nuts <= 0.20
+            and blf.strong_nuts <= 0.55
+        )
+        if ctx.equity_range < 0.30 and not float_bluff:
             return TriggerResult(False)
         # Sticky 对手 + bluff bucket 时 float 结构性 -EV（同 ProbeBet 逻辑）。
         # value bucket 保留 —— IP 对 station 的薄价值 stab 仍 +EV。
         if no_fold_equity(ctx) and ctx.hero_bucket in ('air', 'weak_draw'):
             return TriggerResult(False)
         return TriggerResult(True, 0.5 + 0.3 * ctx.villain_stats.bluff_win_rate
-                             + _no_fe_value_weight_add(ctx))
+                             + 0.25 * blf.score + _no_fe_value_weight_add(ctx))
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
         if _no_fe_value_pressure(ctx):
@@ -1325,18 +1381,24 @@ class DoubleBarrel(Purpose):
         if _fragile_underpair_after_resistance(ctx):
             return TriggerResult(False)
         need = 0.45 + _barrel_resistance_eq_add(ctx)
+        blf = bluff_context.evaluate(ctx)
         if (
             no_fold_equity(ctx)
             and ctx.hero_bucket in ('air', 'weak_draw', 'draw')
             and not _realizable_no_fe_draw(ctx)
         ):
             return TriggerResult(False)
-        if ctx.hero_bucket in ('air', 'weak_draw', 'draw') and ctx.equity_range < need:
+        barrel_context_ok = (
+            blf.score >= _BLUFF_CONTEXT_BARREL_MIN
+            and blf.nuts <= 0.25
+            and blf.strong_nuts <= 0.60
+        )
+        if ctx.hero_bucket in ('air', 'weak_draw', 'draw') and ctx.equity_range < need and not barrel_context_ok:
             return TriggerResult(False)
         # good barrel card = high (A/K/Q) turn or equity >= need
-        if ctx.equity_range < need and ctx.board_sig.high_card_rank < 12:
+        if ctx.equity_range < need and ctx.board_sig.high_card_rank < 12 and not barrel_context_ok:
             return TriggerResult(False)
-        weight = 0.7 + 0.5 * ctx.equity_range + _no_fe_value_weight_add(ctx)
+        weight = 0.7 + 0.5 * ctx.equity_range + 0.25 * blf.score + _no_fe_value_weight_add(ctx)
         if ctx.hero_bucket in ('air', 'weak_draw', 'draw') and getattr(ctx, 'resistance_level', 0.0) > 0:
             weight *= _BARREL_RESIST_WEIGHT_MULT
         return TriggerResult(True, weight)
@@ -1367,15 +1429,18 @@ class TripleBarrel(Purpose):
             return TriggerResult(False)
         if ctx.hero_bucket not in ('nuts', 'strong', 'air'):
             return TriggerResult(False)
-        if ctx.hero_bucket == 'air' and not ctx.blockers.count():
+        blf = bluff_context.evaluate(ctx)
+        if ctx.hero_bucket == 'air' and blf.blocker_score < 0.35:
             return TriggerResult(False)
         if ctx.hero_bucket in ('air', 'weak_draw', 'draw'):
             need = _barrel_resistance_eq_add(ctx)
             if need > 0 and ctx.equity_range < need:
                 return TriggerResult(False)
+            if blf.score < 0.60 or blf.nuts > 0.25 or blf.strong_nuts > 0.60:
+                return TriggerResult(False)
         if ctx.villain_stats.river_fold_rate < 0.35:
             return TriggerResult(False)
-        weight = 0.7
+        weight = 0.7 + (0.25 * blf.score if ctx.hero_bucket == 'air' else 0.0)
         if ctx.hero_bucket in ('air', 'weak_draw', 'draw') and getattr(ctx, 'resistance_level', 0.0) > 0:
             weight *= _BARREL_RESIST_WEIGHT_MULT
         return TriggerResult(True, weight)

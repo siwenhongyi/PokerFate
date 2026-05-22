@@ -385,6 +385,76 @@ def _bucket_metrics(rows: list[dict[str, Any]], probs: np.ndarray) -> dict[str, 
     }
 
 
+def _bucket_risk_summary(raw: dict[str, Any], fit: dict[str, Any]) -> dict[str, Any]:
+    strong_delta = (
+        float(fit.get("strong_nuts_under_20_pct", 0.0))
+        - float(raw.get("strong_nuts_under_20_pct", 0.0))
+    )
+    combo_delta = (
+        float(fit.get("strong_nuts_combo_under_20_pct", 0.0))
+        - float(raw.get("strong_nuts_combo_under_20_pct", 0.0))
+    )
+    return {
+        "strong_nuts_under_20_delta_pp": round(strong_delta, 2),
+        "strong_nuts_combo_under_20_delta_pp": round(combo_delta, 2),
+        "strong_nuts_combo_avg_delta_pp": round(
+            float(fit.get("strong_nuts_combo_avg_pct", 0.0))
+            - float(raw.get("strong_nuts_combo_avg_pct", 0.0)),
+            2,
+        ),
+    }
+
+
+def _select_bucket_blend(
+    rows: list[dict[str, Any]],
+    raw_probs: np.ndarray,
+    model_probs: np.ndarray,
+    *,
+    min_bucket_nll_gain: float,
+    max_strong_nuts_under_worsen_pp: float,
+    max_strong_nuts_combo_under_worsen_pp: float,
+) -> dict[str, Any]:
+    raw_m = _bucket_metrics(rows, raw_probs)
+    best: dict[str, Any] | None = None
+    for alpha in np.linspace(0.05, 1.0, 20):
+        blended = (1.0 - float(alpha)) * raw_probs + float(alpha) * model_probs
+        blended = np.clip(blended, EPS, 1.0)
+        blended /= blended.sum(axis=1, keepdims=True)
+        metrics = _bucket_metrics(rows, blended)
+        risk = _bucket_risk_summary(raw_m, metrics)
+        nll_gain = round(float(raw_m["nll"] - metrics["nll"]), 5)
+        usable = (
+            nll_gain >= min_bucket_nll_gain
+            and risk["strong_nuts_under_20_delta_pp"] <= max_strong_nuts_under_worsen_pp
+            and risk["strong_nuts_combo_under_20_delta_pp"] <= max_strong_nuts_combo_under_worsen_pp
+        )
+        candidate = {
+            "alpha": round(float(alpha), 2),
+            "metrics": metrics,
+            "risk": risk,
+            "nll_gain": nll_gain,
+            "usable": usable,
+        }
+        if usable and (
+            best is None
+            or candidate["nll_gain"] > best["nll_gain"]
+            or (
+                candidate["nll_gain"] == best["nll_gain"]
+                and candidate["alpha"] > best["alpha"]
+            )
+        ):
+            best = candidate
+    if best is not None:
+        return best
+    return {
+        "alpha": 0.0,
+        "metrics": raw_m,
+        "risk": _bucket_risk_summary(raw_m, raw_m),
+        "nll_gain": 0.0,
+        "usable": False,
+    }
+
+
 class Adam:
     def __init__(self, lr: float) -> None:
         self.lr = lr
@@ -439,6 +509,9 @@ def _train_bucket_fm(
     bucket_strong_nuts_weight: float,
     strong_nuts_lowprob_penalty: float,
     strong_nuts_lowprob_threshold: float,
+    min_bucket_nll_gain: float,
+    max_strong_nuts_under_worsen_pp: float,
+    max_strong_nuts_combo_under_worsen_pp: float,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     dense_names = list(_dense_bucket_features(train_rows[0]).keys())
     feature_map = _build_feature_map(
@@ -527,8 +600,21 @@ def _train_bucket_fm(
             })
     raw_train = _bucket_metrics(train_rows, _softmax(base_train))
     raw_val = _bucket_metrics(val_rows, _softmax(base_val))
-    fm_train = _bucket_metrics(train_rows, _softmax(_bucket_logits(x_train, base_train, params)))
-    fm_val = _bucket_metrics(val_rows, _softmax(_bucket_logits(x_val, base_val, params)))
+    train_model_probs = _softmax(_bucket_logits(x_train, base_train, params))
+    val_model_probs = _softmax(_bucket_logits(x_val, base_val, params))
+    fm_train = _bucket_metrics(train_rows, train_model_probs)
+    fm_val = _bucket_metrics(val_rows, val_model_probs)
+    val_risk = _bucket_risk_summary(raw_val, fm_val)
+    val_nll_gain = round(float(raw_val["nll"] - fm_val["nll"]), 5)
+    selected = _select_bucket_blend(
+        val_rows,
+        _softmax(base_val),
+        val_model_probs,
+        min_bucket_nll_gain=min_bucket_nll_gain,
+        max_strong_nuts_under_worsen_pp=max_strong_nuts_under_worsen_pp,
+        max_strong_nuts_combo_under_worsen_pp=max_strong_nuts_combo_under_worsen_pp,
+    )
+    runtime_usable = bool(selected["usable"])
     model = {
         "type": "bucket_fm_residual",
         "cat_order": list(CAT_ORDER),
@@ -537,6 +623,8 @@ def _train_bucket_fm(
         "bucket_strong_nuts_weight": bucket_strong_nuts_weight,
         "strong_nuts_lowprob_penalty": strong_nuts_lowprob_penalty,
         "strong_nuts_lowprob_threshold": strong_nuts_lowprob_threshold,
+        "blend_alpha": selected["alpha"],
+        "runtime_usable": runtime_usable,
         "feature_map": feature_map,
         "w": np.round(params["w"], 6).tolist(),
         "b": np.round(params["b"], 6).tolist(),
@@ -549,8 +637,16 @@ def _train_bucket_fm(
         "train_fm": fm_train,
         "val_raw": raw_val,
         "val_fm": fm_val,
-        "val_nll_gain": round(float(raw_val["nll"] - fm_val["nll"]), 5),
+        "val_nll_gain": val_nll_gain,
         "val_brier_gain": round(float(raw_val["brier"] - fm_val["brier"]), 5),
+        "val_risk": val_risk,
+        "selected_blend": selected,
+        "runtime_usable": runtime_usable,
+        "usable_gate": {
+            "min_bucket_nll_gain": min_bucket_nll_gain,
+            "max_strong_nuts_under_worsen_pp": max_strong_nuts_under_worsen_pp,
+            "max_strong_nuts_combo_under_worsen_pp": max_strong_nuts_combo_under_worsen_pp,
+        },
     }
     return model, report, {"feature_map": feature_map}
 
@@ -560,12 +656,111 @@ def _equity_metrics(items: list[tuple[dict[str, Any], float, float]], pred: np.n
         return {"n": 0}
     y = np.array([actual for _row, _raw, actual in items], dtype=np.float64)
     err = pred - y
+    high_mask = y >= 0.75
+    low_mask = y <= 0.25
     return {
         "n": len(items),
         "mae_pp": round(float(np.mean(np.abs(err)) * 100.0), 2),
         "rmse_pp": round(float(math.sqrt(np.mean(err * err))) * 100.0, 2),
         "bias_pp": round(float(np.mean(err) * 100.0), 2),
         "ece_pp": round(_ece(pred, y) * 100.0, 2),
+        "high_actual_under_50_pct": round(
+            float(np.mean(pred[high_mask] < 0.50) * 100.0)
+            if bool(high_mask.any()) else 0.0,
+            2,
+        ),
+        "high_actual_avg_pred_pct": round(
+            float(np.mean(pred[high_mask]) * 100.0)
+            if bool(high_mask.any()) else 0.0,
+            2,
+        ),
+        "low_actual_over_50_pct": round(
+            float(np.mean(pred[low_mask] > 0.50) * 100.0)
+            if bool(low_mask.any()) else 0.0,
+            2,
+        ),
+        "low_actual_avg_pred_pct": round(
+            float(np.mean(pred[low_mask]) * 100.0)
+            if bool(low_mask.any()) else 0.0,
+            2,
+        ),
+    }
+
+
+def _equity_risk_summary(raw: dict[str, Any], fit: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "high_actual_under_50_delta_pp": round(
+            float(fit.get("high_actual_under_50_pct", 0.0))
+            - float(raw.get("high_actual_under_50_pct", 0.0)),
+            2,
+        ),
+        "high_actual_avg_pred_delta_pp": round(
+            float(fit.get("high_actual_avg_pred_pct", 0.0))
+            - float(raw.get("high_actual_avg_pred_pct", 0.0)),
+            2,
+        ),
+        "low_actual_over_50_delta_pp": round(
+            float(fit.get("low_actual_over_50_pct", 0.0))
+            - float(raw.get("low_actual_over_50_pct", 0.0)),
+            2,
+        ),
+        "low_actual_avg_pred_delta_pp": round(
+            float(fit.get("low_actual_avg_pred_pct", 0.0))
+            - float(raw.get("low_actual_avg_pred_pct", 0.0)),
+            2,
+        ),
+    }
+
+
+def _select_equity_blend(
+    items: list[tuple[dict[str, Any], float, float]],
+    raw_pred: np.ndarray,
+    model_pred: np.ndarray,
+    *,
+    min_mae_gain_pp: float,
+    max_high_actual_under_worsen_pp: float,
+    max_low_actual_over_worsen_pp: float,
+) -> dict[str, Any]:
+    raw_m = _equity_metrics(items, raw_pred)
+    best: dict[str, Any] | None = None
+    for alpha in np.linspace(0.05, 1.0, 20):
+        blended = np.clip(
+            (1.0 - float(alpha)) * raw_pred + float(alpha) * model_pred,
+            0.0,
+            1.0,
+        )
+        metrics = _equity_metrics(items, blended)
+        risk = _equity_risk_summary(raw_m, metrics)
+        gain = round(float(raw_m["mae_pp"] - metrics["mae_pp"]), 3)
+        usable = (
+            gain >= min_mae_gain_pp
+            and risk["high_actual_under_50_delta_pp"] <= max_high_actual_under_worsen_pp
+            and risk["low_actual_over_50_delta_pp"] <= max_low_actual_over_worsen_pp
+        )
+        candidate = {
+            "alpha": round(float(alpha), 2),
+            "metrics": metrics,
+            "risk": risk,
+            "mae_gain_pp": gain,
+            "usable": usable,
+        }
+        if usable and (
+            best is None
+            or candidate["mae_gain_pp"] > best["mae_gain_pp"]
+            or (
+                candidate["mae_gain_pp"] == best["mae_gain_pp"]
+                and candidate["alpha"] > best["alpha"]
+            )
+        ):
+            best = candidate
+    if best is not None:
+        return best
+    return {
+        "alpha": 0.0,
+        "metrics": raw_m,
+        "risk": _equity_risk_summary(raw_m, raw_m),
+        "mae_gain_pp": 0.0,
+        "usable": False,
     }
 
 
@@ -604,6 +799,11 @@ def _train_equity_fm(
     dense_feature_fn=_dense_equity_features,
     model_type: str = "equity_fm_residual",
     include_relative_context: bool = False,
+    high_actual_weight: float = 1.0,
+    low_actual_weight: float = 1.0,
+    min_mae_gain_pp: float = 0.0,
+    max_high_actual_under_worsen_pp: float = 0.0,
+    max_low_actual_over_worsen_pp: float = 0.0,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     train_rows = [row for row, _pred, _actual in train_items]
     train_pred_by_id = {id(row): pred for row, pred, _actual in train_items}
@@ -632,6 +832,14 @@ def _train_equity_fm(
     )
     raw_train = np.array([pred for _row, pred, _actual in train_items], dtype=np.float64)
     y_train = np.array([actual for _row, _pred, actual in train_items], dtype=np.float64)
+    sample_weight = np.ones(len(y_train), dtype=np.float64)
+    if high_actual_weight > 1.0:
+        sample_weight[y_train >= 0.75] = float(high_actual_weight)
+    if low_actual_weight > 1.0:
+        sample_weight[y_train <= 0.25] = np.maximum(
+            sample_weight[y_train <= 0.25],
+            float(low_actual_weight),
+        )
     raw_val = np.array([pred for _row, pred, _actual in val_items], dtype=np.float64)
     base_train = _logit(raw_train)
     base_val = _logit(raw_val)
@@ -651,9 +859,13 @@ def _train_equity_fm(
             idx = order[start:start + batch_size]
             xb = x_train[idx].astype(np.float64, copy=False)
             yb = y_train[idx]
+            wb = sample_weight[idx]
             z = _equity_score(xb, base_train[idx], params)
             pred = _sigmoid(z)
-            dz = (2.0 * (pred - yb) * pred * (1.0 - pred)) / max(len(idx), 1)
+            dz = (
+                2.0 * (pred - yb) * pred * (1.0 - pred)
+                * wb / max(float(wb.sum()), 1.0)
+            )
             xv = xb @ params["v"]
             x2 = xb * xb
             grads = {
@@ -673,13 +885,29 @@ def _train_equity_fm(
                 "val": _equity_metrics(val_items, val_pred),
             })
     fm_train = _equity_metrics(train_items, _sigmoid(_equity_score(x_train, base_train, params)))
-    fm_val = _equity_metrics(val_items, _sigmoid(_equity_score(x_val, base_val, params)))
+    val_model_pred = _sigmoid(_equity_score(x_val, base_val, params))
+    fm_val = _equity_metrics(val_items, val_model_pred)
     raw_train_m = _equity_metrics(train_items, raw_train)
     raw_val_m = _equity_metrics(val_items, raw_val)
+    val_risk = _equity_risk_summary(raw_val_m, fm_val)
+    val_mae_gain_pp = round(float(raw_val_m["mae_pp"] - fm_val["mae_pp"]), 3)
+    selected = _select_equity_blend(
+        val_items,
+        raw_val,
+        val_model_pred,
+        min_mae_gain_pp=min_mae_gain_pp,
+        max_high_actual_under_worsen_pp=max_high_actual_under_worsen_pp,
+        max_low_actual_over_worsen_pp=max_low_actual_over_worsen_pp,
+    )
+    runtime_usable = bool(selected["usable"])
     model = {
         "type": model_type,
         "rank": rank,
         "include_player": include_player,
+        "high_actual_weight": high_actual_weight,
+        "low_actual_weight": low_actual_weight,
+        "blend_alpha": selected["alpha"],
+        "runtime_usable": runtime_usable,
         "feature_map": feature_map,
         "w": np.round(params["w"], 6).tolist(),
         "b": np.round(params["b"], 6).tolist(),
@@ -692,8 +920,16 @@ def _train_equity_fm(
         "train_fm": fm_train,
         "val_raw": raw_val_m,
         "val_fm": fm_val,
-        "val_mae_gain_pp": round(float(raw_val_m["mae_pp"] - fm_val["mae_pp"]), 3),
+        "val_mae_gain_pp": val_mae_gain_pp,
         "val_ece_gain_pp": round(float(raw_val_m["ece_pp"] - fm_val["ece_pp"]), 3),
+        "val_risk": val_risk,
+        "selected_blend": selected,
+        "runtime_usable": runtime_usable,
+        "usable_gate": {
+            "min_mae_gain_pp": min_mae_gain_pp,
+            "max_high_actual_under_worsen_pp": max_high_actual_under_worsen_pp,
+            "max_low_actual_over_worsen_pp": max_low_actual_over_worsen_pp,
+        },
     }
     return model, report
 
@@ -715,9 +951,17 @@ def main() -> None:
     ap.add_argument("--l2", type=float, default=0.0005)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--include-player", action="store_true")
-    ap.add_argument("--bucket-strong-nuts-weight", type=float, default=1.0)
-    ap.add_argument("--strong-nuts-lowprob-penalty", type=float, default=0.0)
+    ap.add_argument("--bucket-strong-nuts-weight", type=float, default=2.0)
+    ap.add_argument("--strong-nuts-lowprob-penalty", type=float, default=1.0)
     ap.add_argument("--strong-nuts-lowprob-threshold", type=float, default=0.20)
+    ap.add_argument("--min-bucket-nll-gain", type=float, default=0.001)
+    ap.add_argument("--max-strong-nuts-under-worsen-pp", type=float, default=0.0)
+    ap.add_argument("--max-strong-nuts-combo-under-worsen-pp", type=float, default=0.0)
+    ap.add_argument("--equity-high-actual-weight", type=float, default=1.5)
+    ap.add_argument("--equity-low-actual-weight", type=float, default=1.25)
+    ap.add_argument("--min-equity-mae-gain-pp", type=float, default=0.01)
+    ap.add_argument("--max-high-actual-under-worsen-pp", type=float, default=0.0)
+    ap.add_argument("--max-low-actual-over-worsen-pp", type=float, default=0.0)
     ap.add_argument("--max-train-rows", type=int, default=0)
     ap.add_argument("--max-val-rows", type=int, default=0)
     ap.add_argument("--skip-bucket", action="store_true")
@@ -776,6 +1020,14 @@ def main() -> None:
             "bucket_strong_nuts_weight": args.bucket_strong_nuts_weight,
             "strong_nuts_lowprob_penalty": args.strong_nuts_lowprob_penalty,
             "strong_nuts_lowprob_threshold": args.strong_nuts_lowprob_threshold,
+            "min_bucket_nll_gain": args.min_bucket_nll_gain,
+            "max_strong_nuts_under_worsen_pp": args.max_strong_nuts_under_worsen_pp,
+            "max_strong_nuts_combo_under_worsen_pp": args.max_strong_nuts_combo_under_worsen_pp,
+            "equity_high_actual_weight": args.equity_high_actual_weight,
+            "equity_low_actual_weight": args.equity_low_actual_weight,
+            "min_equity_mae_gain_pp": args.min_equity_mae_gain_pp,
+            "max_high_actual_under_worsen_pp": args.max_high_actual_under_worsen_pp,
+            "max_low_actual_over_worsen_pp": args.max_low_actual_over_worsen_pp,
         }
     }
 
@@ -799,6 +1051,9 @@ def main() -> None:
                 bucket_strong_nuts_weight=args.bucket_strong_nuts_weight,
                 strong_nuts_lowprob_penalty=args.strong_nuts_lowprob_penalty,
                 strong_nuts_lowprob_threshold=args.strong_nuts_lowprob_threshold,
+                min_bucket_nll_gain=args.min_bucket_nll_gain,
+                max_strong_nuts_under_worsen_pp=args.max_strong_nuts_under_worsen_pp,
+                max_strong_nuts_combo_under_worsen_pp=args.max_strong_nuts_combo_under_worsen_pp,
             )
             report["bucket"] = bucket_report
             _write_json(args.bucket_model_out, bucket_model)
@@ -819,6 +1074,11 @@ def main() -> None:
                 l2=args.l2,
                 seed=args.seed,
                 include_player=args.include_player,
+                high_actual_weight=args.equity_high_actual_weight,
+                low_actual_weight=args.equity_low_actual_weight,
+                min_mae_gain_pp=args.min_equity_mae_gain_pp,
+                max_high_actual_under_worsen_pp=args.max_high_actual_under_worsen_pp,
+                max_low_actual_over_worsen_pp=args.max_low_actual_over_worsen_pp,
             )
             report["equity"] = eq_report
             _write_json(args.equity_model_out, eq_model)
@@ -842,6 +1102,11 @@ def main() -> None:
                 dense_feature_fn=_dense_relative_features,
                 model_type="river_relative_fm_residual",
                 include_relative_context=True,
+                high_actual_weight=args.equity_high_actual_weight,
+                low_actual_weight=args.equity_low_actual_weight,
+                min_mae_gain_pp=args.min_equity_mae_gain_pp,
+                max_high_actual_under_worsen_pp=args.max_high_actual_under_worsen_pp,
+                max_low_actual_over_worsen_pp=args.max_low_actual_over_worsen_pp,
             )
             report["river_relative"] = rel_report
             _write_json(args.relative_model_out, rel_model)
