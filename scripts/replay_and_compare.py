@@ -34,9 +34,9 @@ from pathlib import Path
 from typing import Optional
 
 try:
-    from scripts.hero_name import load_hero_name
+    from scripts.hero_name import HeroNames, load_hero_names
 except ModuleNotFoundError:  # Support `python scripts/replay_and_compare.py`.
-    from hero_name import load_hero_name
+    from hero_name import HeroNames, load_hero_names
 
 # Windows 编码兜底：强制 stdout/stderr 用 UTF-8（避免 cmd cp936 print 中文/花色崩）
 # Python 3.7+ 支持 reconfigure；旧环境失败时静默跳过。
@@ -63,9 +63,9 @@ def load_replay(path: Path) -> list[dict]:
     return hands
 
 
-def _hero_id(players: list[dict], hero_name: str) -> Optional[int]:
+def _hero_id(players: list[dict], hero_names: HeroNames) -> Optional[int]:
     for p in players:
-        if p.get("name") == hero_name:
+        if hero_names.matches(p.get("name", "")):
             return p["id"]
     return None
 
@@ -641,7 +641,7 @@ def main() -> None:
                     help="Keep calibration hook enabled for diagnostic replay")
     args = ap.parse_args()
     try:
-        hero_name = load_hero_name()
+        hero_names = load_hero_names()
     except RuntimeError as exc:
         ap.error(str(exc))
 
@@ -668,7 +668,7 @@ def main() -> None:
     progress_every = max(1, int(args.progress_every))
     for idx, hand in enumerate(hands, 1):
         session = hand.get("session", 0)
-        hero_id = _hero_id(hand["players"], hero_name)
+        hero_id = _hero_id(hand["players"], hero_names)
         if hero_id is None:
             if args.progress and (idx == 1 or idx == total_hands or idx % progress_every == 0):
                 print(f"__PF_PROGRESS__ {idx} {total_hands}", file=sys.stderr, flush=True)

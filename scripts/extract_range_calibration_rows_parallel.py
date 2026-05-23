@@ -412,13 +412,13 @@ def _run_task(task: dict[str, Any]) -> dict[str, Any]:
 
     try:
         from pokerfate.api import PokerFateAPI
-        from scripts.hero_name import load_hero_name
+        from scripts.hero_name import load_hero_names
         from scripts.replay_and_compare import _hero_id, _replay_hand
     except Exception as exc:
         return {"error": f"import failed: {type(exc).__name__}: {exc}"}
 
     try:
-        hero_name = load_hero_name()
+        hero_names = load_hero_names()
     except Exception as exc:
         return {"error": f"hero name failed: {type(exc).__name__}: {exc}"}
 
@@ -456,7 +456,7 @@ def _run_task(task: dict[str, Any]) -> dict[str, Any]:
                         })
                     continue
 
-                hero_id = _hero_id(hand.get("players", []), hero_name)
+                hero_id = _hero_id(hand.get("players", []), hero_names)
                 if hero_id is None:
                     skipped_no_hero += 1
                     continue

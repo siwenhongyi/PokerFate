@@ -29,7 +29,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Optional
-from scripts.hero_name import load_hero_name
+from scripts.hero_name import HeroNames, load_hero_names
 
 # Windows 兜底：强制 stdout/stderr UTF-8
 if sys.platform == 'win32':
@@ -120,7 +120,7 @@ def translate_ptype(tag: str) -> str:
     return tag
 
 
-def parse_log(log_path: Path, hero_name: str, bb_value: int = 1000) -> list[dict]:
+def parse_log(log_path: Path, hero_names: HeroNames, bb_value: int = 1000) -> list[dict]:
     """把 console log 切成手数列表，每手一个 dict。"""
     lines = log_path.read_text(encoding='utf-8', errors='replace').split("\n")
     hands: list[dict] = []
@@ -181,7 +181,7 @@ def parse_log(log_path: Path, hero_name: str, bb_value: int = 1000) -> list[dict
                     "name": pname,
                     "stack": stack_bb * bb_value,
                     "pos": "",
-                    "player_type": translate_ptype(ptype_raw) if pname != hero_name else "",
+                    "player_type": translate_ptype(ptype_raw) if not hero_names.matches(pname) else "",
                 })
             cur = {
                 "hand": hand_no,
@@ -236,7 +236,7 @@ def parse_log(log_path: Path, hero_name: str, bb_value: int = 1000) -> list[dict
         stripped = text.lstrip()
         if stripped.startswith("►"):
             h = HERO_DECISION_RE.search(text)
-            if h and h.group(1) == hero_name:
+            if h and hero_names.matches(h.group(1)):
                 action_cn = h.group(2)
                 amount = int(h.group(3)) if h.group(3) else 0
                 eq_pct = int(h.group(4))
@@ -274,7 +274,7 @@ def parse_log(log_path: Path, hero_name: str, bb_value: int = 1000) -> list[dict
         m = OPP_ACTION_RE.match(text)
         if m:
             opp_name = m.group(1)
-            if opp_name == hero_name or opp_name in folded_in_hand:
+            if hero_names.matches(opp_name) or opp_name in folded_in_hand:
                 continue
             action_cn = m.group(2)
             amount_bb = int(m.group(3)) if m.group(3) else 0
@@ -349,13 +349,13 @@ def main():
                     help="single source_log label written to every hand")
     args = ap.parse_args()
     try:
-        hero_name = load_hero_name()
+        hero_names = load_hero_names()
     except RuntimeError as exc:
         ap.error(str(exc))
 
     hands = []
     for log in args.log:
-        parsed = parse_log(Path(log), hero_name, args.bb_value)
+        parsed = parse_log(Path(log), hero_names, args.bb_value)
         source = args.source_label or str(log)
         for h in parsed:
             h["source_log"] = source

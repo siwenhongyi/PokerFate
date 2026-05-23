@@ -32,7 +32,7 @@ os.environ.setdefault("PYTEST_CURRENT_TEST", "scripts/replay_range_bucket_calibr
 from pokerfate.calibration.showdown_calibration import ShowdownCalibrator
 from pokerfate.core.card import Card
 from pokerfate.strategy.range_v2 import hand_categorizer as hcat
-from scripts.hero_name import load_hero_name
+from scripts.hero_name import load_hero_names
 from scripts.replay_and_compare import _hero_id, _replay_hand, load_replay
 
 
@@ -302,7 +302,7 @@ def search_params(train_rows: list[dict], val_rows: list[dict], *,
 
 def replay_rows(args: argparse.Namespace) -> list[dict]:
     try:
-        hero_name = load_hero_name()
+        hero_names = load_hero_names()
     except RuntimeError as exc:
         raise SystemExit(str(exc)) from exc
 
@@ -321,7 +321,7 @@ def replay_rows(args: argparse.Namespace) -> list[dict]:
         collector: Optional[BucketCalibrationCollector] = None
 
         for hand in hands:
-            hero_id = _hero_id(hand.get("players", []), hero_name)
+            hero_id = _hero_id(hand.get("players", []), hero_names)
             if hero_id is None:
                 skipped_no_hero += 1
                 continue

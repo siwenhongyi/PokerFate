@@ -16,7 +16,7 @@ from typing import Optional
 os.environ.setdefault("PYTEST_CURRENT_TEST", "scripts/replay_range_calibration.py")
 
 from scripts.analyze_range_calibration import CalRow, render_markdown, summarize
-from scripts.hero_name import load_hero_name
+from scripts.hero_name import load_hero_names
 from scripts.replay_and_compare import _hero_id, _replay_hand, load_replay
 
 
@@ -76,7 +76,7 @@ def main() -> None:
     args = ap.parse_args()
 
     try:
-        hero_name = load_hero_name()
+        hero_names = load_hero_names()
     except RuntimeError as exc:
         ap.error(str(exc))
 
@@ -105,7 +105,7 @@ def main() -> None:
     skipped_no_hero = 0
 
     for idx, hand in enumerate(hands, 1):
-        hero_id = _hero_id(hand.get("players", []), hero_name)
+        hero_id = _hero_id(hand.get("players", []), hero_names)
         if hero_id is None:
             skipped_no_hero += 1
             continue
