@@ -59,6 +59,20 @@ def test_dealer_info_passes_global_hand_seq_to_api(monkeypatch) -> None:
     assert calls[0]["hand_number"] == 42
 
 
+def test_robot_snapshot_excludes_self_uid(monkeypatch) -> None:
+    b = BotBridge()
+    b._my_seat = 0
+    b._my_uid = "99"
+    b._seat_uids = {0: "99", 1: "88"}
+    b._seat_names = {0: "me", 1: "robot"}
+    monkeypatch.setattr("pf_intercept.bot._load_known_robot_uids", lambda: {"99", "88"})
+
+    b._snapshot_current_hand_robots([0, 1])
+
+    assert b._current_hand_robot_seats == {1}
+    assert b._current_hand_robot_uids == {1: "88"}
+
+
 class TestBotBridgeProfitLock:
     def _next_hand_dealer(self, bridge: BotBridge, gameid: str = "t_next"):
         """盈利锁仓达标后需再收到一手 DealerInfo 才会注入 LeaveRoomREQ。"""

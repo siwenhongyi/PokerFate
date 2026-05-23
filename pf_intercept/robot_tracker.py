@@ -38,10 +38,22 @@ class RobotTracker:
         self._events_file = self._data_dir / "robot_events.jsonl"
         self._summary_file = self._data_dir / "robot_players.json"
 
+        self._self_uids: set[str] = set()
         self._current_room_id: int = 0
         self._last_rb_num_by_room: dict[int, int] = {}
         self._players_by_uid: dict[str, dict[str, Any]] = {}
         self._summary: dict[str, Any] = self._load_summary()
+
+    def set_self_uid(self, uid: Any) -> None:
+        uid_str = _uid(uid)
+        if not uid_str:
+            return
+        self._self_uids.add(uid_str)
+        robots = self._summary.get("robots")
+        if isinstance(robots, dict) and uid_str in robots:
+            robots.pop(uid_str, None)
+            self._summary["updated_at"] = _now_iso()
+            self._write_summary()
 
     def observe(
         self,
@@ -100,8 +112,6 @@ class RobotTracker:
         )
         self._last_rb_num_by_room[room] = new_rb
         self._append_event(event)
-        if inference == "robot_enter":
-            self._mark_robot(user, event, reason="rb_num increased on enter")
         self._log_event(event)
 
     def _on_other_leave(self, msg: dict, *, room_id: int, observed_at: str | None) -> None:
@@ -175,7 +185,7 @@ class RobotTracker:
             return "rb_count_seen"
         if event == "enter":
             if new_rb > old_rb:
-                return "robot_enter"
+                return "rb_count_increased_on_enter"
             if new_rb == old_rb:
                 return "non_robot_enter"
             return "rb_count_decreased_on_enter"
@@ -236,6 +246,9 @@ class RobotTracker:
     def _mark_robot(self, user: dict[str, Any], event: dict[str, Any], *, reason: str) -> None:
         uid = _uid(event.get("uid") or user.get("uid"))
         if not uid:
+            return
+        if uid in self._self_uids:
+            log.info("[ROBOT] skip self uid=%s for robot evidence", uid)
             return
         ts = str(event.get("ts") or _now_iso())
         robots = self._summary.setdefault("robots", {})

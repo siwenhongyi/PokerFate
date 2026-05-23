@@ -557,6 +557,11 @@ async def _s2c_analysis_worker(
             if msg is None:
                 log.warning("[S→C] %s  (decode failed — run gen_pb2.sh first)", frame.type_name)
                 continue
+            if frame.type_name == "pb.SelfUserInfoRSP":
+                brief = msg.get("brief") or {}
+                uid = brief.get("uid")
+                if uid is not None:
+                    _robot_tracker.set_self_uid(uid)
             _robot_tracker.observe(frame.type_name, msg, room_id=frame.room_id)
             log.info("[S→C] %s  %s", frame.type_name, msg)
             result = bridge.handle(frame.type_name, msg)

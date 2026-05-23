@@ -665,6 +665,8 @@ class BotBridge:
             return
         for seat in seats:
             uid = self._seat_uids.get(seat)
+            if seat == self._my_seat or (self._my_uid and uid == self._my_uid):
+                continue
             if uid and uid in known_robot_uids:
                 self._current_hand_robot_seats.add(seat)
                 self._current_hand_robot_uids[seat] = uid
