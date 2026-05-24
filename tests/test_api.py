@@ -5,6 +5,7 @@ import os
 import tempfile
 import pytest
 from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
+from pokerfate.core.card import Card
 from pokerfate.core.game_state import Action, ActionType, GameState, Player
 
 
@@ -29,6 +30,15 @@ def start_hand(api: PokerFateAPI):
 
 
 class TestAPILifecycle:
+    def test_board_hand_type_for_bluff_stats_handles_partial_boards(self):
+        def cards(*values):
+            return [Card.from_str(v) for v in values]
+
+        assert PokerFateAPI._board_hand_type_for_bluff_stats(cards("Ks", "Kh", "Ad")) == 2
+        assert PokerFateAPI._board_hand_type_for_bluff_stats(cards("Ks", "Kh", "7d", "7c")) == 3
+        assert PokerFateAPI._board_hand_type_for_bluff_stats(cards("Ks", "Kh", "Kd")) == 4
+        assert PokerFateAPI._board_hand_type_for_bluff_stats(cards("2s", "3h", "4d", "5c", "6s")) == 5
+
     def test_new_hand_and_hole_cards(self):
         api = make_api()
         start_hand(api)

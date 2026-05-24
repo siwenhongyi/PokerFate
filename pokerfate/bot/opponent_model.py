@@ -468,7 +468,37 @@ class OpponentModel:
         if won:
             s.showdown_win_count += 1
 
-    def record_win_with_hand_type(self, player_id: int, hand_type: int, had_aggression: bool) -> None:
+    @staticmethod
+    def _is_bluff_win_hand_type(hand_type: int, board_hand_type: int | None = None) -> bool:
+        """Return whether a winning hand type counts as a bluff-win sample."""
+        try:
+            winner_type = int(hand_type)
+        except (TypeError, ValueError):
+            return False
+
+        if board_hand_type is None:
+            return winner_type in (1, 2)
+
+        try:
+            board_type = int(board_hand_type)
+        except (TypeError, ValueError):
+            return winner_type in (1, 2)
+
+        # Strong made winners are value wins for this statistic.
+        if winner_type >= 5:
+            return False
+        if board_type >= 5:
+            return False
+
+        return winner_type == board_type and winner_type in (1, 2, 3, 4)
+
+    def record_win_with_hand_type(
+        self,
+        player_id: int,
+        hand_type: int,
+        had_aggression: bool,
+        board_hand_type: int | None = None,
+    ) -> None:
         """记录赢底池时的牌型，用于统计 bluff_win_rate。
 
         Parameters
@@ -477,12 +507,14 @@ class OpponentModel:
             服务端牌型整数（1=高牌, 2=一对, ...）。
         had_aggression : bool
             本手该玩家是否有过下注/加注行为（无攻击性行为的赢不计入）。
+        board_hand_type : int, optional
+            公牌自身牌型整数（1=高牌, 2=一对, ...），用于判断赢家是否只靠公牌牌力赢。
         """
         if not had_aggression:
             return
         s = self.get(player_id)
         s.bet_win_count += 1
-        if hand_type in (1, 2):   # 高牌或一对 = 弱牌赢
+        if self._is_bluff_win_hand_type(hand_type, board_hand_type):
             s.bluff_win_count += 1
 
     def fold_to_cbet_rate(self, player_id: int) -> float:

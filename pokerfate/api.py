@@ -1189,6 +1189,26 @@ class PokerFateAPI:
             return None
         return HandRank(value - 1)
 
+    @staticmethod
+    def _board_hand_type_for_bluff_stats(board: List[Card]) -> Optional[int]:
+        if len(board) < 3:
+            return None
+        if len(board) >= 5:
+            return int(HandEvaluator.evaluate(list(board))[0]) + 1
+
+        counts = Counter(c.rank.value for c in board)
+        max_count = max(counts.values(), default=0)
+        pair_count = sum(1 for count in counts.values() if count >= 2)
+        if max_count >= 4:
+            return 8
+        if max_count >= 3:
+            return 4
+        if pair_count >= 2:
+            return 3
+        if max_count >= 2:
+            return 2
+        return 1
+
     def hand_over(
         self,
         winner_ids: List[int],
@@ -1379,6 +1399,7 @@ class PokerFateAPI:
         # bluff_win_rate：赢底池时记录牌型（含无底牌的上界估算）
         # 对每个赢家：有下注行为 + 知道牌型（服务端下发或摊牌得到）→ 记录
         if winner_ids and wht:
+            board_hand_type = self._board_hand_type_for_bluff_stats(list(self._board))
             for pid in winner_ids:
                 if pid == self.my_player_id:
                     continue
@@ -1391,7 +1412,12 @@ class PokerFateAPI:
                 else:
                     action_seq = self._bot.range_estimator._hand_actions.get(pid, [])
                 had_aggression = any(a == 'raise' for _, a in action_seq)
-                self._bot.opponent_model.record_win_with_hand_type(pid, hand_type, had_aggression)
+                self._bot.opponent_model.record_win_with_hand_type(
+                    pid,
+                    hand_type,
+                    had_aggression,
+                    board_hand_type=board_hand_type,
+                )
 
         if self._bot.use_range_equity:
             # ── Range V2 showdown processing ──

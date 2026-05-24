@@ -9,6 +9,41 @@ import pytest
 from pokerfate.bot.opponent_model import OpponentModel, OpponentStats
 
 
+class TestBluffWinClassification:
+    def test_board_relative_bluff_win_rules(self):
+        model = OpponentModel()
+        cases = [
+            (1, 1, True),    # board high card, winner high card
+            (1, 2, False),   # board high card, winner made a pair
+            (2, 2, True),    # board pair, winner one pair
+            (2, 3, False),   # board pair, winner improved to two pair
+            (3, 3, True),    # board two pair, winner two pair
+            (4, 4, True),    # board trips, winner trips
+            (3, 5, False),   # winner straight is not counted as bluff
+            (7, 7, False),   # board/winner full house is not counted as bluff
+        ]
+
+        for idx, (board_type, winner_type, is_bluff) in enumerate(cases, start=1):
+            model.record_win_with_hand_type(
+                idx,
+                winner_type,
+                had_aggression=True,
+                board_hand_type=board_type,
+            )
+            stats = model.get(idx)
+            assert stats.bet_win_count == 1
+            assert stats.bluff_win_count == int(is_bluff)
+
+    def test_missing_board_type_keeps_legacy_fallback(self):
+        model = OpponentModel()
+
+        model.record_win_with_hand_type(1, 2, had_aggression=True)
+
+        stats = model.get(1)
+        assert stats.bet_win_count == 1
+        assert stats.bluff_win_count == 1
+
+
 class TestPlayerTypePriority:
     """player_type() uses VPIP/PFR/gap/AF/WTSD/flop AFq; see opponent_model module docstring."""
 
