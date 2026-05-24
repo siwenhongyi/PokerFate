@@ -463,33 +463,11 @@ class PokerFateAPI:
             player_positions=player_positions,
         )
 
-        _TYPE_CN = {
-            "nit":             "紧手",
-            "calling_station": "跟注站",
-            "maniac":          "疯狂激进",
-            "whale":           "超松被动",
-            "reg":             "常规玩家",
-            "fish":            "鱼",
-            "unknown":         "未知",
-        }
-
-        # 与 OpponentStats.player_type() 共用 core.config.MIN_HANDS_FOR_CLASSIFICATION；
-        # 样本不足时只标「数据不足N手」，不用已失真的 player_type。
-
-        def _player_type_tag(player_id: int) -> str:
-            if player_id == self.my_player_id:
-                return ""
-            s = self._bot.opponent_model.get(player_id)
-            if s.hands_seen < MIN_HANDS_FOR_CLASSIFICATION:
-                return f"数据不足{s.hands_seen}手"
-            return _TYPE_CN.get(s.player_type(), s.player_type())
-
         self._log.hand_start(
             hand_number=self._hand_number,
             players=[
                 {"id": p.player_id, "name": p.name,
-                 "stack": p.stack, "pos": pi.position,
-                 "player_type": _player_type_tag(p.player_id)}
+                 "stack": p.stack, "pos": pi.position}
                 for p, pi in zip(self._players, players)
             ],
             dealer_id=dealer_id,
@@ -652,9 +630,6 @@ class PokerFateAPI:
         name = pobj.name if pobj else str(event.player_id)
 
         # Gather extra context for enriched opponent action log
-        opp_stats = self._bot.opponent_model.get(event.player_id)
-        ptype = opp_stats.player_type() if opp_stats.hands_seen >= MIN_HANDS_FOR_CLASSIFICATION else ''
-        pwi = opp_stats.pwi()
 
         range_pct = 0.0
         bucket_dist = None
@@ -685,8 +660,6 @@ class PokerFateAPI:
             name, event.action, normalized_action_amount, event.street,
             big_blind=self.big_blind,
             pot=self._last_known_pot,
-            player_type=ptype,
-            pwi=pwi,
             range_pct=range_pct,
             bucket_dist=bucket_dist,
             vs_hero=vs_hero,
@@ -891,10 +864,6 @@ class PokerFateAPI:
             river_relative=(
                 getattr(self._bot, "last_decision_diagnostics", {})
                 .get("river_relative", {})
-            ),
-            street_relative=(
-                getattr(self._bot, "last_decision_diagnostics", {})
-                .get("street_relative", {})
             ),
         )
         self._maybe_record_river_value_sizing_decision(
@@ -1143,7 +1112,6 @@ class PokerFateAPI:
                 "river_bet_frequency": float(stats.river_bet_frequency),
                 "river_action_count": int(stats.river_action_count),
                 "pwi": float(stats.pwi()),
-                "player_type": stats.player_type(),
             }
         except Exception:
             traceback.print_exc()
@@ -1812,50 +1780,10 @@ class PokerFateAPI:
             return
         setattr(self, key, self._hand_number)
 
-        # adj 只含连续 scale（不再有 cbet_freq / bluff_freq 离散字段）。
-        # 从 scale 反推展示标签：bluff_ag_scale 是决策层用的连续值，
-        # 在这里派生成 log 的一行"模式摘要"。
         bluff_ag = adj.get("bluff_ag_scale", 0.55)
-        value_ag = adj.get("value_ag_scale", 1.0)
         if s.fold_to_cbet_opps >= 5 and (bluff_ag >= 0.85 or bluff_ag <= 0.18):
-            tag = "high_fold" if bluff_ag >= 0.85 else "value_only"
-            self._log.opponent_pattern(name, "fold_to_cbet",
-                                       s.fold_to_cbet, tag)
-        elif bluff_ag <= 0.22:
-            self._log.opponent_pattern(name, "player_type",
-                                       s.vpip, f"bluff_ag×{bluff_ag:.2f}")
-        elif bluff_ag >= 0.90:
-            self._log.opponent_pattern(name, "player_type",
-                                       s.vpip, f"bluff_ag×{bluff_ag:.2f}")
-
-        # ── 新信号：面对对手下注时的读牌信号 ──
-        river_bf_samples = s.river_bet_count + s.river_check_count
-        if river_bf_samples >= 8:
-            if adj.get("river_bluff_likely"):
-                self._log.opponent_pattern(
-                    name, "river_bluff_likely",
-                    s.river_bet_frequency, "equity+7%")
-            elif adj.get("river_bet_rare"):
-                self._log.opponent_pattern(
-                    name, "river_bet_rare",
-                    s.river_bet_frequency, "equity-5%")
-
-        if adj.get("flop_float_favorable"):
-            self._log.opponent_pattern(
-                name, "flop_afq_high",
-                s.flop_afq, "float+5%")
-        if adj.get("turn_bluff_then_fold"):
-            self._log.opponent_pattern(
-                name, "turn_barrel_give_up",
-                s.turn_afq, "equity+5%@turn")
-
-        # ── 新信号：我方主动决策时的手牌质量信号 ──
-        # 原本用 bluff_freq=='none' 离散判断；改为 bluff_ag_scale 连续阈值。
-        if s.showdown_count >= 8:
-            if adj.get("bluff_ag_scale", 0.55) <= 0.18 and s.wtsd >= 0.35:
-                self._log.opponent_pattern(
-                    name, "calling_station",
-                    s.wmsd, f"wtsd={s.wtsd:.0%} thin_value+no_bluff")
+            pattern = "fold_to_cbet_high" if bluff_ag >= 0.85 else "fold_to_cbet_low"
+            self._log.opponent_pattern(name, pattern, s.fold_to_cbet, f"bluff_ag×{bluff_ag:.2f}")
 
     def session_summary(self):
         """Print and log a session-end summary."""

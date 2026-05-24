@@ -66,9 +66,8 @@ class BoardSignals:
 class VillainStats:
     """Flattened opponent statistics needed by purpose triggers.
 
-    不含 player_type / pwi 等聚合字段：决策层完全由原子连续指标驱动；
-    玩家类型标签与 pwi 聚合分仅在 log 路径展示（分别由
-    OpponentStats.player_type() 与 pwi() 方法直接提供）。
+    不含 player_type / pwi 等聚合字段：决策层完全由原子连续指标驱动。
+    玩家类型标签只保留在 OpponentStats 的分类方法和相关测试里，不进入决策上下文。
     """
     vpip: float = 0.0
     pfr: float = 0.0

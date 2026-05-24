@@ -281,9 +281,7 @@ class PokerLogger:
 
         bb = max(big_blind, 1.0)
         def _seat_str(p: dict) -> str:
-            ptype = p.get("player_type", "")
-            tag = f"({ptype})" if ptype else ""
-            return f"{p['name']}{tag} {p['stack'] / bb:.0f}bb [{_pos(p.get('pos', ''))}]"
+            return f"{p['name']} {p['stack'] / bb:.0f}bb [{_pos(p.get('pos', ''))}]"
         seats = "   ".join(_seat_str(p) for p in players)
         hand_tag = f"  第 {hand_number} 手"
         self._raw(f"{hand_tag:<12}{seats}", bold=True)
@@ -309,8 +307,6 @@ class PokerLogger:
         *,
         big_blind: float = 0.0,
         pot: float = 0.0,
-        player_type: str = "",
-        pwi: float = 0.0,
         range_pct: float = 0.0,
         bucket_dist: Optional[Dict[str, float]] = None,
         vs_hero: Optional[Dict[str, float]] = None,
@@ -324,7 +320,6 @@ class PokerLogger:
             "action": action,
             "amount": amount,
             "street": street,
-            "player_type": player_type or None,
             "range_pct": round(range_pct, 3) if range_pct > 0 else None,
             "bucket_dist": {k: round(v, 3) for k, v in (bucket_dist or {}).items() if v > 0.01} or None,
             "vs_hero": {k: round(v, 3) for k, v in (vs_hero or {}).items()} or None,
@@ -335,15 +330,6 @@ class PokerLogger:
 
         cn = _ACTION_CN.get(action, action)
         bb = big_blind if big_blind > 0 else 1.0
-
-        # ── 标签：type/PWI ──
-        tag = ""
-        if player_type and player_type != 'unknown':
-            _TYPE_SHORT = {
-                'nit': '紧手', 'reg': 'reg', 'maniac': '疯狂',
-                'whale': '鲸鱼', 'fish': '鱼', 'calling_station': '跟注站',
-            }
-            tag = f"[{_TYPE_SHORT.get(player_type, player_type)}/PWI{pwi:+.0f}]"
 
         # ── 范围信息 ──
         range_str = ""
@@ -390,19 +376,19 @@ class PokerLogger:
             if to_call > 0:
                 call_str = f"  需跟{to_call / bb:.0f}bb 赔率{to_call / (pot + to_call):.0%}"
             self._raw(
-                f"    {player_name:<12}  {cn}  {amt_bb:.0f}bb  {size_str}  {tag}  {range_str}{call_str}",
+                f"    {player_name:<12}  {cn}  {amt_bb:.0f}bb  {size_str}  {range_str}{call_str}",
                 color=_C.YELLOW,
             )
         elif action == "fold":
             self._raw(f"    {player_name:<12}  {cn}", color=_C.RED, dim=True)
         elif action == "call":
             self._raw(
-                f"    {player_name:<12}  {cn}  {tag}  {range_str}",
+                f"    {player_name:<12}  {cn}  {range_str}",
                 dim=True,
             )
         elif action == "check":
             self._raw(
-                f"    {player_name:<12}  {cn}  {tag}  {range_str}" if range_str else
+                f"    {player_name:<12}  {cn}  {range_str}" if range_str else
                 f"    {player_name:<12}  {cn}",
                 dim=True,
             )

@@ -804,42 +804,9 @@ class PokerBot:
                 and self.range_estimator.has_calibration(primary_opp_id)
             )
 
-        # 对手标签日志：类型 + PWI + 关键 adj 信号摘要
         opp_label = ""
-        adj_summary = ""
         if primary_opp_id >= 0:
-            opp_stats = self.opponent_model.get(primary_opp_id)
-            opp_name = self.opponent_model._id_to_name.get(primary_opp_id, f"P{primary_opp_id}")
-            ptype = opp_stats.player_type()
-            pwi = opp_stats.pwi()
-            opp_label = f"{opp_name}/{ptype}/PWI{pwi:+.0f}"
-            # 提炼最关键的 adj 信号，不是全部堆出来。
-            # 标签文字从连续 scale 派生（展示用途，不做决策）。
-            sig_parts = []
-            bluff_ag = adj.get('bluff_ag_scale', 0.55)
-            if bluff_ag <= 0.18:
-                sig_parts.append(f"禁诈唬(bluff_ag×{bluff_ag:.2f})")
-            elif bluff_ag >= 0.85:
-                sig_parts.append(f"多诈唬(bluff_ag×{bluff_ag:.2f})")
-            elif bluff_ag <= 0.35:
-                sig_parts.append(f"少诈唬(bluff_ag×{bluff_ag:.2f})")
-            value_ag = adj.get('value_ag_scale', 1.0)
-            if value_ag <= 0.55 and bluff_ag <= 0.25:
-                sig_parts.append(f"纯价值(value_ag×{value_ag:.2f})")
-            elif bluff_ag >= 0.90:
-                sig_parts.append(f"高频cbet(bluff_ag×{bluff_ag:.2f})")
-            scale = adj.get('aggression_scale', 1.0)
-            if scale != 1.0:
-                sig_parts.append(f"ag×{scale:.2f}")
-            if adj.get('river_bluff_likely'):
-                sig_parts.append("河牌可能诈唬")
-            if adj.get('river_bet_rare'):
-                sig_parts.append("河牌下注=强")
-            if adj.get('flop_float_favorable'):
-                sig_parts.append("翻牌可浮牌")
-            if adj.get('turn_bluff_then_fold'):
-                sig_parts.append("转牌诈唬放弃")
-            adj_summary = "/".join(sig_parts)
+            opp_label = self.opponent_model._id_to_name.get(primary_opp_id, f"P{primary_opp_id}")
 
         self._last_reasoning = self._postflop_reasoning(
             player.hole_cards,
@@ -864,7 +831,6 @@ class PokerBot:
             min_rf=min_rf,
             num_opp=num_opponents,
             opp_label=opp_label,
-            adj_summary=adj_summary,
             is_delayed_cbet=is_delayed_cbet,
             opponent_checked_back=opponent_checked_back,
             nut_advantage=nut_adv,
@@ -1261,7 +1227,6 @@ class PokerBot:
         min_rf: float = 1.0,
         num_opp: int = 1,
         opp_label: str = "",
-        adj_summary: str = "",
         is_delayed_cbet: bool = False,
         opponent_checked_back: bool = False,
         nut_advantage: float = 0.0,
@@ -1295,8 +1260,7 @@ class PokerBot:
             eq = f"决策胜率{equity:.0%}"
 
         opp_ctx = f" [{opp_label}]" if opp_label else ""
-        adj_ctx = f" 调整:{adj_summary}" if adj_summary else ""
-        head = f"{tag} {made} {position}/{mw} SPR≈{spr:.1f}({spr_lbl}) {tex}{opp_ctx}{adj_ctx}"
+        head = f"{tag} {made} {position}/{mw} SPR≈{spr:.1f}({spr_lbl}) {tex}{opp_ctx}"
 
         # ── action label ──────────────────────────────────────────────────
         if action_str == "raise":
@@ -1406,9 +1370,6 @@ class PokerBot:
         if ctx_flags:
             details.append(" ".join(ctx_flags))
 
-        if facing_bet and abs(exploit_need_adjust) > 1e-6:
-            details.append(f"need_adj={exploit_need_adjust:+.3f}")
-
         rel_obs = river_relative_assessment or {}
         if rel_obs:
             rel_bits = [
@@ -1427,24 +1388,6 @@ class PokerBot:
                     f"/n{int(rel_obs.get('cal_n', 0) or 0)}"
                 )
             details.append(" ".join(str(x) for x in rel_bits if x))
-
-        street_obs = street_relative_assessment or {}
-        if street_obs:
-            flags = ",".join(str(x) for x in street_obs.get('board_flags', []) or [])
-            action_flags = ",".join(str(x) for x in street_obs.get('action_flags', []) or [])
-            sr_bits = [
-                f"street_rel={street_obs.get('street', '')}",
-                f"风险{float(street_obs.get('risk', 0.0)):.0%}",
-                f"强+坚{float(street_obs.get('villain_strong_plus', 0.0)):.0%}",
-                f"坚{float(street_obs.get('villain_nuts', 0.0)):.0%}",
-                f"eq{float(street_obs.get('eq', 0.0)):.0%}",
-                f"评={street_obs.get('label', '')}",
-            ]
-            if flags:
-                sr_bits.append(f"board={flags}")
-            if action_flags:
-                sr_bits.append(f"act={action_flags}")
-            details.append(" ".join(str(x) for x in sr_bits if x))
 
         detail_line = "  │  " + "  │  ".join(details) if details else ""
         return main_line + ("\n      " + detail_line if detail_line else "")
