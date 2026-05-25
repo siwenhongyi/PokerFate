@@ -1262,31 +1262,42 @@ class PokerBot:
         opp_ctx = f" [{opp_label}]" if opp_label else ""
         head = f"{tag} {made} {position}/{mw} SPR≈{spr:.1f}({spr_lbl}) {tex}{opp_ctx}"
 
+        purpose_labels = {
+            'range_cbet': '范围下注',
+            'polarized_cbet': '极化下注',
+            'protection_bet': '保护下注',
+            'thin_value_bet': '薄价值下注',
+            'thick_value_bet': '厚价值下注',
+            'monster_value_plan': '强价值下注',
+            'overbet_value': '超池价值下注',
+            'value_jam': '价值全下',
+            'block_bet': '阻断下注',
+            'default_stab': '主动stab',
+            'profit_flop_cbet': '盈利翻牌cbet',
+            'profit_delayed_probe': '延迟探测下注',
+            'profit_paid_value_continue': '持续价值下注',
+            'semi_bluff': '半诈唬',
+            'pure_bluff_river': '河牌纯诈唬',
+            'delayed_cbet': '延迟cbet',
+            'probe_bet': '探测下注',
+            'float_bet': 'float下注',
+            'turn_donk': '转牌donk',
+            'double_barrel': '二连发',
+            'triple_barrel': '三连发',
+            'stop_and_go': 'stop-and-go',
+            'small_pressure_bet': '小注压力',
+        }
+        cd = self.postflop._last_cbet_detail or {}
+        purpose = str(cd.get('purpose', '?')).split("→", 1)[0]
+        purpose_label = purpose_labels.get(purpose, purpose.replace('_', '-'))
+
         # ── action label ──────────────────────────────────────────────────
         if action_str == "raise":
             if facing_bet:
                 role = "IP加注" if is_ip else "check-raise"
                 action_label = f"{pos} 面对下注→{role}"
             else:
-                if street == "river":
-                    if equity >= 0.60:
-                        action_label = "河牌价值下注"
-                    elif equity >= 0.50:
-                        action_label = "河牌薄价值"
-                    else:
-                        action_label = f"诈唬(弃牌率{opp_fold_rate:.0%})"
-                elif is_delayed_cbet:
-                    action_label = "延迟续注(delayed-cbet)"
-                elif opponent_checked_back and not is_ip:
-                    action_label = "探测下注(probe)"
-                elif equity >= 0.90:
-                    action_label = "强牌下注"
-                elif equity >= 0.60:
-                    action_label = "价值持续下注"
-                elif equity >= 0.30:
-                    action_label = "半诈唬"
-                else:
-                    action_label = f"纯诈唬(弃牌率{opp_fold_rate:.0%})"
+                action_label = purpose_label
         elif action_str == "call":
             action_label = f"底池赔率{pot_odds:.0%}→跟注"
         elif action_str == "check":
@@ -1334,6 +1345,26 @@ class PokerBot:
             if top:
                 cand_str = " ".join(f"{p}[{prob * 100:.0f}%]" for p, prob in top)
                 details.append(f"候选: {cand_str}")
+
+        arbitration_mode = str(cd.get('arbitration_mode') or '')
+        decision_trace = cd.get('decision_trace') or {}
+        trace_candidates = decision_trace.get('candidates') or []
+        if action_str == 'fold' and trace_candidates:
+            top = trace_candidates[0]
+            top_action = str(top.get('action') or '')
+            if top_action and top_action != 'fold':
+                top_ev = float(top.get('ev') or 0.0)
+                top_margin = float(top.get('margin') or 0.0)
+                top_reason = str(top.get('reason') or '')
+                top_risk = ((top.get('components') or {}).get('risk') or {})
+                risk_tags = ",".join(str(x) for x in (top_risk.get('tags') or []))
+                why = arbitration_mode or 'fold_selected'
+                detail = f"裁决: fold>{top_action} 原因={why} top_ev={top_ev:.0f} margin={top_margin:.0f}"
+                if risk_tags:
+                    detail += f" risk={risk_tags}"
+                if top_reason:
+                    detail += f" {top_reason}"
+                details.append(detail)
 
         gates = cd.get('strategy_gates') or []
         if gates:

@@ -17,8 +17,7 @@ from pokerfate.strategy.range_v2.runtime_formula_calibration import bb_key
 
 CAT_ORDER = ("nuts", "strong", "medium", "draw", "weak_draw", "air")
 EPS = 1e-6
-_ROOT = Path(__file__).resolve().parents[3] / "data" / "runtime_calibration"
-_TAG = os.environ.get("PF_BUCKET_ML_TAG", "20260522_riskblend")
+_ROOT = Path(__file__).resolve().parents[2] / "data" / "runtime_calibration"
 _CACHE: Dict[tuple[str, str], Optional[dict[str, Any]]] = {}
 _BOOSTER_CACHE: Dict[tuple[str, str], Any] = {}
 
@@ -34,8 +33,8 @@ def mode_for_big_blind(big_blind: Optional[float]) -> str:
     mode = str(raw or "off").strip().lower()
     if mode in {"0", "false", "no", "none", "off", "disabled"}:
         return "off"
-    if mode in {"fm", "lgbm", "lightgbm"}:
-        return "lgbm" if mode == "lightgbm" else mode
+    if mode in {"lgbm", "lightgbm"}:
+        return "lgbm"
     return "off"
 
 
@@ -44,17 +43,11 @@ def experiment_flags() -> dict[str, str]:
         "PF_BUCKET_ML_10K": os.environ.get("PF_BUCKET_ML_10K", "off"),
         "PF_BUCKET_ML_50K": os.environ.get("PF_BUCKET_ML_50K", "off"),
         "PF_BUCKET_ML_DEFAULT": os.environ.get("PF_BUCKET_ML_DEFAULT", "off"),
-        "PF_BUCKET_ML_TAG": _TAG,
     }
 
 
 def _model_path(big_blind: Optional[float], mode: str) -> Path:
-    key = bb_key(big_blind)
-    if mode == "fm":
-        name = f"runtime_fm_bucket_model_{_TAG}.json"
-    else:
-        name = f"runtime_lgbm_bucket_model_{_TAG}.json"
-    return _ROOT / key / name
+    return _ROOT / bb_key(big_blind) / "runtime_lgbm_bucket_model.json"
 
 
 def _load_model(big_blind: Optional[float], mode: str) -> Optional[dict[str, Any]]:
@@ -136,7 +129,6 @@ def _experiment_profile() -> str:
         "PF_BUCKET_ML_10K",
         "PF_BUCKET_ML_50K",
         "PF_BUCKET_ML_DEFAULT",
-        "PF_BUCKET_ML_TAG",
     )
     defaults = {
         "PF_TURN_FLOP_RELATIVE_GUARD": "1",
@@ -145,7 +137,6 @@ def _experiment_profile() -> str:
         "PF_BUCKET_ML_10K": "off",
         "PF_BUCKET_ML_50K": "off",
         "PF_BUCKET_ML_DEFAULT": "off",
-        "PF_BUCKET_ML_TAG": _TAG,
     }
     return "|".join(f"{key}={os.environ.get(key, defaults[key])}" for key in keys)
 
@@ -317,5 +308,5 @@ def calibrate_bucket_probs(
     blended /= float(blended.sum())
     return (
         {cat: float(val) for cat, val in zip(CAT_ORDER, blended)},
-        {"mode": mode, "used": True, "alpha": alpha, "tag": _TAG},
+        {"mode": mode, "used": True, "alpha": alpha},
     )

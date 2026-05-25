@@ -1,10 +1,4 @@
-"""Runtime formula calibration parameter loader.
-
-The offline formula fitter writes JSON params under
-``data/runtime_calibration/<bb_key>/``.  Live strategy should only consume the
-subsets that have passed validation; by default that is the 50k table fit from
-2026-05-22.
-"""
+"""Runtime equity calibration parameter loader."""
 
 from __future__ import annotations
 
@@ -20,19 +14,8 @@ RUNTIME_RANGE_CALIBRATION_ENABLED = (
     os.environ.get("PF_RUNTIME_RANGE_CALIBRATION", "1").lower()
     not in ("0", "false", "no", "")
 )
-RUNTIME_RANGE_CALIBRATION_TAG = os.environ.get(
-    "PF_RUNTIME_RANGE_CALIBRATION_TAG",
-    "20260522",
-)
-_DEFAULT_BB_KEYS = "bb_50k"
-_BB_KEYS_RAW = os.environ.get("PF_RUNTIME_RANGE_CALIBRATION_BB_KEYS", _DEFAULT_BB_KEYS)
-_RUNTIME_RANGE_CALIBRATION_BB_KEYS = {
-    item.strip()
-    for item in _BB_KEYS_RAW.split(",")
-    if item.strip()
-}
 RUNTIME_RANGE_CALIBRATION_ROOT = (
-    Path(__file__).resolve().parents[3] / "data" / "runtime_calibration"
+    Path(__file__).resolve().parents[2] / "data" / "runtime_calibration"
 )
 
 _CACHE: Dict[tuple[str, str], Optional[Dict[str, Any]]] = {}
@@ -50,27 +33,15 @@ def bb_key(big_blind: Optional[float]) -> str:
     return "bb_" + str(bb).replace(".", "_")
 
 
-def runtime_enabled_for(big_blind: Optional[float]) -> bool:
-    if not RUNTIME_RANGE_CALIBRATION_ENABLED:
-        return False
-    key = bb_key(big_blind)
-    return "all" in _RUNTIME_RANGE_CALIBRATION_BB_KEYS or key in _RUNTIME_RANGE_CALIBRATION_BB_KEYS
-
-
 def load_params(kind: str, big_blind: Optional[float]) -> Optional[Dict[str, Any]]:
-    """Load runtime params for ``kind``: bucket / equity / river_relative."""
-    if not runtime_enabled_for(big_blind):
+    if not RUNTIME_RANGE_CALIBRATION_ENABLED or kind not in {"bucket", "equity"}:
         return None
     key = bb_key(big_blind)
     cache_key = (kind, key)
     if cache_key in _CACHE:
         return _CACHE[cache_key]
 
-    path = (
-        RUNTIME_RANGE_CALIBRATION_ROOT
-        / key
-        / f"runtime_{kind}_params_{RUNTIME_RANGE_CALIBRATION_TAG}.json"
-    )
+    path = RUNTIME_RANGE_CALIBRATION_ROOT / key / f"runtime_{kind}_params.json"
     if not path.exists():
         if cache_key not in _WARNED:
             log.warning("runtime %s calibration not found for %s: %s", kind, key, path)

@@ -71,13 +71,12 @@ def _compute_equity_uncertainty(
         u += min(0.12, H / 14.9)  # H=1.79 → +0.12, H=0 → 0
 
     # 信号 2: villain 偏被动（polarization_index 低 → GTO 表适配性差）
-    # 用 AF 和 VPIP 做 proxy（postflop 路径不一定能直接拿到 polarization_index）
+    # 用 AF 和 VPIP 做连续 proxy；越 loose、越 passive，uncertainty 越高。
     af = getattr(villain_stats, 'af', 1.5) or 1.5
     vpip = getattr(villain_stats, 'vpip', 0.25) or 0.25
-    if af < 1.5 and vpip > 0.45:        # 典型 whale 画像
-        u += 0.06
-    elif af < 2.0 and vpip > 0.35:       # 偏 loose-passive
-        u += 0.03
+    vpip_factor = max(0.0, min(1.0, (vpip - 0.35) / 0.20))
+    af_factor = max(0.0, min(1.0, (2.0 - af) / 1.2))
+    u += 0.06 * vpip_factor * af_factor
 
     # 信号 3: 多人池 range 不独立
     if num_opponents > 1:
@@ -613,6 +612,7 @@ class PostflopStrategy:
             'top_gap': out.top_gap,
             'leverage_flags': out.leverage_flags,
             'strategy_gates': strategy_gates,
+            'decision_trace': out.decision_trace,
             'hero_made_subtype': ctx.hero_made_subtype,
             'hero_hand_rank': ctx.hero_hand_rank,
             'hero_kicker_rank': ctx.hero_kicker_rank,

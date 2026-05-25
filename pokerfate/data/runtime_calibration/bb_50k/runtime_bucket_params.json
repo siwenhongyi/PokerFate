@@ -1,0 +1,24 @@
+{
+  "flop action:check nopp=3+ tex=unpaired:rainbow": {
+    "gamma": 0.759,
+    "theta": {
+      "air": -0.01,
+      "draw": -0.0846,
+      "medium": 0.1848,
+      "nuts": 0.0537,
+      "strong": -0.2162,
+      "weak_draw": 0.0723
+    }
+  },
+  "flop board:flop nopp=2 tex=unpaired:fd": {
+    "gamma": 0.9286,
+    "theta": {
+      "air": -0.1856,
+      "draw": 0.1425,
+      "medium": 0.1075,
+      "nuts": -0.0454,
+      "strong": -0.0263,
+      "weak_draw": 0.0073
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "river|strong|2|passive|paired:fd": {
+    "a": 1.16833,
+    "b": 0.06128,
+    "type": "linear"
+  },
+  "river|strong|3+|passive|paired:fd": {
+    "a": 1.35607,
+    "b": 0.04142,
+    "type": "linear"
+  }
+}

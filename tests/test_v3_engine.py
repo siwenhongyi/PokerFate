@@ -19,7 +19,7 @@ from pokerfate.strategy.v3 import alpha_gate, calibrator
 from pokerfate.strategy.v3 import board as v3_board
 from pokerfate.strategy.v3 import exploit as v3_exploit
 from pokerfate.strategy.v3 import river_value_sizing
-from pokerfate.strategy.postflop import _hero_draw_profile
+from pokerfate.strategy.postflop import _compute_equity_uncertainty, _hero_draw_profile
 from pokerfate.strategy.range_v2.hand_categorizer import made_hand_info
 
 
@@ -29,6 +29,33 @@ def card(s: str) -> Card:
 
 def cards(*strs) -> list:
     return [card(s) for s in strs]
+
+
+class TestEquityUncertainty:
+    def test_passive_villain_term_is_continuous(self):
+        dist = {'strong': 0.25, 'medium': 0.30, 'draw': 0.10, 'weak_draw': 0.20, 'air': 0.15}
+        below = _compute_equity_uncertainty(
+            dist,
+            VillainStats(af=0.8, vpip=0.349, hands_seen=30),
+            num_opponents=3,
+            facing_bet=True,
+        )
+        just_above = _compute_equity_uncertainty(
+            dist,
+            VillainStats(af=0.8, vpip=0.351, hands_seen=30),
+            num_opponents=3,
+            facing_bet=True,
+        )
+        loose_passive = _compute_equity_uncertainty(
+            dist,
+            VillainStats(af=0.8, vpip=0.55, hands_seen=30),
+            num_opponents=3,
+            facing_bet=True,
+        )
+
+        assert just_above - below < 0.001
+        assert 0.163 <= below <= 0.164
+        assert loose_passive == pytest.approx(0.20)
 
 
 # ---------------------------------------------------------------------------

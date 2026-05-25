@@ -1,0 +1,63 @@
+{
+  "flop action:bet nopp=3+ tex=unpaired:fd": {
+    "gamma": 0.7822,
+    "theta": {
+      "air": -0.3868,
+      "draw": 0.3268,
+      "medium": 0.5093,
+      "nuts": -0.4805,
+      "strong": 0.1127,
+      "weak_draw": -0.0814
+    }
+  },
+  "flop action:check nopp=3+ tex=unpaired:fd": {
+    "gamma": 0.9424,
+    "theta": {
+      "air": 0.1073,
+      "draw": 0.2032,
+      "medium": 0.0166,
+      "nuts": -0.1273,
+      "strong": -0.3723,
+      "weak_draw": 0.1724
+    }
+  },
+  "flop action:fold_other nopp=3+ tex=unpaired:rainbow": {
+    "gamma": 0.8074,
+    "theta": {
+      "air": -0.3502,
+      "draw": -0.1015,
+      "medium": 0.3711,
+      "nuts": -0.1532,
+      "strong": 0.0972,
+      "weak_draw": 0.1367
+    }
+  },
+  "flop board:flop nopp=2 tex=unpaired:fd": {
+    "gamma": 0.8125,
+    "theta": {
+      "air": -0.0253,
+      "draw": 0.0702,
+      "medium": 0.2264,
+      "nuts": -0.2234,
+      "strong": -0.0813,
+      "weak_draw": 0.0334
+    }
+  },
+  "flop board:flop nopp=3+ tex=paired:fd": {
+    "gamma": 0.8574,
+    "theta": {
+      "air": 0.0065,
+      "medium": -0.0093,
+      "nuts": 0.0069
+    }
+  },
+  "river board:river nopp=2 tex=paired:fd": {
+    "gamma": 0.9485,
+    "theta": {
+      "air": 0.2619,
+      "medium": -0.078,
+      "nuts": -0.1982,
+      "strong": 0.0144
+    }
+  }
+}

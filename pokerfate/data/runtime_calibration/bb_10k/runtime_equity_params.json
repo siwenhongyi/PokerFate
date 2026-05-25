@@ -1,0 +1,22 @@
+{
+  "river|nuts|3+|passive|paired:fd": {
+    "bias": 0.11498,
+    "raw_bias": 0.16391,
+    "type": "bias"
+  },
+  "river|strong|2|passive|paired:fd": {
+    "bias": -0.02375,
+    "raw_bias": -0.03376,
+    "type": "bias"
+  },
+  "river|strong|3+|passive|paired:fd": {
+    "a": 1.40286,
+    "b": 0.08539,
+    "type": "linear"
+  },
+  "turn|strong|3+|passive|unpaired:fd": {
+    "a": 0.97708,
+    "b": 0.09622,
+    "type": "linear"
+  }
+}
