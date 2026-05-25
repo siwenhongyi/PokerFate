@@ -12,16 +12,16 @@ CONSOLE_LOG = ROOT / "pokerfate" / "logs" / "pokerfate_console.log"
 
 TS_RE = re.compile(r"^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)$")
 HAND_HEADER_RE = re.compile(r"第\s*(\d+)\s*手\s*(.*)$")
-PLAYER_RE = re.compile(r"(\S+?)(?:\(([^)]*)\))?\s+(\d+)bb\s+\[([^\]]*)\]")
+PLAYER_RE = re.compile(r"(?:^|\s{2,})(.+?)(?:\(([^)]*)\))?\s+(\d+)bb\s+\[([^\]]*)\]")
 CARD_RE = re.compile(r"([2-9TJQKA])([♠♥♦♣]️?|[cdhs])", re.IGNORECASE)
 HOLE_RE = re.compile(r"底牌\s+(.+)$")
 STREET_RE = re.compile(r"──\s*(翻牌前|翻牌|转牌|河牌)\s*(.*?)\s*(?:底池\s+([\d,]+))?\s*─")
-HERO_DECISION_RE = re.compile(r"►\s*(\S+)\s+(弃牌|过牌|跟注|加注|下注|全下)(?:\s+([+-]?\d+))?")
+HERO_DECISION_RE = re.compile(r"►\s*(.+?)\s+(弃牌|过牌|跟注|加注|下注|全下)(?:\s+([+-]?\d+))?")
 RESULT_RE = re.compile(
     r"✔\s*(.*?)\s+赢得\s+([\d,]+)\s+本手\s+([+-]?\d+)"
     r"(?:\s+\[我:\s*([^\]]+)\])?(?:\s*│\s*(.*))?"
 )
-FINAL_STACK_RE = re.compile(r"(\S+?)\s+(\d{4,})(?=\s|$)")
+FINAL_STACK_RE = re.compile(r"(?:^|\s{2,})(.+?)\s+(\d{4,})(?=\s{2,}|$)")
 THOUGHT_PREFLOP_POS_RE = re.compile(
     r"【GTOv2·翻前】\s+\S+\s+([A-Z]{1,3}(?:\+\d+)?)\s"
 )
@@ -104,23 +104,34 @@ def _num(text: str) -> int:
         return 0
 
 
-def _identify_hero(lines: list[str]) -> str:
+def _action_hero(lines: list[str]) -> str:
     counts: dict[str, int] = {}
-    fallback = ""
     for raw in lines:
         _ts, text = _strip_ts(raw)
         m = HERO_DECISION_RE.search(text)
         if m:
-            counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+            name = m.group(1).strip()
+            counts[name] = counts.get(name, 0) + 1
+    if counts:
+        return max(counts.items(), key=lambda item: item[1])[0]
+    return ""
+
+
+def _identify_hero(lines: list[str]) -> str:
+    action_hero = _action_hero(lines)
+    if action_hero:
+        return action_hero
+    fallback = ""
+    for raw in lines:
+        _ts, text = _strip_ts(raw)
         mh = HAND_HEADER_RE.search(text)
         if mh:
             for name, tag, _bb, pos in PLAYER_RE.findall(mh.group(2)):
+                name = name.strip()
                 if not tag and not fallback:
                     fallback = name
                 if pos and not fallback:
                     fallback = name
-    if counts:
-        return max(counts.items(), key=lambda item: item[1])[0]
     return fallback or "斯文红衣"
 
 
@@ -154,6 +165,7 @@ def _parse_hand(seq: int, start_line: int, raw_lines: list[str], hero: str) -> P
         mh = HAND_HEADER_RE.search(text)
         if mh:
             for name, _tag, stack_bb, pos in PLAYER_RE.findall(mh.group(2)):
+                name = name.strip()
                 h.header_stacks_bb[name] = int(stack_bb)
                 h.header_positions[name] = pos
                 if name == hero:
@@ -179,7 +191,7 @@ def _parse_hand(seq: int, start_line: int, raw_lines: list[str], hero: str) -> P
             continue
 
         md = HERO_DECISION_RE.search(text)
-        if md and md.group(1) == hero:
+        if md and md.group(1).strip() == hero:
             action_cn = md.group(2)
             amount = _num(md.group(3) or "0")
             action = {
@@ -218,7 +230,7 @@ def _parse_hand(seq: int, start_line: int, raw_lines: list[str], hero: str) -> P
             h.pnl = _num(mr.group(3))
             h.hero_combo = (mr.group(4) or "").strip()
             h.final_stacks = {
-                name: int(chips)
+                name.strip(): int(chips)
                 for name, chips in FINAL_STACK_RE.findall(mr.group(5) or "")
             }
             estimates: list[int] = []
@@ -256,7 +268,8 @@ def read_hands(log_path: Path = CONSOLE_LOG) -> list[PreviewHand]:
                 while cur and _is_header_prefix_line(cur[-1]):
                     prefix.insert(0, cur.pop())
                 if cur:
-                    hands.append(_parse_hand(len(hands) + 1, cur_start, cur, hero))
+                    hand_hero = _action_hero(cur) or hero
+                    hands.append(_parse_hand(len(hands) + 1, cur_start, cur, hand_hero))
                 cur = prefix + [raw]
                 cur_start = line_no - len(prefix)
             else:
@@ -265,7 +278,8 @@ def read_hands(log_path: Path = CONSOLE_LOG) -> list[PreviewHand]:
         elif cur:
             cur.append(raw)
     if cur:
-        hands.append(_parse_hand(len(hands) + 1, cur_start, cur, hero))
+        hand_hero = _action_hero(cur) or hero
+        hands.append(_parse_hand(len(hands) + 1, cur_start, cur, hand_hero))
 
     estimates = [h.bb_chips for h in hands if h.bb_chips]
     default_bb = int(median(estimates)) if estimates else 10000
@@ -310,6 +324,8 @@ def hand_list_payload(
     vpip: str = "",
     result: str = "",
     bb_k: str = "",
+    page: int = 1,
+    page_size: int = 30,
     log_path: Path = CONSOLE_LOG,
 ) -> dict[str, Any]:
     hands = read_hands(log_path)
@@ -335,13 +351,35 @@ def hand_list_payload(
 
     filtered = [h for h in hands if include(h)]
     filtered.sort(key=lambda item: item.seq, reverse=True)
+    try:
+        page = int(page)
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = int(page_size)
+    except (TypeError, ValueError):
+        page_size = 30
+    page = max(1, page)
+    page_size = min(200, max(1, page_size))
+    page_count = max(1, (len(filtered) + page_size - 1) // page_size)
+    page = min(page, page_count)
+    start = (page - 1) * page_size
+    end = min(start + page_size, len(filtered))
+    page_items = filtered[start:end]
     return {
         "log_path": str(log_path),
         "total": len(hands),
         "count": len(filtered),
         "positions": positions,
         "bb_k_values": bb_values,
-        "hands": [_summary(h) for h in filtered],
+        "page": page,
+        "page_size": page_size,
+        "page_count": page_count,
+        "page_start": start + 1 if filtered else 0,
+        "page_end": end,
+        "has_prev": page > 1,
+        "has_next": page < page_count,
+        "hands": [_summary(h) for h in page_items],
     }
 
 

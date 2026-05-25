@@ -134,6 +134,8 @@ class EntertainmentWebServer:
                         vpip=self._str_query(request, "vpip", "all"),
                         result=self._str_query(request, "result", "all"),
                         bb_k=self._str_query(request, "bb_k", "all"),
+                        page=self._int_query(request, "page", 1),
+                        page_size=self._int_query(request, "page_size", 30),
                     ),
                 }
             )
@@ -485,9 +487,23 @@ INDEX_HTML = r"""<!doctype html>
     }
     .hand-grid {
       display: grid;
-      grid-template-columns: minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1.15fr) minmax(360px, .85fr);
       gap: 16px;
+      align-items: start;
     }
+    .hand-grid > section { margin-bottom: 0; }
+    .hand-detail-section { position: sticky; top: 88px; }
+    .hand-pager {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 14px;
+      flex-wrap: wrap;
+    }
+    .hand-pager-controls { display: flex; align-items: center; gap: 8px; }
+    .hand-page-size { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+    .hand-page-size select { width: 82px; }
     .cards { display: inline-flex; gap: 5px; flex-wrap: wrap; align-items: center; }
     .card {
       display: inline-flex;
@@ -543,6 +559,8 @@ INDEX_HTML = r"""<!doctype html>
       .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .history-item { grid-template-columns: 1fr 1fr; }
       .hand-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .hand-grid { grid-template-columns: 1fr; }
+      .hand-detail-section { position: static; }
     }
   </style>
 </head>
@@ -686,39 +704,56 @@ INDEX_HTML = r"""<!doctype html>
           <div class="metric"><span>已选手牌</span><b id="hands-selected">-</b></div>
           <div class="metric"><span>详情行号</span><b id="hands-lines">-</b></div>
         </div>
-      </section>
-
-      <section>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>手数</th>
-                <th>时间</th>
-                <th>位置</th>
-                <th>BB</th>
-                <th>底牌</th>
-                <th>排面</th>
-                <th>入池</th>
-                <th>结果</th>
-                <th>最后动作</th>
-                <th>赢家 / 我的牌型</th>
-              </tr>
-            </thead>
-            <tbody id="hands-body">
-              <tr><td colspan="10" class="muted">暂无对局</td></tr>
-            </tbody>
-          </table>
+        <div class="hand-pager">
+          <div class="hand-pager-controls">
+            <button id="hands-prev-btn" class="secondary" type="button">上一页</button>
+            <span id="hands-page-info" class="muted">第 1 / 1 页</span>
+            <button id="hands-next-btn" class="secondary" type="button">下一页</button>
+          </div>
+          <label class="hand-page-size">每页
+            <select id="hands-page-size">
+              <option value="20">20</option>
+              <option value="30" selected>30</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
         </div>
       </section>
 
-      <section>
-        <div class="hand-detail-title">
-          <h2 id="hand-detail-title">对局详情</h2>
-          <span id="hand-detail-meta" class="muted">选择一手查看完整日志</span>
-        </div>
-        <pre id="hand-detail" class="log-detail">暂无详情</pre>
-      </section>
+      <div class="hand-grid">
+        <section>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>手数</th>
+                  <th>时间</th>
+                  <th>位置</th>
+                  <th>BB</th>
+                  <th>底牌</th>
+                  <th>排面</th>
+                  <th>入池</th>
+                  <th>结果</th>
+                  <th>最后动作</th>
+                  <th>赢家 / 我的牌型</th>
+                </tr>
+              </thead>
+              <tbody id="hands-body">
+                <tr><td colspan="10" class="muted">暂无对局</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="hand-detail-section">
+          <div class="hand-detail-title">
+            <h2 id="hand-detail-title">对局详情</h2>
+            <span id="hand-detail-meta" class="muted">选择一手查看完整日志</span>
+          </div>
+          <pre id="hand-detail" class="log-detail">暂无详情</pre>
+        </section>
+      </div>
     </div>
   </main>
 
@@ -735,6 +770,8 @@ INDEX_HTML = r"""<!doctype html>
     let activeTab = "color";
     let selectedHandId = null;
     let handFilterOptionsReady = false;
+    let handPage = 1;
+    let handPageSize = 30;
 
     function escapeHtml(text) {
       return String(text ?? "")
@@ -931,10 +968,20 @@ INDEX_HTML = r"""<!doctype html>
       $("hands-total").textContent = Number(data.total || 0).toLocaleString();
       $("hands-count").textContent = Number(data.count || 0).toLocaleString();
       $("hands-log").textContent = (data.log_path || "").split("/").slice(-1)[0] || "-";
+      handPage = Number(data.page || 1);
+      handPageSize = Number(data.page_size || handPageSize || 30);
+      $("hands-page-size").value = String(handPageSize);
+      $("hands-page-info").textContent = `${Number(data.page_start || 0).toLocaleString()}-${Number(data.page_end || 0).toLocaleString()} / ${Number(data.count || 0).toLocaleString()}，第 ${handPage} / ${Number(data.page_count || 1)} 页`;
+      $("hands-prev-btn").disabled = !data.has_prev;
+      $("hands-next-btn").disabled = !data.has_next;
       const hands = data.hands || [];
       if (!hands.length) {
         $("hands-body").innerHTML = '<tr><td colspan="10" class="muted">暂无对局</td></tr>';
         selectedHandId = null;
+        $("hands-selected").textContent = "-";
+        $("hands-lines").textContent = "-";
+        $("hand-detail-title").textContent = "对局详情";
+        $("hand-detail-meta").textContent = "选择一手查看完整日志";
         $("hand-detail").textContent = "暂无详情";
         return;
       }
@@ -972,6 +1019,8 @@ INDEX_HTML = r"""<!doctype html>
         vpip: $("hand-vpip").value || "all",
         result: $("hand-result").value || "all",
         bb_k: $("hand-bb").value || "all",
+        page: String(handPage),
+        page_size: String(handPageSize),
       });
       const data = await api(`/api/hands?${params.toString()}`);
       renderHands(data);
@@ -1036,8 +1085,26 @@ INDEX_HTML = r"""<!doctype html>
       handFilterOptionsReady = false;
       refreshHands().catch((err) => setNotice(err.message));
     });
+    $("hands-prev-btn").addEventListener("click", () => {
+      if (handPage <= 1) return;
+      handPage -= 1;
+      selectedHandId = null;
+      refreshHands().catch((err) => setNotice(err.message));
+    });
+    $("hands-next-btn").addEventListener("click", () => {
+      handPage += 1;
+      selectedHandId = null;
+      refreshHands().catch((err) => setNotice(err.message));
+    });
+    $("hands-page-size").addEventListener("change", () => {
+      handPageSize = Number($("hands-page-size").value || 30);
+      handPage = 1;
+      selectedHandId = null;
+      refreshHands().catch((err) => setNotice(err.message));
+    });
     ["hand-position", "hand-vpip", "hand-result", "hand-bb"].forEach((id) => {
       $(id).addEventListener("change", () => {
+        handPage = 1;
         selectedHandId = null;
         refreshHands().catch((err) => setNotice(err.message));
       });
