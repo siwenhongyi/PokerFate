@@ -482,6 +482,7 @@ async def _do_inject(
         "pb.EnterRoomREQ",
         "pb.QuickStartREQ",
         "pb.RebyREQ",
+        "pb.ShowMyCardREQ",
     ):
         log.warning(
             "[BOT→S] %s 使用 room_id=0，服务器通常会忽略；"
@@ -507,6 +508,17 @@ def _make_entertainment_sender(server_ws):
         await server_ws.send(wire)
 
     return _send
+
+
+def _iter_injects(result: tuple | list | None) -> tuple[tuple, ...]:
+    """Normalize BotBridge output to one or more C2S injection tuples."""
+    if result is None:
+        return ()
+    if isinstance(result, list):
+        return tuple(item for item in result if item is not None)
+    if isinstance(result, tuple) and result and isinstance(result[0], tuple):
+        return tuple(item for item in result if item is not None)
+    return (result,)
 
 
 async def _c2s_analysis_worker(buf: FrameBuffer, queue: asyncio.Queue) -> None:
@@ -565,9 +577,9 @@ async def _s2c_analysis_worker(
             _robot_tracker.observe(frame.type_name, msg, room_id=frame.room_id)
             log.info("[S→C] %s  %s", frame.type_name, msg)
             result = bridge.handle(frame.type_name, msg)
-            if result is not None:
-                inject_room_id = bridge.room_id_for_c2s(frame.room_id)
-                asyncio.create_task(_do_inject(server_ws, bridge, result, inject_room_id, session_id))
+            inject_room_id = bridge.room_id_for_c2s(frame.room_id)
+            for inject in _iter_injects(result):
+                asyncio.create_task(_do_inject(server_ws, bridge, inject, inject_room_id, session_id))
 
 
 async def _pipe_c2s(client_ws, server_ws, buf: FrameBuffer) -> None:

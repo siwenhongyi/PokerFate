@@ -16,9 +16,11 @@ from pokerfate.strategy.v3 import (
     VillainStats,
 )
 from pokerfate.strategy.v3 import alpha_gate, calibrator
+from pokerfate.strategy.v3 import purposes_active as active
 from pokerfate.strategy.v3 import board as v3_board
 from pokerfate.strategy.v3 import exploit as v3_exploit
 from pokerfate.strategy.v3 import river_value_sizing
+from pokerfate.strategy.v3.purposes_active import PureBluffRiver
 from pokerfate.strategy.postflop import _compute_equity_uncertainty, _hero_draw_profile
 from pokerfate.strategy.range_v2.hand_categorizer import made_hand_info
 
@@ -1025,7 +1027,6 @@ class TestPurposeTriggers:
         assert not p.trigger(fragile).hit
 
     def test_river_pure_bluff_uses_bucket_context_to_fire(self):
-        from pokerfate.strategy.v3.purposes_active import PureBluffRiver
 
         board = cards('Kh', 'Jh', '7c', '2s', '3d')
         ctx = self._base_ctx(
@@ -1053,7 +1054,6 @@ class TestPurposeTriggers:
         assert PureBluffRiver().trigger(ctx).hit
 
     def test_river_pure_bluff_bucket_context_blocks_nuts_heavy_range(self):
-        from pokerfate.strategy.v3.purposes_active import PureBluffRiver
 
         board = cards('Kh', 'Jh', '7c', '2s', '3d')
         ctx = self._base_ctx(
@@ -2127,7 +2127,6 @@ class TestPurposeTriggers:
         assert p.trigger(ctx).hit
 
     def test_pure_bluff_river_requires_blocker(self):
-        from pokerfate.strategy.v3.purposes_active import PureBluffRiver
         p = PureBluffRiver()
         ctx = self._base_ctx(
             street='river',
@@ -2142,7 +2141,6 @@ class TestPurposeTriggers:
         assert not p.trigger(ctx).hit
 
     def test_pure_bluff_river_with_nut_flush_blocker(self):
-        from pokerfate.strategy.v3.purposes_active import PureBluffRiver
         p = PureBluffRiver()
         ctx = self._base_ctx(
             street='river',
@@ -2156,6 +2154,131 @@ class TestPurposeTriggers:
             villain_stats=VillainStats(river_fold_rate=0.55),
         )
         assert p.trigger(ctx).hit
+
+    def test_pure_bluff_river_env_switch_disables_purpose(self, monkeypatch):
+        monkeypatch.setenv('PF_PURE_BLUFF_ENABLED', '0')
+        importlib.reload(active)
+        try:
+            p = active.PureBluffRiver()
+            ctx = self._base_ctx(
+                street='river',
+                hero_bucket='air', equity_range=0.05,
+                blockers=BlockerSet(nut_flush_blocker=True),
+                villain_bucket_dist={
+                    'nuts': 0.05, 'strong': 0.10,
+                    'medium': 0.35, 'weak_draw': 0.20,
+                    'draw': 0.10, 'air': 0.20,
+                },
+                villain_stats=VillainStats(river_fold_rate=0.70, river_action_count=10),
+            )
+            assert not p.trigger(ctx).hit
+            assert p.sizer(ctx) == []
+        finally:
+            monkeypatch.delenv('PF_PURE_BLUFF_ENABLED', raising=False)
+            importlib.reload(active)
+
+    def test_pure_bluff_river_size_filters_by_fold_equity(self):
+        p = PureBluffRiver()
+        ctx = self._base_ctx(
+            street='river',
+            hero_bucket='air', equity_range=0.05,
+            blockers=BlockerSet(nut_flush_blocker=True),
+            my_prev_actions={'turn': 'bet'},
+            villain_bucket_dist={
+                'nuts': 0.02, 'strong': 0.05,
+                'medium': 0.22, 'weak_draw': 0.20,
+                'draw': 0.06, 'air': 0.45,
+            },
+            villain_stats=VillainStats(river_fold_rate=0.48, river_action_count=10),
+        )
+        assert p.trigger(ctx).hit
+        assert p.sizer(ctx) == [(0.66, 0.4), (0.75, 0.3)]
+
+    def test_pure_bluff_river_penalizes_blocking_missed_draw_folds(self):
+        p = PureBluffRiver()
+        board = cards('Kh', 'Jh', '7c', '2s', '3d')
+        ctx = self._base_ctx(
+            street='river',
+            hole_cards=cards('Ah', '9h'),
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hero_bucket='air', equity_range=0.05,
+            blockers=BlockerSet(nut_flush_blocker=True),
+            villain_bucket_dist={
+                'nuts': 0.05, 'strong': 0.10,
+                'medium': 0.35, 'weak_draw': 0.20,
+                'draw': 0.10, 'air': 0.20,
+            },
+            villain_stats=VillainStats(river_fold_rate=0.55, river_action_count=10),
+        )
+        assert not p.trigger(ctx).hit
+
+    def test_pure_bluff_river_extreme_overfold_allows_small_without_blocker(self):
+        p = PureBluffRiver()
+        ctx = self._base_ctx(
+            street='river',
+            hero_bucket='air', equity_range=0.05,
+            blockers=BlockerSet(),
+            villain_bucket_dist={
+                'nuts': 0.04, 'strong': 0.08,
+                'medium': 0.28, 'weak_draw': 0.25,
+                'draw': 0.08, 'air': 0.27,
+            },
+            villain_stats=VillainStats(river_fold_rate=0.70, river_action_count=10),
+        )
+        assert p.trigger(ctx).hit
+        assert p.sizer(ctx) == [(0.66, 1.0)]
+
+    def test_pure_bluff_river_allows_two_way_only_with_joint_fe_and_strong_blocker(self):
+        p = PureBluffRiver()
+        ctx = self._base_ctx(
+            street='river',
+            num_opponents=2,
+            hero_bucket='air', equity_range=0.05,
+            blockers=BlockerSet(nut_flush_blocker=True, straight_blocker=True),
+            villain_bucket_dist={
+                'nuts': 0.04, 'strong': 0.14,
+                'medium': 0.40, 'weak_draw': 0.20,
+                'draw': 0.08, 'air': 0.14,
+            },
+            villain_stats=VillainStats(river_fold_rate=0.78, river_action_count=10),
+            worst_villain_stats=VillainStats(river_fold_rate=0.72, river_action_count=10),
+        )
+        assert p.trigger(ctx).hit
+        assert p.sizer(ctx) == [(0.50, 0.55), (0.66, 0.45)]
+
+    def test_pure_bluff_river_blocks_two_way_with_sticky_villain(self):
+        p = PureBluffRiver()
+        ctx = self._base_ctx(
+            street='river',
+            num_opponents=2,
+            hero_bucket='air', equity_range=0.05,
+            blockers=BlockerSet(nut_flush_blocker=True, straight_blocker=True),
+            villain_bucket_dist={
+                'nuts': 0.04, 'strong': 0.14,
+                'medium': 0.40, 'weak_draw': 0.20,
+                'draw': 0.08, 'air': 0.14,
+            },
+            villain_stats=VillainStats(river_fold_rate=0.78, river_action_count=10),
+            worst_villain_stats=VillainStats(river_fold_rate=0.30, river_action_count=10, wtsd=0.36),
+        )
+        assert not p.trigger(ctx).hit
+
+    def test_pure_bluff_river_blocks_three_way(self):
+        p = PureBluffRiver()
+        ctx = self._base_ctx(
+            street='river',
+            num_opponents=3,
+            hero_bucket='air', equity_range=0.05,
+            blockers=BlockerSet(nut_flush_blocker=True, straight_blocker=True),
+            villain_bucket_dist={
+                'nuts': 0.04, 'strong': 0.10,
+                'medium': 0.40, 'weak_draw': 0.20,
+                'draw': 0.08, 'air': 0.18,
+            },
+            villain_stats=VillainStats(river_fold_rate=0.80, river_action_count=10),
+        )
+        assert not p.trigger(ctx).hit
 
     def test_delayed_cbet_requires_flop_checked_through(self):
         from pokerfate.strategy.v3.purposes_active import DelayedCbet

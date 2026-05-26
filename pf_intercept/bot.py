@@ -28,6 +28,7 @@ import json
 import logging
 import random
 from pathlib import Path
+from typing import TypeAlias
 
 from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
 from pf_intercept import config
@@ -39,6 +40,9 @@ from pf_notify import notify
 from pf_notify.templates import format_chips_km_signed
 
 log = logging.getLogger("pf_bot")
+
+WireInject: TypeAlias = tuple[str, dict] | tuple[str, dict, float]
+WireInjectResult: TypeAlias = WireInject | list[WireInject] | None
 
 _MAX_INJECT_DELAY = float(config.ACTION_INJECT_DELAY_MAX_SEC)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -188,7 +192,9 @@ class BotBridge:
     PokerFateAPI is created lazily once those values are known.
 
     Call handle(type_name, msg) for every decoded S2C frame.
-    Returns (proto_name, fields) or (proto_name, fields, delay_sec) to inject C2S, else None.
+    Returns one or more C2S injections:
+      (proto_name, fields), (proto_name, fields, delay_sec), a list of those,
+      or None.
     """
 
     def __init__(self, max_auto_rebuy: int = 1, use_range_equity: bool = True) -> None:
@@ -239,6 +245,7 @@ class BotBridge:
         self._current_gameid: str = ""
         self._hand_seq: int = 0
         self._auto_collected_gameids: set[str] = set()
+        self._pending_injects: list[WireInject] = []
 
         # GameData API: 已拉取过的 uid（本次 proxy 进程内不重复拉）
         self._fetched_uids: set[str] = set()
@@ -327,6 +334,65 @@ class BotBridge:
         """换桌匹配前清零统计，避免回到同房时立刻再次触发逃离。"""
         self._room_escape_bust_count = 0
 
+    def _show_my_card_request(
+        self,
+        *,
+        pos: int,
+        flag: int = 1,
+        delay_sec: float = 0.0,
+    ) -> WireInject | None:
+        """Build pb.ShowMyCardREQ for one of our hole-card positions."""
+        gameid = str(self._current_gameid or "").strip()
+        if not gameid or gameid == "0":
+            log.warning("[BOT] 亮牌：缺少 gameid，跳过展示第 %s 张手牌。", pos)
+            return None
+        if pos <= 0:
+            return None
+        return (
+            "pb.ShowMyCardREQ",
+            {
+                "gameid": gameid,
+                "pos": int(pos),
+                "flag": int(flag),
+            },
+            max(0.0, float(delay_sec)),
+        )
+
+    def show_my_card(self, pos: int, *, flag: int = 1, delay_sec: float = 0.0) -> bool:
+        """Queue one ShowMyCardREQ. Decision logic calls this when it wants to reveal."""
+        req = self._show_my_card_request(pos=pos, flag=flag, delay_sec=delay_sec)
+        if req is None:
+            return False
+        self._pending_injects.append(req)
+        return True
+
+    def show_my_hole_cards(self, count: int = 2) -> int:
+        """Queue ShowMyCardREQ for our first `count` hole cards."""
+        requests: list[WireInject] = []
+        for idx, pos in enumerate(range(1, min(2, int(count)) + 1)):
+            req = self._show_my_card_request(pos=pos, flag=1, delay_sec=idx * 0.05)
+            if req is not None:
+                requests.append(req)
+        self._pending_injects.extend(requests)
+        if requests:
+            log.info(
+                "[BOT] 亮牌：已排队展示自己的 %d 张手牌 gameid=%s",
+                len(requests),
+                self._current_gameid,
+            )
+        return len(requests)
+
+    def _drain_pending_injects(self, result: WireInjectResult) -> WireInjectResult:
+        if not self._pending_injects:
+            return result
+        pending = self._pending_injects
+        self._pending_injects = []
+        if result is None:
+            return pending
+        if isinstance(result, list):
+            return pending + result
+        return pending + [result]
+
     def _notify(self, event: str, **fields) -> None:
         """Room-aware notification wrapper. SNG/tournament/friend rooms stay quiet."""
         if self._is_sng_room:
@@ -337,27 +403,26 @@ class BotBridge:
             return
         notify(event, **fields)
 
-    def handle(self, type_name: str, msg: dict) -> tuple[str, dict] | tuple[str, dict, float] | None:
+    def handle(self, type_name: str, msg: dict) -> WireInjectResult:
         """
         Process one decoded S2C frame.
-        Returns (proto_type_name, fields_dict) or (proto_type_name, fields_dict, delay_sec)
-        to inject a C2S message after optional delay (seconds), else None.
+        Returns one or more C2S injections after optional delay, else None.
         """
         try:
-            return self._dispatch(type_name, msg)
+            return self._drain_pending_injects(self._dispatch(type_name, msg))
         except Exception:
             log.exception("[BOT] Error handling %s", type_name)
             return None
 
     # ── Dispatch ──────────────────────────────────────────────────────────────
 
-    def _dispatch(self, type_name: str, msg: dict) -> tuple[str, dict] | tuple[str, dict, float] | None:
+    def _dispatch(self, type_name: str, msg: dict) -> WireInjectResult:
         if   type_name == "pb.SelfUserInfoRSP": self._on_self_user_info(msg)
         elif type_name == "pb.SitDownRSP":      self._on_sit_down(msg)
         elif type_name == "pb.SitDownBRC":       self._on_sit_down_brc(msg)
         elif type_name == "pb.EnterRoomRSP":     return self._on_enter_room(msg)
         elif type_name == "pb.DealerInfoRSP":    return self._on_dealer_info(msg)
-        elif type_name == "pb.HandCardRSP":      self._on_hand_card(msg)
+        elif type_name == "pb.HandCardRSP":      return self._on_hand_card(msg)
         elif type_name == "pb.RoundStartBRC":    self._on_round_start(msg)
         elif type_name == "pb.ActionBRC":        self._on_action_brc(msg)
         elif type_name == "pb.RoundOverBRC":     self._on_round_over(msg)
@@ -462,7 +527,7 @@ class BotBridge:
             return bb, sb if sb > 0 else bb / 2.0
         return 0.0, 0.0
 
-    def _on_enter_room(self, msg: dict) -> tuple[str, dict, float] | None:
+    def _on_enter_room(self, msg: dict) -> WireInject | None:
         self._profit_lock_reenter = None
         self._profit_lock_deferred = None
         self._room_escape_reenter = None
@@ -601,7 +666,7 @@ class BotBridge:
     def _profit_lock_quick_start_fallback(
         self,
         context: str = "盈利锁仓",
-    ) -> tuple[str, dict, float] | None:
+    ) -> WireInject | None:
         """按大厅 QuickStart 随机配桌（LobbyByinDialog 同款字段）。"""
         bb = float(self._bb or 0.0)
         if bb <= 0:
@@ -809,7 +874,7 @@ class BotBridge:
 
     # ── Hand lifecycle ────────────────────────────────────────────────────────
 
-    def _on_dealer_info(self, msg: dict) -> tuple[str, dict, float] | None:
+    def _on_dealer_info(self, msg: dict) -> WireInject | None:
         if not self._ensure_api():
             return None
 
@@ -917,9 +982,9 @@ class BotBridge:
 
         return None
 
-    def _on_hand_card(self, msg: dict) -> None:
+    def _on_hand_card(self, msg: dict) -> WireInjectResult:
         if self._api is None:
-            return
+            return None
         cards = [
             _card_str(msg[k])
             for k in ("card1", "card2", "card3", "card4")
@@ -931,6 +996,7 @@ class BotBridge:
             self._api.deal_hole_cards(cards)
         elif cards:
             log.warning("[BOT] Incomplete hole cards (%d): %s", len(cards), cards)
+        return None
 
     def _on_round_start(self, msg: dict) -> None:
         stage = msg.get("stage", 1)
@@ -1030,7 +1096,29 @@ class BotBridge:
         if pool:
             self._pot = sum(_chip_int(p, 0) for p in pool)
 
-    def _on_action_notify(self, msg: dict) -> tuple[str, dict, float] | None:
+    def _decision_purpose(self) -> str:
+        if self._api is None:
+            return ""
+        getter = getattr(self._api, "last_decision_diagnostics", None)
+        if not callable(getter):
+            return ""
+        try:
+            diag = getter() or {}
+        except Exception:
+            log.exception("[BOT] failed to read decision diagnostics")
+            return ""
+        return str(diag.get("final_purpose") or "").split("→", 1)[0].strip()
+
+    def _maybe_show_pure_bluff_before_action(self, decision: BotDecision) -> None:
+        if (decision.action or "").lower() != "raise":
+            return
+        if self._decision_purpose() != "pure_bluff_river":
+            return
+        shown = self.show_my_hole_cards()
+        if shown:
+            log.info("[BOT] 纯诈唬亮牌：ActionREQ 前展示 %d 张手牌。", shown)
+
+    def _on_action_notify(self, msg: dict) -> WireInject | None:
         if self._api is None or self._my_seat is None:
             return None
         seat = _chip_int(msg.get("seatid", 0), 0)
@@ -1089,11 +1177,17 @@ class BotBridge:
                  decision, street, self._pot, call_need, self._my_chips)
 
         action_type, chips = _decision_to_wire(decision)
+        self._maybe_show_pure_bluff_before_action(decision)
         delay_sec = _inject_delay_before_action(
             street, decision, self._pot, self._bb or 0.0,
         )
         log.debug("[BOT] ActionREQ inject delay: %.2fs", delay_sec)
-        return "pb.ActionREQ", {"action_type": action_type, "chips": chips}, delay_sec
+        action_req = ("pb.ActionREQ", {"action_type": action_type, "chips": chips}, delay_sec)
+        if self._pending_injects:
+            pending = self._pending_injects
+            self._pending_injects = []
+            return pending + [action_req]
+        return action_req
 
     def _on_show_hand(self, msg: dict) -> None:
         """Capture ShowHandRSP — hole cards revealed at showdown."""
@@ -1275,7 +1369,7 @@ class BotBridge:
 
     def _maybe_profit_lock_leave_reenter(
         self, final_stacks: dict[int, int]
-    ) -> tuple[str, dict, float] | None:
+    ) -> WireInject | None:
         """桌上筹码 >= 阈值则记在 deferred，下一手 DealerInfo 再离桌并以 100BB 进同一房间.
 
         设计：
@@ -1344,7 +1438,7 @@ class BotBridge:
             self._api._log.note(msg)
         return None
 
-    def _on_leave_room_rsp(self, msg: dict) -> tuple[str, dict, float] | None:
+    def _on_leave_room_rsp(self, msg: dict) -> WireInject | None:
         """盈利锁仓：离桌成功后带买入重新进房；房间逃离：离桌后 QuickStart。"""
         esc = self._room_escape_reenter
         if esc is not None and esc.get("quickstart"):
@@ -1403,7 +1497,7 @@ class BotBridge:
         )
         return "pb.EnterRoomREQ", fields, delay
 
-    def _on_notice_reby(self, msg: dict) -> tuple[str, dict, float] | None:
+    def _on_notice_reby(self, msg: dict) -> WireInject | None:
         """Server notifies us that our chips hit 0 — rebuy window opened."""
         seat = msg.get("seatid", 0)  # pb omits field when value is 0
         if seat != self._my_seat:

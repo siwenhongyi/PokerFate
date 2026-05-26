@@ -2,6 +2,7 @@
 
 from pf_intercept import config
 from pf_intercept.bot import BotBridge
+from pokerfate.api import BotDecision
 
 
 class TestBotBridgeActionAmounts:
@@ -71,6 +72,93 @@ def test_robot_snapshot_excludes_self_uid(monkeypatch) -> None:
 
     assert b._current_hand_robot_seats == {1}
     assert b._current_hand_robot_uids == {1: "88"}
+
+
+def test_hand_card_rsp_does_not_auto_show_hero_cards() -> None:
+    class FakeAPI:
+        def __init__(self):
+            self.cards = []
+
+        def deal_hole_cards(self, cards):
+            self.cards.append(cards)
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._current_gameid = "game-1"
+
+    out = b.handle("pb.HandCardRSP", {"card1": 270, "card2": 1038})
+
+    assert b._api.cards == [["Ad", "As"]]
+    assert out is None
+
+
+def test_show_my_hole_cards_queues_two_requests_for_next_handle() -> None:
+    b = BotBridge()
+    b._current_gameid = "game-1"
+
+    assert b.show_my_hole_cards() == 2
+
+    assert b.handle("pb.RoundOverBRC", {}) == [
+        ("pb.ShowMyCardREQ", {"gameid": "game-1", "pos": 1, "flag": 1}, 0.0),
+        ("pb.ShowMyCardREQ", {"gameid": "game-1", "pos": 2, "flag": 1}, 0.05),
+    ]
+
+
+def test_show_my_card_brc_is_not_watched_but_showdown_messages_are() -> None:
+    assert "pb.ShowMyCardBRC" not in config.WATCH_S2C
+    assert "pb.ShowHandRSP" in config.WATCH_S2C
+    assert "pb.WinnerRSP" in config.WATCH_S2C
+
+
+def test_pure_bluff_river_shows_hole_cards_before_action_req() -> None:
+    class FakeAPI:
+        def request_action(self, **kwargs):
+            return BotDecision(action="raise", amount=120.0)
+
+        def last_decision_diagnostics(self):
+            return {"final_purpose": "pure_bluff_river"}
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._my_seat = 0
+    b._current_gameid = "game-1"
+    b._hole_cards_count = 2
+    b._stage = 4
+    b._pot = 100
+    b._my_chips = 1000
+    b._all_seats = [0, 1]
+
+    out = b.handle("pb.ActionNotifyBRC", {"seatid": 0, "call_need_chips": 0})
+
+    assert out == [
+        ("pb.ShowMyCardREQ", {"gameid": "game-1", "pos": 1, "flag": 1}, 0.0),
+        ("pb.ShowMyCardREQ", {"gameid": "game-1", "pos": 2, "flag": 1}, 0.05),
+        ("pb.ActionREQ", {"action_type": 4, "chips": 120}, out[2][2]),
+    ]
+
+
+def test_non_pure_bluff_raise_does_not_show_hole_cards() -> None:
+    class FakeAPI:
+        def request_action(self, **kwargs):
+            return BotDecision(action="raise", amount=120.0)
+
+        def last_decision_diagnostics(self):
+            return {"final_purpose": "thick_value_bet"}
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._my_seat = 0
+    b._current_gameid = "game-1"
+    b._hole_cards_count = 2
+    b._stage = 4
+    b._pot = 100
+    b._my_chips = 1000
+    b._all_seats = [0, 1]
+
+    out = b.handle("pb.ActionNotifyBRC", {"seatid": 0, "call_need_chips": 0})
+
+    assert out[0] == "pb.ActionREQ"
+    assert out[1] == {"action_type": 4, "chips": 120}
 
 
 class TestBotBridgeProfitLock:

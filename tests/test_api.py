@@ -130,7 +130,7 @@ class TestAPILifecycle:
 
         assert api.last_auto_collect_reasons() == []
 
-    def test_auto_collect_reasons_keep_special_full_house(self):
+    def test_auto_collect_reasons_skip_full_house(self):
         api = make_api()
         start_hand(api)
         api.deal_hole_cards(["Ac", "Ks"])
@@ -145,7 +145,7 @@ class TestAPILifecycle:
             my_profit_delta=60,
         )
 
-        assert api.last_auto_collect_reasons() == ["葫芦"]
+        assert api.last_auto_collect_reasons() == []
 
     def test_auto_collect_reasons_skip_board_trips_full_house(self):
         api = make_api()

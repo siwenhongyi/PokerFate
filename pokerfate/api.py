@@ -1581,6 +1581,9 @@ class PokerFateAPI:
         """Return the latest hand detail in a push-friendly compact form."""
         return _fit_utf8(self._last_hand_push_detail, max_bytes)
 
+    def last_decision_diagnostics(self) -> dict:
+        return dict(getattr(self._bot, "last_decision_diagnostics", {}) or {})
+
     def last_auto_collect_reasons(self) -> list[str]:
         """Reasons why the latest hand should be auto-collected."""
         return list(self._last_auto_collect_reasons)
@@ -1591,11 +1594,6 @@ class PokerFateAPI:
 
         rank = self._my_best_hand_rank()
         if rank is None:
-            return []
-
-        if rank == HandRank.FULL_HOUSE:
-            if not self._board_has_rank_trip():
-                return ["葫芦"]
             return []
 
         label = _AUTO_COLLECT_HAND_RANKS.get(rank)
@@ -1609,9 +1607,6 @@ class PokerFateAPI:
         except Exception:
             return None
         return score[0]
-
-    def _board_has_rank_trip(self) -> bool:
-        return any(count >= 3 for count in Counter(c.rank.value for c in self._board).values())
 
     def _build_hand_push_detail(
         self,

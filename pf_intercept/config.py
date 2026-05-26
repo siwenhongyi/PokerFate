@@ -96,7 +96,7 @@ ROOM_ESCAPE_CONSECUTIVE_BUSTS = 2
 
 # 自动收藏牌局：WinnerRSP 结算后，仅对我方获胜的特殊牌型调用 /collCard/update。
 # 与盈利锁仓一致，SNG / 好友局会跳过。
-# 条件：葫芦（公共牌不能已经三条）/ 四条 / 同花顺 / 皇家同花顺。
+# 条件：四条 / 同花顺 / 皇家同花顺。
 AUTO_COLLECT_SPECIAL_HANDS_ENABLED = True
 
 GAME_HTTP_VERSION = "1.5.1"

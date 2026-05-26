@@ -72,8 +72,10 @@ _RIVER_THIN_VALUE_MAX_LOSS = float(
 _RIVER_THIN_VALUE_MAX_NUTS = float(
     _os.environ.get('PF_RIVER_THIN_VALUE_MAX_NUTS', '0.25')
 )
-_PURE_BLUFF_RIVER_FOLD_MIN = float(_os.environ.get('PF_PURE_BLUFF_RIVER_FOLD_MIN', '0.52'))
+_PURE_BLUFF_ENABLED = _os.environ.get('PF_PURE_BLUFF_ENABLED', '1').lower() not in {'0', 'false', 'off', 'no'}
 _PURE_BLUFF_CATCHER_MIN = float(_os.environ.get('PF_PURE_BLUFF_CATCHER_MIN', '0.42'))
+_PURE_BLUFF_FE_MARGIN = float(_os.environ.get('PF_PURE_BLUFF_FE_MARGIN', '0.02'))
+_PURE_BLUFF_UNBLOCKER_PENALTY = float(_os.environ.get('PF_PURE_BLUFF_UNBLOCKER_PENALTY', '0.24'))
 _BARREL_RESIST_CALL_EQ_ADD = float(_os.environ.get('PF_BARREL_RESIST_CALL_EQ_ADD', '0.04'))
 _BARREL_RESIST_RAISE_EQ_ADD = float(_os.environ.get('PF_BARREL_RESIST_RAISE_EQ_ADD', '0.10'))
 _BARREL_RESIST_WEIGHT_MULT = float(_os.environ.get('PF_BARREL_RESIST_WEIGHT_MULT', '0.70'))
@@ -127,6 +129,144 @@ def _villain_caps(ctx: DecisionCtx) -> bool:
 def _bluff_catcher_density(ctx: DecisionCtx) -> float:
     return (ctx.villain_bucket_dist.get('medium', 0.0)
             + ctx.villain_bucket_dist.get('weak_draw', 0.0))
+
+
+def _clamp01(x: float) -> float:
+    return max(0.0, min(1.0, x))
+
+
+def _pure_bluff_required_fe(frac: float) -> float:
+    if frac <= 0:
+        return 0.0
+    return frac / (1.0 + frac)
+
+
+def _river_fold_estimate(ctx: DecisionCtx) -> float:
+    vs = ctx.villain_stats
+    if vs.river_action_count >= 5 or vs.river_fold_rate > 0.50:
+        return _clamp01(vs.river_fold_rate)
+    if vs.fold_to_cbet_opps >= 5:
+        return _clamp01(vs.fold_to_cbet - 0.05)
+    return 0.38
+
+
+def _worst_river_fold_estimate(ctx: DecisionCtx, primary: float) -> float:
+    vs = ctx.worst_villain_stats
+    if vs.river_action_count >= 5 or vs.river_fold_rate > 0.50:
+        return _clamp01(vs.river_fold_rate)
+    if vs.fold_to_cbet_opps >= 5:
+        return _clamp01(vs.fold_to_cbet - 0.05)
+    return _clamp01(primary - 0.08)
+
+
+def _pure_bluff_field_fe(ctx: DecisionCtx) -> float:
+    primary = _river_fold_estimate(ctx)
+    if ctx.num_opponents <= 1:
+        return primary
+    if ctx.num_opponents == 2:
+        return primary * _worst_river_fold_estimate(ctx, primary)
+    return 0.0
+
+
+def _pure_bluff_fe_ok(ctx: DecisionCtx, blf, frac: float) -> bool:
+    context_bonus = min(0.06, 0.04 * blf.blocker_score + 0.03 * blf.story_score)
+    return _pure_bluff_field_fe(ctx) + context_bonus >= _pure_bluff_required_fe(frac) + _PURE_BLUFF_FE_MARGIN
+
+
+def _missed_flush_unblocker_penalty(ctx: DecisionCtx) -> float:
+    if ctx.board_sig.flush_possible or not ctx.board_sig.flush_draw:
+        return 0.0
+    suits: dict[object, int] = {}
+    for c in ctx.board:
+        suits[c.suit] = suits.get(c.suit, 0) + 1
+    draw_suits = {suit for suit, count in suits.items() if count == 2}
+    if not draw_suits:
+        return 0.0
+    held_draw_suit = sum(1 for c in ctx.hole_cards if c.suit in draw_suits)
+    return min(_PURE_BLUFF_UNBLOCKER_PENALTY, 0.12 * held_draw_suit)
+
+
+def _missed_straight_unblocker_penalty(ctx: DecisionCtx) -> float:
+    if ctx.board_sig.straight_possible or not ctx.board_sig.straight_draw_heavy:
+        return 0.0
+    ranks = {int(c.rank) for c in ctx.board}
+    if not ranks:
+        return 0.0
+    top = max(ranks)
+    windows = [set(range(lo, lo + 5)) for lo in range(2, 11)]
+    live_windows = [w for w in windows if len(w & ranks) >= 3 and top in w]
+    if not live_windows:
+        return 0.0
+    held = {int(c.rank) for c in ctx.hole_cards}
+    if not any(held & (w - ranks) for w in live_windows):
+        return 0.0
+    return 0.08
+
+
+def _pure_bluff_blocker_quality(ctx: DecisionCtx, blf) -> float:
+    penalty = _missed_flush_unblocker_penalty(ctx) + _missed_straight_unblocker_penalty(ctx)
+    quality = blf.blocker_score - min(_PURE_BLUFF_UNBLOCKER_PENALTY, penalty)
+    if ctx.blockers.set_blocker and not (ctx.blockers.nut_flush_blocker or ctx.blockers.straight_blocker):
+        quality -= 0.08
+    return _clamp01(quality)
+
+
+def _pure_bluff_blocker_need(ctx: DecisionCtx, blf) -> float:
+    if blf.air_weak >= 0.45 and _pure_bluff_field_fe(ctx) >= 0.62 and blf.nuts <= 0.08:
+        return 0.0
+    need = 0.30 if (blf.air_weak >= 0.35 or _pure_bluff_field_fe(ctx) >= 0.55) else 0.40
+    if _pure_bluff_field_fe(ctx) < 0.45:
+        need = max(need, 0.45)
+    if ctx.num_opponents == 2:
+        need = max(need, 0.55)
+    return need
+
+
+def _pure_bluff_blocker_ok(ctx: DecisionCtx, blf, quality: float) -> bool:
+    need = _pure_bluff_blocker_need(ctx, blf)
+    if need <= 0.0:
+        return True
+    return quality >= need
+
+
+def _pure_bluff_player_count_ok(ctx: DecisionCtx, blf, quality: float) -> bool:
+    if ctx.num_opponents <= 1:
+        return True
+    if ctx.num_opponents >= 3:
+        return False
+    worst = ctx.worst_villain_stats
+    worst_no_fe = worst.fold_to_cbet_opps >= 5 and worst.fold_to_cbet <= 0.30
+    worst_sticky = (
+        ctx.n_sticky > 0
+        or ctx.max_value_lean >= 1.20
+        or worst.wtsd >= 0.32
+        or (worst.river_action_count >= 5 and worst.river_fold_rate < 0.45)
+    )
+    return (
+        not worst_no_fe
+        and not worst_sticky
+        and blf.nuts <= 0.12
+        and blf.strong_nuts <= 0.40
+        and blf.air_weak + blf.medium >= 0.60
+        and quality >= 0.55
+    )
+
+
+def _pure_bluff_river_fracs(ctx: DecisionCtx, blf=None) -> List[Tuple[float, float]]:
+    blf = blf or bluff_context.evaluate(ctx)
+    quality = _pure_bluff_blocker_quality(ctx, blf)
+    if quality <= 0.0:
+        if (
+            ctx.num_opponents == 1
+            and _river_fold_estimate(ctx) >= 0.65
+            and blf.air_weak >= 0.45
+            and blf.nuts <= 0.08
+            and _pure_bluff_fe_ok(ctx, blf, 0.66)
+        ):
+            return [(0.66, 1.0)]
+        return []
+    base = [(0.50, 0.55), (0.66, 0.45)] if ctx.num_opponents == 2 else [(0.66, 0.4), (0.75, 0.3), (1.00, 0.3)]
+    return [(frac, weight) for frac, weight in base if _pure_bluff_fe_ok(ctx, blf, frac)]
 
 
 def _bucket_mass(ctx: DecisionCtx, *names: str) -> float:
@@ -1248,11 +1388,15 @@ class PureBluffRiver(Purpose):
     street_gate = ('river',)
 
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
+        if not _PURE_BLUFF_ENABLED:
+            return TriggerResult(False)
         if ctx.facing_bet or ctx.hero_bucket != 'air':
             return TriggerResult(False)
+        if no_fold_equity(ctx):
+            return TriggerResult(False)
         blf = bluff_context.evaluate(ctx)
-        blocker_need = 0.35 if blf.air_weak >= 0.35 else 0.45
-        if blf.blocker_score < blocker_need:
+        quality = _pure_bluff_blocker_quality(ctx, blf)
+        if not _pure_bluff_blocker_ok(ctx, blf, quality):
             return TriggerResult(False)
         if blf.nuts > 0.18 or blf.strong_nuts > 0.55:
             return TriggerResult(False)
@@ -1262,23 +1406,21 @@ class PureBluffRiver(Purpose):
             and blf.medium < 0.35
         ):
             return TriggerResult(False)
-        if ctx.villain_stats.river_fold_rate <= _PURE_BLUFF_RIVER_FOLD_MIN and blf.score < 0.66:
-            return TriggerResult(False)
-        # Sticky 对手硬门：pure bluff 的 EV 主项完全依赖 FE；river_fold_rate
-        # 已有 > 0.40 门，但 river_fold 与 fold_to_cbet 不同 street——对
-        # fold_to_cbet ≤ 0.20 的 station 对手（flop-call station），river
-        # fold 率偶尔过 0.40 门也仍是结构性 -EV。双门更稳健。
-        if no_fold_equity(ctx):
-            return TriggerResult(False)
-        if ctx.num_opponents != 1:
+        if not _pure_bluff_player_count_ok(ctx, blf, quality):
             return TriggerResult(False)
         if blf.score < _BLUFF_CONTEXT_RIVER_MIN:
             return TriggerResult(False)
-        w = 0.25 + 0.75 * blf.score + 0.20 * blf.blocker_score
+        if not _pure_bluff_river_fracs(ctx, blf):
+            return TriggerResult(False)
+        w = 0.25 + 0.75 * blf.score + 0.20 * quality
+        if ctx.num_opponents == 2:
+            w *= 0.65
         return TriggerResult(True, max(0.2, w))
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
-        return [(0.66, 0.4), (0.75, 0.3), (1.00, 0.3)]
+        if not _PURE_BLUFF_ENABLED:
+            return []
+        return _pure_bluff_river_fracs(ctx)
 
 
 # ---------------------------------------------------------------------------
