@@ -3,6 +3,7 @@
 from pf_intercept import config
 from pf_intercept.bot import BotBridge
 from pokerfate.api import BotDecision
+from pokerfate.bot.opponent_model import OpponentModel, OpponentStats
 
 
 class TestBotBridgeActionAmounts:
@@ -36,6 +37,27 @@ class TestBotBridgeActionAmounts:
         assert b._api.events[0].action == "call"
         assert b._api.events[0].amount == 6
 
+    def test_opponent_action_uses_uid_not_seat_id(self):
+        b = BotBridge()
+        b._api = self._FakeAPI()
+        b._stage = 1
+        b._my_seat = 0
+        b._seat_uids = {2: "123456"}
+
+        b._on_action_brc({"seatid": 2, "action_type": 3, "chips": 6, "hand_chips": 194})
+
+        assert b._api.events[0].player_id == 123456
+
+    def test_opponent_action_without_uid_uses_negative_runtime_id(self):
+        b = BotBridge()
+        b._api = self._FakeAPI()
+        b._stage = 1
+        b._my_seat = 0
+
+        b._on_action_brc({"seatid": 2, "action_type": 3, "chips": 6, "hand_chips": 194})
+
+        assert b._api.events[0].player_id == -3
+
 
 def test_dealer_info_passes_global_hand_seq_to_api(monkeypatch) -> None:
     calls = []
@@ -58,6 +80,100 @@ def test_dealer_info_passes_global_hand_seq_to_api(monkeypatch) -> None:
     )
 
     assert calls[0]["hand_number"] == 42
+
+
+def test_pending_gamedata_seed_migrates_legacy_archive_before_get() -> None:
+    class FakeBot:
+        def __init__(self):
+            self.opponent_model = OpponentModel()
+
+    class FakeAPI:
+        def __init__(self):
+            self._bot = FakeBot()
+            self.hands = []
+
+        def new_hand(self, **kwargs):
+            self.hands.append(kwargs)
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._my_seat = 0
+    b._seat_names = {0: "Hero", 2: "LegacyName"}
+    b._seat_uids = {0: "999", 2: "1001"}
+    b._api._bot.opponent_model._name_archive["LegacyName"] = OpponentStats(
+        hands_seen=35,
+        fold_count=9,
+    )
+    b._pending_seeds = {
+        1001: {
+            "play_times": 20,
+            "pool_entry_rate": 5000,
+            "add_before_flipping_rate": 2000,
+            "show_hand_rate": 2500,
+            "active_rate": 1000,
+        }
+    }
+
+    b._on_dealer_info(
+        {
+            "dealer": 0,
+            "start_info": [
+                {"seatid": 0, "chips": 200},
+                {"seatid": 2, "chips": 200},
+            ],
+            "gameid": "legacy-seed",
+        }
+    )
+
+    om = b._api._bot.opponent_model
+    stats = om.get(1001)
+    assert "LegacyName" not in om._name_archive
+    assert stats.hands_seen == 20
+    assert stats.fold_count == 9
+    assert om._id_to_name[1001] == "LegacyName"
+
+
+def test_pending_gamedata_seed_uses_cached_name_when_player_not_in_hand() -> None:
+    class FakeBot:
+        def __init__(self):
+            self.opponent_model = OpponentModel()
+
+    class FakeAPI:
+        def __init__(self):
+            self._bot = FakeBot()
+
+        def new_hand(self, **kwargs):
+            pass
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._my_seat = 0
+    b._seat_names = {0: "Hero"}
+    b._seat_uids = {0: "999"}
+    b._pending_seeds = {
+        1001: {
+            "name": "CachedName",
+            "data": {
+                "play_times": 20,
+                "pool_entry_rate": 5000,
+                "add_before_flipping_rate": 2000,
+                "show_hand_rate": 2500,
+                "active_rate": 1000,
+            },
+        }
+    }
+
+    b._on_dealer_info(
+        {
+            "dealer": 0,
+            "start_info": [{"seatid": 0, "chips": 200}],
+            "gameid": "cached-name-seed",
+        }
+    )
+
+    om = b._api._bot.opponent_model
+    assert om.get(1001).hands_seen == 20
+    assert om._id_to_name[1001] == "CachedName"
 
 
 def test_robot_snapshot_excludes_self_uid(monkeypatch) -> None:
@@ -110,7 +226,7 @@ def test_show_my_card_brc_is_not_watched_but_showdown_messages_are() -> None:
     assert "pb.WinnerRSP" in config.WATCH_S2C
 
 
-def test_pure_bluff_river_shows_hole_cards_before_action_req() -> None:
+def test_pure_bluff_river_does_not_show_hole_cards_before_action_req() -> None:
     class FakeAPI:
         def request_action(self, **kwargs):
             return BotDecision(action="raise", amount=120.0)
@@ -130,11 +246,8 @@ def test_pure_bluff_river_shows_hole_cards_before_action_req() -> None:
 
     out = b.handle("pb.ActionNotifyBRC", {"seatid": 0, "call_need_chips": 0})
 
-    assert out == [
-        ("pb.ShowMyCardREQ", {"gameid": "game-1", "pos": 1, "flag": 1}, 0.0),
-        ("pb.ShowMyCardREQ", {"gameid": "game-1", "pos": 2, "flag": 1}, 0.05),
-        ("pb.ActionREQ", {"action_type": 4, "chips": 120}, out[2][2]),
-    ]
+    assert out[0] == "pb.ActionREQ"
+    assert out[1] == {"action_type": 4, "chips": 120}
 
 
 def test_non_pure_bluff_raise_does_not_show_hole_cards() -> None:

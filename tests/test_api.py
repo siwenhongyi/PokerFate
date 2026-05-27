@@ -417,8 +417,8 @@ class TestAutosave:
             assert os.path.exists(path)
             with open(path) as f:
                 data = json.load(f)
-            # Opponent (id=1) should be in the saved file
-            assert "1" in data["stats"]
+            # Opponent uid=1 should be in the saved file
+            assert "1" in data["players"]
         finally:
             if os.path.exists(path):
                 os.unlink(path)
@@ -559,10 +559,9 @@ class TestStackTracking:
         assert player.stack == 150.0
         assert api._session_stacks[1] == 150.0
 
-    def test_name_based_model_migration(self):
-        """Same opponent name, different player_id → stats are preserved."""
+    def test_same_name_different_uid_does_not_migrate_model(self):
+        """Display name is not identity; only uid/player_id preserves stats."""
         api = make_api()
-        # Session 1: opponent is id=1 named "GPT"
         api.new_hand(
             players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "GPT", 200.0)],
             dealer_id=0,
@@ -570,13 +569,12 @@ class TestStackTracking:
         api.deal_hole_cards(["Ac", "Kd"])
         for _ in range(5):
             api.notify_action(ActionEvent(1, "fold", 0.0, "preflop"))
-        hands_after = api._bot.opponent_model.get(1).hands_seen
+        old_stats = api._bot.opponent_model.get(1)
+        assert old_stats.fold_count > 0
 
-        # "GPT" reconnects with a new player_id=7
         api.notify_player_joined(player_id=7, name="GPT", stack=200.0)
-        # Stats should have migrated to id=7
         stats_new_id = api._bot.opponent_model.get(7)
-        assert stats_new_id.fold_count > 0
+        assert stats_new_id.fold_count == 0
 
     def test_session_survives_multiple_hand_cycles(self):
         api = make_api()
@@ -822,8 +820,8 @@ class TestSeatManagement:
         assert new_stats.hands_seen == 0
         assert new_stats.fold_count == 0
 
-    def test_returning_player_with_different_id_restores_stats(self):
-        """Player who left and rejoins under a different player_id gets their history back."""
+    def test_returning_player_with_different_uid_starts_fresh(self):
+        """Different player_id/uid with same name does not inherit history."""
         api = make_api()
         api.new_hand(
             players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "Veteran", 200.0)],
@@ -837,13 +835,11 @@ class TestSeatManagement:
         saved_folds = api._bot.opponent_model.get(1).fold_count
         assert saved_folds > 0
 
-        # Veteran leaves, then rejoins with a new player_id
         api.notify_player_left(player_id=1)
         api.notify_player_joined(player_id=9, name="Veteran", stack=200.0)
 
-        # Stats should be restored on new id
         restored = api._bot.opponent_model.get(9)
-        assert restored.fold_count == saved_folds
+        assert restored.fold_count == 0
 
     def test_notify_player_left_then_rejoin_same_id(self):
         """Player leaves and rejoins at same id — stats are preserved via archive restore."""

@@ -725,8 +725,7 @@ class PokerFateAPI:
         resolved_stack = stack if stack is not None else self._default_stack
         self._session_stacks[player_id] = resolved_stack
         self._session_names[player_id] = name
-        # Register name: if this name was seen before with a different ID,
-        # historical stats are automatically migrated to the new ID.
+        # Register name for the uid-keyed opponent model; display names are not identities.
         self._bot.opponent_model.register_name(player_id, name)
         if self.verbose:
             self._log.raw({"event": "player_joined", "player_id": player_id,

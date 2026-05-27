@@ -3,8 +3,9 @@
 Persistence
 -----------
 OpponentModel 支持将对手数据持久化到 JSON 文件。
-遇到熟悉对手时（相同 player_id 或相同 name），可以直接加载历史数据，
-继续利用已积累的统计信息进行可剥削调整。
+持久化记录以用户唯一 player_id 为主键，name 只是该 uid 的展示属性。
+旧版 name_archive 会在玩家再次出现时按名字懒迁移到 uid 归档。
+遇到熟悉对手时，可以直接加载历史数据，继续利用已积累的统计信息进行可剥削调整。
 
 用法：
     model = OpponentModel.load("opponents.json")  # 从文件加载
@@ -317,74 +318,30 @@ class OpponentStats:
 class OpponentModel:
     """Track and model opponent behavior, with optional persistence.
 
-    Keyed by player_id (int). Optionally also indexed by name for
-    cross-session lookup when player_ids change.
+    Keyed by player_id (int). Display names are active-table labels, not identity keys.
+    Older name-keyed archives are supported only for lazy migration.
     """
 
     def __init__(self):
         self._stats: Dict[int, OpponentStats] = {}
-        self._id_to_name: Dict[int, str] = {}    # player_id -> name
-        self._name_to_id: Dict[str, int] = {}    # name -> canonical player_id
-        # Archive: stats keyed by name for players who vacated a seat.
-        # Allows stats to survive seat changes without leaking to new occupants.
+        self._id_to_name: Dict[int, str] = {}    # uid -> display name
         self._name_archive: Dict[str, OpponentStats] = {}
         # Showdown calibrator data loaded from file (passed back to caller).
         self._showdown_data: dict = {}
 
-    def register_name(self, player_id: int, name: str) -> None:
-        """Associate a player_id with a display name.
+    def register_name(self, uid: int, name: str) -> None:
+        """Associate a stable uid with a display name and migrate legacy name data."""
+        if uid < 0:
+            return
+        uid = int(uid)
+        if uid not in self._stats and name in self._name_archive:
+            self._stats[uid] = self._name_archive.pop(name)
+        self._id_to_name[uid] = name
 
-        Handles three scenarios correctly:
-
-        1. Same player, same ID (re-registration): no-op, stable.
-
-        2. Same player, new ID (e.g. changed seat between sessions):
-           stats are migrated from old active ID to new ID.
-           Also restores from name_archive if they previously vacated a seat.
-
-        3. Different player, same ID (seat reuse within a session):
-           old player's stats are archived under their name and cleared
-           from this ID so the new player starts with a clean slate.
-           Old player's data is recoverable if they rejoin later.
-        """
-        existing_name = self._id_to_name.get(player_id)
-        if existing_name is not None and existing_name != name:
-            # Scenario 3: different player now at this seat/ID.
-            # Archive old player's stats by name (not lost, just detached).
-            if self._name_to_id.get(existing_name) == player_id:
-                del self._name_to_id[existing_name]
-            if player_id in self._stats:
-                self._name_archive[existing_name] = self._stats.pop(player_id)
-
-        # Restore from archive if this player was previously seen (unregistered).
-        if name in self._name_archive and player_id not in self._stats:
-            self._stats[player_id] = self._name_archive.pop(name)
-
-        # Migrate from a different active ID (same player, seat change).
-        self._id_to_name[player_id] = name
-        if name in self._name_to_id:
-            old_id = self._name_to_id[name]
-            if old_id != player_id and old_id in self._stats:
-                self._stats[player_id] = self._stats.pop(old_id)
-        self._name_to_id[name] = player_id
 
     def unregister_seat(self, player_id: int) -> None:
-        """Dissociate a player_id / seat from its current occupant.
-
-        Call this when a player leaves their seat (StandUpBRC / LeaveRoom)
-        so the next player to sit here does not inherit their stats.
-
-        Stats are moved to the name_archive — if the player rejoins at any
-        seat/ID later, register_name() will restore their history.
-        """
-        name = self._id_to_name.pop(player_id, None)
-        if name is None:
-            return
-        if self._name_to_id.get(name) == player_id:
-            del self._name_to_id[name]
-        # Move stats to name-keyed archive so they survive ID recycling.
-        if player_id in self._stats:
-            self._name_archive[name] = self._stats.pop(player_id)
+        """Compatibility no-op: seat lifecycle is not persisted in the uid model."""
+        return
 
     def get(self, player_id: int) -> OpponentStats:
         if player_id not in self._stats:
@@ -751,13 +708,16 @@ class OpponentModel:
             ``"showdown"`` key. Pass ``calibrator.to_dict()`` here so both
             datasets stay in one local JSON file.
         """
+        players = {
+            str(uid): {
+                "name": self._id_to_name.get(uid, ""),
+                "stats": asdict(stats),
+            }
+            for uid, stats in self._stats.items()
+            if uid >= 0
+        }
         data = {
-            "stats": {
-                str(pid): asdict(stats)
-                for pid, stats in self._stats.items()
-            },
-            "id_to_name": {str(k): v for k, v in self._id_to_name.items()},
-            "name_to_id": self._name_to_id,
+            "players": players,
             "name_archive": {
                 name: asdict(stats)
                 for name, stats in self._name_archive.items()
@@ -800,12 +760,39 @@ class OpponentModel:
             return OpponentStats(**{k: v for k, v in stats_dict.items()
                                      if k in valid_keys})
 
-        for pid_str, stats_dict in data.get("stats", {}).items():
-            model._stats[int(pid_str)] = _build(stats_dict)
-        model._id_to_name = {int(k): v for k, v in data.get("id_to_name", {}).items()}
-        model._name_to_id = data.get("name_to_id", {})
+        for pid_str, entry in data.get("players", {}).items():
+            uid = int(pid_str)
+            if isinstance(entry, dict) and "stats" in entry:
+                model._stats[uid] = _build(entry.get("stats", {}))
+                name = entry.get("name")
+                if name:
+                    model._id_to_name[uid] = name
+            elif isinstance(entry, dict):
+                model._stats[uid] = _build(entry)
+        legacy_id_to_name = {
+            str(pid): str(name)
+            for pid, name in data.get("id_to_name", {}).items()
+            if name
+        }
+        legacy_name_to_id = {
+            str(name): str(pid)
+            for name, pid in data.get("name_to_id", {}).items()
+            if name
+        }
         for name, stats_dict in data.get("name_archive", {}).items():
             model._name_archive[name] = _build(stats_dict)
+        for pid_str, stats_dict in data.get("stats", {}).items():
+            # Legacy top-level stats were keyed by runtime player_id, which was
+            # often a physical seat. Keep them only as name-keyed lazy migration
+            # data so we do not persist seat numbers as uid keys.
+            name = legacy_id_to_name.get(str(pid_str))
+            if not name:
+                for candidate_name, candidate_pid in legacy_name_to_id.items():
+                    if candidate_pid == str(pid_str):
+                        name = candidate_name
+                        break
+            if name and name not in model._name_archive:
+                model._name_archive[name] = _build(stats_dict)
         model._showdown_data = data.get("showdown", {})
         return model
 
@@ -848,7 +835,6 @@ class OpponentModel:
             else:
                 self._stats[pid] = stats
         self._id_to_name.update(other._id_to_name)
-        self._name_to_id.update(other._name_to_id)
 
     def summary(self) -> str:
         """Return a human-readable summary of all known opponents."""

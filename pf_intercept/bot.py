@@ -250,7 +250,7 @@ class BotBridge:
         # GameData API: 已拉取过的 uid（本次 proxy 进程内不重复拉）
         self._fetched_uids: set[str] = set()
         # 在 API 创建前到达的 server stats，缓存至 _ensure_api 创建后再注入
-        self._pending_seeds: dict[int, dict] = {}   # seat_id → raw server data dict
+        self._pending_seeds: dict[int, dict] = {}   # uid -> {"data": raw stats, "name": display name}
 
         # GameData 无历史数据通知（每次 proxy 进程启动只发一次）
         self._gamedata_no_history_notified: bool = False
@@ -698,14 +698,6 @@ class BotBridge:
         """A player sat down — update name map from SitDownBRC.status."""
         seat_status = msg.get("status") or {}
         self._extract_seat_name(seat_status)
-        # Pre-register seat→name mapping synchronously before triggering the async
-        # gamedata fetch, so that when the HTTP response arrives, om.get(seat)
-        # already points to the correct player (not the previous seat occupant).
-        if self._api is not None:
-            seat = _chip_int(seat_status.get("seatid", 0), 0)
-            name = (seat_status.get("player") or {}).get("name", "")
-            if name and seat != self._my_seat:
-                self._api._bot.opponent_model.register_name(seat, name)
         self._trigger_gamedata_fetch(seat_status)
 
     def _extract_seat_name(self, seat_status: dict) -> None:
@@ -720,6 +712,30 @@ class BotBridge:
             uid_str = str(uid)
             self._uid_to_seat[uid_str] = seat
             self._seat_uids[seat] = uid_str
+
+    def _seat_to_player_id(self, seat: int) -> int:
+        uid = self._seat_uids.get(seat)
+        if uid is not None:
+            return int(uid)
+        return -(int(seat) + 1)
+
+    def _seat_player_name(self, seat: int) -> str:
+        return self._seat_names.get(seat) or f"Player_{seat}"
+
+    def _seat_map_to_player_ids(self, values: dict[int, object]) -> dict[int, object]:
+        return {self._seat_to_player_id(seat): value for seat, value in values.items()}
+
+    def _seat_list_to_player_ids(self, seats: list[int]) -> list[int]:
+        return [self._seat_to_player_id(seat) for seat in seats]
+
+    def _seat_set_to_player_ids(self, seats: set[int]) -> set[int]:
+        return {self._seat_to_player_id(seat) for seat in seats}
+
+    def _seat_uid_map_to_player_ids(self, seat_uids: dict[int, str]) -> dict[int, str]:
+        return {self._seat_to_player_id(seat): uid for seat, uid in seat_uids.items()}
+
+    def _seat_showdown_to_player_ids(self, hands: dict[int, list[str]]) -> dict[int, list[str]]:
+        return {self._seat_to_player_id(seat): cards for seat, cards in hands.items()}
 
     def _snapshot_current_hand_robots(self, seats: list[int]) -> None:
         """Freeze robot seats for this hand so later joins/leaves do not mutate it."""
@@ -805,14 +821,15 @@ class BotBridge:
 
         if self._api is not None:
             om = self._api._bot.opponent_model
-            stats = om.get(seat)
+            display_name = name or self._seat_names.get(seat) or f"uid{uid}"
+            om.register_name(int(uid), display_name)
+            stats = om.get(int(uid))
             applied = seed_from_server(stats, data)
             if applied:
-                name = self._seat_names.get(seat) or f"seat{seat}"
                 log.info(
                     "[gamedata] %s 写入成功 | hands=%d VPIP=%.0f%% PFR=%.0f%% "
                     "AF=%.2f wtsd=%.0f%%",
-                    name,
+                    display_name,
                     data.get("play_times", 0),
                     stats.vpip * 100,
                     stats.pfr * 100,
@@ -821,10 +838,10 @@ class BotBridge:
                 )
         else:
             # API not ready yet (seat/blinds unknown); buffer until _ensure_api
-            self._pending_seeds[seat] = data
-            name = self._seat_names.get(seat) or f"seat{seat}"
+            display_name = name or self._seat_names.get(seat) or f"uid{uid}"
+            self._pending_seeds[int(uid)] = {"data": data, "name": display_name}
             log.info("[gamedata] %s: API 未就绪，数据已缓存 (hands=%d)",
-                     name, data.get("play_times", 0))
+                     display_name, data.get("play_times", 0))
 
     def _sync_stacks_from_table_snapshot(self, table_status: dict) -> None:
         """用 EnterRoomRSP.table_status 里的 hand_chips 对齐本地快照。
@@ -860,7 +877,7 @@ class BotBridge:
         bb = self._bb or 2.0
         sb = self._sb or 1.0
         self._api = PokerFateAPI(
-            my_player_id=self._my_seat,
+            my_player_id=self._seat_to_player_id(self._my_seat),
             big_blind=bb,
             small_blind=sb,
             equity_iterations=3000,
@@ -919,9 +936,9 @@ class BotBridge:
             self._hand_start_chips[seat] = chips
             if seat == self._my_seat:
                 self._my_chips = chips
-            name = self._seat_names.get(seat) or f"Player_{seat}"
+            name = self._seat_player_name(seat)
             players.append(PlayerInfo(
-                player_id=seat,
+                player_id=self._seat_to_player_id(seat),
                 name=name,
                 stack=chips,
             ))
@@ -931,15 +948,20 @@ class BotBridge:
         # 否则 opponent_model 里 seat 还映射着上一局的旧玩家，seed 会写错位置。
         if self._pending_seeds:
             om = self._api._bot.opponent_model
-            # Pre-register：让 seat_id → player 映射与本手一致
-            for p in players:
-                if p.player_id != self._my_seat:
-                    om.register_name(p.player_id, p.name)
-            seat_to_name = {p.player_id: p.name for p in players}
-            for seat_id, data in self._pending_seeds.items():
-                stats = om.get(seat_id)
+            player_names = {p.player_id: p.name for p in players}
+            for uid, payload in self._pending_seeds.items():
+                if isinstance(payload, dict) and "data" in payload:
+                    data = payload.get("data") or {}
+                    cached_name = str(payload.get("name") or "")
+                else:
+                    data = payload
+                    cached_name = ""
+                display_name = player_names.get(uid) or cached_name
+                if display_name:
+                    om.register_name(uid, display_name)
+                stats = om.get(uid)
                 if seed_from_server(stats, data):
-                    pname = seat_to_name.get(seat_id) or f"seat{seat_id}"
+                    pname = display_name or f"uid{uid}"
                     log.info(
                         "[gamedata] %s 缓存数据写入 | hands=%d VPIP=%.0f%% PFR=%.0f%% "
                         "AF=%.2f wtsd=%.0f%%",
@@ -954,7 +976,7 @@ class BotBridge:
 
         self._api.new_hand(
             players=players,
-            dealer_id=msg.get("dealer", 0),
+            dealer_id=self._seat_to_player_id(msg.get("dealer", 0)),
             hand_number=self._hand_seq,
         )
 
@@ -1085,7 +1107,7 @@ class BotBridge:
         else:
             api_amount = 0
         self._api.notify_action(ActionEvent(
-            player_id=seat,
+            player_id=self._seat_to_player_id(seat),
             action=action_str,
             amount=api_amount,
             street=street,
@@ -1114,9 +1136,10 @@ class BotBridge:
             return
         if self._decision_purpose() != "pure_bluff_river":
             return
-        shown = self.show_my_hole_cards()
-        if shown:
-            log.info("[BOT] 纯诈唬亮牌：ActionREQ 前展示 %d 张手牌。", shown)
+        # Auto reveal is disabled while pure-bluff show strategy is under review.
+        # shown = self.show_my_hole_cards()
+        # if shown:
+        #     log.info("[BOT] 纯诈唬亮牌：ActionREQ 前展示 %d 张手牌。", shown)
 
     def _on_action_notify(self, msg: dict) -> WireInject | None:
         if self._api is None or self._my_seat is None:
@@ -1226,12 +1249,12 @@ class BotBridge:
                     log.warning("[BOT] WinnerRSP: uid=%s has no seat mapping — skipping", uid)
                     continue
 
-            winner_ids.append(seat)
+            winner_ids.append(self._seat_to_player_id(seat))
 
             # Capture server-provided hand type (authoritative)
             hand_type = w.get("type")
             if hand_type:
-                self._pending_winner_types[seat] = int(hand_type)
+                self._pending_winner_types[self._seat_to_player_id(seat)] = int(hand_type)
 
         # Build final_stacks from hand-start chips + server profit delta.
         # WinnerRSP.profit gives each player's net gain/loss for the hand,
@@ -1268,12 +1291,15 @@ class BotBridge:
         self._api.hand_over(
             winner_ids=winner_ids,
             pot=total_pot,
-            final_stacks=final_stacks,
-            showdown_hands=self._pending_showdown or None,
+            final_stacks=self._seat_map_to_player_ids(final_stacks),
+            showdown_hands=(
+                self._seat_showdown_to_player_ids(self._pending_showdown)
+                if self._pending_showdown else None
+            ),
             winner_hand_types=self._pending_winner_types or None,
             my_profit_delta=my_profit_delta,
-            robot_player_ids=self._current_hand_robot_seats,
-            robot_player_uids=self._current_hand_robot_uids,
+            robot_player_ids=self._seat_set_to_player_ids(self._current_hand_robot_seats),
+            robot_player_uids=self._seat_uid_map_to_player_ids(self._current_hand_robot_uids),
         )
         self._pending_showdown = {}
         self._pending_winner_types = {}

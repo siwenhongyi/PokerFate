@@ -1,4 +1,4 @@
-"""Tests for OpponentModel persistence and name-based ID migration."""
+"""Tests for OpponentModel persistence and uid-based archive migration."""
 
 import json
 import os
@@ -120,27 +120,36 @@ class TestPersistence:
             model.save(path)
             with open(path) as f:
                 data = json.load(f)
-            assert "42" in data["stats"]
-            assert data["stats"]["42"]["hands_seen"] == 10
+            assert "42" in data["players"]
+            assert data["players"]["42"]["name"] == "TestBot"
+            assert data["players"]["42"]["stats"]["hands_seen"] == 10
         finally:
             os.unlink(path)
 
 
 class TestNameMigration:
-    def test_same_name_different_id_migrates_stats(self):
+    def test_same_uid_name_change_keeps_stats(self):
         model = OpponentModel()
-        # First encounter: id=1, name="Villain"
+        model.register_name(1, "OldName")
+        model.get(1).hands_seen = 100
+        model.get(1).fold_count = 30
+
+        model.register_name(1, "NewName")
+
+        assert model.get(1).hands_seen == 100
+        assert model.get(1).fold_count == 30
+        assert model._id_to_name[1] == "NewName"
+
+    def test_same_name_different_uid_does_not_migrate_stats(self):
+        model = OpponentModel()
         model.register_name(1, "Villain")
         model.get(1).hands_seen = 100
         model.get(1).fold_count = 30
 
-        # Reconnects with id=5
         model.register_name(5, "Villain")
-        # Stats should be on id=5 now
-        assert model.get(5).hands_seen == 100
-        assert model.get(5).fold_count == 30
-        # id=1 should be gone
-        assert 1 not in model._stats
+
+        assert model.get(5).hands_seen == 0
+        assert model.get(1).hands_seen == 100
 
     def test_different_names_dont_interfere(self):
         model = OpponentModel()
@@ -149,17 +158,18 @@ class TestNameMigration:
         model.get(1).hands_seen = 50
         model.get(2).hands_seen = 75
 
-        model.register_name(3, "Alice")  # Alice reconnects as id=3
-        assert model.get(3).hands_seen == 50  # Alice's stats migrated
-        assert model.get(2).hands_seen == 75  # Bob untouched
+        model.register_name(3, "Alice")
+        assert model.get(3).hands_seen == 0
+        assert model.get(1).hands_seen == 50
+        assert model.get(2).hands_seen == 75
 
     def test_new_name_no_migration(self):
         model = OpponentModel()
         model.register_name(1, "OldBot")
         model.get(1).hands_seen = 30
 
-        model.register_name(2, "NewBot")  # completely new name
-        assert model.get(2).hands_seen == 0  # fresh stats
+        model.register_name(2, "NewBot")
+        assert model.get(2).hands_seen == 0
 
 
 class TestMerge:
@@ -203,77 +213,124 @@ class TestSummary:
 
 
 class TestSeatReuse:
-    """Tests for seat-reuse detection and name_archive pattern."""
+    """Tests for pure uid archive and legacy name_archive migration."""
 
-    def test_unregister_seat_archives_stats(self):
-        """unregister_seat moves stats to name_archive, clears active mappings."""
+    def test_unregister_seat_is_noop_for_uid_model(self):
         model = OpponentModel()
         model.register_name(1, "Alice")
         model.get(1).hands_seen = 42
         model.unregister_seat(1)
 
-        # Active mappings cleared
-        assert 1 not in model._id_to_name
-        assert "Alice" not in model._name_to_id
-        assert 1 not in model._stats
-        # Stats preserved in archive
-        assert "Alice" in model._name_archive
-        assert model._name_archive["Alice"].hands_seen == 42
+        assert model.get(1).hands_seen == 42
+        assert model._id_to_name[1] == "Alice"
 
-    def test_new_player_at_vacated_seat_starts_fresh(self):
-        """After unregister_seat, a different player at same ID gets clean stats."""
+    def test_same_uid_name_change_keeps_stats(self):
         model = OpponentModel()
         model.register_name(1, "OldPlayer")
         model.get(1).hands_seen = 99
-        model.unregister_seat(1)
 
-        # New player sits in the same seat/ID
         model.register_name(1, "NewPlayer")
-        assert model.get(1).hands_seen == 0  # fresh start
+        assert model.get(1).hands_seen == 99
+        assert model._id_to_name[1] == "NewPlayer"
 
-    def test_returning_player_after_unregister_restores_stats(self):
-        """Player who left and rejoins (same or different ID) gets their stats back."""
+    def test_same_name_different_uid_after_unregister_starts_fresh(self):
         model = OpponentModel()
         model.register_name(1, "Alice")
         model.get(1).hands_seen = 50
         model.get(1).fold_count = 20
         model.unregister_seat(1)
 
-        # Alice rejoins at a different seat ID
         model.register_name(3, "Alice")
-        assert model.get(3).hands_seen == 50
-        assert model.get(3).fold_count == 20
-        # Archive should be cleared (stats restored to active)
-        assert "Alice" not in model._name_archive
+        assert model.get(3).hands_seen == 0
+        assert model.get(1).hands_seen == 50
 
-    def test_seat_reuse_without_explicit_unregister(self):
-        """register_name with a new name at existing ID detects seat reuse inline."""
+    def test_same_uid_without_explicit_unregister_keeps_stats(self):
         model = OpponentModel()
         model.register_name(2, "OldPlayer")
         model.get(2).hands_seen = 77
 
-        # Same seat (ID=2) now has a different player — no explicit unregister called
         model.register_name(2, "NewPlayer")
-        assert model.get(2).hands_seen == 0  # NewPlayer starts fresh
-
-        # OldPlayer's stats should be archived, not lost
-        assert "OldPlayer" in model._name_archive
-        assert model._name_archive["OldPlayer"].hands_seen == 77
+        assert model.get(2).hands_seen == 77
+        assert model._id_to_name[2] == "NewPlayer"
+        assert "OldPlayer" not in model._name_archive
 
     def test_archive_persisted_in_save_load(self):
-        """name_archive survives save/load roundtrip."""
+        """uid archive survives save/load roundtrip."""
         model = OpponentModel()
         model.register_name(1, "ArchiveMe")
         model.get(1).hands_seen = 35
-        model.unregister_seat(1)
 
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             path = f.name
         try:
             model.save(path)
             loaded = OpponentModel.load(path)
-            assert "ArchiveMe" in loaded._name_archive
-            assert loaded._name_archive["ArchiveMe"].hands_seen == 35
+            assert loaded.get(1).hands_seen == 35
+            assert loaded._id_to_name[1] == "ArchiveMe"
+            assert "ArchiveMe" not in loaded._name_archive
+        finally:
+            os.unlink(path)
+
+    def test_legacy_name_archive_lazy_migrates_to_uid_archive(self):
+        data = {
+            "stats": {},
+            "id_to_name": {},
+            "name_to_id": {},
+            "name_archive": {"LegacyName": {"hands_seen": 35, "fold_count": 9}},
+        }
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as f:
+            json.dump(data, f)
+            path = f.name
+        try:
+            model = OpponentModel.load(path)
+            model.register_name(7, "LegacyName")
+
+            assert model.get(7).hands_seen == 35
+            assert model.get(7).fold_count == 9
+            assert "LegacyName" not in model._name_archive
+            with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as out:
+                out_path = out.name
+            try:
+                model.save(out_path)
+                saved = json.load(open(out_path))
+                assert "7" in saved["players"]
+                assert "LegacyName" not in saved["name_archive"]
+            finally:
+                os.unlink(out_path)
+        finally:
+            os.unlink(path)
+
+    def test_legacy_active_seat_stats_lazy_migrate_by_name_not_seat_key(self):
+        data = {
+            "stats": {"2": {"hands_seen": 35, "fold_count": 9}},
+            "id_to_name": {"2": "LegacySeatName"},
+            "name_to_id": {"LegacySeatName": 2},
+            "name_archive": {},
+        }
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as f:
+            json.dump(data, f)
+            path = f.name
+        try:
+            model = OpponentModel.load(path)
+
+            assert 2 not in model._stats
+            assert model._name_archive["LegacySeatName"].hands_seen == 35
+
+            model.register_name(1001, "LegacySeatName")
+
+            assert model.get(1001).hands_seen == 35
+            assert model.get(1001).fold_count == 9
+            assert "LegacySeatName" not in model._name_archive
+
+            with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as out:
+                out_path = out.name
+            try:
+                model.save(out_path)
+                saved = json.load(open(out_path))
+                assert "1001" in saved["players"]
+                assert "2" not in saved["players"]
+            finally:
+                os.unlink(out_path)
         finally:
             os.unlink(path)
 
