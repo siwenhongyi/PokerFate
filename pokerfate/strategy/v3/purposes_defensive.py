@@ -7,7 +7,7 @@ from typing import List, Tuple
 
 from pokerfate.strategy.gto import GTOMath
 from pokerfate.strategy.v3.context import DecisionCtx
-from pokerfate.strategy.v3 import bluff_context, early_relative
+from pokerfate.strategy.v3 import bluff_context, draw_quality, early_relative
 from pokerfate.strategy.v3.exploit import AF_PASSIVE_BASELINE, no_fold_equity, sticky_passive
 from pokerfate.strategy.v3.purpose import Purpose, TriggerResult
 from pokerfate.strategy.v3.stackoff_guard import stackoff_guard_reason
@@ -491,7 +491,8 @@ class DrawCall(Purpose):
         has_profile = any((
             d.flush_draw, d.oesd, d.gutshot, d.backdoor_flush, d.overcards,
         ))
-        strong_draw = d.flush_draw or d.oesd
+        premium_draw = draw_quality.premium_draw(ctx)
+        strong_draw = draw_quality.strong_draw(ctx)
         gutshot_over = d.gutshot and d.overcards
         overcards_only = (
             d.overcards
@@ -514,6 +515,10 @@ class DrawCall(Purpose):
                 margin = _DRAW_CALL_OVERCARDS_MARGIN
                 max_pot_odds = _DRAW_CALL_OVERCARDS_MAX_POT_ODDS
                 weight = 0.25
+        elif premium_draw:
+            implied_mult = 0.0 if ctx.spr <= 3.0 else 1.0
+            margin = -0.02 if ctx.spr <= 3.0 else 0.0
+            weight = 0.78
         elif strong_draw:
             weight = 0.65
         elif gutshot_over:
@@ -555,6 +560,11 @@ class DrawCall(Purpose):
 
         if ctx.pot_odds > max_pot_odds:
             return TriggerResult(False)
+        if premium_draw and ctx.spr <= 3.0:
+            direct_need = max(ctx.pot_odds + margin, 0.28)
+            if ctx.equity_range < direct_need:
+                return TriggerResult(False)
+            return TriggerResult(True, max(0.15, weight))
         effective_implied = implied * implied_mult
         if ctx.equity_range + effective_implied < ctx.pot_odds + margin:
             return TriggerResult(False)
@@ -637,8 +647,9 @@ class SemiBluffRaise(Purpose):
             return TriggerResult(False)
         if ctx.hero_bucket == 'weak_draw' and ctx.equity_range < 0.22:
             return TriggerResult(False)
-        d = ctx.draw
-        strong_draw = d.flush_draw or d.oesd or (d.gutshot and d.overcards)
+        premium_draw = draw_quality.premium_draw(ctx)
+        strong_draw = draw_quality.strong_draw(ctx)
+        weak_draw = ctx.hero_bucket == 'weak_draw'
         blf = bluff_context.evaluate(ctx)
         if (
             not (ctx.blockers.nut_flush_blocker or ctx.blockers.straight_blocker)
@@ -648,34 +659,41 @@ class SemiBluffRaise(Purpose):
             return TriggerResult(False)
         if not strong_draw and blf.strong_nuts >= 0.60:
             return TriggerResult(False)
-        if ctx.spr < 2.5:
-            return TriggerResult(False)
-        weak_bluff = not strong_draw
+        weak_bluff = weak_draw
         if weak_bluff:
+            if not draw_quality.weak_draw_semibluff_quality_ok(ctx):
+                return TriggerResult(False)
             if sticky_passive(ctx) or ctx.n_sticky >= 1:
                 return TriggerResult(False)
             if blf.score < 0.55 or blf.blocker_score < 0.45:
                 return TriggerResult(False)
-            if (
-                ctx.villain_stats.fold_to_cbet_opps < 5
-                or ctx.villain_stats.fold_to_cbet < _SEMI_BLUFF_RAISE_WEAK_MIN_FOLD
-            ):
+            if ctx.villain_stats.fold_to_cbet < _SEMI_BLUFF_RAISE_WEAK_MIN_FOLD:
                 return TriggerResult(False)
             if ctx.equity_range < _SEMI_BLUFF_RAISE_WEAK_MIN_EQ:
                 return TriggerResult(False)
+            if ctx.spr <= 3.0:
+                return TriggerResult(False)
+        elif ctx.spr <= 2.0 and not premium_draw:
+            return TriggerResult(False)
         # Sticky villain 硬门：semi-bluff raise 的 EV 公式中 fold_equity 是
         # 主收入项；FE ≈ 0 时 raise 把 pot 放大只增加 reverse-implied 损失，
         # EV 结构性为负。用 exploit.no_fold_equity 公共判据（统一跨 purpose）。
-        if no_fold_equity(ctx):
+        if no_fold_equity(ctx) and not (premium_draw and ctx.equity_range >= 0.45):
             return TriggerResult(False)
         if ctx.stack > 0:
             raise_to = min(max(ctx.to_call * 2.8, ctx.to_call + ctx.pot * 0.75), ctx.stack)
-            if (
-                raise_to / ctx.stack > _SEMI_BLUFF_RAISE_MAX_COMMIT
-                and ctx.equity_range < 0.45
-            ):
-                return TriggerResult(False)
-        return TriggerResult(True, 0.3 + 0.3 * ctx.equity_range + 0.15 * blf.score)
+            commit = raise_to / ctx.stack
+            if commit > _SEMI_BLUFF_RAISE_MAX_COMMIT:
+                if not premium_draw:
+                    return TriggerResult(False)
+                if ctx.equity_range < max(0.40, ctx.pot_odds + 0.12):
+                    return TriggerResult(False)
+        w = 0.3 + 0.3 * ctx.equity_range + 0.15 * blf.score
+        if premium_draw:
+            w += 0.10
+        if weak_bluff:
+            w *= 0.75
+        return TriggerResult(True, w)
 
 
 # ---------------------------------------------------------------------------

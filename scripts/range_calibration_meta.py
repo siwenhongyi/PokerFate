@@ -18,6 +18,9 @@ _PROFILE_DEFAULTS = {
     "PF_BUCKET_ML_10K": "off",
     "PF_BUCKET_ML_50K": "off",
     "PF_BUCKET_ML_DEFAULT": "off",
+    "PF_EQUITY_ML_10K": "lgbm",
+    "PF_EQUITY_ML_50K": "lgbm",
+    "PF_EQUITY_ML_DEFAULT": "off",
     "PF_POSTFLOP_PROFIT_EXPAND_V1": "0",
 }
 

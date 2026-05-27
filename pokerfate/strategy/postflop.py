@@ -372,7 +372,7 @@ def _protection_bet_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
         tag = f"pr<{_pct(_v3_active._ACTIVE_PROTECTION_WETNESS_MIN)}"
     elif nuts > _v3_active._ACTIVE_PROTECTION_MAX_NUTS:
         tag = f"nuts>{_pct(_v3_active._ACTIVE_PROTECTION_MAX_NUTS)}"
-    elif ctx.spr < 3 or ctx.spr > 8:
+    elif ctx.spr < 3:
         tag = 'spr'
     elif ctx.equity_range < need:
         tag = f"eq<{_pct(need)}"

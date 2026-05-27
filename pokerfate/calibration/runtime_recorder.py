@@ -27,6 +27,9 @@ _EXPERIMENT_FLAG_DEFAULTS = {
     "PF_BUCKET_ML_10K": "off",
     "PF_BUCKET_ML_50K": "off",
     "PF_BUCKET_ML_DEFAULT": "off",
+    "PF_EQUITY_ML_10K": "lgbm",
+    "PF_EQUITY_ML_50K": "lgbm",
+    "PF_EQUITY_ML_DEFAULT": "off",
     "PF_POSTFLOP_PROFIT_EXPAND_V1": "0",
 }
 
@@ -154,10 +157,12 @@ class RuntimeCalibrationRecorder:
 
         for path, rows in rows_by_path.items():
             path.parent.mkdir(parents=True, exist_ok=True)
+            lines = [
+                json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+                for row in rows
+            ]
             with path.open("a", encoding="utf-8") as f:
-                for row in rows:
-                    f.write(json.dumps(row, ensure_ascii=False, sort_keys=True))
-                    f.write("\n")
+                f.writelines(lines)
         return count
 
     def write_river_value_sizing(
@@ -248,6 +253,16 @@ class RuntimeCalibrationRecorder:
             "hero_hand_rank": getattr(rec, "hero_hand_rank", "") or "",
             "board_texture": getattr(rec, "board_texture", "") or "",
             "villain_vs_hero_dist": dict(getattr(rec, "villain_vs_hero_dist", {}) or {}),
+            "position": getattr(rec, "position", "") or "",
+            "facing_action": getattr(rec, "facing_action", "") or "",
+            "preflop_action_type": getattr(rec, "preflop_action_type", "") or "",
+            "action_bet_ratio": float(getattr(rec, "action_bet_ratio", 0.0) or 0.0),
+            "is_raise_over": bool(getattr(rec, "is_raise_over", False)),
+            "player_profile": _json_safe(getattr(rec, "player_profile", {}) or {}),
+            "range_summary": _json_safe(getattr(rec, "range_summary", {}) or {}),
+            "action_diagnostics": _json_safe(getattr(rec, "action_diagnostics", {}) or {}),
+            "range_snapshot": _json_safe(getattr(rec, "range_snapshot", {}) or {}),
+            "active_range_summaries": _json_safe(getattr(rec, "active_range_summaries", {}) or {}),
             "predicted_relation_eq": (
                 float(result.predicted_relation_eq)
                 if result.predicted_relation_eq is not None else None

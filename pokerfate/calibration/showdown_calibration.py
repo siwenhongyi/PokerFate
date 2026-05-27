@@ -16,8 +16,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
 import os as _os
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import random
@@ -45,6 +46,7 @@ _ACTUAL_EQ_TURN_SAMPLES = int(
 _ACTUAL_EQ_RIVER_UNSHOWN_SAMPLES = int(
     _os.environ.get('PF_CAL_ACTUAL_EQ_RIVER_UNSHOWN_SAMPLES', '2000')
 )
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -75,6 +77,16 @@ class PredictionRecord:
     # River-only hero-relative distribution:
     # {'win': hero beats villain, 'tie': split, 'loss': villain beats hero}.
     villain_vs_hero_dist: Dict[str, float] = field(default_factory=dict)
+    position: str = ''
+    facing_action: str = ''
+    preflop_action_type: str = ''
+    action_bet_ratio: float = 0.0
+    is_raise_over: bool = False
+    player_profile: Dict[str, Any] = field(default_factory=dict)
+    range_summary: Dict[str, Any] = field(default_factory=dict)
+    action_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    range_snapshot: Dict[str, Any] = field(default_factory=dict)
+    active_range_summaries: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass
@@ -118,6 +130,9 @@ class ShowdownCalibrator:
         # 本手累积的摊牌 villain 底牌（player_id → cards），用于计算多人
         # 池"实际胜率"。finalize_hand_calibration 读这里。
         self._shown_cards: Dict[int, List[Card]] = {}
+        self._actual_eq_cache: Dict[tuple, Optional[float]] = {}
+        self._actual_eq_cache_hits = 0
+        self._actual_eq_cache_misses = 0
 
     # ---------------- lifecycle ----------------
 
@@ -125,6 +140,9 @@ class ShowdownCalibrator:
         self._hand_id = hand_id
         self._hand_predictions = {}
         self._shown_cards = {}
+        self._actual_eq_cache = {}
+        self._actual_eq_cache_hits = 0
+        self._actual_eq_cache_misses = 0
 
     # ---------------- prediction 录入 ----------------
 
@@ -138,6 +156,16 @@ class ShowdownCalibrator:
         hero_cards: Optional[List[Card]],
         trigger: str,
         active_weights: Optional[Dict[int, np.ndarray]] = None,
+        position: str = '',
+        facing_action: str = '',
+        preflop_action_type: str = '',
+        action_bet_ratio: float = 0.0,
+        is_raise_over: bool = False,
+        player_profile: Optional[Dict[str, Any]] = None,
+        range_summary: Optional[Dict[str, Any]] = None,
+        action_diagnostics: Optional[Dict[str, Any]] = None,
+        range_snapshot: Optional[Dict[str, Any]] = None,
+        active_range_summaries: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> None:
         """每次 tracker 的 _weights[player_id] 更新后调用。
 
@@ -211,6 +239,18 @@ class ShowdownCalibrator:
             hero_hand_rank=hero_hand_rank,
             board_texture=board_texture_key(board),
             villain_vs_hero_dist=rel_dist,
+            position=position,
+            facing_action=facing_action,
+            preflop_action_type=preflop_action_type,
+            action_bet_ratio=float(action_bet_ratio or 0.0),
+            is_raise_over=bool(is_raise_over),
+            player_profile=dict(player_profile or {}),
+            range_summary=dict(range_summary or {}),
+            action_diagnostics=dict(action_diagnostics or {}),
+            range_snapshot=dict(range_snapshot or {}),
+            active_range_summaries={
+                str(k): dict(v) for k, v in (active_range_summaries or {}).items()
+            },
         )
         self._hand_predictions.setdefault(player_id, []).append(record)
 
@@ -237,11 +277,15 @@ class ShowdownCalibrator:
         """所有 villain 亮牌采集完后调一次，对每个 (villain, 预测快照)
         计算 CalibrationResult（单挑 + 多人池）并写日志。"""
         all_results: List[CalibrationResult] = []
+        self._actual_eq_cache = {}
+        self._actual_eq_cache_hits = 0
+        self._actual_eq_cache_misses = 0
         for player_id, actual_cards in self._shown_cards.items():
             records = self._hand_predictions.get(player_id, [])
             for rec in records:
                 result = self._build_result(rec, actual_cards, hero_cards, final_board)
                 all_results.append(result)
+        self._log_actual_eq_cache_stats('finalize_hand_calibration')
         if self._logger is not None:
             for r in all_results:
                 self._logger.calibration_result(r)
@@ -264,10 +308,94 @@ class ShowdownCalibrator:
         for rec in records:
             result = self._build_result(rec, actual_cards, hero_cards, final_board)
             results.append(result)
+        self._log_actual_eq_cache_stats('emit_records_for')
         if self._logger is not None:
             for r in results:
                 self._logger.calibration_result(r)
         return results
+
+    def _log_actual_eq_cache_stats(self, source: str) -> None:
+        total = self._actual_eq_cache_hits + self._actual_eq_cache_misses
+        if total <= 0:
+            return
+        log.info(
+            "actual equity cache %s hand=%s hits=%s misses=%s hit_rate=%.1f%% entries=%s",
+            source,
+            self._hand_id,
+            self._actual_eq_cache_hits,
+            self._actual_eq_cache_misses,
+            100.0 * self._actual_eq_cache_hits / total,
+            len(self._actual_eq_cache),
+        )
+
+    @staticmethod
+    def _cards_key(cards: List[Card] | None) -> tuple:
+        return tuple(sorted(str(c) for c in (cards or [])))
+
+    def _cached_actual_hero_eq_at_street(
+        self,
+        hero_cards: List[Card],
+        villain_cards: List[Card],
+        board_at_street: List[Card],
+    ) -> Optional[float]:
+        key = (
+            'hu_street',
+            self._cards_key(hero_cards),
+            self._cards_key(villain_cards),
+            tuple(str(c) for c in (board_at_street or [])),
+        )
+        if key in self._actual_eq_cache:
+            self._actual_eq_cache_hits += 1
+            return self._actual_eq_cache[key]
+        self._actual_eq_cache_misses += 1
+        value = self._actual_hero_eq_at_street(hero_cards, villain_cards, board_at_street)
+        self._actual_eq_cache[key] = value
+        return value
+
+    def _cached_actual_hero_eq_final(
+        self,
+        hero_cards: List[Card],
+        villain_cards: List[Card],
+        final_board: List[Card],
+    ) -> float:
+        key = (
+            'hu_final',
+            self._cards_key(hero_cards),
+            self._cards_key(villain_cards),
+            tuple(str(c) for c in (final_board or [])),
+        )
+        if key in self._actual_eq_cache:
+            self._actual_eq_cache_hits += 1
+            value = self._actual_eq_cache[key]
+            return 0.0 if value is None else float(value)
+        self._actual_eq_cache_misses += 1
+        value = self._actual_hero_eq(hero_cards, villain_cards, final_board)
+        self._actual_eq_cache[key] = value
+        return value
+
+    def _cached_actual_hero_eq_multi_at_street(
+        self,
+        hero_cards: List[Card],
+        villain_hands: List[List[Card]],
+        board_at_street: List[Card],
+        n_unshown: int = 0,
+    ) -> Optional[float]:
+        key = (
+            'multi_street',
+            self._cards_key(hero_cards),
+            tuple(self._cards_key(v) for v in villain_hands),
+            tuple(str(c) for c in (board_at_street or [])),
+            int(n_unshown),
+        )
+        if key in self._actual_eq_cache:
+            self._actual_eq_cache_hits += 1
+            return self._actual_eq_cache[key]
+        self._actual_eq_cache_misses += 1
+        value = self._actual_hero_eq_multi_at_street(
+            hero_cards, villain_hands, board_at_street, n_unshown=n_unshown,
+        )
+        self._actual_eq_cache[key] = value
+        return value
 
     def _build_result(
         self,
@@ -287,7 +415,7 @@ class ShowdownCalibrator:
         actual_hero_eq_street = None
         eq_error_street = None
         if hero_cards is not None and len(hero_cards) >= 2:
-            actual_hero_eq_street = self._actual_hero_eq_at_street(
+            actual_hero_eq_street = self._cached_actual_hero_eq_at_street(
                 hero_cards, actual_cards, rec.board,
             )
             if (rec.predicted_hero_eq is not None
@@ -299,7 +427,7 @@ class ShowdownCalibrator:
         eq_error = None
         if (hero_cards is not None and len(hero_cards) >= 2
                 and final_board and len(final_board) >= 5):
-            actual_hero_eq_final = self._actual_hero_eq(
+            actual_hero_eq_final = self._cached_actual_hero_eq_final(
                 hero_cards, actual_cards, final_board,
             )
             if rec.predicted_hero_eq is not None:
@@ -326,12 +454,12 @@ class ShowdownCalibrator:
                     n_unshown += 1
             if shown_hands:
                 # 只用亮牌 villain 的版本——日志展示用（反映本手真实摊牌结果）
-                actual_hero_eq_multi_shown = self._actual_hero_eq_multi_at_street(
+                actual_hero_eq_multi_shown = self._cached_actual_hero_eq_multi_at_street(
                     hero_cards, shown_hands, rec.board, n_unshown=0,
                 )
                 # N-way 版本——hero_eq_calibrator 用（和 predicted 同口径）
                 if n_unshown > 0:
-                    actual_hero_eq_multi = self._actual_hero_eq_multi_at_street(
+                    actual_hero_eq_multi = self._cached_actual_hero_eq_multi_at_street(
                         hero_cards, shown_hands, rec.board, n_unshown=n_unshown,
                     )
                 else:

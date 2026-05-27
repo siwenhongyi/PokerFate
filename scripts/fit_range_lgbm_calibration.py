@@ -480,6 +480,7 @@ def main() -> None:
     ap.add_argument("--val-rows", type=Path, action="append", required=True)
     ap.add_argument("--report-out", type=Path)
     ap.add_argument("--bucket-model-out", type=Path)
+    ap.add_argument("--equity-model-out", type=Path)
     ap.add_argument("--bucket-streets", default="flop,turn,river")
     ap.add_argument("--equity-target", choices=("multi", "hu"), default="multi")
     ap.add_argument("--include-player", action="store_true")
@@ -703,6 +704,40 @@ def main() -> None:
                 max_low_actual_over_worsen_pp=args.max_low_actual_over_worsen_pp,
             )
             runtime_usable = bool(selected["usable"])
+            if args.equity_model_out is not None:
+                _write_json(args.equity_model_out, {
+                    "type": "equity_lgbm_calibration",
+                    "feature_version": "range_v2_equity_lgbm_v1",
+                    "equity_target": args.equity_target,
+                    "feature_names": list(vec.feature_names_),
+                    "blend_alpha": selected["alpha"],
+                    "runtime_usable": runtime_usable,
+                    "model_str": reg.booster_.model_to_string(),
+                    "selected_blend": selected,
+                    "metrics": {
+                        "train_raw": _equity_metrics(tr_items, raw_tr),
+                        "train_lgbm": _equity_metrics(tr_items, pred_tr),
+                        "val_raw": raw_val_m,
+                        "val_lgbm": lgb_val_m,
+                        "val_mae_gain_pp": val_mae_gain_pp,
+                        "val_ece_gain_pp": round(raw_val_m["ece_pp"] - lgb_val_m["ece_pp"], 3),
+                        "val_risk": val_risk,
+                    },
+                    "train_args": {
+                        "n_estimators": args.n_estimators,
+                        "learning_rate": args.learning_rate,
+                        "num_leaves": args.num_leaves,
+                        "min_child_samples": args.min_child_samples,
+                        "reg_lambda": args.reg_lambda,
+                        "equity_high_actual_weight": args.equity_high_actual_weight,
+                        "equity_low_actual_weight": args.equity_low_actual_weight,
+                        "min_equity_mae_gain_pp": args.min_equity_mae_gain_pp,
+                        "max_high_actual_under_worsen_pp": args.max_high_actual_under_worsen_pp,
+                        "max_low_actual_over_worsen_pp": args.max_low_actual_over_worsen_pp,
+                        "include_player": args.include_player,
+                        "row_filters": report["meta"]["row_filters"],
+                    },
+                })
             report["equity"] = {
                 "features": len(vec.feature_names_),
                 "train_raw": _equity_metrics(tr_items, raw_tr),

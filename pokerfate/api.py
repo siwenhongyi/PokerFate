@@ -592,7 +592,7 @@ class PokerFateAPI:
         # 估算：pot_at_action = _last_known_pot + 本街已累积 current_bet。
         # 对首次下注这个就是 _last_known_pot。对 raise_over，我们加上桌上其他
         # 玩家本街已投入的 current_bet 估计当前池子。
-        opp_pos = self._hand_positions.get(event.player_id) or ''
+        opp_pos = self._hand_positions.get(event.player_id) or 'CO'
         base_pot = getattr(self, '_street_base_pot', self._last_known_pot)
         pot_at_action = base_pot + self._observed_street_contrib_total()
         pot_for_model = max(1.0, pot_at_action)

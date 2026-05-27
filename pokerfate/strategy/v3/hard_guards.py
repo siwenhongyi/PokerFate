@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pokerfate.strategy.v3.candidates import ActionCandidate
 from pokerfate.strategy.v3.context import DecisionCtx
+from pokerfate.strategy.v3 import draw_quality
 from pokerfate.strategy.v3.exploit import no_fold_equity
 
 _NON_NUT_DANGER_SUBTYPES = {
@@ -32,8 +33,15 @@ def reasons(ctx: DecisionCtx, cand: ActionCandidate) -> list[str]:
             out.append("non_nut_completed_draw_raise")
         if (cand.jammed or (ctx.stack > 0 and cand.amount / ctx.stack >= 0.70)) and ctx.hero_bucket != "nuts":
             if ctx.spr <= 2.0 or ctx.board_sig.flush_possible or ctx.board_sig.straight_possible or ctx.board_sig.paired:
-                if (ctx.hero_made_subtype or "") in _NON_NUT_DANGER_SUBTYPES or ctx.hero_bucket in {"medium", "strong", "draw", "weak_draw"}:
+                danger_made = (ctx.hero_made_subtype or "") in _NON_NUT_DANGER_SUBTYPES
+                if danger_made or ctx.hero_bucket in {"medium", "strong", "weak_draw"}:
                     out.append("non_nut_stackoff")
+                elif ctx.hero_bucket == "draw":
+                    premium_ok = draw_quality.premium_draw_stackoff_ok(ctx)
+                    if no_fold_equity(ctx) and ctx.equity_range < 0.45:
+                        premium_ok = False
+                    if not premium_ok:
+                        out.append("non_nut_stackoff")
         if ctx.prev_bet_raised and ctx.hero_bucket in {"air", "weak", "weak_draw"}:
             out.append("raised_line_no_air")
     if action == "call":

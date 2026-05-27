@@ -409,18 +409,36 @@ class PokerBot:
             action_ctx = classify_action_ctx_from_decision(
                 facing_bet=facing_bet, to_call=to_call, pot=pot,
             )
+            target_bucket_dist: Dict[str, float] = {}
+            target_range_pct = 0.0
+            try:
+                target_bucket_dist = self._range_tracker.get_bucket_distribution(
+                    target_opp, board,
+                )
+                target_range_pct = self._range_tracker.get_effective_range_pct(target_opp)
+            except Exception:
+                log.exception(
+                    "equity calibration feature lookup failed opponent=%s board=%s",
+                    target_opp,
+                    [str(c) for c in board],
+                )
+                target_bucket_dist = {}
+                target_range_pct = 0.0
             range_eq = self._hero_eq_calibrator.calibrate(
                 range_eq, hero_bucket, street, len(opp_ids),
                 action_ctx=action_ctx,
                 big_blind=bb,
                 board_texture=river_rel_board_texture_key(board),
+                bucket_dist=target_bucket_dist,
+                range_pct=target_range_pct,
+                board_len=len(board),
             )
             range_eq = river_rel_clamp_equity_to_bounds(
                 range_eq, river_exact_bounds,
             )
             call_equity = range_eq
             discount = 1.0
-            min_rf = self._range_tracker.get_effective_range_pct(target_opp)
+            min_rf = target_range_pct
             self._last_equity_mode = "range_v2"
         else:
             # ── EQR path (completely independent) ──
@@ -438,6 +456,8 @@ class PokerBot:
             self._last_equity_mode = "mc_eqr"
 
         equity = call_equity
+        if self._last_equity_mode != "range_v2":
+            self._hero_eq_calibrator.last_diagnostic = {}
         self._last_equity = equity
 
         # Get exploit adjustments
@@ -868,6 +888,7 @@ class PokerBot:
             prev_bet_was_multiway=prev_resistance['was_multiway'],
             resistance_level=prev_resistance['level'],
             river_relative_calibration=river_relative_calibration,
+            equity_calibration=dict(self._hero_eq_calibrator.last_diagnostic or {}),
             river_relative_assessment=river_relative_assessment,
             street_relative_assessment=street_relative_assessment,
         )
@@ -982,6 +1003,7 @@ class PokerBot:
         prev_bet_was_multiway: bool = False,
         resistance_level: float = 0.0,
         river_relative_calibration: Optional[Dict[str, object]] = None,
+        equity_calibration: Optional[Dict[str, object]] = None,
         river_relative_assessment: Optional[Dict[str, object]] = None,
         street_relative_assessment: Optional[Dict[str, object]] = None,
     ) -> dict:
@@ -1032,6 +1054,7 @@ class PokerBot:
                 for k, v in (detail.get('villain_vs_hero_dist') or {}).items()
             },
             'river_relative_calibration': dict(river_relative_calibration or {}),
+            'equity_calibration': dict(equity_calibration or {}),
             'river_relative': dict(river_relative_assessment or {}),
             'street_relative': dict(street_relative_assessment or {}),
             'prev_bet_called_count': int(prev_bet_called_count),

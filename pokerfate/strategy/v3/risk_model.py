@@ -41,7 +41,7 @@ def assess(ctx: DecisionCtx, *, action: str, frac: float = 0.0, jammed: bool = F
     tags: list[str] = []
     pot = _pot(ctx)
     premium = 0.0
-    margin = max(0.02 * pot, float(ctx.big_blind or 1.0))
+    margin = 0.02 * pot
     confidence_penalty = 0.0
     commit = (float(ctx.to_call or 0.0) / max(float(ctx.stack or 1.0), 1.0)) if ctx.facing_bet else 0.0
     if action in {"bet", "raise", "call"}:

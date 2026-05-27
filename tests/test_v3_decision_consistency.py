@@ -7,7 +7,9 @@ parameter searches cannot silently reintroduce passive leaks.
 from __future__ import annotations
 
 from pokerfate.core.card import Card
-from pokerfate.strategy.v3 import BoardSignals, DecisionCtx, V3Engine, VillainStats
+from pokerfate.strategy.v3 import (
+    BlockerSet, BoardSignals, DecisionCtx, DrawProfile, V3Engine, VillainStats,
+)
 from pokerfate.strategy.v3 import board as v3_board
 
 
@@ -111,6 +113,8 @@ def test_semi_bluff_is_not_stolen_by_default_check() -> None:
         equity_range=0.35,
         is_pfr=False,
         board_sig=v3_board.analyze(board),
+        draw=DrawProfile(oesd=True, overcards=True),
+        blockers=BlockerSet(straight_blocker=True),
         villain_stats=reg_stats(fold_to_cbet=0.50),
     )
 

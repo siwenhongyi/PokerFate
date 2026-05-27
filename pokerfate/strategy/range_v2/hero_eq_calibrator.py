@@ -30,6 +30,7 @@ from __future__ import annotations
 import os as _os
 from typing import Any, Dict, List, Optional, Tuple
 
+from pokerfate.strategy.range_v2.equity_ml_calibration import calibrate_equity
 from pokerfate.strategy.range_v2.runtime_formula_calibration import load_params
 
 
@@ -47,6 +48,18 @@ def _num_opp_bin(n: int) -> str:
     if n == 2:
         return '2'
     return '3+'
+
+
+def _num_opp_exact_bin(n: int) -> str:
+    if n <= 1:
+        return '1'
+    if n == 2:
+        return '2'
+    if n == 3:
+        return '3'
+    if n == 4:
+        return '4'
+    return '5+'
 
 
 def _norm_ctx(action_ctx: str) -> str:
@@ -128,6 +141,7 @@ class HeroEquityCalibrator:
 
     def __init__(self) -> None:
         self._samples: Dict[str, List[Tuple[float, float]]] = {}
+        self.last_diagnostic: Dict[str, Any] = {}
 
     # -------- record / query --------
 
@@ -145,33 +159,68 @@ class HeroEquityCalibrator:
     def calibrate(self, raw_eq: float, bucket: str, street: str,
                   num_opp: int, action_ctx: str = 'passive',
                   big_blind: Optional[float] = None,
-                  board_texture: str = '') -> float:
-        """Apply historical bias correction. Falls back to raw if insufficient data."""
+                  board_texture: str = '',
+                  bucket_dist: Optional[Dict[str, float]] = None,
+                  range_pct: float = 0.0,
+                  board_len: int = 0) -> float:
+        """Apply formula, optional ML blend, then online historical bias."""
+        self.last_diagnostic = {}
         if not bucket or not street:
             return raw_eq
         calibrated = raw_eq
         runtime_params = _load_runtime_equity_params(big_blind)
         if runtime_params:
+            texture = board_texture or 'pre'
+            exact_rich_key = f"{street}|{bucket or '?'}|{_num_opp_exact_bin(num_opp)}|{_norm_ctx(action_ctx)}|{texture}"
+            exact_wildcard_key = f"{street}|{bucket or '?'}|{_num_opp_exact_bin(num_opp)}|*"
             rich_key = _runtime_eq_context(
                 bucket, street, num_opp, action_ctx, board_texture,
             )
+            exact_action_key = f"{street}|{bucket or '?'}|{_num_opp_exact_bin(num_opp)}|{_norm_ctx(action_ctx)}"
             action_key = f"{street}|{bucket or '?'}|{_num_opp_bin(num_opp)}|{_norm_ctx(action_ctx)}"
+            wildcard_key = f"{street}|{bucket or '?'}|{_num_opp_bin(num_opp)}|*"
             simple_key = f"{street}|{bucket or '?'}"
             model = (
-                runtime_params.get(rich_key)
+                runtime_params.get(exact_rich_key)
+                or runtime_params.get(exact_action_key)
+                or runtime_params.get(exact_wildcard_key)
+                or runtime_params.get(rich_key)
                 or runtime_params.get(action_key)
+                or runtime_params.get(wildcard_key)
                 or runtime_params.get(simple_key)
             )
             calibrated = _apply_runtime_model(calibrated, model)
 
+        formula_eq = calibrated
+        calibrated, ml_diag = calibrate_equity(
+            calibrated,
+            big_blind=big_blind,
+            bucket_dist=bucket_dist or {},
+            street=street,
+            action_ctx=action_ctx,
+            active_count=num_opp,
+            board_len=board_len,
+            board_texture=board_texture,
+            range_pct=range_pct,
+            hero_bucket=bucket,
+        )
+
         samples = self._samples.get(_make_key(bucket, street, num_opp, action_ctx), [])
-        if len(samples) < _MIN_SAMPLES:
-            return calibrated
-        bias = sum(a - p for p, a in samples) / len(samples)
-        bias = max(-_MAX_SHIFT, min(_MAX_SHIFT, bias))
-        if _BIAS_SHRINK_K > 0:
-            bias *= len(samples) / (len(samples) + _BIAS_SHRINK_K)
-        return max(0.0, min(1.0, calibrated + bias))
+        online_bias = 0.0
+        if len(samples) >= _MIN_SAMPLES:
+            online_bias = sum(a - p for p, a in samples) / len(samples)
+            online_bias = max(-_MAX_SHIFT, min(_MAX_SHIFT, online_bias))
+            if _BIAS_SHRINK_K > 0:
+                online_bias *= len(samples) / (len(samples) + _BIAS_SHRINK_K)
+            calibrated = max(0.0, min(1.0, calibrated + online_bias))
+        self.last_diagnostic = {
+            'raw': float(raw_eq),
+            'formula': float(formula_eq),
+            'ml': dict(ml_diag),
+            'online_bias': float(online_bias),
+            'final': float(calibrated),
+        }
+        return calibrated
 
     def sample_count(self, bucket: str, street: str, num_opp: int,
                      action_ctx: str = 'passive') -> int:

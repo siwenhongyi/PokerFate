@@ -14,7 +14,7 @@ from __future__ import annotations
 import os as _os
 from typing import List, Optional, Tuple
 
-from pokerfate.strategy.v3 import bluff_context, early_relative
+from pokerfate.strategy.v3 import bluff_context, draw_quality, early_relative
 from pokerfate.strategy.v3.context import DecisionCtx
 from pokerfate.strategy.v3.exploit import no_fold_equity, sticky_passive
 from pokerfate.strategy.v3.purpose import Purpose, TriggerResult
@@ -511,8 +511,7 @@ def _barrel_resistance_eq_add(ctx: DecisionCtx) -> float:
 
 
 def _strong_draw_profile(ctx: DecisionCtx) -> bool:
-    d = ctx.draw
-    return bool(d.flush_draw or d.oesd)
+    return draw_quality.strong_draw(ctx)
 
 
 def _realizable_no_fe_draw(ctx: DecisionCtx) -> bool:
@@ -523,7 +522,7 @@ def _realizable_no_fe_draw(ctx: DecisionCtx) -> bool:
     hands are allowed only as a flop one-street pressure spot with enough equity.
     """
     d = ctx.draw
-    if _strong_draw_profile(ctx):
+    if d.flush_draw or d.oesd:
         return ctx.equity_range >= 0.35
     return (
         ctx.street == 'flop'
@@ -962,8 +961,6 @@ class ProtectionBet(Purpose):
             return TriggerResult(False)
         if (ctx.villain_bucket_dist or {}).get('nuts', 0.0) > _ACTIVE_PROTECTION_MAX_NUTS:
             return TriggerResult(False)
-        if ctx.spr < 3 or ctx.spr > 8:
-            return TriggerResult(False)
         protection_need = _PROTECTION_MIN_EQ
         if ctx.hero_bucket == 'medium':
             if not _ACTIVE_PROTECTION_MEDIUM_ENABLED:
@@ -1325,57 +1322,82 @@ class SemiBluff(Purpose):
     street_gate = ('flop', 'turn')
 
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
-        # 2026-04-25 放宽：draw 桶太严格（明确 OESD/flush draw），实战里 hero
-        # 更常落到 weak_draw（gutshot / overcards + backdoor）。两者都是 "未
-        # 成牌但有听牌潜力" —— semi_bluff 本来的语义就涵盖。
-        # weak_draw 时用 eq 而非 draw 的确定性补偿听牌质量。
         if ctx.facing_bet or ctx.hero_bucket not in ('draw', 'weak_draw'):
             return TriggerResult(False)
-        if ctx.spr < 3:
-            return TriggerResult(False)
-        # weak_draw 默认要求 eq ≥ 0.22；PFR/IP 或单挑时允许 0.20 的卡顺+
-        # overcard 小频率下注，否则这些边缘 equity 全部免费放弃。
         blf = bluff_context.evaluate(ctx)
-        weak_min = 0.22
-        if ctx.is_pfr and (ctx.is_ip or ctx.num_opponents == 1):
-            weak_min = 0.20
-        if ctx.hero_bucket == 'weak_draw' and blf.air_weak >= 0.35 and blf.score >= 0.50:
-            weak_min = max(0.18, weak_min - 0.02)
-        if ctx.hero_bucket == 'weak_draw' and ctx.equity_range < weak_min:
-            return TriggerResult(False)
-        if ctx.hero_bucket == 'weak_draw' and blf.nuts >= 0.30:
-            return TriggerResult(False)
-        if ctx.hero_bucket == 'weak_draw' and blf.strong_nuts >= 0.65:
-            return TriggerResult(False)
-        # Sticky 对手硬门：semi-bluff 是 draw-only bucket 的纯 bluff 线，
-        # EV 公式以 fold_equity 为主项，FE≈0 时结构性负。原 EV gate 用
-        # `opp_fold_est = max(0.35, ftc)` 的 floor 反而把 station 对手的
-        # FE 人为抬到 35%，误判 +EV（实战手 204：hero JT gutshot eq 19%
-        # vs ftc=0% station 连打两街 -287680）。
+        premium = draw_quality.premium_draw(ctx)
+        strong = draw_quality.strong_draw(ctx)
+        weak = ctx.hero_bucket == 'weak_draw'
+
+        if weak:
+            if not draw_quality.weak_draw_semibluff_quality_ok(ctx):
+                return TriggerResult(False)
+            if ctx.spr <= 2.0:
+                return TriggerResult(False)
+            if ctx.num_opponents > 1 and ctx.board_sig.is_wet:
+                return TriggerResult(False)
+            if sticky_passive(ctx) or ctx.n_sticky >= 1:
+                return TriggerResult(False)
+            weak_min = 0.26
+            if ctx.is_pfr and (ctx.is_ip or ctx.num_opponents == 1):
+                weak_min = 0.24
+            if blf.air_weak >= 0.35 and blf.score >= 0.55 and ctx.is_ip:
+                weak_min = max(0.22, weak_min - 0.02)
+            if ctx.spr < 4.0:
+                weak_min += 0.03
+            if ctx.equity_range < weak_min:
+                return TriggerResult(False)
+            if blf.nuts >= 0.25 or blf.strong_nuts >= 0.55:
+                return TriggerResult(False)
+        else:
+            min_eq = 0.32 if premium else 0.36
+            if ctx.spr <= 2.0 and not premium:
+                min_eq += 0.06
+            elif ctx.spr < 4.0 and not premium:
+                min_eq += 0.03
+            if ctx.equity_range < min_eq:
+                return TriggerResult(False)
+            if ctx.num_opponents > 1 and ctx.board_sig.is_wet and not premium:
+                return TriggerResult(False)
+
         low_fe = no_fold_equity(ctx)
-        if low_fe and not (ctx.hero_bucket == 'draw' and _realizable_no_fe_draw(ctx)):
-            return TriggerResult(False)
-        # EV gate: FE + (1-FE)*(eq*(1+bet) - (1-eq)*bet) >= 0 at 0.66 bet.
+        if low_fe:
+            if not premium and not _realizable_no_fe_draw(ctx):
+                return TriggerResult(False)
+            if premium and ctx.equity_range < 0.42:
+                return TriggerResult(False)
+
         bet = 0.66
-        fe = bet / (1.0 + bet)  # required FE for pure bluff
-        # Approximation of opp MDF-aligned fold:
-        opp_fold_est = max(0.35, ctx.villain_stats.fold_to_cbet)
+        fe = bet / (1.0 + bet)
+        opp_fold_est = ctx.villain_stats.fold_to_cbet
         ev = (opp_fold_est * 1.0
               + (1 - opp_fold_est) * (ctx.equity_range * (1 + bet)
                                        - (1 - ctx.equity_range) * bet))
-        if ev <= 0 and ctx.equity_range < 0.40:
+        if ev <= 0 and ctx.equity_range < (0.38 if premium else 0.40):
             return TriggerResult(False)
-        _ = fe  # retained for doc clarity
+        _ = fe
         bucket_delta = 0.0
         if ctx.villain_bucket_dist:
             bucket_delta = max(-0.10, min(0.18, (blf.score - 0.45) * 0.35))
         w = 0.4 + 0.5 * ctx.equity_range + bucket_delta
+        if premium:
+            w += 0.10
+        if weak:
+            w *= 0.70
+        if ctx.spr < 3.0:
+            w *= 0.85
         return TriggerResult(True, w)
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
+        if ctx.hero_bucket == 'weak_draw':
+            return [(0.45, 0.55), (0.55, 0.45)]
+        if ctx.spr < 3.0 and not draw_quality.premium_draw(ctx):
+            return [(0.45, 0.55), (0.55, 0.45)]
         if no_fold_equity(ctx):
             return [(0.40, 0.45), (0.55, 0.55)]
-        return [(0.55, 0.4), (0.66, 0.4), (0.75, 0.2)]
+        if draw_quality.premium_draw(ctx):
+            return [(0.55, 0.35), (0.66, 0.45), (0.75, 0.20)]
+        return [(0.50, 0.45), (0.66, 0.40), (0.75, 0.15)]
 
 
 # ---------------------------------------------------------------------------
@@ -1785,8 +1807,6 @@ class DefaultStab(Purpose):
 
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
         if ctx.facing_bet or not ctx.is_pfr:
-            return TriggerResult(False)
-        if ctx.spr < 3.0:
             return TriggerResult(False)
         if ctx.num_opponents > 3:
             return TriggerResult(False)

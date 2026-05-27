@@ -1634,6 +1634,73 @@ class TestPurposeTriggers:
 
         assert p.trigger(ctx).hit
 
+    def test_semi_bluff_uses_actual_fold_to_cbet_without_floor(self):
+        from pokerfate.strategy.v3.purposes_active import SemiBluff
+
+        p = SemiBluff()
+        board = cards('Jd', '9d', '7h')
+        ctx = self._base_ctx(
+            street='flop',
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hero_bucket='draw',
+            equity_range=0.34,
+            is_pfr=True,
+            draw=DrawProfile(flush_draw=True),
+            villain_stats=VillainStats(
+                vpip=0.30, af=1.8, fold_to_cbet=0.10,
+                fold_to_cbet_opps=8, hands_seen=40,
+            ),
+        )
+
+        assert not p.trigger(ctx).hit
+
+    def test_low_spr_premium_draw_can_semibluff(self):
+        from pokerfate.strategy.v3.purposes_active import SemiBluff
+
+        p = SemiBluff()
+        board = cards('Jd', '9d', '7h')
+        ctx = self._base_ctx(
+            street='flop',
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hero_bucket='draw',
+            equity_range=0.44,
+            equity_mc=0.46,
+            spr=1.8,
+            is_pfr=True,
+            draw=DrawProfile(flush_draw=True, overcards=True),
+            blockers=BlockerSet(nut_flush_blocker=True),
+            villain_stats=VillainStats(
+                vpip=0.30, af=1.8, fold_to_cbet=0.20,
+                fold_to_cbet_opps=8, hands_seen=40,
+            ),
+        )
+
+        assert p.trigger(ctx).hit
+
+    def test_low_spr_weak_draw_cannot_semibluff(self):
+        from pokerfate.strategy.v3.purposes_active import SemiBluff
+
+        p = SemiBluff()
+        board = cards('Qc', 'Jd', '4h')
+        ctx = self._base_ctx(
+            street='flop',
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hero_bucket='weak_draw',
+            equity_range=0.33,
+            spr=1.8,
+            is_pfr=True,
+            draw=DrawProfile(gutshot=True, overcards=True),
+            villain_stats=VillainStats(
+                vpip=0.30, af=1.8, fold_to_cbet=0.60,
+                fold_to_cbet_opps=8, hands_seen=40,
+            ),
+        )
+
+        assert not p.trigger(ctx).hit
+
     def test_no_fold_equity_boosts_made_value_size_not_air(self):
         from pokerfate.strategy.v3.purposes_active import DefaultStab
 
@@ -2125,6 +2192,50 @@ class TestPurposeTriggers:
             ),
         )
         assert p.trigger(ctx).hit
+
+    def test_hard_guard_allows_premium_draw_stackoff_exception(self):
+        from pokerfate.strategy.v3.candidates import ActionCandidate
+        from pokerfate.strategy.v3.hard_guards import allowed
+
+        board = cards('Jd', '9d', '7h')
+        ctx = self._base_ctx(
+            street='flop',
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hero_bucket='draw',
+            equity_range=0.44,
+            equity_mc=0.46,
+            spr=1.8,
+            stack=100.0,
+            draw=DrawProfile(flush_draw=True, overcards=True),
+            blockers=BlockerSet(nut_flush_blocker=True),
+        )
+        cand = ActionCandidate('semi_bluff:0.75', 'bet', amount=75.0, frac=0.75, purpose='semi_bluff')
+
+        ok, reasons = allowed(ctx, cand)
+        assert ok, reasons
+
+    def test_hard_guard_blocks_ordinary_draw_stackoff(self):
+        from pokerfate.strategy.v3.candidates import ActionCandidate
+        from pokerfate.strategy.v3.hard_guards import allowed
+
+        board = cards('Jd', '9d', '7h')
+        ctx = self._base_ctx(
+            street='flop',
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hero_bucket='draw',
+            equity_range=0.36,
+            equity_mc=0.38,
+            spr=1.8,
+            stack=100.0,
+            draw=DrawProfile(flush_draw=True),
+        )
+        cand = ActionCandidate('semi_bluff:0.75', 'bet', amount=75.0, frac=0.75, purpose='semi_bluff')
+
+        ok, reasons = allowed(ctx, cand)
+        assert not ok
+        assert 'non_nut_stackoff' in reasons
 
     def test_pure_bluff_river_requires_blocker(self):
         p = PureBluffRiver()

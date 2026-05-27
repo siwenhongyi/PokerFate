@@ -543,24 +543,31 @@ class TestPositionEndToEnd:
         )
 
     def test_opp_position_feeds_action_context(self):
-        """After notify_action, the tracker's action history contains the
-        street+refined action. We can't inspect the ActionContext directly
-        (it's local to observe_action) but we CAN verify the position was
-        used by checking _hand_positions is populated correctly.
-        """
         api = self._setup('SB')
-        # _hand_positions is the canonical storage for the per-hand map.
         assert api._hand_positions.get(1) == 'SB'
         assert api._hand_positions.get(0) == 'BTN'
 
-        # And when a villain acts, observe_action is called with opp_position.
-        # The tracker's action history should be populated without crashing.
         api.deal_board(['7h', '7d', '2c'], street='flop', pot=6.0)
         api.notify_action(ActionEvent(
             player_id=1, action='check', amount=0.0, street='flop',
         ))
         hist = api._bot._range_tracker._action_history.get(1, [])
         assert hist and hist[-1] == ('flop', 'check')
+        assert api._bot._range_tracker._action_meta[1]['position'] == 'SB'
+
+    def test_empty_action_context_preserves_reset_position(self):
+        tracker = BayesianRangeTracker(ActionModel())
+        profile = PlayerProfile()
+        tracker.reset_hand(1, 'BB', profile)
+        tracker.observe_action(
+            1,
+            'check',
+            'flop',
+            ActionContext(position='', board=[], street='flop', facing_action='check'),
+            profile,
+            board=[Card.from_str('7h'), Card.from_str('7d'), Card.from_str('2c')],
+        )
+        assert tracker._action_meta[1]['position'] == 'BB'
 
 
 class TestProfitLockOnTableTrigger:
@@ -1440,6 +1447,10 @@ class TestShowdownCalibration:
         # hero_eq 能算出来（hero 已知 + board 已设）
         assert second.predicted_hero_eq is not None
         assert 0.0 <= second.predicted_hero_eq <= 1.0
+        assert second.range_summary['bucket_dist']
+        assert second.range_snapshot['top_combos']
+        assert second.action_diagnostics['likelihood']['by_bucket']
+        assert second.active_range_summaries[str(second.player_id)] == second.range_summary
 
     def test_record_actual_computes_compare(self):
         """record_actual 对每条历史预测计算 CalibrationResult。"""

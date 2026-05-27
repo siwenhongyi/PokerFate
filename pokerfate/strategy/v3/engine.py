@@ -241,8 +241,6 @@ class V3Engine:
             return []
         if ctx.num_opponents > 3:
             return []
-        if ctx.spr > 0 and ctx.spr <= 2.0:
-            return []
         if ctx.hero_bucket in {"air", "weak", "weak_draw"}:
             has_semibluff = ctx.draw.flush_draw or ctx.draw.oesd or ctx.draw.gutshot or ctx.draw.backdoor_flush or ctx.blockers.count() > 0
             range_spot = ctx.is_pfr and (ctx.is_ip or ctx.board_sig.is_dry) and max(ctx.equity_range, ctx.equity_mc) >= 0.20
