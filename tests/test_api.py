@@ -113,7 +113,7 @@ class TestAPILifecycle:
         assert "赢家牌型: Opponent:同花" in detail
         assert "结果: Opponent 赢池 118，我 -40" in detail
 
-    def test_non_showdown_weak_winner_before_river_does_not_count_as_bluff_win(self):
+    def test_weak_winner_before_river_does_not_count_as_bluff_win_without_showdown(self):
         api = make_api()
         start_hand(api)
         api.deal_hole_cards(["As", "Qh"])
@@ -130,6 +130,29 @@ class TestAPILifecycle:
         )
 
         stats = api._bot.opponent_model.get(1)
+        assert stats.bet_win_count == 0
+        assert stats.bluff_win_count == 0
+
+    def test_weak_winner_before_river_does_not_count_as_bluff_win_with_showdown(self):
+        api = make_api()
+        start_hand(api)
+        api.deal_hole_cards(["As", "Qh"])
+        api.deal_board(["Kd", "7d", "2c"], street="flop", pot=20)
+        api.deal_board(["9h"], street="turn", pot=60)
+        api.notify_action(ActionEvent(1, "raise", 30.0, "turn"))
+
+        api.hand_over(
+            winner_ids=[1],
+            pot=90,
+            final_stacks={0: 170, 1: 230},
+            showdown_hands={1: ["Jh", "Th"]},
+            winner_hand_types={1: 1},
+            my_profit_delta=-30,
+        )
+
+        stats = api._bot.opponent_model.get(1)
+        assert stats.showdown_count == 1
+        assert stats.showdown_win_count == 1
         assert stats.bet_win_count == 0
         assert stats.bluff_win_count == 0
 

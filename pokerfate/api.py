@@ -1395,18 +1395,18 @@ class PokerFateAPI:
                 if pid != self.my_player_id:
                     self._bot.opponent_model.record_showdown(pid, won=(pid in winner_id_set))
 
-        # bluff_win_rate：赢底池时记录牌型（含无底牌的上界估算）
+        # bluff_win_rate：只在河牌结算时记录弱牌主动赢池。
+        # 早街亮牌/未亮牌都可能包含听牌半诈唬，不混入 river bluff 倾向。
         # 对每个赢家：有下注行为 + 知道牌型（服务端下发或摊牌得到）→ 记录
         if winner_ids and wht:
             board_hand_type = self._board_hand_type_for_bluff_stats(list(self._board))
-            shown_player_ids = set(showdown_hands or {})
             for pid in winner_ids:
                 if pid == self.my_player_id:
                     continue
                 hand_type = wht.get(pid)
                 if hand_type is None:
                     continue
-                if pid not in shown_player_ids and len(self._board) < 5:
+                if len(self._board) < 5:
                     continue
                 # 判断本手该玩家是否有过下注/加注行为
                 if self._bot.use_range_equity:
