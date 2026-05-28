@@ -45,6 +45,34 @@ _DEFAULT_BARK_KEY_FILE = _PROJECT_ROOT / "data" / "bark_key.txt"
 _POKERFATE_CONSOLE_LOG = _PROJECT_ROOT / "pokerfate" / "logs" / "pokerfate_console.log"
 
 
+class _ExpectedHandshakeNoiseFilter(logging.Filter):
+    """Suppress clients that connect to the WSS port and close before HTTP."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.getMessage() != "opening handshake failed":
+            return True
+        if not record.exc_info:
+            return True
+        exc = record.exc_info[1]
+        if not isinstance(exc, websockets.exceptions.InvalidMessage):
+            return True
+        if str(exc) != "did not receive a valid HTTP request":
+            return True
+        cause = exc.__cause__
+        return not (
+            isinstance(cause, EOFError)
+            and "connection closed while reading HTTP request line" in str(cause)
+        )
+
+
+def _websockets_server_logger() -> logging.Logger:
+    logger = logging.getLogger("pf_proxy.websockets")
+    if not getattr(logger, "_pf_expected_handshake_filter", False):
+        logger.addFilter(_ExpectedHandshakeNoiseFilter())
+        setattr(logger, "_pf_expected_handshake_filter", True)
+    return logger
+
+
 def _wss_close_is_abnormal(code: int | None) -> bool:
     return code is not None and code not in (1000, 1001)
 
@@ -672,8 +700,10 @@ async def _handle_wss(client_ws) -> None:
     _active_server_ws = None
     if prev_client_ws is not None or prev_server_ws is not None:
         log.info("[WSS] session #%s supersedes previous WSS session", session_id)
-        await _close_ws_quietly(prev_client_ws, reason="superseded by reconnect")
-        await _close_ws_quietly(prev_server_ws, reason="superseded by reconnect")
+        if prev_client_ws is not None:
+            asyncio.create_task(_close_ws_quietly(prev_client_ws, reason="superseded by reconnect"))
+        if prev_server_ws is not None:
+            asyncio.create_task(_close_ws_quietly(prev_server_ws, reason="superseded by reconnect"))
 
     req = getattr(client_ws, "request", None)
     path = (req.path if req else None) or "/"
@@ -1039,6 +1069,7 @@ async def main(
         # the phone side on jittery office Wi-Fi.
         ping_interval=None,
         ping_timeout=None,
+        logger=_websockets_server_logger(),
     )
     log.info("WSS MITM   %s:%d  →  wss://<domain>:%d  (dynamic per-connection)", PROXY_HOST, WSS_PORT, SERVER_WSS_PORT)
     print(f"[proxy] WSS MITM 已启动  {PROXY_HOST}:{WSS_PORT}  →  wss://<domain>:{SERVER_WSS_PORT}")

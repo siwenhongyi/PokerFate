@@ -1447,10 +1447,55 @@ class TestShowdownCalibration:
         # hero_eq 能算出来（hero 已知 + board 已设）
         assert second.predicted_hero_eq is not None
         assert 0.0 <= second.predicted_hero_eq <= 1.0
-        assert second.range_summary['bucket_dist']
-        assert second.range_snapshot['top_combos']
-        assert second.action_diagnostics['likelihood']['by_bucket']
-        assert second.active_range_summaries[str(second.player_id)] == second.range_summary
+        assert second.position == 'CO'
+        assert second.facing_action == 'bet'
+        assert second.action_bet_ratio == 0.0
+        assert second.bet_size_bucket == 'none'
+        assert second.action_sequence == 'flop:call'
+        assert second.board_features['high_card_rank'] == 13
+        assert 'flush_draw' in second.hero_draw
+        assert 'nut_flush_blocker' in second.hero_blockers
+
+    def test_preflop_action_type_survives_postflop_predictions(self):
+        from pokerfate.calibration import ShowdownCalibrator
+        from pokerfate.strategy.range_v2.action_model import ActionModel, ActionContext, PlayerProfile
+
+        calibrator = ShowdownCalibrator(logger=None)
+        tracker = BayesianRangeTracker(action_model=ActionModel())
+        tracker._prediction_hook = calibrator.record_prediction
+        tracker._name_resolver = lambda pid: f'P{pid}'
+        tracker.set_known_cards([Card.from_str('Ac'), Card.from_str('Kd')])
+        calibrator.start_hand(2)
+
+        prof = PlayerProfile(name='villain', hands_seen=20, vpip=0.30, pfr=0.20, af=2.0)
+        tracker.reset_hand(player_id=1, position='BB', profile=prof)
+        tracker.observe_action(
+            1,
+            'raise',
+            'preflop',
+            ActionContext(
+                position='BB',
+                board=[],
+                street='preflop',
+                facing_action='none',
+                preflop_action_type='open',
+            ),
+            prof,
+            board=[],
+        )
+        board = [Card.from_str(c) for c in ['5h', '8d', 'Kc']]
+        tracker.observe_action(
+            1,
+            'call',
+            'flop',
+            ActionContext(position='BB', board=board, street='flop', facing_action='call'),
+            prof,
+            board=board,
+        )
+
+        last = calibrator._hand_predictions[1][-1]
+        assert last.street == 'flop'
+        assert last.preflop_action_type == 'open'
 
     def test_record_actual_computes_compare(self):
         """record_actual 对每条历史预测计算 CalibrationResult。"""

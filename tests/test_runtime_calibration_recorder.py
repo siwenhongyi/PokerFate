@@ -25,15 +25,16 @@ def test_runtime_calibration_recorder_writes_bb_split_rows(tmp_path):
         active_player_ids=[11, 12],
         hero_bucket="medium",
         position="BTN",
+        is_ip=True,
         facing_action="open",
         preflop_action_type="3bet",
         action_bet_ratio=2.5,
+        bet_size_bucket="huge",
         is_raise_over=True,
-        player_profile={"vpip": 0.55, "pfr": 0.18, "three_bet_pct": 0.09},
-        range_summary={"effective_range_pct": 0.22, "entropy": 7.1},
-        action_diagnostics={"signal_strength": 0.8, "alpha": 0.9},
-        range_snapshot={"top_combos": [{"combo": "AsKs", "weight": 0.02}]},
-        active_range_summaries={"11": {"effective_range_pct": 0.22}},
+        action_sequence="preflop:raise|flop:call",
+        board_features={"paired": False, "flush_draw": True, "wetness": 0.4},
+        hero_draw={"flush_draw": True, "oesd": False},
+        hero_blockers={"nut_flush_blocker": True},
     )
     result = CalibrationResult(
         record=rec,
@@ -75,15 +76,25 @@ def test_runtime_calibration_recorder_writes_bb_split_rows(tmp_path):
     assert row["experiment_flags"]["PF_TURN_FLOP_RELATIVE_GUARD"] == "1"
     assert row["experiment_flags"]["PF_BUCKET_CALIBRATION"] == "1"
     assert row["position"] == "BTN"
+    assert row["is_ip"] is True
     assert row["facing_action"] == "open"
     assert row["preflop_action_type"] == "3bet"
     assert row["action_bet_ratio"] == 2.5
+    assert row["bet_size_bucket"] == "huge"
     assert row["is_raise_over"] is True
-    assert row["player_profile"]["vpip"] == 0.55
-    assert row["range_summary"]["effective_range_pct"] == 0.22
-    assert row["action_diagnostics"]["signal_strength"] == 0.8
-    assert row["range_snapshot"]["top_combos"][0]["combo"] == "AsKs"
-    assert row["active_range_summaries"]["11"]["effective_range_pct"] == 0.22
+    assert row["action_sequence"] == "preflop:raise|flop:call"
+    assert row["player_uid"] == "11"
+    assert "player" not in row
+    assert "player_id" not in row
+    assert "active_player_ids" not in row
+    assert row["board_features"]["flush_draw"] is True
+    assert row["hero_draw"]["flush_draw"] is True
+    assert row["hero_blockers"]["nut_flush_blocker"] is True
+    assert "player_profile" not in row
+    assert "range_summary" not in row
+    assert "action_diagnostics" not in row
+    assert "range_snapshot" not in row
+    assert "active_range_summaries" not in row
 
 
 def test_runtime_calibration_recorder_writes_river_value_sizing_rows(tmp_path):

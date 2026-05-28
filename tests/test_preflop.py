@@ -35,6 +35,20 @@ class TestHandCategory:
 class TestOpenRange:
     strat = PreflopStrategy()
 
+    def test_pressure_inputs_cap_uncallable_overbet_odds(self):
+        call_amt, pot_odds, stack_commit, call_bb = self.strat._pressure_inputs(
+            stack=50.0,
+            pot=100.0,          # 30 old pot + villain's 70
+            to_call=70.0,
+            open_raise=70.0,
+            big_blind=10.0,
+        )
+
+        assert call_amt == pytest.approx(50.0)
+        assert pot_odds == pytest.approx(50.0 / 130.0)
+        assert stack_commit == pytest.approx(1.0)
+        assert call_bb == pytest.approx(5.0)
+
     def test_AA_in_all_positions(self):
         for pos in ['UTG', 'HJ', 'CO', 'BTN', 'SB', 'BB']:
             assert self.strat.in_open_range(cards('Ac', 'Ad'), pos)

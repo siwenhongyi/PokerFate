@@ -514,6 +514,76 @@ class TestEngineActive:
         assert out.frac >= 0.40
         assert out.arbitration_mode == 'purpose_mix'
 
+    def test_small_pressure_10k_blocks_under_twenty_range_equity(self):
+        engine = V3Engine()
+        ctx = self._setup_flop_ctx(
+            big_blind=10_000.0,
+            hero_bucket='medium',
+            equity_range=0.19,
+            equity_mc=0.80,
+        )
+
+        assert engine._small_pressure_fracs(ctx) == []
+
+        ctx.equity_range = 0.20
+        assert engine._small_pressure_fracs(ctx) == [0.25, 0.33]
+
+    def test_small_pressure_50k_blocks_under_thirty_range_equity(self):
+        engine = V3Engine()
+        ctx = self._setup_flop_ctx(
+            big_blind=50_000.0,
+            hero_bucket='medium',
+            equity_range=0.29,
+            equity_mc=0.80,
+        )
+
+        assert engine._small_pressure_fracs(ctx) == []
+
+        ctx.equity_range = 0.30
+        assert engine._small_pressure_fracs(ctx) == [0.25, 0.33]
+
+    def test_small_pressure_50k_blocks_low_mid_equity_after_flop_call(self):
+        engine = V3Engine()
+        for street, board in [
+            ('turn', cards('Ac', '7d', '2s', 'Jc')),
+            ('river', cards('Ac', '7d', '2s', 'Jc', '4h')),
+        ]:
+            ctx = self._setup_flop_ctx(
+                street=street,
+                board=board,
+                board_sig=v3_board.analyze(board),
+                big_blind=50_000.0,
+                hero_bucket='medium',
+                equity_range=0.35,
+                equity_mc=0.80,
+                my_prev_actions={'flop': 'raise'},
+                opp_prev_actions={'flop': 'call'},
+            )
+            assert engine._small_pressure_fracs(ctx) == []
+
+        flop_ctx = self._setup_flop_ctx(
+            big_blind=50_000.0,
+            hero_bucket='medium',
+            equity_range=0.35,
+            equity_mc=0.80,
+        )
+        assert engine._small_pressure_fracs(flop_ctx) == [0.25, 0.33]
+
+    def test_small_pressure_50k_allows_forty_equity_after_resistance(self):
+        engine = V3Engine()
+        ctx = self._setup_flop_ctx(
+            street='river',
+            board=cards('Ac', '7d', '2s', 'Jc', '4h'),
+            board_sig=v3_board.analyze(cards('Ac', '7d', '2s', 'Jc', '4h')),
+            big_blind=50_000.0,
+            hero_bucket='medium',
+            equity_range=0.40,
+            equity_mc=0.80,
+            prev_bet_called_count=1,
+        )
+
+        assert engine._small_pressure_fracs(ctx) == [0.25, 0.33]
+
 
 # ---------------------------------------------------------------------------
 # Engine — defense branch

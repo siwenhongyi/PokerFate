@@ -132,6 +132,7 @@ def _card_str(code: int) -> str | None:
 _STAGE_TO_STREET = {1: "preflop", 2: "flop", 3: "turn", 4: "river"}
 _SNG_GAME_TYPES = {10050301, 10060301, 40050301}
 _FRIEND_GAME_TYPES = {20010103}
+_POSITION_LABELS_AFTER_BB = ["UTG", "UTG+1", "UTG+2", "LJ", "HJ", "CO"]
 
 
 def _is_sng_game_type(game_type) -> bool:
@@ -140,6 +141,46 @@ def _is_sng_game_type(game_type) -> bool:
 
 def _is_friend_game_type(game_type) -> bool:
     return _chip_int(game_type, 0) in _FRIEND_GAME_TYPES
+
+
+def _seat_positions(seats: list[int], dealer: int) -> dict[int, str]:
+    ordered = sorted(int(s) for s in seats)
+    if not ordered:
+        return {}
+
+    n = len(ordered)
+    try:
+        dealer_idx = ordered.index(int(dealer))
+    except ValueError:
+        dealer_idx = 0
+
+    if n == 1:
+        return {ordered[0]: "BTN"}
+    if n == 2:
+        return {
+            ordered[dealer_idx]: "BTN",
+            ordered[(dealer_idx + 1) % n]: "BB",
+        }
+
+    btn_idx = dealer_idx
+    sb_idx = (dealer_idx + 1) % n
+    bb_idx = (dealer_idx + 2) % n
+    out: dict[int, str] = {}
+    for idx, seat in enumerate(ordered):
+        if idx == btn_idx:
+            out[seat] = "BTN"
+        elif idx == sb_idx:
+            out[seat] = "SB"
+        elif idx == bb_idx:
+            out[seat] = "BB"
+        else:
+            dist = (idx - bb_idx - 1) % n
+            out[seat] = (
+                _POSITION_LABELS_AFTER_BB[dist]
+                if dist < len(_POSITION_LABELS_AFTER_BB)
+                else "MP"
+            )
+    return out
 
 
 def _chip_int(value, default: int = 0) -> int:
@@ -237,6 +278,8 @@ class BotBridge:
         self._is_friend_room: bool = False
         self._skip_profit_lock: bool = False
         self._skip_profit_lock_reason: str = ""
+        self._skip_runtime_collection: bool = False
+        self._skip_runtime_collection_reason: str = ""
 
         # C2S 帧里的 room_id 须与客户端 Net.packNetData 一致（GameModel:getRoomId）。
         # 部分 S2C（如 WinnerRSP）wire 上 room_id 可能为 0，要用进房时或任意非 0 帧补全。
@@ -548,6 +591,13 @@ class BotBridge:
         else:
             self._skip_profit_lock_reason = ""
         self._skip_profit_lock = bool(self._skip_profit_lock_reason)
+        self._skip_runtime_collection = self._skip_profit_lock
+        self._skip_runtime_collection_reason = self._skip_profit_lock_reason
+        if self._api is not None:
+            self._api.set_runtime_collection_enabled(
+                not self._skip_runtime_collection,
+                self._skip_runtime_collection_reason,
+            )
         room_info_early = msg.get("room_info") or {}
         if "lobby_coin" in room_info_early:
             self._session_lobby_coin = _chip_int(room_info_early.get("lobby_coin"), 0)
@@ -884,6 +934,11 @@ class BotBridge:
             verbose=True,
             use_range_equity=self._use_range_equity,
         )
+        if self._skip_runtime_collection:
+            self._api.set_runtime_collection_enabled(
+                False,
+                self._skip_runtime_collection_reason,
+            )
         log.info("[BOT] PokerFateAPI ready — seat=%d  BB=%.1f  SB=%.1f",
                  self._my_seat, bb, sb)
 
@@ -924,6 +979,8 @@ class BotBridge:
 
         start_info.sort(key=lambda si: si["seatid"])
         self._all_seats = [si["seatid"] for si in start_info]
+        dealer_seat = _chip_int(msg.get("dealer", 0), 0)
+        seat_positions = _seat_positions(self._all_seats, dealer_seat)
         self._snapshot_current_hand_robots(self._all_seats)
         self._seat_chips = {}
         self._hand_start_chips = {}
@@ -937,10 +994,13 @@ class BotBridge:
             if seat == self._my_seat:
                 self._my_chips = chips
             name = self._seat_player_name(seat)
+            player_id = self._seat_to_player_id(seat)
+            position = seat_positions.get(seat, "")
             players.append(PlayerInfo(
-                player_id=self._seat_to_player_id(seat),
+                player_id=player_id,
                 name=name,
                 stack=chips,
+                position=position,
             ))
 
         # 应用 API 创建前已缓冲的 server stats：
@@ -976,7 +1036,7 @@ class BotBridge:
 
         self._api.new_hand(
             players=players,
-            dealer_id=self._seat_to_player_id(msg.get("dealer", 0)),
+            dealer_id=self._seat_to_player_id(dealer_seat),
             hand_number=self._hand_seq,
         )
 

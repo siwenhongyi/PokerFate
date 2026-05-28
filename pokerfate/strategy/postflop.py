@@ -756,7 +756,10 @@ class PostflopStrategy:
 
         eq_range = equity if equity_range is None else equity_range
         eq_mc = eq_range if equity_mc is None else equity_mc
-        effective_call = min(to_call, stack) if (to_call > 0 and stack > 0) else to_call
+        stack = max(0.0, float(stack or 0.0))
+        raw_to_call = max(0.0, float(to_call or 0.0))
+        effective_call = min(raw_to_call, stack) if raw_to_call > 0 else 0.0
+        pot = max(0.0, float(pot or 0.0) - max(0.0, raw_to_call - effective_call))
         pot_odds = (
             effective_call / (pot + effective_call)
             if effective_call > 0 and (pot + effective_call) > 0 else 0.0
@@ -790,7 +793,7 @@ class PostflopStrategy:
             is_ip=is_ip,
             num_opponents=num_opponents,
             pot=pot,
-            to_call=to_call,
+            to_call=effective_call,
             stack=stack,
             effective_stack=(
                 float(effective_stack)

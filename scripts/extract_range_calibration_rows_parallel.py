@@ -161,8 +161,7 @@ def _row_from_result(result: Any, source: str) -> dict[str, Any]:
         "source": source,
         "hand": int(rec.hand_id),
         "street": rec.street,
-        "player": rec.player_name,
-        "player_id": rec.player_id,
+        "player_uid": str(rec.player_id),
         "trigger": rec.trigger,
         "board": _cards_str(rec.board),
         "actual_cards": _cards_str(result.actual_cards),
@@ -175,7 +174,18 @@ def _row_from_result(result: Any, source: str) -> dict[str, Any]:
         "hero_made_subtype": getattr(rec, "hero_made_subtype", "") or "",
         "hero_hand_rank": getattr(rec, "hero_hand_rank", "") or "",
         "board_texture": getattr(rec, "board_texture", "") or "",
+        "board_features": dict(getattr(rec, "board_features", {}) or {}),
         "villain_vs_hero_dist": dict(getattr(rec, "villain_vs_hero_dist", {}) or {}),
+        "position": getattr(rec, "position", "") or "",
+        "is_ip": bool(getattr(rec, "is_ip", False)),
+        "facing_action": getattr(rec, "facing_action", "") or "",
+        "preflop_action_type": getattr(rec, "preflop_action_type", "") or "",
+        "action_bet_ratio": float(getattr(rec, "action_bet_ratio", 0.0) or 0.0),
+        "bet_size_bucket": getattr(rec, "bet_size_bucket", "") or "",
+        "is_raise_over": bool(getattr(rec, "is_raise_over", False)),
+        "action_sequence": getattr(rec, "action_sequence", "") or "",
+        "hero_draw": dict(getattr(rec, "hero_draw", {}) or {}),
+        "hero_blockers": dict(getattr(rec, "hero_blockers", {}) or {}),
         "predicted_relation_eq": (
             float(result.predicted_relation_eq)
             if getattr(result, "predicted_relation_eq", None) is not None else None
@@ -201,7 +211,6 @@ def _row_from_result(result: Any, source: str) -> dict[str, Any]:
             float(result.actual_hero_eq_street_multi_shown)
             if result.actual_hero_eq_street_multi_shown is not None else None
         ),
-        "active_player_ids": list(getattr(rec, "active_player_ids", []) or []),
         "active_player_count": len(getattr(rec, "active_player_ids", []) or []),
     }
 
@@ -297,6 +306,7 @@ def _bucket_only_collector(source: str):
             hero_cards=None,
             trigger: str = "",
             active_weights=None,
+            **meta: Any,
         ) -> None:
             total = float(weights.sum())
             if total <= 1e-15:
@@ -308,12 +318,19 @@ def _bucket_only_collector(source: str):
                 "source": self.source,
                 "hand": self._hand_id,
                 "street": street,
-                "player_id": player_id,
-                "player": player_name,
+                "player_uid": str(player_id),
                 "trigger": trigger,
                 "board": [str(c) for c in board],
                 "range_pct": range_pct,
                 "bucket_dist": bucket_dist,
+                "position": str(meta.get("position") or ""),
+                "is_ip": bool(meta.get("is_ip") or False),
+                "facing_action": str(meta.get("facing_action") or ""),
+                "preflop_action_type": str(meta.get("preflop_action_type") or ""),
+                "action_bet_ratio": float(meta.get("action_bet_ratio") or 0.0),
+                "bet_size_bucket": str(meta.get("bet_size_bucket") or ""),
+                "is_raise_over": bool(meta.get("is_raise_over") or False),
+                "action_sequence": str(meta.get("action_sequence") or ""),
             })
 
         def record_actual(
@@ -349,6 +366,9 @@ def _bucket_only_collector(source: str):
                     "hero_made_subtype": "",
                     "hero_hand_rank": "",
                     "board_texture": "",
+                    "board_features": {},
+                    "hero_draw": {},
+                    "hero_blockers": {},
                     "villain_vs_hero_dist": {},
                     "predicted_relation_eq": None,
                     "actual_relation": "",
@@ -357,7 +377,6 @@ def _bucket_only_collector(source: str):
                     "predicted_hero_eq_multi": None,
                     "actual_hero_eq_street_multi": None,
                     "actual_hero_eq_street_multi_shown": None,
-                    "active_player_ids": [],
                     "active_player_count": 0,
                 })
             return []

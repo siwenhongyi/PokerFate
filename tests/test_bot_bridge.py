@@ -82,6 +82,40 @@ def test_dealer_info_passes_global_hand_seq_to_api(monkeypatch) -> None:
     assert calls[0]["hand_number"] == 42
 
 
+def test_dealer_info_passes_positions_to_api(monkeypatch) -> None:
+    calls = []
+
+    class FakeAPI:
+        def new_hand(self, **kwargs):
+            calls.append(kwargs)
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._my_seat = 0
+    b._seat_uids = {0: "100", 2: "200", 5: "500"}
+    monkeypatch.setattr(b, "_ensure_api", lambda: True)
+
+    b._on_dealer_info(
+        {
+            "dealer": 2,
+            "start_info": [
+                {"seatid": 5, "chips": 200},
+                {"seatid": 0, "chips": 200},
+                {"seatid": 2, "chips": 200},
+            ],
+            "gameid": "pos1",
+        }
+    )
+
+    positions = {p.player_id: p.position for p in calls[0]["players"]}
+    assert calls[0]["dealer_id"] == 200
+    assert positions == {
+        100: "BB",
+        200: "BTN",
+        500: "SB",
+    }
+
+
 def test_pending_gamedata_seed_migrates_legacy_archive_before_get() -> None:
     class FakeBot:
         def __init__(self):
@@ -669,6 +703,69 @@ def test_enter_room_uses_sngroom_info_blinds_when_room_info_empty() -> None:
     assert b._api is not None
     assert b._api.big_blind == 50.0
     assert b._api.small_blind == 25.0
+    assert b._api._runtime_calibration_recorder is None
+    assert b._api._runtime_collection_skip_reason == "sng"
+
+
+def test_sng_and_friend_rooms_disable_runtime_collection() -> None:
+    b = BotBridge(max_auto_rebuy=3)
+    b._my_seat = 0
+    b.handle(
+        "pb.EnterRoomRSP",
+        {
+            "code": 0,
+            "roomid": 20399792,
+            "game_type": 10050301,
+            "room_info": {},
+            "sngroom_info": {"blind_level": 1, "sb": "25", "bb": "50"},
+            "table_status": {"seat": []},
+        },
+    )
+    b.handle(
+        "pb.DealerInfoRSP",
+        {
+            "dealer": 0,
+            "small_blind": 25,
+            "big_blind": 50,
+            "start_info": [{"chips": "1000"}, {"seatid": 1, "chips": "1000"}],
+            "gameid": "sng1",
+        },
+    )
+
+    assert b._skip_runtime_collection is True
+    assert b._skip_runtime_collection_reason == "sng"
+    assert b._api is not None
+    assert b._api._runtime_calibration_recorder is None
+
+    b.handle(
+        "pb.EnterRoomRSP",
+        {
+            "code": 0,
+            "roomid": 200001,
+            "game_type": 20010103,
+            "room_info": {"bb": 2.0, "sb": 1.0},
+            "table_status": {"seat": []},
+        },
+    )
+
+    assert b._skip_runtime_collection is True
+    assert b._skip_runtime_collection_reason == "friend_room"
+    assert b._api._runtime_calibration_recorder is None
+
+    b.handle(
+        "pb.EnterRoomRSP",
+        {
+            "code": 0,
+            "roomid": 20242379,
+            "game_type": 10010101,
+            "room_info": {"bb": 2.0, "sb": 1.0},
+            "table_status": {"seat": []},
+        },
+    )
+
+    assert b._skip_runtime_collection is False
+    assert b._skip_runtime_collection_reason == ""
+    assert b._api._runtime_calibration_recorder is not None
 
 
 def test_blind_status_updates_sng_blinds_from_cached_schedule() -> None:

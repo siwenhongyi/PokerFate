@@ -241,6 +241,8 @@ class V3Engine:
             return []
         if ctx.num_opponents > 3:
             return []
+        if self._small_pressure_blocked_by_live_limits(ctx):
+            return []
         if ctx.hero_bucket in {"air", "weak", "weak_draw"}:
             has_semibluff = ctx.draw.flush_draw or ctx.draw.oesd or ctx.draw.gutshot or ctx.draw.backdoor_flush or ctx.blockers.count() > 0
             range_spot = ctx.is_pfr and (ctx.is_ip or ctx.board_sig.is_dry) and max(ctx.equity_range, ctx.equity_mc) >= 0.20
@@ -249,6 +251,30 @@ class V3Engine:
         if ctx.num_opponents > 1 and ctx.board_sig.is_wet and ctx.hero_bucket in {"air", "weak", "weak_draw"}:
             return []
         return [0.25, 0.33]
+
+    def _small_pressure_blocked_by_live_limits(self, ctx: DecisionCtx) -> bool:
+        equity = max(0.0, min(1.0, float(ctx.equity_range or 0.0)))
+        if self._is_big_blind_level(ctx, 10_000) and equity < 0.20:
+            return True
+        if not self._is_big_blind_level(ctx, 50_000):
+            return False
+        if equity < 0.30:
+            return True
+        if 0.30 <= equity < 0.40 and ctx.street in {"turn", "river"}:
+            return self._had_called_flop_bet(ctx) or ctx.prev_bet_called_count > 0
+        return False
+
+    @staticmethod
+    def _is_big_blind_level(ctx: DecisionCtx, target: float) -> bool:
+        bb = float(ctx.big_blind or 0.0)
+        return target * 0.90 <= bb <= target * 1.10
+
+    @staticmethod
+    def _had_called_flop_bet(ctx: DecisionCtx) -> bool:
+        return (
+            ctx.my_prev_actions.get("flop") in {"bet", "raise"}
+            and ctx.opp_prev_actions.get("flop") == "call"
+        )
 
     def _defensive_candidates(self, ctx: DecisionCtx) -> list[ActionCandidate]:
         out: list[ActionCandidate] = [

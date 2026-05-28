@@ -322,6 +322,8 @@ class PokerFateAPI:
         self._last_auto_collect_reasons: list[str] = []
         self._pending_river_value_sizing_rows: list[dict[str, Any]] = []
         self._runtime_calibration_recorder = None
+        self._runtime_collection_enabled = False
+        self._runtime_collection_skip_reason = ""
 
         # ── 2026-04-23: Showdown calibration ──
         # 每次 tracker range 调整时记录预测，手牌结束时对比摊牌实际，写入
@@ -349,6 +351,7 @@ class PokerFateAPI:
             tracker._name_resolver = lambda pid: self._session_names.get(pid, str(pid))
             from pokerfate.calibration import RuntimeCalibrationRecorder
             self._runtime_calibration_recorder = RuntimeCalibrationRecorder()
+            self._runtime_collection_enabled = True
         else:
             self._calibrator = None
 
@@ -358,6 +361,26 @@ class PokerFateAPI:
         self.small_blind = float(small_blind)
         self._default_stack = 100.0 * self.big_blind
         self._bot._range_tracker.set_big_blind(self.big_blind)
+
+    def set_runtime_collection_enabled(self, enabled: bool, reason: str = "") -> None:
+        """Enable/disable realtime training-row collection for this room.
+
+        SNG/tournament/friend rooms are useful for live play but should not
+        contaminate cash-game runtime calibration datasets.
+        """
+        self._runtime_collection_enabled = bool(enabled)
+        self._runtime_collection_skip_reason = "" if enabled else str(reason or "disabled")
+        if not enabled:
+            self._runtime_calibration_recorder = None
+            self._pending_river_value_sizing_rows = []
+            return
+        if (
+            self._runtime_calibration_recorder is None
+            and self._calibrator is not None
+            and self._bot.use_range_equity
+        ):
+            from pokerfate.calibration import RuntimeCalibrationRecorder
+            self._runtime_calibration_recorder = RuntimeCalibrationRecorder()
 
     # ------------------------------------------------------------------
     # Hand lifecycle events
@@ -416,10 +439,9 @@ class PokerFateAPI:
         self._street_base_pot = self._last_known_pot
         self._street_base_street = "preflop"
         self._street_contribs = {}
-        # Per-hand position map: player_id → position string (UTG/MP/CO/...).
-        # Populated from PlayerInfo.position at hand start; consumed by
-        # Range V2 tracker.reset_hand and per-action observe_action as
-        # `opp_position`. Fresh every hand (positions rotate).
+        # Per-hand position map: player_id -> position string (UTG/MP/CO/...).
+        # Upstream may leave PlayerInfo.position empty; after building the
+        # players list below we fill those gaps from dealer_id + seat order.
         self._hand_positions: Dict[int, str] = {}
         self._players = []
         for p in players:
@@ -429,10 +451,9 @@ class PokerFateAPI:
                 stack = self._session_stacks.get(p.player_id, self._default_stack)
 
             self._session_names[p.player_id] = p.name
-            # None → '' so downstream treats as unknown; '' triggers the
-            # CO-neutral fallback in tracker.reset_hand. (Never look this
-            # value up with dict.get(k, default) — the entry exists as '',
-            # so the default never fires. Use `value or 'CO'` instead.)
+            # None -> '' so downstream treats it as unknown; '' triggers the
+            # position inference below. Never look this value up with
+            # dict.get(k, default) because the entry exists as ''.
             self._hand_positions[p.player_id] = p.position or ''
             if p.stack is not None:
                 self._session_stacks[p.player_id] = p.stack
@@ -447,6 +468,16 @@ class PokerFateAPI:
                 stack=stack,
             ))
 
+        dealer_pos = 0
+        for idx, p in enumerate(self._players):
+            if p.player_id == dealer_id:
+                dealer_pos = idx
+                break
+        position_state = GameState(players=self._players, dealer_pos=dealer_pos)
+        for p in self._players:
+            if not self._hand_positions.get(p.player_id):
+                self._hand_positions[p.player_id] = position_state.position_of(p)
+
         # Record my stack at the start of this hand for delta calculation
         my_p = self._get_my_player()
         self._my_stack_start = my_p.stack if my_p else 0.0
@@ -454,7 +485,7 @@ class PokerFateAPI:
         all_ids = [p.player_id for p in players if p.player_id != self.my_player_id]
         player_names = {p.player_id: p.name for p in players if p.player_id != self.my_player_id}
         player_positions = {
-            p.player_id: (p.position or '')
+            p.player_id: self._hand_positions.get(p.player_id, '')
             for p in players if p.player_id != self.my_player_id
         }
         self._bot.new_hand(
@@ -467,8 +498,8 @@ class PokerFateAPI:
             hand_number=self._hand_number,
             players=[
                 {"id": p.player_id, "name": p.name,
-                 "stack": p.stack, "pos": pi.position}
-                for p, pi in zip(self._players, players)
+                 "stack": p.stack, "pos": self._hand_positions.get(p.player_id, '')}
+                for p in self._players
             ],
             dealer_id=dealer_id,
             big_blind=self.big_blind,
@@ -593,6 +624,7 @@ class PokerFateAPI:
         # 对首次下注这个就是 _last_known_pot。对 raise_over，我们加上桌上其他
         # 玩家本街已投入的 current_bet 估计当前池子。
         opp_pos = self._hand_positions.get(event.player_id) or 'CO'
+        opp_is_ip = self._is_player_ip(event.player_id)
         base_pot = getattr(self, '_street_base_pot', self._last_known_pot)
         pot_at_action = base_pot + self._observed_street_contrib_total()
         pot_for_model = max(1.0, pot_at_action)
@@ -618,6 +650,7 @@ class PokerFateAPI:
             pot=pot_for_model,
             opp_position=opp_pos,
             is_raise_over=is_raise_over,
+            is_ip=opp_is_ip,
         )
         self._record_river_value_sizing_response(
             event=event,
@@ -1519,7 +1552,11 @@ class PokerFateAPI:
                                     predicted_dist=rec.villain_vs_hero_dist,
                                     actual_relation=r.actual_relation,
                                 )
-                        if self._runtime_calibration_recorder is not None and results:
+                        if (
+                            self._runtime_calibration_recorder is not None
+                            and results
+                            and "PYTEST_CURRENT_TEST" not in os.environ
+                        ):
                             try:
                                 self._runtime_calibration_recorder.write_results(
                                     results,
@@ -2076,3 +2113,14 @@ class PokerFateAPI:
             if p.player_id == player_id:
                 return p
         return None
+
+    def _is_player_ip(self, player_id: int) -> bool:
+        player = self._get_player(player_id)
+        if player is None:
+            return False
+        dealer_pos = 0
+        for idx, p in enumerate(self._players):
+            if p.player_id == self._dealer_id:
+                dealer_pos = idx
+                break
+        return GameState(players=self._players, dealer_pos=dealer_pos).is_ip(player)

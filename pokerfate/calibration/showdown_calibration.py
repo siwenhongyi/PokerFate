@@ -25,6 +25,8 @@ import random
 
 from pokerfate.core.card import Card
 from pokerfate.core.hand_evaluator import HandEvaluator
+from pokerfate.strategy.postflop import _hero_draw_profile
+from pokerfate.strategy.range_v2 import board_analyzer as _board_analyzer
 from pokerfate.strategy.range_v2 import hand_categorizer as hcat
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
 from pokerfate.strategy.range_v2.river_relative_calibrator import (
@@ -32,6 +34,7 @@ from pokerfate.strategy.range_v2.river_relative_calibrator import (
     relation_eq,
     relation_from_actual_eq,
 )
+from pokerfate.strategy.v3 import board as _v3_board
 
 _PRED_EQ_SAMPLES = int(_os.environ.get('PF_CAL_PRED_EQ_SAMPLES', '500'))
 _ACTUAL_EQ_PREFLOP_SAMPLES = int(
@@ -47,6 +50,62 @@ _ACTUAL_EQ_RIVER_UNSHOWN_SAMPLES = int(
     _os.environ.get('PF_CAL_ACTUAL_EQ_RIVER_UNSHOWN_SAMPLES', '2000')
 )
 log = logging.getLogger(__name__)
+
+def _bet_size_bucket(ratio: float) -> str:
+    try:
+        x = float(ratio or 0.0)
+    except Exception:
+        x = 0.0
+    if x <= 0.0:
+        return 'none'
+    if x <= 0.25:
+        return 'small'
+    if x <= 0.40:
+        return 'third'
+    if x <= 0.55:
+        return 'half'
+    if x <= 0.80:
+        return 'two_third'
+    if x <= 1.10:
+        return 'pot'
+    if x <= 1.75:
+        return 'overpot'
+    return 'huge'
+
+
+def _board_features(board: List[Card]) -> Dict[str, Any]:
+    tex = _board_analyzer.analyze(list(board or []))
+    return {
+        'wetness': float(tex.wetness),
+        'paired': bool(tex.paired),
+        'monotone': bool(tex.monotone),
+        'flush_possible': bool(tex.flush_possible),
+        'flush_draw': bool(tex.flush_draw),
+        'straight_possible': bool(tex.straight_possible),
+        'straight_draw_heavy': bool(tex.straight_draw_heavy),
+        'high_card_rank': int(tex.high_card_rank or 0),
+        'connectedness': float(tex.connectedness),
+    }
+
+
+def _hero_draw_features(hole: List[Card], board: List[Card]) -> Dict[str, bool]:
+    draw = _hero_draw_profile(list(hole or []), list(board or []))
+    return {
+        'flush_draw': bool(draw.flush_draw),
+        'oesd': bool(draw.oesd),
+        'gutshot': bool(draw.gutshot),
+        'backdoor_flush': bool(draw.backdoor_flush),
+        'overcards': bool(draw.overcards),
+    }
+
+
+def _hero_blocker_features(hole: List[Card], board: List[Card]) -> Dict[str, bool]:
+    return {
+        key: bool(value)
+        for key, value in _v3_board.detect_blockers(
+            list(hole or []), list(board or []),
+        ).items()
+    }
 
 
 @dataclass
@@ -78,15 +137,16 @@ class PredictionRecord:
     # {'win': hero beats villain, 'tie': split, 'loss': villain beats hero}.
     villain_vs_hero_dist: Dict[str, float] = field(default_factory=dict)
     position: str = ''
+    is_ip: bool = False
     facing_action: str = ''
     preflop_action_type: str = ''
     action_bet_ratio: float = 0.0
+    bet_size_bucket: str = ''
     is_raise_over: bool = False
-    player_profile: Dict[str, Any] = field(default_factory=dict)
-    range_summary: Dict[str, Any] = field(default_factory=dict)
-    action_diagnostics: Dict[str, Any] = field(default_factory=dict)
-    range_snapshot: Dict[str, Any] = field(default_factory=dict)
-    active_range_summaries: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    action_sequence: str = ''
+    board_features: Dict[str, Any] = field(default_factory=dict)
+    hero_draw: Dict[str, bool] = field(default_factory=dict)
+    hero_blockers: Dict[str, bool] = field(default_factory=dict)
 
 
 @dataclass
@@ -157,15 +217,13 @@ class ShowdownCalibrator:
         trigger: str,
         active_weights: Optional[Dict[int, np.ndarray]] = None,
         position: str = '',
+        is_ip: bool = False,
         facing_action: str = '',
         preflop_action_type: str = '',
         action_bet_ratio: float = 0.0,
+        bet_size_bucket: str = '',
         is_raise_over: bool = False,
-        player_profile: Optional[Dict[str, Any]] = None,
-        range_summary: Optional[Dict[str, Any]] = None,
-        action_diagnostics: Optional[Dict[str, Any]] = None,
-        range_snapshot: Optional[Dict[str, Any]] = None,
-        active_range_summaries: Optional[Dict[str, Dict[str, Any]]] = None,
+        action_sequence: str = '',
     ) -> None:
         """每次 tracker 的 _weights[player_id] 更新后调用。
 
@@ -240,17 +298,16 @@ class ShowdownCalibrator:
             board_texture=board_texture_key(board),
             villain_vs_hero_dist=rel_dist,
             position=position,
+            is_ip=bool(is_ip),
             facing_action=facing_action,
             preflop_action_type=preflop_action_type,
             action_bet_ratio=float(action_bet_ratio or 0.0),
+            bet_size_bucket=bet_size_bucket or _bet_size_bucket(action_bet_ratio),
             is_raise_over=bool(is_raise_over),
-            player_profile=dict(player_profile or {}),
-            range_summary=dict(range_summary or {}),
-            action_diagnostics=dict(action_diagnostics or {}),
-            range_snapshot=dict(range_snapshot or {}),
-            active_range_summaries={
-                str(k): dict(v) for k, v in (active_range_summaries or {}).items()
-            },
+            action_sequence=action_sequence,
+            board_features=_board_features(board),
+            hero_draw=_hero_draw_features(list(hero_cards or []), list(board)),
+            hero_blockers=_hero_blocker_features(list(hero_cards or []), list(board)),
         )
         self._hand_predictions.setdefault(player_id, []).append(record)
 
@@ -315,10 +372,12 @@ class ShowdownCalibrator:
         return results
 
     def _log_actual_eq_cache_stats(self, source: str) -> None:
+        if not log.isEnabledFor(logging.DEBUG):
+            return
         total = self._actual_eq_cache_hits + self._actual_eq_cache_misses
         if total <= 0:
             return
-        log.info(
+        log.debug(
             "actual equity cache %s hand=%s hits=%s misses=%s hit_rate=%.1f%% entries=%s",
             source,
             self._hand_id,

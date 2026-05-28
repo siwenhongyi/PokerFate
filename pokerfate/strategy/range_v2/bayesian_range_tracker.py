@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import logging
 import os as _os
-from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Set
 
 import numpy as np
@@ -119,23 +118,31 @@ def _board_texture_key(board: List[Card]) -> str:
     return ('paired' if paired else 'unpaired') + ':' + flush
 
 
-def _profile_snapshot(profile: PlayerProfile | None) -> Dict[str, Any]:
-    if profile is None:
-        return {}
-    data = asdict(profile)
-    return {
-        key: data.get(key)
-        for key in (
-            'name', 'hands_seen', 'vpip', 'pfr', 'af', 'three_bet_pct',
-            'fold_to_3bet', 'fold_to_cbet', 'fold_to_cbet_opps', 'wtsd',
-            'wmsd', 'flop_afq', 'turn_afq', 'river_afq',
-            'river_fold_rate', 'river_bet_freq', 'bluff_win_rate',
-            'bet_win_count', 'river_bet_count', 'river_check_count',
-            'pwi', 'flop_action_count', 'turn_action_count',
-            'river_action_count', 'river_facing_bet_opps',
-        )
-        if data.get(key) is not None
-    }
+def _bet_size_bucket(ratio: float) -> str:
+    try:
+        x = float(ratio or 0.0)
+    except Exception:
+        x = 0.0
+    if x <= 0.0:
+        return 'none'
+    if x <= 0.25:
+        return 'small'
+    if x <= 0.40:
+        return 'third'
+    if x <= 0.55:
+        return 'half'
+    if x <= 0.80:
+        return 'two_third'
+    if x <= 1.10:
+        return 'pot'
+    if x <= 1.75:
+        return 'overpot'
+    return 'huge'
+
+
+def _action_sequence_key(history: List[tuple], limit: int = 6) -> str:
+    recent = history[-limit:]
+    return '|'.join(f'{street}:{action}' for street, action in recent)
 
 
 def _preflop_action_type(action: str, context: ActionContext) -> str:
@@ -410,8 +417,6 @@ class BayesianRangeTracker:
         # Review 01_bayesian_tracker §2.3 + §4.8: 50%+ CPU saving expected.
         self._cat_cache_key: Optional[tuple] = None
         self._cat_cache: Optional[List[str]] = None
-        self._bucket_index_cache_key: Optional[tuple] = None
-        self._bucket_index_cache: Optional[Dict[str, np.ndarray]] = None
         self._board_int_cache_key: Optional[tuple] = None
         self._board_int_cache: Set[int] = set()
         self._blocked_mask_cache: Dict[tuple, np.ndarray] = {}
@@ -447,20 +452,6 @@ class BayesianRangeTracker:
             mask = hcm.blocked_by(set(key))
             self._blocked_mask_cache[key] = mask
         return mask
-
-    def _get_bucket_indices(self, board: List[Card]) -> Dict[str, np.ndarray]:
-        key = self._board_key(board)
-        if self._bucket_index_cache_key != key:
-            cats = self._get_categories(board)
-            self._bucket_index_cache = {
-                cat: np.fromiter(
-                    (i for i, value in enumerate(cats) if value == cat),
-                    dtype=np.int64,
-                )
-                for cat in _BUCKET_CAL_CATS
-            }
-            self._bucket_index_cache_key = key
-        return self._bucket_index_cache or {}
 
     def _get_categories(self, board: List[Card]) -> List[str]:
         """Return per-combo category list for this board (cached).
@@ -632,12 +623,13 @@ class BayesianRangeTracker:
         self._weights[player_id] = w
         self._action_meta[player_id] = {
             'position': position,
+            'is_ip': False,
             'facing_action': 'none',
             'preflop_action_type': 'reset',
             'action_bet_ratio': 0.0,
+            'bet_size_bucket': 'none',
             'is_raise_over': False,
-            'player_profile': _profile_snapshot(profile),
-            'action_diagnostics': {},
+            'action_sequence': '',
         }
         # Sequence-pattern history starts fresh for this hand. If this call
         # gets skipped, _detect_sequence_pattern would see stale entries from
@@ -883,6 +875,7 @@ class BayesianRangeTracker:
 
         history = self._action_history.setdefault(player_id, [])
         history.append((street, refined))
+        action_sequence = _action_sequence_key(history)
 
         pattern_name = _detect_sequence_pattern(history)
         if pattern_name:
@@ -921,25 +914,20 @@ class BayesianRangeTracker:
 
         existing_meta = self._action_meta.get(player_id, {})
         position = context.position or str(existing_meta.get('position') or '') or 'CO'
+        preflop_action_type = (
+            context.preflop_action_type
+            or _preflop_action_type(action, context)
+            or str(existing_meta.get('preflop_action_type') or '')
+        )
         self._action_meta[player_id] = {
             'position': position,
+            'is_ip': bool(context.is_ip),
             'facing_action': context.facing_action or '',
-            'preflop_action_type': _preflop_action_type(action, context),
+            'preflop_action_type': preflop_action_type,
             'action_bet_ratio': float(context.bet_ratio or 0.0),
+            'bet_size_bucket': _bet_size_bucket(context.bet_ratio),
             'is_raise_over': bool(context.is_raise_over),
-            'player_profile': _profile_snapshot(profile),
-            'action_diagnostics': {
-                'raw_action': action,
-                'refined_action': refined,
-                'signal_strength': signal_strength,
-                'alpha': alpha,
-                'alpha_adaptive': alpha_adaptive,
-                'floor_mixing_lambda': lam,
-                'confidence': confidence,
-                'n_active_before': n_active,
-                'likelihood': self._likelihood_summary(likelihoods, board),
-                'sequence_pattern': pattern_name or '',
-            },
+            'action_sequence': action_sequence,
         }
         self._weights[player_id] = w
         self._apply_bucket_calibration(
@@ -968,98 +956,6 @@ class BayesianRangeTracker:
                         pid, street, board, 'action:fold_other',
                     )
 
-    def _range_debug_summary(self, player_id: int, board: List[Card]) -> Dict[str, Any]:
-        w = self._weights.get(player_id)
-        if w is None:
-            return {}
-        threshold = 1.0 / 1326 * 0.1
-        top_mass = 0.0
-        active = int((w > threshold).sum())
-        nz = np.flatnonzero(w > 1e-10)
-        if len(nz):
-            top = np.sort(w[nz])[-20:]
-            top_mass = float(top.sum())
-        return {
-            'effective_range_pct': float(active) / 1326.0,
-            'active_combos': int(len(nz)),
-            'entropy': self.get_entropy(player_id),
-            'max_weight': float(w.max()),
-            'top20_mass': top_mass,
-            'bucket_dist': self.get_bucket_distribution(player_id, board),
-        }
-
-    def _range_snapshot(self, player_id: int, board: List[Card], limit: int = 20) -> Dict[str, Any]:
-        w = self._weights.get(player_id)
-        if w is None:
-            return {}
-        known = set(self._known_cards)
-        if board:
-            known |= self._board_ints(board)
-        valid = w.copy()
-        valid[self._blocked_mask(known)] = 0.0
-        total = float(valid.sum())
-        if total <= 1e-15:
-            return {}
-        valid /= total
-        if limit < len(valid):
-            idxs = np.argpartition(valid, -limit)[-limit:]
-            idxs = idxs[np.argsort(valid[idxs])[::-1]]
-        else:
-            idxs = np.argsort(valid)[::-1]
-        categories = self._get_categories(board)
-        combos = []
-        for idx in idxs:
-            weight = float(valid[int(idx)])
-            if weight <= 0:
-                continue
-            c1, c2 = hcm.ALL_COMBOS[int(idx)]
-            cards = [hcm.int_to_card(c1), hcm.int_to_card(c2)]
-            combos.append({
-                'combo': ''.join(str(c) for c in cards),
-                'weight': weight,
-                'bucket': categories[int(idx)],
-            })
-        return {
-            'top_combos': combos,
-            'top_mass': float(sum(c['weight'] for c in combos)),
-            'limit': int(limit),
-        }
-
-    def _active_range_summaries(
-        self,
-        board: List[Card],
-        current_player_id: int,
-        current_summary: Dict[str, Any],
-    ) -> Dict[str, Dict[str, Any]]:
-        out: Dict[str, Dict[str, Any]] = {}
-        for pid in self._weights:
-            if pid in self._folded:
-                continue
-            if pid == current_player_id:
-                out[str(pid)] = current_summary
-            else:
-                out[str(pid)] = self._range_debug_summary(pid, board)
-        return out
-
-    def _likelihood_summary(self, likelihoods: np.ndarray, board: List[Card]) -> Dict[str, Any]:
-        by_cat: Dict[str, Dict[str, float]] = {}
-        arr = np.asarray(likelihoods, dtype=np.float64)
-        for cat, idxs in self._get_bucket_indices(board).items():
-            if idxs.size == 0:
-                continue
-            vals = arr[idxs]
-            by_cat[cat] = {
-                'mean': float(np.mean(vals)),
-                'min': float(np.min(vals)),
-                'max': float(np.max(vals)),
-            }
-        return {
-            'min': float(np.min(arr)),
-            'max': float(np.max(arr)),
-            'mean': float(np.mean(arr)),
-            'by_bucket': by_cat,
-        }
-
     def _emit_prediction(self, player_id: int, street: str,
                          board: List[Card], trigger: str) -> None:
         """Push current posterior to calibration hook (if set)."""
@@ -1086,11 +982,6 @@ class BayesianRangeTracker:
             if pid not in self._folded
         }
         meta = self._action_meta.get(player_id, {})
-        range_summary = self._range_debug_summary(player_id, board)
-        range_snapshot = self._range_snapshot(player_id, board)
-        active_range_summaries = self._active_range_summaries(
-            board, player_id, range_summary,
-        )
         try:
             self._prediction_hook(
                 player_id=player_id, player_name=name,
@@ -1098,15 +989,13 @@ class BayesianRangeTracker:
                 weights=w, hero_cards=hero_cards, trigger=trigger,
                 active_weights=active_weights,
                 position=str(meta.get('position') or ''),
+                is_ip=bool(meta.get('is_ip') or False),
                 facing_action=str(meta.get('facing_action') or ''),
                 preflop_action_type=str(meta.get('preflop_action_type') or ''),
                 action_bet_ratio=float(meta.get('action_bet_ratio') or 0.0),
+                bet_size_bucket=str(meta.get('bet_size_bucket') or ''),
                 is_raise_over=bool(meta.get('is_raise_over') or False),
-                player_profile=dict(meta.get('player_profile') or {}),
-                range_summary=range_summary,
-                action_diagnostics=dict(meta.get('action_diagnostics') or {}),
-                range_snapshot=range_snapshot,
-                active_range_summaries=active_range_summaries,
+                action_sequence=str(meta.get('action_sequence') or ''),
             )
         except Exception:
             # Calibration hook 失败不应影响正常决策，但必须暴露出来。

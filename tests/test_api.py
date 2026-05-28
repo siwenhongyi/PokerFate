@@ -715,6 +715,24 @@ class TestBugFixes:
         )
         assert decision.action == "raise"
 
+    def test_api_infers_empty_playerinfo_positions_for_range_tracker(self):
+        """Empty PlayerInfo.position should not collapse runtime features to CO."""
+        api = PokerFateAPI(my_player_id=100, big_blind=2.0, autosave_path=None)
+        api.new_hand(
+            players=[
+                PlayerInfo(100, "PokerFate", 200.0),
+                PlayerInfo(200, "Opp SB", 200.0),
+                PlayerInfo(300, "Opp BB", 200.0),
+            ],
+            dealer_id=100,
+        )
+
+        assert api._hand_positions[100] == "BTN"
+        assert api._hand_positions[200] == "SB"
+        assert api._hand_positions[300] == "BB"
+        assert api._bot._range_tracker._action_meta[200]["position"] == "SB"
+        assert api._bot._range_tracker._action_meta[300]["position"] == "BB"
+
     # ------------------------------------------------------------------
     # Bug 2: is_cbet_spot / is_3bet_spot 永远是 False
     # ------------------------------------------------------------------

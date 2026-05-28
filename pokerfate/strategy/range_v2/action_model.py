@@ -43,6 +43,10 @@ class ActionContext:
     bet_ratio: float = 0.0
     # True = this raise is over someone's bet (re-raise / CR); False = first bet
     is_raise_over: bool = False
+    # Whether the acting opponent is in position among currently active players.
+    is_ip: bool = False
+    # Normalized preflop action label for calibration features only.
+    preflop_action_type: str = ""
 
 
 # ---------------------------------------------------------------------------

@@ -237,8 +237,7 @@ class RuntimeCalibrationRecorder:
             "bb_bucket": _bb_key(big_blind),
             "hand": int(rec.hand_id),
             "street": rec.street,
-            "player": rec.player_name,
-            "player_id": rec.player_id,
+            "player_uid": str(rec.player_id),
             "trigger": rec.trigger,
             "board": _cards_str(rec.board),
             "final_board": _cards_str(final_board),
@@ -252,17 +251,18 @@ class RuntimeCalibrationRecorder:
             "hero_made_subtype": getattr(rec, "hero_made_subtype", "") or "",
             "hero_hand_rank": getattr(rec, "hero_hand_rank", "") or "",
             "board_texture": getattr(rec, "board_texture", "") or "",
+            "board_features": _json_safe(getattr(rec, "board_features", {}) or {}),
             "villain_vs_hero_dist": dict(getattr(rec, "villain_vs_hero_dist", {}) or {}),
             "position": getattr(rec, "position", "") or "",
+            "is_ip": bool(getattr(rec, "is_ip", False)),
             "facing_action": getattr(rec, "facing_action", "") or "",
             "preflop_action_type": getattr(rec, "preflop_action_type", "") or "",
             "action_bet_ratio": float(getattr(rec, "action_bet_ratio", 0.0) or 0.0),
+            "bet_size_bucket": getattr(rec, "bet_size_bucket", "") or "",
             "is_raise_over": bool(getattr(rec, "is_raise_over", False)),
-            "player_profile": _json_safe(getattr(rec, "player_profile", {}) or {}),
-            "range_summary": _json_safe(getattr(rec, "range_summary", {}) or {}),
-            "action_diagnostics": _json_safe(getattr(rec, "action_diagnostics", {}) or {}),
-            "range_snapshot": _json_safe(getattr(rec, "range_snapshot", {}) or {}),
-            "active_range_summaries": _json_safe(getattr(rec, "active_range_summaries", {}) or {}),
+            "action_sequence": getattr(rec, "action_sequence", "") or "",
+            "hero_draw": _json_safe(getattr(rec, "hero_draw", {}) or {}),
+            "hero_blockers": _json_safe(getattr(rec, "hero_blockers", {}) or {}),
             "predicted_relation_eq": (
                 float(result.predicted_relation_eq)
                 if result.predicted_relation_eq is not None else None
@@ -288,6 +288,5 @@ class RuntimeCalibrationRecorder:
                 float(result.actual_hero_eq_street_multi_shown)
                 if result.actual_hero_eq_street_multi_shown is not None else None
             ),
-            "active_player_ids": list(getattr(rec, "active_player_ids", []) or []),
             "active_player_count": len(getattr(rec, "active_player_ids", []) or []),
         }

@@ -622,8 +622,10 @@ class PreflopStrategy:
         open_raise: float,
         big_blind: float,
     ) -> tuple[float, float, float, float]:
-        call_amt = min(to_call or open_raise, stack)
-        pot_odds = call_amt / (pot + call_amt) if (pot + call_amt) > 0 else 1.0
+        raw_call = max(0.0, float(to_call or open_raise or 0.0))
+        call_amt = min(raw_call, stack)
+        contestable_pot = max(0.0, float(pot or 0.0) - max(0.0, raw_call - call_amt))
+        pot_odds = call_amt / (contestable_pot + call_amt) if (contestable_pot + call_amt) > 0 else 1.0
         stack_commit = call_amt / stack if stack > 0 else 1.0
         call_bb = call_amt / big_blind if big_blind > 0 else 99.0
         return call_amt, pot_odds, stack_commit, call_bb
@@ -1191,8 +1193,9 @@ class PreflopStrategy:
             villain_norm = _normalize_position(villain_position)
             chart_key = f"{hero_norm}-vs-open-{villain_norm}" if hero_norm and villain_norm else ''
             chart_action, chart_reason = self._greenline_action(chart_key, cat) if chart_key else ('', '')
-            call_amt = min(to_call or open_raise, stack)
-            pot_odds = call_amt / (pot + call_amt) if (pot + call_amt) > 0 else 0.0
+            call_amt, pot_odds, _, _ = self._pressure_inputs(
+                stack, pot, to_call, open_raise, big_blind,
+            )
             oop_penalty = 0.04 if (position == 'SB') else 0.0
             depth_margin = -0.02 if stack_bb >= 75.0 else 0.0
             if chart_action in {'allin', 'raise'}:
