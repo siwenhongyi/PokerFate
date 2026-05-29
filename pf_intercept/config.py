@@ -38,12 +38,6 @@ PREFERRED_WSS_HOSTS: list[str] = [
 ]
 CERT_ALT_HOSTS = PREFERRED_WSS_HOSTS  # alias used by gen_cert.py
 
-# 实验：把登录响应里成对出现的 IP HTTP/WSS 入口当作一组使用。
-# 客户端仍看到域名入口；mitm/proxy 内部把 HTTP 转到 http://IP:8888，
-# WSS 低延迟 IP 候选也按 wss://IP:9013 的 Host/SNI 行为连接。
-EXPERIMENT_ROUTE_HTTP_TO_IP_ENTRY = True
-EXPERIMENT_WSS_IP_TARGET_USES_IP_HOST = True
-
 # ── Bot / game logic ─────────────────────────────────────────────────────────
 # MY_SEAT_ID: auto-detected from SitDownRSP — no need to set manually.
 

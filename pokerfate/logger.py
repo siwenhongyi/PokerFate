@@ -38,7 +38,23 @@ class _C:
     WHITE  = "\033[97m"
     MAGENTA = "\033[95m"
 
+
+def _env_truthy(name: str) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return False
+    return value.strip().lower() not in {"", "0", "false", "no", "off"}
+
+
 def _no_color() -> bool:
+    force_color = (
+        _env_truthy("PF_FORCE_COLOR")
+        or _env_truthy("FORCE_COLOR")
+        or _env_truthy("CLICOLOR_FORCE")
+        or _env_truthy("PYCHARM_HOSTED")
+    )
+    if force_color:
+        return False
     return not sys.stdout.isatty() or bool(os.environ.get("NO_COLOR"))
 
 
