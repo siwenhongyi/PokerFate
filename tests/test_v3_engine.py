@@ -19,10 +19,10 @@ from pokerfate.strategy.v3 import alpha_gate, calibrator
 from pokerfate.strategy.v3 import purposes_active as active
 from pokerfate.strategy.v3 import board as v3_board
 from pokerfate.strategy.v3 import exploit as v3_exploit
-from pokerfate.strategy.v3 import river_value_sizing
+from pokerfate.strategy.v3 import active_value_sizing
 from pokerfate.strategy.v3.purposes_active import PureBluffRiver
 from pokerfate.strategy.postflop import _compute_equity_uncertainty, _hero_draw_profile
-from pokerfate.strategy.range_v2.hand_categorizer import made_hand_info
+from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards, made_hand_info
 
 
 def card(s: str) -> Card:
@@ -526,7 +526,7 @@ class TestEngineActive:
         assert engine._small_pressure_fracs(ctx) == []
 
         ctx.equity_range = 0.20
-        assert engine._small_pressure_fracs(ctx) == [0.25, 0.33]
+        assert engine._small_pressure_fracs(ctx) == [0.33]
 
     def test_small_pressure_50k_blocks_under_thirty_range_equity(self):
         engine = V3Engine()
@@ -540,7 +540,7 @@ class TestEngineActive:
         assert engine._small_pressure_fracs(ctx) == []
 
         ctx.equity_range = 0.30
-        assert engine._small_pressure_fracs(ctx) == [0.25, 0.33]
+        assert engine._small_pressure_fracs(ctx) == [0.33]
 
     def test_small_pressure_50k_blocks_low_mid_equity_after_flop_call(self):
         engine = V3Engine()
@@ -567,7 +567,7 @@ class TestEngineActive:
             equity_range=0.35,
             equity_mc=0.80,
         )
-        assert engine._small_pressure_fracs(flop_ctx) == [0.25, 0.33]
+        assert engine._small_pressure_fracs(flop_ctx) == [0.33]
 
     def test_small_pressure_50k_allows_forty_equity_after_resistance(self):
         engine = V3Engine()
@@ -582,7 +582,7 @@ class TestEngineActive:
             prev_bet_called_count=1,
         )
 
-        assert engine._small_pressure_fracs(ctx) == [0.25, 0.33]
+        assert engine._small_pressure_fracs(ctx) == [0.50]
 
 
 # ---------------------------------------------------------------------------
@@ -737,7 +737,7 @@ class TestEngineDefense:
         out = engine.decide(ctx)
 
         assert out.action == 'call'
-        assert out.purpose == 'call'
+        assert out.purpose == 'draw_call'
 
     def test_draw_call_uses_implied_odds(self):
         engine = V3Engine()
@@ -1962,7 +1962,7 @@ class TestPurposeTriggers:
         )
         ctx.rng.seed(7)
 
-        choice = river_value_sizing.choose(ctx, 'overbet_value', 1.25)
+        choice = active_value_sizing.choose(ctx, 'overbet_value', 1.25)
 
         assert choice is not None
         assert choice.frac <= 1.0
@@ -1986,7 +1986,7 @@ class TestPurposeTriggers:
         )
         ctx.rng.seed(3)
 
-        choice = river_value_sizing.choose(ctx, 'overbet_value', 1.25)
+        choice = active_value_sizing.choose(ctx, 'overbet_value', 1.25)
 
         assert choice is not None
         assert choice.frac >= 1.0
@@ -2013,7 +2013,7 @@ class TestPurposeTriggers:
         )
         ctx.rng.seed(7)
 
-        choice = river_value_sizing.choose(ctx, 'thick_value_bet', 0.75)
+        choice = active_value_sizing.choose(ctx, 'thick_value_bet', 0.75)
 
         assert choice is not None
         assert 0.75 <= choice.frac <= 2.00
@@ -2046,7 +2046,7 @@ class TestPurposeTriggers:
         )
         ctx.rng.seed(1)
 
-        choice = river_value_sizing.choose(ctx, 'thick_value_bet', 0.75)
+        choice = active_value_sizing.choose(ctx, 'thick_value_bet', 0.75)
 
         assert choice is not None
         assert 1.25 <= choice.frac <= 2.00
@@ -2527,6 +2527,88 @@ class TestPurposeTriggers:
         assert p.trigger(ctx).hit
         assert p.sizer(ctx) == [(0.55, 0.40), (0.75, 0.60)]
 
+    def test_super_monster_flop_keeps_native_sizes_in_engine(self):
+        ctx = self._base_ctx(
+            hero_bucket='nuts',
+            hero_hand_rank='four_of_a_kind',
+            equity_range=0.995,
+            equity_mc=0.99,
+            pot=1000.0,
+            stack=10000.0,
+            big_blind=10.0,
+            spr=10.0,
+            villain_vs_hero_dist={'win': 1.0, 'tie': 0.0, 'loss': 0.0},
+            villain_bucket_dist={
+                'nuts': 0.0, 'strong': 0.05, 'medium': 0.10,
+                'draw': 0.05, 'weak_draw': 0.20, 'air': 0.60,
+            },
+        )
+
+        candidates = [
+            c for c in V3Engine()._active_candidates(ctx)
+            if c.purpose == 'monster_value_plan'
+        ]
+
+        assert [c.frac for c in candidates] == pytest.approx([0.33, 0.50])
+
+    def test_super_monster_turn_after_checkthrough_keeps_native_sizes_in_engine(self):
+        board = cards('Ac', '7d', '2s', 'Qh')
+        ctx = self._base_ctx(
+            street='turn',
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hero_bucket='nuts',
+            hero_hand_rank='four_of_a_kind',
+            equity_range=0.995,
+            equity_mc=0.99,
+            pot=1000.0,
+            stack=10000.0,
+            big_blind=10.0,
+            spr=10.0,
+            flop_checked_through=True,
+            my_prev_actions={'flop': 'check'},
+            villain_vs_hero_dist={'win': 1.0, 'tie': 0.0, 'loss': 0.0},
+            villain_bucket_dist={
+                'nuts': 0.0, 'strong': 0.05, 'medium': 0.10,
+                'draw': 0.05, 'weak_draw': 0.20, 'air': 0.60,
+            },
+        )
+
+        candidates = [
+            c for c in V3Engine()._active_candidates(ctx)
+            if c.purpose == 'monster_value_plan'
+        ]
+
+        assert [c.frac for c in candidates] == pytest.approx([0.33, 0.55])
+
+    def test_super_monster_river_still_uses_active_value_optimizer(self):
+        board = cards('Ac', '7d', '2s', 'Qh', '9c')
+        ctx = self._base_ctx(
+            street='river',
+            board=board,
+            board_sig=v3_board.analyze(board),
+            hero_bucket='nuts',
+            hero_hand_rank='four_of_a_kind',
+            equity_range=0.995,
+            equity_mc=0.99,
+            pot=1000.0,
+            stack=10000.0,
+            big_blind=10.0,
+            spr=10.0,
+            villain_vs_hero_dist={'win': 1.0, 'tie': 0.0, 'loss': 0.0},
+            villain_bucket_dist={
+                'nuts': 0.0, 'strong': 0.05, 'medium': 0.10,
+                'draw': 0.05, 'weak_draw': 0.20, 'air': 0.60,
+            },
+        )
+
+        candidates = [
+            c for c in V3Engine()._active_candidates(ctx)
+            if c.purpose == 'monster_value_plan'
+        ]
+
+        assert all(c.frac >= 0.75 for c in candidates)
+
     def test_monster_full_house_air_heavy_uses_small_value_plan(self):
         from pokerfate.strategy.v3.purposes_active import MonsterValuePlan, ThickValueBet
         p = MonsterValuePlan()
@@ -2610,7 +2692,7 @@ class TestPurposeTriggers:
 
         out = V3Engine().decide(ctx)
         assert out.action in ('call', 'raise')
-        assert out.purpose in ('call', 'protection_raise')
+        assert out.purpose in ('bluff_catch_call', 'protection_raise')
 
     def test_tiny_donk_overpair_still_respects_high_villain_nuts(self):
         from pokerfate.strategy.v3.purposes_defensive import ProtectionRaise
@@ -2707,8 +2789,17 @@ class TestPurposeTriggers:
 class TestNonNutStackoffGuard:
     def test_made_hand_info_marks_non_nut_trips_and_board_pair_two_pair(self):
         info = made_hand_info(cards('Qc', 'Ts'), cards('Ah', '8s', '2h', 'Qd', 'Qs'))
-        assert info.subtype == 'trips_weak_kicker'
+        assert info.subtype == 'trips_top_kicker'
         assert info.kicker_rank == 10
+
+        info = made_hand_info(cards('Qc', '9s'), cards('Ah', '8s', '2h', 'Qd', 'Qs'))
+        assert info.subtype == 'trips_weak_kicker'
+        assert info.kicker_rank == 9
+
+        top_pair = made_hand_info(cards('Ac', 'Ts'), cards('Ah', '8s', '2h'))
+        assert top_pair.subtype == 'top_pair_good_kicker'
+        assert top_pair.kicker_rank == 10
+        assert categorize_cards(cards('Ac', 'Ts'), cards('Ah', '8s', '2h')) == 'strong'
 
         under = made_hand_info(cards('Tc', 'Ts'), cards('Qh', 'Qd', '6s'))
         assert under.subtype == 'board_pair_pocket_underpair'
@@ -2717,10 +2808,10 @@ class TestNonNutStackoffGuard:
 
     def _facing_river_ctx(self, **over) -> DecisionCtx:
         board = cards('Ah', '8s', '2h', 'Qd', 'Qs')
-        info = made_hand_info(cards('Qc', 'Ts'), board)
+        info = made_hand_info(cards('Qc', '9s'), board)
         defaults = dict(
             street='river',
-            hole_cards=cards('Qc', 'Ts'),
+            hole_cards=cards('Qc', '9s'),
             board=board,
             position='BTN',
             is_ip=True,

@@ -249,6 +249,7 @@ class PokerLogger:
         players: List[Dict],
         dealer_id: int,
         big_blind: float = 1.0,
+        hero_id: Optional[int] = None,
     ):
         self._hand_num[0] = hand_number
         self._current_hand_lines = []
@@ -281,7 +282,10 @@ class PokerLogger:
 
         bb = max(big_blind, 1.0)
         def _seat_str(p: dict) -> str:
-            return f"{p['name']} {p['stack'] / bb:.0f}bb [{_pos(p.get('pos', ''))}]"
+            text = f"{p['name']} {p['stack'] / bb:.0f}bb [{_pos(p.get('pos', ''))}]"
+            if self._color and hero_id is not None and p.get("id") == hero_id:
+                return f"{_C.YELLOW}{text}{_C.RESET}{_C.BOLD}"
+            return text
         seats = "   ".join(_seat_str(p) for p in players)
         hand_tag = f"  第 {hand_number} 手"
         self._raw(f"{hand_tag:<12}{seats}", bold=True)

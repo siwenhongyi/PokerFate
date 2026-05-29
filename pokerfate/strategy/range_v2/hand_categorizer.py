@@ -23,6 +23,7 @@ MEDIUM = 'medium'       # top pair weak kicker, second pair, pocket pair below t
 DRAW = 'draw'           # flush draw, OESD (8+ outs)
 WEAK_DRAW = 'weak_draw' # gutshot, backdoor + overcards
 AIR = 'air'             # nothing
+GOOD_KICKER_MIN_RANK = 10
 
 
 @dataclass(frozen=True)
@@ -92,7 +93,7 @@ def categorize_cards(hole: List[Card], board: List[Card]) -> str:
             if pair_rank > board_ranks[0]:
                 return STRONG  # overpair
             # Top pair: kicker quality matters
-            if kicker >= 12:  # Q+
+            if kicker >= GOOD_KICKER_MIN_RANK:
                 return STRONG
             return MEDIUM
         if len(board_ranks) > 1 and pair_rank >= board_ranks[1]:
@@ -163,7 +164,7 @@ def made_hand_info(hole: List[Card], board: List[Card]) -> MadeHandInfo:
         elif hole_trip_count == 1 and board_trip_count >= 2:
             side_kickers = [r for r in hole_ranks if r != trip_rank]
             kicker = max(side_kickers) if side_kickers else 0
-            subtype = 'trips_top_kicker' if kicker >= 12 else 'trips_weak_kicker'
+            subtype = 'trips_top_kicker' if kicker >= GOOD_KICKER_MIN_RANK else 'trips_weak_kicker'
         elif board_trip_count >= 3:
             kicker = max(hole_ranks)
             subtype = 'board_trips_kicker'
@@ -215,7 +216,7 @@ def made_hand_info(hole: List[Card], board: List[Card]) -> MadeHandInfo:
         elif pair_rank in hole_ranks:
             top_board = max(board_ranks)
             if pair_rank >= top_board:
-                subtype = 'top_pair_good_kicker' if kicker >= 12 else 'top_pair_weak_kicker'
+                subtype = 'top_pair_good_kicker' if kicker >= GOOD_KICKER_MIN_RANK else 'top_pair_weak_kicker'
             else:
                 subtype = 'pair'
         elif board_pair_rank:

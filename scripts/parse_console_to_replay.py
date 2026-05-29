@@ -44,11 +44,11 @@ HAND_HEADER_RE = re.compile(r"第\s*(\d+)\s*手")
 HOLE_RE = re.compile(r"底牌\s+(\S+)\s+(\S+)")
 STREET_RE = re.compile(r"──\s*(翻牌前|翻牌|转牌|河牌)(?:\s+(.+?))?\s*(?:底池\s+(\d+))?\s*──")
 BOARD_CARD_RE = re.compile(r"[2-9TJQKA][♠♥♦♣]")
-PLAYER_TOKEN_RE = re.compile(r"(\S+?)(?:\(([^)]+)\))?\s+(\d+)bb\s+\[\]")
+PLAYER_TOKEN_RE = re.compile(r"(.+?)(?:\(([^)]+)\))?\s+(\d+(?:\.\d+)?)bb\s+\[([^\]]*)\]")
 SUITS = {"♠": "s", "♥": "h", "♦": "d", "♣": "c"}
 
 HERO_DECISION_RE = re.compile(
-    r"►\s*(\S+)\s+(弃牌|过牌|跟注|加注|下注|全下)"
+    r"►\s*(.+?)\s{2,}(弃牌|过牌|跟注|加注|下注|全下)"
     r"(?:\s+(\d+))?"
     r".*?胜率\s*(\d+)%(?:\(vs随机(\d+)%\))?"
     r"\s+SPR\s*[≈=]?\s*([\d.]+)"
@@ -57,8 +57,8 @@ HERO_DECISION_RE = re.compile(
 )
 
 OPP_ACTION_RE = re.compile(
-    r"^\s{2,}(\S+)\s+(弃牌|过牌|跟注|加注|下注|全下)"
-    r"(?:\s+(\d+)bb(?:\s+\(\d+bb\s+([\d.]+)x\s+pot\))?)?"
+    r"^\s{2,}(.+?)\s{2,}(弃牌|过牌|跟注|加注|下注|全下)"
+    r"(?:\s+(\d+(?:\.\d+)?)bb(?:\s+\(\d+(?:\.\d+)?bb\s+([\d.]+)x\s+pot\))?)?"
     r".*?(?:\[([^/\]]+)(?:/PWI[+-]?\d+)?\])?"
     r"(?:.*?range\s+(\d+)%(?:\s+\[([^\]]+)\])?)?"
 )
@@ -87,6 +87,13 @@ BUCKET_TRANSLATE = {
 PTYPE_TRANSLATE = {
     "鲸鱼": "whale", "鱼": "fish", "超松被动": "whale", "跟注站": "whale",
     "紧手": "nit", "激进": "lag", "疯狂": "maniac", "规则": "reg",
+}
+
+POSITION_TRANSLATE = {
+    "庄": "BTN",
+    "小盲": "SB",
+    "大盲": "BB",
+    "枪口": "UTG",
 }
 
 
@@ -120,7 +127,42 @@ def translate_ptype(tag: str) -> str:
     return tag
 
 
-def parse_log(log_path: Path, hero_names: HeroNames, bb_value: int = 1000) -> list[dict]:
+def _round_bb_value(value: float, fallback: int) -> int:
+    if value <= 0:
+        return int(fallback)
+    rounded = int(round(value / 1000.0) * 1000)
+    if 7000 <= rounded <= 15000:
+        return 10000
+    if 35000 <= rounded <= 65000:
+        return 50000
+    return max(1, rounded or int(fallback))
+
+
+def _finalize_hand_units(hand: dict, hero_names: HeroNames, fallback_bb: int, auto_bb: bool) -> None:
+    bb = int(fallback_bb)
+    if auto_bb:
+        result = hand.get("result") or {}
+        final_stacks = result.get("final_stacks") or {}
+        my_delta = result.get("my_delta")
+        for p in hand.get("players", []):
+            if not hero_names.matches(p.get("name", "")):
+                continue
+            final_stack = final_stacks.get(p.get("name"))
+            stack_bb = float(p.get("stack_bb_raw") or 0.0)
+            if final_stack is not None and my_delta is not None and stack_bb > 0:
+                start_stack = float(final_stack) - float(my_delta)
+                bb = _round_bb_value(start_stack / stack_bb, fallback_bb)
+            break
+
+    hand["big_blind"] = bb
+    for p in hand.get("players", []):
+        p["stack"] = float(p.get("stack_bb_raw") or 0.0) * bb
+    for ev in hand.get("events", []):
+        if ev.get("type") == "opp_action":
+            ev["amount"] = float(ev.get("amount_bb_raw") or 0.0) * bb
+
+
+def parse_log(log_path: Path, hero_names: HeroNames, bb_value: int = 1000, auto_bb: bool = False) -> list[dict]:
     """把 console log 切成手数列表，每手一个 dict。"""
     lines = log_path.read_text(encoding='utf-8', errors='replace').split("\n")
     hands: list[dict] = []
@@ -150,6 +192,7 @@ def parse_log(log_path: Path, hero_names: HeroNames, bb_value: int = 1000) -> li
     def finish_hand():
         nonlocal cur
         if cur is not None and cur.get("events"):
+            _finalize_hand_units(cur, hero_names, bb_value, auto_bb)
             hands.append(cur)
         cur = None
 
@@ -173,21 +216,29 @@ def parse_log(log_path: Path, hero_names: HeroNames, bb_value: int = 1000) -> li
             # 解析玩家 + 起始筹码
             players = []
             tail = text[m.end():]
+            dealer_id = 0
             for pm in PLAYER_TOKEN_RE.finditer(tail):
-                pname, ptype_raw, stack_bb = pm.group(1), pm.group(2) or "", int(pm.group(3))
+                pname = pm.group(1).strip()
+                ptype_raw = pm.group(2) or ""
+                stack_bb = float(pm.group(3))
+                pos_raw = pm.group(4) or ""
                 pid = assign_pid(pname)
+                if pos_raw == "庄":
+                    dealer_id = pid
                 players.append({
                     "id": pid,
                     "name": pname,
                     "stack": stack_bb * bb_value,
-                    "pos": "",
+                    "stack_bb_raw": stack_bb,
+                    "pos": POSITION_TRANSLATE.get(pos_raw, pos_raw),
+                    "raw_pos": pos_raw,
                     "player_type": translate_ptype(ptype_raw) if not hero_names.matches(pname) else "",
                 })
             cur = {
                 "hand": hand_no,
                 "session": session_id,
                 "big_blind": bb_value,
-                "dealer_id": 0,
+                "dealer_id": dealer_id,
                 "players": players,
                 "hole_cards": [],
                 "events": [],
@@ -236,7 +287,7 @@ def parse_log(log_path: Path, hero_names: HeroNames, bb_value: int = 1000) -> li
         stripped = text.lstrip()
         if stripped.startswith("►"):
             h = HERO_DECISION_RE.search(text)
-            if h and hero_names.matches(h.group(1)):
+            if h and hero_names.matches(h.group(1).strip()):
                 action_cn = h.group(2)
                 amount = int(h.group(3)) if h.group(3) else 0
                 eq_pct = int(h.group(4))
@@ -274,10 +325,11 @@ def parse_log(log_path: Path, hero_names: HeroNames, bb_value: int = 1000) -> li
         m = OPP_ACTION_RE.match(text)
         if m:
             opp_name = m.group(1)
+            opp_name = opp_name.strip()
             if hero_names.matches(opp_name) or opp_name in folded_in_hand:
                 continue
             action_cn = m.group(2)
-            amount_bb = int(m.group(3)) if m.group(3) else 0
+            amount_bb = float(m.group(3)) if m.group(3) else 0.0
             type_tag = m.group(5)
             range_pct_raw = m.group(6)
             bucket_raw = m.group(7)
@@ -289,6 +341,7 @@ def parse_log(log_path: Path, hero_names: HeroNames, bb_value: int = 1000) -> li
                 "name": opp_name,
                 "action": ACTION_MAP.get(action_cn, action_cn),
                 "amount": amount_bb * bb_value if amount_bb else 0,
+                "amount_bb_raw": amount_bb,
                 "street": cur_street,
                 "bucket_dist": parse_bucket_dist(bucket_raw) if bucket_raw else None,
                 "range_pct": int(range_pct_raw) / 100.0 if range_pct_raw else 1.0,
@@ -329,9 +382,18 @@ def parse_log(log_path: Path, hero_names: HeroNames, bb_value: int = 1000) -> li
             # 解析最终筹码
             tail_m = FINAL_STACKS_RE.search(text)
             if tail_m:
-                for sm in PLAYER_STACK_RE.finditer(tail_m.group(1)):
-                    pname, stack = sm.group(1), int(sm.group(2))
-                    cur["result"]["final_stacks"][pname] = stack
+                tail = tail_m.group(1)
+                matched_names = set()
+                for p in cur.get("players", []):
+                    pname = p.get("name", "")
+                    sm = re.search(rf"(?<!\S){re.escape(pname)}\s+(\d+)(?:\s|$)", tail)
+                    if sm:
+                        cur["result"]["final_stacks"][pname] = int(sm.group(1))
+                        matched_names.add(pname)
+                if not matched_names:
+                    for sm in PLAYER_STACK_RE.finditer(tail):
+                        pname, stack = sm.group(1), int(sm.group(2))
+                        cur["result"]["final_stacks"][pname] = stack
             continue
 
     finish_hand()
@@ -345,6 +407,8 @@ def main():
     ap.add_argument("--out", required=True, help="replay JSONL output")
     ap.add_argument("--bb-value", type=int, default=1000,
                     help="chips per BB (default 1000)")
+    ap.add_argument("--auto-bb", action="store_true",
+                    help="infer each hand's BB from header stack, result delta, and final stack")
     ap.add_argument("--source-label", default="",
                     help="single source_log label written to every hand")
     args = ap.parse_args()
@@ -355,7 +419,7 @@ def main():
 
     hands = []
     for log in args.log:
-        parsed = parse_log(Path(log), hero_names, args.bb_value)
+        parsed = parse_log(Path(log), hero_names, args.bb_value, auto_bb=args.auto_bb)
         source = args.source_label or str(log)
         for h in parsed:
             h["source_log"] = source

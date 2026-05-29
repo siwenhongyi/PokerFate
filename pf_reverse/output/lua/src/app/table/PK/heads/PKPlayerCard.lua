@@ -191,7 +191,7 @@ function P:refreshCard(is_reset)
 		end
 	end
 	local info = self.data:getPlayer(self.seatid)
-	if not self.data:isPlaying() or not info or not info.has_card or not info.hand_cards or info.hand_cards[1] == 0 then
+	if not self.data:isPlaying() or not info or not info.has_card or ((not info.hand_cards or info.hand_cards[1] == 0) and info.seatid ~= self.data:getObserveSeatid()) then
 		for _, v in ipairs(self.ImageCards) do
 			v:SetActive(false)
 			local eft = self:find("Eff_poker_card_sg", v)
@@ -358,9 +358,9 @@ function P:showCardType(cardType, cards, isDealing, pkType)
             self.BgCardValue:SetActive(false)
 			if self._isDealing then
 				if info.hand_cards and GF.getCardNumber(info.hand_cards[1]) == GF.getCardNumber(info.hand_cards[2]) then
-					self:playHoleCardVoice(info, ROLE_VOICE.one_pair)
+					self:playSound(ROLE_VOICE.one_pair)
 				else
-					self:playHoleCardVoice(info, ROLE_VOICE.high_card)
+					self:playSound(ROLE_VOICE.high_card)
 				end
 			end
 		elseif boards and #boards > 0 then
@@ -385,9 +385,9 @@ function P:showCardType(cardType, cards, isDealing, pkType)
                 self:find("ImageBar2", self.BgCardValue):SetActive(true)
                 if self._isDealing then
 					if info.hand_cards and GF.getCardNumber(info.hand_cards[1]) == GF.getCardNumber(info.hand_cards[2]) then
-						self:playHoleCardVoice(info, ROLE_VOICE.one_pair)
+						self:playSound(ROLE_VOICE.one_pair)
 					else
-						self:playHoleCardVoice(info, ROLE_VOICE.high_card)
+						self:playSound(ROLE_VOICE.high_card)
 					end
                 end
             end

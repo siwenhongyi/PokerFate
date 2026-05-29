@@ -204,6 +204,75 @@ class TestBotDecisions:
             action = bot.decide(gs, player_id=0)
             assert isinstance(action, Action)
 
+
+class TestPreflopBetLevelClassification:
+    def _preflop_state(self, action_history, short_current_bet: float = 0.0) -> GameState:
+        hero = Player(0, 'Royal Police', 930_000.0, cards('Ts', 'Tc'), current_bet=60_000.0)
+        three_bettor = Player(1, 'zhouking', 1_000_000.0, [], current_bet=200_000.0)
+        short_stack = Player(
+            2, 'kasyer', 0.0, [], current_bet=short_current_bet, is_all_in=True,
+        )
+        button = Player(3, 'button', 1_000_000.0, [])
+        return GameState(
+            players=[hero, three_bettor, short_stack, button],
+            dealer_pos=3,  # hero=SB, three_bettor=BB, short_stack=UTG
+            street=Street.PREFLOP,
+            pot=363_084.0,
+            current_bet=max((act.amount for _pid, act, _st in action_history), default=0.0),
+            big_blind=10_000.0,
+            small_blind=5_000.0,
+            current_player_idx=0,
+            action_history=action_history,
+        )
+
+    def test_short_all_in_below_current_bet_does_not_turn_3bet_into_4bet(self):
+        bot = PokerBot(equity_iterations=10)
+        gs = self._preflop_state(
+            [
+                (0, Action(ActionType.RAISE, 60_000.0), 'preflop'),
+                (1, Action(ActionType.RAISE, 200_000.0), 'preflop'),
+                (2, Action(ActionType.RAISE, 40_000.0), 'preflop'),
+            ],
+            short_current_bet=40_000.0,
+        )
+
+        assert [pid for _idx, pid, _act in bot._effective_preflop_raises(gs)] == [0, 1]
+        assert bot._classify_preflop_action(gs, gs.players[0]) == ('3bet', 200_000.0)
+        assert bot._primary_raiser_id(gs, gs.players[0]) == 1
+        assert bot._primary_raiser_position(gs, gs.players[0]) == 'BB'
+
+    def test_insufficient_all_in_raise_does_not_turn_3bet_into_4bet(self):
+        bot = PokerBot(equity_iterations=10)
+        gs = self._preflop_state(
+            [
+                (0, Action(ActionType.RAISE, 60_000.0), 'preflop'),
+                (1, Action(ActionType.RAISE, 200_000.0), 'preflop'),
+                (2, Action(ActionType.RAISE, 250_000.0), 'preflop'),
+            ],
+            short_current_bet=250_000.0,
+        )
+
+        assert [pid for _idx, pid, _act in bot._effective_preflop_raises(gs)] == [0, 1]
+        assert bot._classify_preflop_action(gs, gs.players[0]) == ('3bet', 200_000.0)
+        assert bot._primary_raiser_id(gs, gs.players[0]) == 1
+        assert bot._primary_raiser_position(gs, gs.players[0]) == 'BB'
+
+    def test_full_raise_after_3bet_still_classifies_as_4bet(self):
+        bot = PokerBot(equity_iterations=10)
+        gs = self._preflop_state(
+            [
+                (0, Action(ActionType.RAISE, 60_000.0), 'preflop'),
+                (1, Action(ActionType.RAISE, 200_000.0), 'preflop'),
+                (2, Action(ActionType.RAISE, 360_000.0), 'preflop'),
+            ],
+            short_current_bet=360_000.0,
+        )
+
+        assert [pid for _idx, pid, _act in bot._effective_preflop_raises(gs)] == [0, 1, 2]
+        assert bot._classify_preflop_action(gs, gs.players[0]) == ('4bet', 360_000.0)
+        assert bot._primary_raiser_id(gs, gs.players[0]) == 2
+        assert bot._primary_raiser_position(gs, gs.players[0]) == 'UTG'
+
 # ---------------------------------------------------------------------------
 # Range Estimator Tests (Libratus-inspired range compression)
 # ---------------------------------------------------------------------------

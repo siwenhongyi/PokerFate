@@ -1,4 +1,4 @@
-"""Entertainment side-game command framework for the MITM proxy."""
+"""Entertainment side-game Web runtime for the MITM proxy."""
 
 from pf_entertainment.runtime import EntertainmentRuntime
 

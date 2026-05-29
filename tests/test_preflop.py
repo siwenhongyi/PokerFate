@@ -96,7 +96,7 @@ class TestOpenRange:
         )
         assert action == 'fold'
 
-    def test_bb1000_cheap_entry_calls_junk(self):
+    def test_bb1000_small_call_uses_normal_greenline_fold(self):
         action, amount = self.strat.decide(
             hole_cards=cards('7c', '2d'),
             position='UTG',
@@ -108,11 +108,11 @@ class TestOpenRange:
             pot=1500.0,
             to_call=1000.0,
         )
-        assert action == 'call'
-        assert amount == pytest.approx(1000.0)
-        assert self.strat.last_expand_reason == 'achievement_entry:bb1000 fold_to_call<=4bb'
+        assert action == 'fold'
+        assert amount == 0.0
+        assert self.strat.last_expand_reason == 'greenline:UTG-RFI 72o -> fold'
 
-    def test_bb1000_cheap_entry_does_not_override_premium_raise(self):
+    def test_bb1000_premium_still_raises_normally(self):
         action, amount = self.strat.decide(
             hole_cards=cards('Ac', 'Ad'),
             position='BTN',
@@ -128,7 +128,7 @@ class TestOpenRange:
         assert action == 'raise'
         assert amount > 3000.0
 
-    def test_bb1000_cheap_entry_does_not_call_above_four_bb(self):
+    def test_bb1000_uses_normal_strategy_for_larger_calls(self):
         action, _ = self.strat.decide(
             hole_cards=cards('7c', '2d'),
             position='BB',
@@ -651,7 +651,7 @@ class TestFacingFourBetDefense:
         assert amount == pytest.approx(1_000.0)
         assert 'greenline' in self.strat.last_expand_reason
 
-    def test_short_ako_vs_4bet_fallback_calls_without_amount_jam(self):
+    def test_missing_greenline_4bet_chart_does_not_use_pokergto_fallback(self):
         action, amount = self.strat.decide(
             hole_cards=cards('Ah', 'Ks'),
             position='MP',
@@ -669,6 +669,26 @@ class TestFacingFourBetDefense:
 
         assert action == 'call'
         assert amount == pytest.approx(900_000.0)
+        assert not self.strat.last_expand_reason.startswith('pokergto:')
+
+    def test_short_stack_vs_4bet_still_folds_when_greenline_missing(self):
+        action, amount = self.strat.decide(
+            hole_cards=cards('8h', '8s'),
+            position='SB',
+            facing_action='4bet',
+            open_raise=990_000.0,
+            is_ip=False,
+            big_blind=10_000.0,
+            stack=290_000.0,
+            pot=1_710_000.0,
+            to_call=290_000.0,
+            equity=0.22,
+            stack_bb=29.0,
+            villain_position='UTG',
+        )
+
+        assert action == 'fold'
+        assert amount == 0.0
         assert self.strat.last_expand_reason == ''
 
     def test_greenline_mix_uses_sampled_action_not_always_raise(self):
@@ -684,7 +704,7 @@ class TestFacingFourBetDefense:
 
         assert action == 'fold'
         assert "greenline_mix:UTG-RFI ATo ['raise', 'fold']" in reason
-        assert "w=pokergto raise:30%/fold:70%" in reason
+        assert "w=pokergto raise:0%/fold:100%" in reason
 
     def test_greenline_mix_uses_exact_pokergto_mixed_frequency(self):
         strat = PreflopStrategy(rng=random.Random(0))
@@ -699,7 +719,26 @@ class TestFacingFourBetDefense:
 
         assert action in {'raise', 'fold'}
         assert "greenline_mix:BTN-vs-open-CO 44 ['raise', 'fold']" in reason
-        assert 'w=pokergto raise:30%/fold:70%' in reason
+        assert 'w=pokergto raise:0%/fold:100%' in reason
+
+    def test_greenline_mix_uses_uniform_frequency_when_pokergto_has_no_match(self, monkeypatch):
+        strat = PreflopStrategy(rng=random.Random(1))
+
+        def fake_lookup_gto(_chart_key, _cat):
+            return {
+                'greenline': ['raise', 'fold'],
+                'pokergto': None,
+                'pokergto_chart_key': None,
+                'primary': ['raise', 'fold'],
+                'primary_source': 'greenline',
+            }
+
+        monkeypatch.setattr(preflop_module, 'lookup_gto', fake_lookup_gto)
+
+        action, reason = strat._greenline_action('X-RFI', 'AA')
+
+        assert action in {'raise', 'fold'}
+        assert "w=uniform raise:50%/fold:50%" in reason
 
     def test_lookup_gto_keeps_greenline_primary_with_pokergto_reference(self):
         refs = preflop_module.lookup_gto('UTG-RFI', 'ATo')
@@ -714,12 +753,13 @@ class TestFacingFourBetDefense:
         assert refs['pokergto'] == {'raise': 0.0, 'call': 0.0, 'fold': 1.0}
         assert refs['greenline'] == ['raise', 'fold']
 
-    def test_lookup_gto_uses_pokergto_when_greenline_chart_is_missing(self):
+    def test_lookup_gto_does_not_use_pokergto_when_greenline_chart_is_missing(self):
         refs = preflop_module.lookup_gto('SB-vs-3bet-UTG', 'ATo')
 
         assert refs['greenline'] is None
-        assert refs['primary_source'] == 'pokergto'
-        assert refs['primary'] == {'raise': 0.75, 'call': 0.0, 'fold': 0.25}
+        assert refs['pokergto'] == {'raise': 0.75, 'call': 0.0, 'fold': 0.25}
+        assert refs['primary_source'] == ''
+        assert refs['primary'] is None
 
     def test_greenline_chart_fold_is_not_overridden_by_pokergto(self):
         refs = preflop_module.lookup_gto('BB-vs-open-CO', 'A2o')
@@ -729,16 +769,14 @@ class TestFacingFourBetDefense:
         assert refs['primary_source'] == 'greenline'
         assert refs['primary'] == 'fold'
 
-    def test_pokergto_fallback_action_when_greenline_chart_is_missing(self):
+    def test_greenline_action_has_no_pokergto_fallback_when_chart_is_missing(self):
         strat = PreflopStrategy(rng=random.Random(1))
         action, reason = strat._greenline_action('SB-vs-3bet-UTG', 'ATo')
 
-        assert action == 'raise'
-        assert reason == (
-            'pokergto:sb_vs_3bet_100bb ATo raise:75%/fold:25% -> raise'
-        )
+        assert action == ''
+        assert reason == ''
 
-    def test_pokergto_fallback_can_drive_vs_3bet_decision(self):
+    def test_vs_3bet_missing_greenline_chart_does_not_use_pokergto_fallback(self):
         strat = PreflopStrategy(rng=random.Random(1))
         action, amount = strat.decide(
             hole_cards=cards('Ad', 'Tc'),
@@ -755,11 +793,114 @@ class TestFacingFourBetDefense:
             equity=0.26,
         )
 
+        assert action == 'fold'
+        assert amount == 0.0
+        assert not strat.last_expand_reason.startswith('pokergto:')
+
+    def test_vs_3bet_missing_position_has_no_pokergto_fallback(self):
+        strat = PreflopStrategy(rng=random.Random(1))
+        action, amount = strat.decide(
+            hole_cards=cards('Ac', '5c'),
+            position='SB',
+            facing_action='3bet',
+            open_raise=270_000.0,
+            is_ip=False,
+            big_blind=10_000.0,
+            stack=490_000.0,
+            pot=410_000.0,
+            to_call=210_000.0,
+            stack_bb=49.0,
+            villain_position='',
+            equity=0.40,
+        )
+
         assert action == 'raise'
         assert amount == pytest.approx(490_000.0)
-        assert strat.last_expand_reason == (
-            'pokergto:sb_vs_3bet_100bb ATo raise:75%/fold:25% -> raise'
+        assert not strat.last_expand_reason.startswith('pokergto:')
+
+    def test_vs_3bet_greenline_fold_can_still_price_call(self):
+        strat = PreflopStrategy(rng=random.Random(1))
+        action, amount = strat.decide(
+            hole_cards=cards('Ad', 'Tc'),
+            position='SB',
+            facing_action='3bet',
+            open_raise=10_000.0,
+            is_ip=False,
+            big_blind=10_000.0,
+            stack=490_000.0,
+            pot=100_000.0,
+            to_call=10_000.0,
+            stack_bb=49.0,
+            villain_position='UTG',
+            equity=0.20,
         )
+
+        assert action == 'call'
+        assert amount == pytest.approx(10_000.0)
+        assert strat.last_expand_reason.startswith('price_call:tiny_3bet')
+
+    def test_50k_vs_3bet_missing_greenline_chart_does_not_use_pokergto_fallback(self):
+        strat = PreflopStrategy(rng=random.Random(1))
+        action, amount = strat.decide(
+            hole_cards=cards('Ad', 'Tc'),
+            position='SB',
+            facing_action='3bet',
+            open_raise=1_350_000.0,
+            is_ip=False,
+            big_blind=50_000.0,
+            stack=2_450_000.0,
+            pot=2_050_000.0,
+            to_call=1_050_000.0,
+            stack_bb=49.0,
+            villain_position='UTG',
+            equity=0.26,
+        )
+
+        assert action == 'fold'
+        assert amount == 0.0
+        assert not strat.last_expand_reason.startswith('pokergto:')
+
+    def test_50k_vs_open_missing_position_has_no_pokergto_fallback(self):
+        strat = PreflopStrategy(rng=random.Random(1))
+        action, amount = strat.decide(
+            hole_cards=cards('9h', '9s'),
+            position='CO',
+            facing_action='open',
+            open_raise=200_000.0,
+            is_ip=True,
+            big_blind=50_000.0,
+            stack=5_000_000.0,
+            pot=275_000.0,
+            to_call=200_000.0,
+            stack_bb=100.0,
+            villain_position='',
+            equity=0.50,
+        )
+
+        assert action == 'call'
+        assert amount == pytest.approx(200_000.0)
+        assert not strat.last_expand_reason.startswith('pokergto:')
+
+    def test_50k_greenline_chart_fold_can_still_price_call(self):
+        strat = PreflopStrategy(rng=random.Random(1))
+        action, amount = strat.decide(
+            hole_cards=cards('7h', '6d'),
+            position='BB',
+            facing_action='open',
+            open_raise=50_000.0,
+            is_ip=False,
+            big_blind=50_000.0,
+            stack=5_000_000.0,
+            pot=250_000.0,
+            to_call=50_000.0,
+            stack_bb=100.0,
+            villain_position='CO',
+            equity=0.25,
+        )
+
+        assert action == 'call'
+        assert amount == pytest.approx(50_000.0)
+        assert strat.last_expand_reason.startswith('price_call:tiny_open')
 
     def test_no_chart_4bet_does_not_use_conditional_edge_call(self):
         action, amount = self.strat.decide(
@@ -1023,7 +1164,7 @@ class TestPreflopChartPrimary:
         assert amount == pytest.approx(1_837_500.0)
         assert strat.last_expand_reason.startswith('greenline_mix:')
 
-    def test_chart_4bet_raise_is_not_blocked_even_for_bluff_combo(self):
+    def test_chart_4bet_mix_uses_pokergto_frequency_even_for_bluff_combo(self):
         strat = PreflopStrategy(rng=random.Random(1))
         action, amount = strat.decide(
             hole_cards=cards('Ac', '4c'),
@@ -1040,9 +1181,10 @@ class TestPreflopChartPrimary:
             equity=0.36,
         )
 
-        assert action == 'raise'
-        assert amount == pytest.approx(1_470_000.0)
+        assert action == 'fold'
+        assert amount == 0.0
         assert strat.last_expand_reason.startswith('greenline_mix:')
+        assert 'w=pokergto raise:0%/fold:100%' in strat.last_expand_reason
 
     def test_chart_allin_short_ako_jams_vs_3bet(self):
         action, amount = self.strat.decide(

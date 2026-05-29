@@ -503,6 +503,7 @@ class PokerFateAPI:
             ],
             dealer_id=dealer_id,
             big_blind=self.big_blind,
+            hero_id=self.my_player_id,
         )
 
     def deal_hole_cards(self, cards: List[str]) -> None:

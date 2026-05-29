@@ -113,7 +113,7 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
 
     comparisons: list[dict] = []
 
-    for ev in hand["events"]:
+    for event_index, ev in enumerate(hand["events"]):
         etype = ev["type"]
         if etype == "board":
             new_street = ev["street"]
@@ -194,6 +194,8 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
             diag = getattr(api._bot, "last_decision_diagnostics", {}) or {}
 
             comparisons.append({
+                "source_log": hand.get("source_log", ""),
+                "event_index": event_index,
                 "hand": hand["hand"],
                 "session": hand.get("session", 0),
                 "street": ev.get("street"),

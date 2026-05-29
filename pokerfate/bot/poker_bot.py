@@ -146,6 +146,42 @@ class PokerBot:
     # Preflop logic
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _effective_preflop_raises(gs: GameState) -> list[tuple[int, int, Action]]:
+        """Return preflop raises that reopen action / advance bet level.
+
+        Short all-ins can be reported as RAISE by the bridge even when they
+        are less than a full raise. Those should affect to_call/current_bet,
+        but must not turn "facing 3bet" into "facing 4bet".
+        """
+        current_max = max(float(gs.big_blind or 0.0), 0.0)
+        last_full_raise = max(float(gs.big_blind or 0.0), 0.0)
+        effective: list[tuple[int, int, Action]] = []
+        eps = 1e-9
+
+        for idx, item in enumerate(gs.action_history):
+            if len(item) < 2:
+                continue
+            if len(item) >= 3 and str(item[2]).lower() != 'preflop':
+                continue
+            pid, act = item[0], item[1]
+            if act.action_type != ActionType.RAISE:
+                continue
+
+            amount = max(0.0, float(act.amount or 0.0))
+            if amount <= current_max + eps:
+                continue
+
+            raise_size = amount - current_max
+            current_max = amount
+            if last_full_raise > eps and raise_size + eps < last_full_raise:
+                continue
+
+            effective.append((idx, pid, act))
+            last_full_raise = raise_size
+
+        return effective
+
     def _decide_preflop(self, gs: GameState, player: Player, is_bb_option: bool = False) -> Action:
         position = gs.position_of(player)
         is_ip = gs.is_ip(player)
@@ -204,7 +240,7 @@ class PokerBot:
         cold_callers = callers_after_last_raise if facing_action in ('3bet', '4bet') else 0
         sticky_density = self._preflop_sticky_density(gs, player)
         preflop_villain_stats = None
-        preflop_aggressor_id = gs.last_aggressor_id(player.player_id, street='preflop')
+        preflop_aggressor_id = self._primary_raiser_id(gs, player)
         if preflop_aggressor_id is not None:
             preflop_villain_stats = self.opponent_model.get(preflop_aggressor_id)
         action_str, amount = self.preflop.decide(
@@ -276,22 +312,16 @@ class PokerBot:
     def _classify_preflop_action(self, gs: GameState, player: Player):
         """Returns (facing_action_str, open_raise_amount).
 
-        Uses total raise count (including bot's own raises) to determine the
-        true bet level, so that bot's 3bet + opponent's re-raise is correctly
-        identified as a 4bet rather than a 3bet.
+        Uses effective raise count (including bot's own full raises) to
+        determine the true bet level. Short all-ins that do not complete a
+        full raise are ignored for bet-level classification.
         """
-        history = gs.action_history
-        opp_raises = []
-        total_raise_count = 0
-        for item in history:
-            pid, act = item[0], item[1]
-            if act.action_type == ActionType.RAISE:
-                total_raise_count += 1
-                if pid != player.player_id:
-                    opp_raises.append((pid, act))
+        raises = self._effective_preflop_raises(gs)
+        opp_raises = [(pid, act) for _idx, pid, act in raises if pid != player.player_id]
         if not opp_raises:
             return 'none', 0.0
-        # total_raise_count includes bot's raises, giving the true bet level:
+        total_raise_count = len(raises)
+        # total_raise_count includes bot's full raises, giving the true bet level:
         # 1 total raise  → open (bot hasn't acted yet)
         # 2 total raises → 3bet facing bot (open + bot's raise, or open + opponent 3bet)
         # 3 total raises → 4bet (open + 3bet + 4bet)
@@ -312,12 +342,8 @@ class PokerBot:
 
     def _count_callers_after_last_preflop_raise(self, gs: GameState, player: Player) -> int:
         """Count non-hero callers after the latest preflop raise."""
-        last_raise_idx = -1
-        for idx, item in enumerate(gs.action_history):
-            if len(item) < 3 or item[2] != 'preflop':
-                continue
-            if item[1].action_type == ActionType.RAISE:
-                last_raise_idx = idx
+        effective_raises = self._effective_preflop_raises(gs)
+        last_raise_idx = effective_raises[-1][0] if effective_raises else -1
         if last_raise_idx < 0:
             return 0
         n = 0
@@ -2333,19 +2359,20 @@ class PokerBot:
 
     def _primary_raiser_position(self, gs: GameState, player: Player) -> str:
         """返回最后一个（相对于 hero）加注者的标准位置字符串，找不到时返回空字符串。"""
-        raises = [
-            item[0] for item in gs.action_history
-            if len(item) >= 3
-            and item[2] == 'preflop'
-            and item[1].action_type == ActionType.RAISE
-            and item[0] != player.player_id
-        ]
-        if not raises:
+        raiser_id = self._primary_raiser_id(gs, player)
+        if raiser_id is None:
             return ""
-        raiser = next((p for p in gs.players if p.player_id == raises[-1]), None)
+        raiser = next((p for p in gs.players if p.player_id == raiser_id), None)
         if raiser is None:
             return ""
         return self._normalize_pos(gs.position_of(raiser))
+
+    def _primary_raiser_id(self, gs: GameState, player: Player) -> int | None:
+        """Last opponent full-raise aggressor; short all-ins do not take over."""
+        for _idx, pid, _act in reversed(self._effective_preflop_raises(gs)):
+            if pid != player.player_id:
+                return pid
+        return None
 
     def _build_player_profile(self, player_id: int) -> PlayerProfile:
         """Build a PlayerProfile from OpponentModel data (read-only)."""

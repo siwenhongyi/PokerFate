@@ -1,9 +1,8 @@
 """pokerfate.data — 静态数据加载器
 
 启动时调用 init() 预加载所有数据到内存。
-翻前 GTO 主决策数据优先来自 AHTOOOXA/poker-charts（Greenline Poker）；
-Greenline 缺少对应 chart 时，PokerGTO Solver Range Wizard 作为次级主表；
-Greenline 混合策略存在时，PokerGTO 仍只作为频率参考。
+翻前 GTO 主决策数据只来自 AHTOOOXA/poker-charts（Greenline Poker）；
+PokerGTO Solver Range Wizard 只在 Greenline 给出混合策略时作为频率参考。
 """
 
 from __future__ import annotations
@@ -49,8 +48,8 @@ def _pokergto_chart_id(chart_key: str) -> str | None:
     """Map local chart keys to PokerGTO Range Wizard ids.
 
     PokerGTO has RFI charts, BB defense charts, hero-position vs-3bet
-    charts, and late-position 3bet-vs-open charts. Greenline remains primary
-    when it has a chart; PokerGTO only replaces missing Greenline chart keys.
+    charts, and late-position 3bet-vs-open charts. It is used only as a
+    frequency reference for Greenline mixed actions.
     """
     if not chart_key:
         return None
@@ -100,12 +99,12 @@ def lookup_gto(chart_key: str, hand: str) -> dict[str, object]:
         {
           "pokergto": {"raise": 0.75, "call": 0.0, "fold": 0.25} | None,
           "greenline": action,
-          "primary": Greenline action, or PokerGTO action when Greenline has no chart,
-          "primary_source": "greenline" | "pokergto" | "",
+          "primary": Greenline action only,
+          "primary_source": "greenline" | "",
         }
         Greenline action 为 "raise"/"call"/"allin"，或 ["raise","fold"] 等
         混合策略，或 "fold"（chart 存在但手牌不在其中），或 None（chart
-        key 不存在）。只有 chart key 不存在时，PokerGTO 才会成为 primary。
+        key 不存在）。PokerGTO 不再成为 primary，只保留为混合频率参考。
 
     常用 chart_key 格式：
         {POSITION}-RFI                      主动开池
@@ -128,9 +127,6 @@ def lookup_gto(chart_key: str, hand: str) -> dict[str, object]:
     if gl_action is not None:
         primary: Action = gl_action
         primary_source = "greenline"
-    elif pg_action is not None:
-        primary = pg_action
-        primary_source = "pokergto"
     else:
         primary = None
         primary_source = ""

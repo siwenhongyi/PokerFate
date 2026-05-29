@@ -1146,6 +1146,9 @@ class MonsterValuePlan(Purpose):
     def alpha_target(self, ctx: DecisionCtx, frac: float) -> Optional[float]:
         return None
 
+    def active_value_sizing_allowed(self, ctx: DecisionCtx, frac: float) -> bool:
+        return ctx.street not in {'flop', 'turn'}
+
 
 # ---------------------------------------------------------------------------
 # 6. thick_value_bet

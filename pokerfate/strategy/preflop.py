@@ -424,10 +424,6 @@ _BLUFF_3BET_FREQ_BY_VS_POS = {
     'SB':  0.70,
 }
 
-_ACHIEVEMENT_ENTRY_BB = 1000.0
-_ACHIEVEMENT_ENTRY_MAX_CALL_BB = 4.0
-
-
 class PreflopStrategy:
     """Preflop decision engine."""
 
@@ -507,10 +503,8 @@ class PreflopStrategy:
     def _greenline_action(self, chart_key: str, cat: str) -> tuple[str, str]:
         """Return the primary preflop chart action.
 
-        Greenline remains primary when its chart exists. If the Greenline
-        chart key is missing, PokerGTO becomes the fallback chart. A returned
-        "fold" from Greenline still means the chart exists and the hand is
-        outside that range.
+        Greenline is the only primary chart. PokerGTO is used only as a
+        frequency reference when Greenline returns a mixed action.
         """
         refs = lookup_gto(chart_key, cat)
         action, source = self._primary_chart_action(refs)
@@ -522,17 +516,19 @@ class PreflopStrategy:
             if not choices:
                 return '', ''
             weights = self._pokergto_mix_weights(refs.get('pokergto'), choices)
-            if weights:
-                action = self._weighted_chart_choice(choices, weights)
-                weight_text = '/'.join(
-                    f"{choice}:{weights.get(choice, 0.0):.0%}" for choice in choices
-                )
-                return str(action), (
-                    f"{source}_mix:{chart_key} {cat} {choices} "
-                    f"w=pokergto {weight_text} -> {action}"
-                )
-            action = self._rng.choice(choices)
-            return str(action), f"{source}_mix:{chart_key} {cat} {choices} -> {action}"
+            weight_source = 'pokergto'
+            if weights is None:
+                uniform = 1.0 / len(choices)
+                weights = {choice: uniform for choice in choices}
+                weight_source = 'uniform'
+            action = self._weighted_chart_choice(choices, weights)
+            weight_text = '/'.join(
+                f"{choice}:{weights.get(choice, 0.0):.0%}" for choice in choices
+            )
+            return str(action), (
+                f"{source}_mix:{chart_key} {cat} {choices} "
+                f"w={weight_source} {weight_text} -> {action}"
+            )
         if isinstance(action, dict):
             choices = [
                 str(name)
@@ -587,18 +583,7 @@ class PreflopStrategy:
         if total <= 0:
             return None
 
-        if len(nonzero) == 1 and len(choices) == 2:
-            primary = next(iter(nonzero))
-            return {
-                choice: 0.7 if choice == primary else 0.3
-                for choice in choices
-            }
-
-        normalized = {choice: weight / total for choice, weight in weights.items()}
-        uniform = 1.0 / len(choices)
-        if all(abs(weight - uniform) < 1e-9 for weight in normalized.values()):
-            return None
-        return normalized
+        return {choice: weight / total for choice, weight in weights.items()}
 
     def _weighted_chart_choice(self, choices: list[str], weights: dict[str, float]) -> str:
         weighted = [(choice, max(0.0, float(weights.get(choice, 0.0)))) for choice in choices]
@@ -828,6 +813,9 @@ class PreflopStrategy:
         if chart_action == 'call':
             self.last_expand_reason = chart_reason
             return 'call'
+        if chart_action == 'fold':
+            self.last_expand_reason = chart_reason
+            return 'fold'
         return 'fold'
 
     def _chart_vs_3bet_response_action(
@@ -1108,10 +1096,6 @@ class PreflopStrategy:
         cat = _hand_category(hole_cards)
         stack_bb = max(stack_bb, 1.0)
         size_map_reason = ''
-        cheap_entry_option = (
-            abs(big_blind - _ACHIEVEMENT_ENTRY_BB) < 1e-6
-            and 0 < to_call <= _ACHIEVEMENT_ENTRY_MAX_CALL_BB * big_blind
-        )
         if facing_action == 'open' and big_blind > 0 and open_raise > 0:
             open_bb = open_raise / big_blind
             if open_bb >= _OPEN_SIZE_AS_4BET_MIN_BB:
@@ -1131,12 +1115,6 @@ class PreflopStrategy:
             if free_check_option:
                 self.last_expand_reason = 'free_check_option:fold_to_check'
                 return ('check', 0.0)
-            if cheap_entry_option:
-                self.last_expand_reason = (
-                    f"achievement_entry:bb1000 fold_to_call<="
-                    f"{_ACHIEVEMENT_ENTRY_MAX_CALL_BB:.0f}bb"
-                )
-                return ('call', min(to_call, stack))
             return ('fold', 0.0)
 
         def _preserve_size_map_reason() -> None:
@@ -1170,7 +1148,11 @@ class PreflopStrategy:
                 return _fold_fallback()
 
             if num_limpers > 0:
-                iso_available = self.should_iso_raise(hole_cards, position, num_players)
+                iso_available = self.should_iso_raise(
+                    hole_cards,
+                    position,
+                    num_players,
+                )
                 if self.should_limp_behind(
                     hole_cards, position, big_blind, stack, to_call,
                     num_limpers, stack_bb, sticky_density,
@@ -1192,7 +1174,9 @@ class PreflopStrategy:
             hero_norm = _normalize_position(position)
             villain_norm = _normalize_position(villain_position)
             chart_key = f"{hero_norm}-vs-open-{villain_norm}" if hero_norm and villain_norm else ''
-            chart_action, chart_reason = self._greenline_action(chart_key, cat) if chart_key else ('', '')
+            chart_action, chart_reason = (
+                self._greenline_action(chart_key, cat) if chart_key else ('', '')
+            )
             call_amt, pot_odds, _, _ = self._pressure_inputs(
                 stack, pot, to_call, open_raise, big_blind,
             )
@@ -1320,14 +1304,8 @@ class PreflopStrategy:
                 return ('raise', min(four_bet, stack))
 
             if chart_action == 'call':
-                chart_call_reason = self.last_expand_reason
-                chart_source = (
-                    'pokergto'
-                    if chart_call_reason.startswith('pokergto:')
-                    else 'greenline'
-                )
                 self.last_expand_reason = (
-                    f"chart_expand:3bet_call {chart_source} "
+                    f"chart_expand:3bet_call greenline "
                     f"{hero_norm}-vs-3bet-{_normalize_position(villain_position)} {cat}"
                 )
                 _preserve_size_map_reason()
