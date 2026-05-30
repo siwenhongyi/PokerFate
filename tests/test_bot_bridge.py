@@ -82,6 +82,119 @@ def test_dealer_info_passes_global_hand_seq_to_api(monkeypatch) -> None:
     assert calls[0]["hand_number"] == 42
 
 
+class TestBotBridgeReconnectRestore:
+    class _FakeAPI:
+        def __init__(self):
+            self.hole_cards = []
+            self.requests = []
+
+        def deal_hole_cards(self, cards):
+            self.hole_cards.append(cards)
+
+        def request_action(self, **kwargs):
+            self.requests.append(kwargs)
+            return BotDecision(action="call", amount=0.0)
+
+        def last_decision_diagnostics(self):
+            return {}
+
+        def set_runtime_collection_enabled(self, enabled, reason=""):
+            pass
+
+    def _bridge(self):
+        fake = self._FakeAPI()
+        b = BotBridge()
+        b._api = fake
+        b._my_uid = "99"
+        b._my_seat = 0
+        b._bb = 10.0
+        b._sb = 5.0
+        return b, fake
+
+    def test_enter_room_rsp_replays_pending_hero_action_after_reconnect(self) -> None:
+        b, fake = self._bridge()
+
+        out = b.handle(
+            "pb.EnterRoomRSP",
+            {
+                "code": 0,
+                "roomid": 123,
+                "game_type": 10010101,
+                "room_info": {"bb": "10", "sb": "5"},
+                "table_status": {
+                    "stage": 1,
+                    "gameid": "game-1",
+                    "seat": [
+                        {
+                            "seatid": 0,
+                            "action_type": 5,
+                            "player": {"uid": "99", "name": "Hero"},
+                            "hand_chips": "990",
+                            "destop_chips": "10",
+                        },
+                        {
+                            "seatid": 1,
+                            "action_type": 4,
+                            "player": {"uid": "100", "name": "Villain"},
+                            "hand_chips": "970",
+                            "destop_chips": "30",
+                        },
+                    ],
+                },
+                "playing_status": {
+                    "card1": 782,
+                    "card2": 1037,
+                    "action_seatid": 0,
+                    "call_need_chips": "20",
+                    "min_chipin": "40",
+                    "max_chipin": "990",
+                    "action_time": 3,
+                },
+            },
+        )
+
+        assert out[0] == "pb.ActionREQ"
+        assert out[1] == {"action_type": 3, "chips": 0}
+        assert out[2] <= 2.0
+        assert fake.hole_cards == [["Ah", "Ks"]]
+        assert fake.requests[0]["to_call"] == 20
+        assert fake.requests[0]["current_bet"] == 30
+
+    def test_enter_room_rsp_does_not_replay_when_hero_already_all_in(self) -> None:
+        b, fake = self._bridge()
+        b._hole_cards_count = 2
+
+        out = b.handle(
+            "pb.EnterRoomRSP",
+            {
+                "code": 0,
+                "roomid": 123,
+                "game_type": 10010101,
+                "room_info": {"bb": "10", "sb": "5"},
+                "table_status": {
+                    "stage": 1,
+                    "seat": [
+                        {
+                            "seatid": 0,
+                            "action_type": 17,
+                            "is_allin": True,
+                            "player": {"uid": "99", "name": "Hero"},
+                            "destop_chips": "1000",
+                        }
+                    ],
+                },
+                "playing_status": {
+                    "action_seatid": 0,
+                    "call_need_chips": "20",
+                    "action_time": 3,
+                },
+            },
+        )
+
+        assert out is None
+        assert fake.requests == []
+
+
 def test_dealer_info_passes_positions_to_api(monkeypatch) -> None:
     calls = []
 

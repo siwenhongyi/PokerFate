@@ -194,22 +194,55 @@ async def _close_ws_quietly(
     code: int = 1001,
     reason: str = "",
     timeout: float = 0.75,
-) -> None:
+) -> bool:
     if ws is None:
-        return
+        return True
     try:
         await asyncio.wait_for(ws.close(code=code, reason=reason), timeout=timeout)
+        return True
     except asyncio.TimeoutError:
         log.debug("[WSS] close timeout; force transport close (%s)", reason)
         _force_transport_close(ws)
+        return False
     except Exception as exc:
         log.debug("[WSS] close ignored: %s", exc)
+        return False
 
 
 def _schedule_ws_close(ws, *, code: int = 1001, reason: str = "") -> None:
     if ws is None:
         return
     asyncio.create_task(_close_ws_quietly(ws, code=code, reason=reason))
+
+
+async def _retire_superseded_wss(prev_client_ws, prev_server_ws, session_id: int) -> None:
+    sockets = [ws for ws in (prev_client_ws, prev_server_ws) if ws is not None]
+    if not sockets:
+        return
+    timeout = 0.5
+    log.info(
+        "[WSS] session #%s closing %d superseded socket(s) before upstream connect (timeout=%.2fs)",
+        session_id,
+        len(sockets),
+        timeout,
+    )
+    results = await asyncio.gather(
+        *(
+            _close_ws_quietly(ws, reason="superseded by reconnect", timeout=timeout)
+            for ws in sockets
+        ),
+        return_exceptions=True,
+    )
+    graceful = sum(1 for result in results if result is True)
+    for ws, result in zip(sockets, results):
+        if result is not True:
+            _force_transport_close(ws)
+    log.info(
+        "[WSS] session #%s superseded socket close complete (%d/%d graceful); connecting upstream",
+        session_id,
+        graceful,
+        len(sockets),
+    )
 
 
 def _peer_is_loopback(peer) -> bool:
@@ -628,7 +661,7 @@ async def _s2c_analysis_worker(
                 asyncio.create_task(_do_inject(server_ws, bridge, inject, inject_room_id, session_id))
 
 
-async def _pipe_c2s(client_ws, server_ws, buf: FrameBuffer) -> None:
+async def _pipe_c2s(client_ws, server_ws, buf: FrameBuffer, session_id: int) -> None:
     """Game client → real server: forward immediately, analyze asynchronously."""
     analysis_queue: asyncio.Queue = asyncio.Queue()
     analysis_task = asyncio.create_task(_c2s_analysis_worker(buf, analysis_queue))
@@ -644,7 +677,7 @@ async def _pipe_c2s(client_ws, server_ws, buf: FrameBuffer) -> None:
     finally:
         analysis_queue.put_nowait(None)   # signal worker to exit
         await analysis_task
-        log.info("[WSS] pipe c2s ended; messages=%d", msg_count)
+        log.info("[WSS] session #%s pipe c2s ended; messages=%d", session_id, msg_count)
 
 
 async def _pipe_s2c(client_ws, server_ws, buf: FrameBuffer, session_id: int) -> None:
@@ -684,7 +717,7 @@ async def _pipe_s2c(client_ws, server_ws, buf: FrameBuffer, session_id: int) -> 
     finally:
         analysis_queue.put_nowait(None)   # signal worker to exit
         await analysis_task
-        log.info("[WSS] pipe s2c ended; messages=%d", msg_count)
+        log.info("[WSS] session #%s pipe s2c ended; messages=%d", session_id, msg_count)
 
 
 async def _run_wss_pair(client_ws, server_ws, session_id: int) -> None:
@@ -696,7 +729,7 @@ async def _run_wss_pair(client_ws, server_ws, session_id: int) -> None:
     tasks: dict[asyncio.Task, str] = {}
     try:
         tasks = {
-            asyncio.create_task(_pipe_c2s(client_ws, server_ws, FrameBuffer())): "c2s",
+            asyncio.create_task(_pipe_c2s(client_ws, server_ws, FrameBuffer(), session_id)): "c2s",
             asyncio.create_task(_pipe_s2c(client_ws, server_ws, FrameBuffer(), session_id)): "s2c",
         }
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -707,10 +740,11 @@ async def _run_wss_pair(client_ws, server_ws, session_id: int) -> None:
             except asyncio.CancelledError:
                 exc = None
             if exc is None:
-                log.info("[WSS] pipe %s stopped first; closing paired sockets", name)
+                log.info("[WSS] session #%s pipe %s stopped first; closing paired sockets", session_id, name)
             else:
                 log.info(
-                    "[WSS] pipe %s failed first (%s: %s); closing paired sockets",
+                    "[WSS] session #%s pipe %s failed first (%s: %s); closing paired sockets",
+                    session_id,
                     name,
                     type(exc).__name__,
                     exc,
@@ -756,8 +790,7 @@ async def _handle_wss(client_ws) -> None:
     _active_server_ws = None
     if prev_client_ws is not None or prev_server_ws is not None:
         log.info("[WSS] session #%s supersedes previous WSS session", session_id)
-        _schedule_ws_close(prev_client_ws, reason="superseded by reconnect")
-        _schedule_ws_close(prev_server_ws, reason="superseded by reconnect")
+        await _retire_superseded_wss(prev_client_ws, prev_server_ws, session_id)
 
     req = getattr(client_ws, "request", None)
     path = (req.path if req else None) or "/"

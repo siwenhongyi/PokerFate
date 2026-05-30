@@ -105,6 +105,19 @@ def _inject_delay_before_action(
     sec = random.uniform(lo, hi)
     return min(_MAX_INJECT_DELAY, max(0.0, sec))
 
+
+def _clamp_inject_delay(result: WireInjectResult, max_delay: float) -> WireInjectResult:
+    """Clamp delayed bot injections when reconnect leaves little action time."""
+    max_delay = max(0.0, float(max_delay))
+    if result is None:
+        return None
+    if isinstance(result, list):
+        return [_clamp_inject_delay(item, max_delay) for item in result if item is not None]
+    if isinstance(result, tuple) and len(result) == 3:
+        inject_type, fields, delay_sec = result
+        return inject_type, fields, min(float(delay_sec), max_delay)
+    return result
+
 # ── Card conversion ────────────────────────────────────────────────────────────
 
 _RANK_TO_STR = {
@@ -570,7 +583,7 @@ class BotBridge:
             return bb, sb if sb > 0 else bb / 2.0
         return 0.0, 0.0
 
-    def _on_enter_room(self, msg: dict) -> WireInject | None:
+    def _on_enter_room(self, msg: dict) -> WireInjectResult:
         self._profit_lock_reenter = None
         self._profit_lock_deferred = None
         self._room_escape_reenter = None
@@ -697,6 +710,7 @@ class BotBridge:
 
         # 重进 / 回桌后必须用服务端筹码覆盖快照（见 _sync_stacks_from_table_snapshot 注释）
         self._sync_stacks_from_table_snapshot(table_status)
+        self._sync_hand_snapshot_from_enter_room(table_status)
 
         # 重连时恢复公共牌。若 table_status 携带了 board（说明局中重连），直接写入 api._board，
         # 并标记已处理的街道，避免后续 RoundStartBRC 重复 deal_board 累加出重复牌。
@@ -711,7 +725,15 @@ class BotBridge:
                 for s in range(2, stage + 1):
                     self._announced_stages.add(s)
 
-        return fallback_inject
+        playing_status = msg.get("playing_status") or {}
+        self._restore_hole_cards_from_playing_status(playing_status)
+        restored_action = self._action_from_enter_room_playing_status(table_status, playing_status)
+
+        if fallback_inject and restored_action:
+            if isinstance(restored_action, list):
+                return [fallback_inject, *restored_action]
+            return [fallback_inject, restored_action]
+        return restored_action or fallback_inject
 
     def _profit_lock_quick_start_fallback(
         self,
@@ -916,6 +938,105 @@ class BotBridge:
             self._hand_start_chips[seat] = chips
             if self._my_seat is not None and seat == self._my_seat:
                 self._my_chips = chips
+
+    def _sync_hand_snapshot_from_enter_room(self, table_status: dict) -> None:
+        """Best-effort restore of per-hand bridge state from EnterRoomRSP after reconnect."""
+        if not table_status:
+            return
+        stage = _chip_int(table_status.get("stage", self._stage or 1), self._stage or 1)
+        if stage > 0:
+            self._stage = stage
+
+        seats: list[int] = []
+        folded: set[int] = set()
+        street_bets: dict[int, int] = {}
+        max_bet = 0
+        my_bet = 0
+        desktop_total = 0
+        for seat_status in table_status.get("seat", []) or []:
+            seat = _chip_int(seat_status.get("seatid", 0), 0)
+            seats.append(seat)
+            action_type = _chip_int(seat_status.get("action_type", 0), 0)
+            if action_type in FOLD_ACTION_TYPES:
+                folded.add(seat)
+
+            destop = _chip_int(seat_status.get("destop_chips", 0), 0)
+            desktop_total += destop
+            if stage == 1 and destop > 0:
+                street_bets[seat] = destop
+                max_bet = max(max_bet, destop)
+                if self._my_seat is not None and seat == self._my_seat:
+                    my_bet = destop
+
+        if seats:
+            self._all_seats = seats
+        self._folded = folded
+        if stage == 1:
+            self._street_bets = street_bets
+            self._max_bet = max_bet
+            self._my_bet = my_bet
+
+        pools = table_status.get("pool") or []
+        if pools:
+            self._pot = sum(_chip_int(p, 0) for p in pools)
+        elif desktop_total and self._pot == 0:
+            self._pot = desktop_total
+
+    def _seat_status_from_table_snapshot(self, table_status: dict, seat: int) -> dict:
+        for seat_status in table_status.get("seat", []) or []:
+            if _chip_int(seat_status.get("seatid", 0), 0) == seat:
+                return seat_status
+        return {}
+
+    def _restore_hole_cards_from_playing_status(self, playing_status: dict) -> None:
+        if self._api is None or self._hole_cards_count >= 2:
+            return
+        cards = [
+            _card_str(playing_status[k])
+            for k in ("card1", "card2", "card3", "card4")
+            if playing_status.get(k)
+        ]
+        cards = [c for c in cards if c is not None]
+        if len(cards) < 2:
+            return
+        self._hole_cards_count = len(cards)
+        self._api.deal_hole_cards(cards)
+        log.info("[BOT] Reconnect restored %d hole card(s) from EnterRoomRSP.playing_status", len(cards))
+
+    def _action_from_enter_room_playing_status(
+        self,
+        table_status: dict,
+        playing_status: dict,
+    ) -> WireInjectResult:
+        if not playing_status or self._my_seat is None:
+            return None
+        if "action_seatid" not in playing_status:
+            return None
+        action_seat = _chip_int(playing_status.get("action_seatid"), -1)
+        if action_seat != self._my_seat:
+            return None
+
+        my_status = self._seat_status_from_table_snapshot(table_status, self._my_seat)
+        my_action = _chip_int(my_status.get("action_type", 0), 0)
+        if my_status.get("is_allin") or my_action == 17 or my_action in FOLD_ACTION_TYPES:
+            log.info(
+                "[BOT] EnterRoomRSP.playing_status action is hero, but seat is already terminal/all-in; skip restore action"
+            )
+            return None
+        if self._api is None or not self._all_seats:
+            log.warning(
+                "[BOT] EnterRoomRSP.playing_status action is hero, but API/hand snapshot is not ready; wait for ActionNotifyBRC"
+            )
+            return None
+
+        notify_msg = dict(playing_status)
+        notify_msg["seatid"] = self._my_seat
+        log.warning("[BOT] 重连恢复：EnterRoomRSP.playing_status 仍轮到我行动，补一次决策。")
+        restored = self._on_action_notify(notify_msg)
+        action_time = _chip_float(playing_status.get("action_time"), 0.0)
+        if action_time > 0:
+            restored = _clamp_inject_delay(restored, max(0.0, action_time - 1.0))
+        return restored
 
     def _ensure_api(self) -> bool:
         """Create PokerFateAPI once seat and blind values are known. Returns True if ready."""

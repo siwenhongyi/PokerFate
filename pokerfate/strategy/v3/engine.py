@@ -35,6 +35,25 @@ _FRAGILE_FOLD_OVERRIDE_SUBTYPES = {
     "trips_weak_kicker",
     "board_trips_kicker",
 }
+_BET_FOLD_BUDGET_PURPOSES = {
+    "default_stab",
+    "thick_value_bet",
+    "range_cbet",
+    "profit_flop_cbet",
+    "profit_delayed_probe",
+}
+_BET_FOLD_BUDGET_FRAGILE_SUBTYPES = {
+    "pocket_pair",
+    "top_pair_weak_kicker",
+    "board_pair_kicker",
+    "board_pair_hero_pair",
+    "board_pair_pocket_underpair",
+    "board_two_pair",
+    "trips_weak_kicker",
+    "board_trips_kicker",
+}
+_BET_FOLD_BUDGET_MAX_FRAC = 0.33
+_BET_FOLD_BUDGET_SPR = 3.0
 
 
 @dataclass
@@ -658,6 +677,8 @@ class V3Engine:
                 cal = calibrator.calibrate(frac, ctx, p.id)
                 if cal.amount <= 0:
                     continue
+                if self._active_bet_fold_budget_blocks(ctx, p.id, cal.frac):
+                    continue
                 cand = ActionCandidate(
                     label=f"{p.id}_{int(round(cal.frac * 100))}",
                     action="bet",
@@ -681,6 +702,64 @@ class V3Engine:
             return frac
         ev_size = active_value_sizing.choose(ctx, purpose.id, frac)
         return float(ev_size.frac if ev_size is not None else frac)
+
+    @staticmethod
+    def _active_bet_fold_budget_blocks(ctx: DecisionCtx, purpose_id: str, frac: float) -> bool:
+        """Skip active bets that are too large for fragile hands to defend.
+
+        This changes only the active side: if the bet is blocked, the engine can
+        still check or use another value/protection purpose. It does not make a
+        facing-bet fold decision.
+        """
+        if ctx.facing_bet or purpose_id not in _BET_FOLD_BUDGET_PURPOSES:
+            return False
+        if frac <= _BET_FOLD_BUDGET_MAX_FRAC:
+            return False
+        if ctx.hero_bucket not in {"medium", "strong"}:
+            return False
+
+        subtype = ctx.hero_made_subtype or ""
+        stable_strong = (
+            ctx.hero_bucket == "strong"
+            and subtype in {"clean_overpair", "set", "clean_two_pair", "straight_or_flush"}
+            and float(ctx.equity_range or 0.0) >= 0.62
+        )
+        if stable_strong:
+            return False
+
+        fragile = (
+            subtype in _BET_FOLD_BUDGET_FRAGILE_SUBTYPES
+            or ctx.hero_hand_rank == "one_pair"
+        )
+        if not fragile:
+            return False
+
+        pressured_pot = (
+            (ctx.spr > 0 and ctx.spr <= _BET_FOLD_BUDGET_SPR)
+            or ctx.prev_bet_called_count > 0
+            or ctx.prev_bet_raised
+            or ctx.resistance_level >= 0.20
+        )
+        if not pressured_pot:
+            return False
+
+        sig = ctx.board_sig
+        dangerous_board = (
+            bool(sig.flush_possible)
+            or bool(sig.flush_draw)
+            or bool(sig.straight_possible)
+            or bool(sig.straight_draw_heavy)
+            or bool(sig.paired)
+            or sig.wetness >= 0.55
+        )
+        strong_mass = float((ctx.villain_bucket_dist or {}).get("strong", 0.0) or 0.0)
+        nuts = float((ctx.villain_bucket_dist or {}).get("nuts", 0.0) or 0.0)
+        pressure_range = strong_mass + nuts >= 0.45 or nuts >= 0.18
+        poor_continue = (
+            float(ctx.equity_range or 0.0) < 0.58
+            or float(ctx.equity_mc or 0.0) - float(ctx.equity_range or 0.0) >= 0.18
+        )
+        return (dangerous_board or pressure_range) and poor_continue
 
     def _small_pressure_fracs(self, ctx: DecisionCtx) -> list[float]:
         if ctx.facing_bet:

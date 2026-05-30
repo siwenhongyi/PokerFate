@@ -72,6 +72,21 @@ _RIVER_THIN_VALUE_MAX_LOSS = float(
 _RIVER_THIN_VALUE_MAX_NUTS = float(
     _os.environ.get('PF_RIVER_THIN_VALUE_MAX_NUTS', '0.25')
 )
+_RIVER_CHECKED_THIN_MIN_REL_EQ = float(
+    _os.environ.get('PF_RIVER_CHECKED_THIN_MIN_REL_EQ', '0.60')
+)
+_RIVER_CHECKED_THIN_MAX_LOSS = float(
+    _os.environ.get('PF_RIVER_CHECKED_THIN_MAX_LOSS', '0.32')
+)
+_RIVER_CHECKED_THIN_MIN_WIN_GAP = float(
+    _os.environ.get('PF_RIVER_CHECKED_THIN_MIN_WIN_GAP', '0.15')
+)
+_RIVER_CHECKED_THIN_MIN_PAYING = float(
+    _os.environ.get('PF_RIVER_CHECKED_THIN_MIN_PAYING', '0.34')
+)
+_RIVER_CHECKED_THIN_MAX_NUTS = float(
+    _os.environ.get('PF_RIVER_CHECKED_THIN_MAX_NUTS', '0.20')
+)
 _PURE_BLUFF_ENABLED = _os.environ.get('PF_PURE_BLUFF_ENABLED', '1').lower() not in {'0', 'false', 'off', 'no'}
 _PURE_BLUFF_CATCHER_MIN = float(_os.environ.get('PF_PURE_BLUFF_CATCHER_MIN', '0.42'))
 _PURE_BLUFF_FE_MARGIN = float(_os.environ.get('PF_PURE_BLUFF_FE_MARGIN', '0.02'))
@@ -111,11 +126,35 @@ _BLUFF_CONTEXT_PROBE_FLOAT_MIN = 0.50
 _BLUFF_CONTEXT_BARREL_MIN = 0.58
 _BLUFF_CONTEXT_RIVER_MIN = 0.48
 _PROFIT_EXPAND_V1 = _os.environ.get('PF_POSTFLOP_PROFIT_EXPAND_V1', '0') == '1'
+_PROFIT_PAID_VALUE_ENABLED = _os.environ.get(
+    'PF_PROFIT_PAID_VALUE_ENABLED', '1'
+).lower() not in {'0', 'false', 'off', 'no'}
+_CAPPED_BLUFF_EXPAND_ENABLED = _os.environ.get(
+    'PF_CAPPED_BLUFF_EXPAND_ENABLED', '1'
+).lower() not in {'0', 'false', 'off', 'no'}
 _PE_FLOP_MAX_NUTS = float(_os.environ.get('PF_PE_FLOP_MAX_NUTS', '0.22'))
 _PE_FLOP_MAX_STRONG_NUTS = float(_os.environ.get('PF_PE_FLOP_MAX_STRONG_NUTS', '0.55'))
 _PE_TURN_MAX_NUTS = float(_os.environ.get('PF_PE_TURN_MAX_NUTS', '0.18'))
 _PE_TURN_MAX_STRONG_NUTS = float(_os.environ.get('PF_PE_TURN_MAX_STRONG_NUTS', '0.52'))
 _PE_PAID_VALUE_MAX_NUTS = float(_os.environ.get('PF_PE_PAID_VALUE_MAX_NUTS', '0.26'))
+_PE_PAID_VALUE_MIN_PAYING = float(
+    _os.environ.get('PF_PE_PAID_VALUE_MIN_PAYING', '0.34')
+)
+_PE_PAID_VALUE_MIN_DRAW_PRESSURE = float(
+    _os.environ.get('PF_PE_PAID_VALUE_MIN_DRAW_PRESSURE', '0.12')
+)
+_CAPPED_BLUFF_MIN_FOLD = float(_os.environ.get('PF_CAPPED_BLUFF_MIN_FOLD', '0.55'))
+_CAPPED_BLUFF_MIN_SCORE = float(_os.environ.get('PF_CAPPED_BLUFF_MIN_SCORE', '0.50'))
+_CAPPED_BLUFF_MAX_NUTS = float(_os.environ.get('PF_CAPPED_BLUFF_MAX_NUTS', '0.12'))
+_CAPPED_BLUFF_MAX_STRONG_NUTS = float(
+    _os.environ.get('PF_CAPPED_BLUFF_MAX_STRONG_NUTS', '0.45')
+)
+_SAFE_VALUE_EXPAND_MIN_EQ = 0.54
+_SAFE_VALUE_EXPAND_MIN_MC = 0.56
+_SAFE_VALUE_EXPAND_MIN_PAYING = 0.42
+_SAFE_VALUE_EXPAND_MAX_NUTS = 0.14
+_SAFE_VALUE_EXPAND_MAX_LOSS = 0.35
+_SAFE_VALUE_EXPAND_MIN_REL_EQ = 0.55
 
 
 # ---------------------------------------------------------------------------
@@ -564,8 +603,57 @@ def _profit_expand_capped_turn(ctx: DecisionCtx) -> bool:
     return True
 
 
+def _capped_high_fe_bluff_ok(ctx: DecisionCtx, blf, *, turn: bool = False) -> bool:
+    if not _CAPPED_BLUFF_EXPAND_ENABLED:
+        return False
+    if no_fold_equity(ctx):
+        return False
+    if ctx.num_opponents > 2:
+        return False
+    if ctx.spr < (2.5 if turn else 3.0):
+        return False
+    if ctx.board_sig.monotone:
+        return False
+    if ctx.board_sig.wetness >= 0.70 and not ctx.draw.flush_draw:
+        return False
+    if _villain_nuts(ctx) > _CAPPED_BLUFF_MAX_NUTS:
+        return False
+    if _bucket_mass(ctx, 'strong', 'nuts') > _CAPPED_BLUFF_MAX_STRONG_NUTS:
+        return False
+
+    fold_est = ctx.villain_stats.fold_to_cbet
+    sampled_fe = ctx.villain_stats.fold_to_cbet_opps >= 5 and fold_est >= _CAPPED_BLUFF_MIN_FOLD
+    range_fe = blf.score >= _CAPPED_BLUFF_MIN_SCORE and blf.air_weak >= 0.35
+    if not (sampled_fe or range_fe):
+        return False
+
+    if ctx.hero_bucket == 'air':
+        return (
+            ctx.equity_range >= 0.14
+            and (
+                sampled_fe
+                or blf.blocker_score >= 0.25
+                or ctx.board_sig.is_dry
+                or ctx.board_sig.high_card_rank >= 12
+            )
+        )
+    if ctx.hero_bucket == 'weak_draw':
+        return (
+            ctx.equity_range >= 0.18
+            and (
+                ctx.blockers.count() > 0
+                or ctx.draw.overcards
+                or ctx.draw.gutshot
+                or ctx.draw.backdoor_flush
+            )
+        )
+    if ctx.hero_bucket == 'draw':
+        return ctx.equity_range >= 0.24
+    return False
+
+
 def _profit_expand_paid_value_ok(ctx: DecisionCtx) -> bool:
-    if not _PROFIT_EXPAND_V1:
+    if not (_PROFIT_EXPAND_V1 or _PROFIT_PAID_VALUE_ENABLED):
         return False
     if ctx.facing_bet or ctx.street not in ('turn', 'river'):
         return False
@@ -579,6 +667,14 @@ def _profit_expand_paid_value_ok(ctx: DecisionCtx) -> bool:
         return False
     nuts = _villain_nuts(ctx)
     if ctx.hero_bucket != 'nuts' and nuts > _PE_PAID_VALUE_MAX_NUTS:
+        return False
+
+    if (
+        ctx.hero_bucket != 'nuts'
+        and not _sticky_value_target(ctx)
+        and _paying_bucket_mass(ctx) < _PE_PAID_VALUE_MIN_PAYING
+        and _draw_pressure_mass(ctx) < _PE_PAID_VALUE_MIN_DRAW_PRESSURE
+    ):
         return False
 
     hero_wins, _ties, villain_wins, rel_eq = _relative_hero_wins(ctx)
@@ -607,6 +703,38 @@ def _profit_expand_paid_value_ok(ctx: DecisionCtx) -> bool:
             and (_paying_bucket_mass(ctx) >= 0.30 or _draw_pressure_mass(ctx) >= 0.12)
         )
     return ctx.equity_range >= 0.55
+
+
+def _safe_thin_value_expand_ok(ctx: DecisionCtx) -> bool:
+    """Extra value only when worse hands can pay and danger is contained."""
+    if ctx.facing_bet or ctx.street not in ('turn', 'river'):
+        return False
+    if ctx.hero_bucket not in ('medium', 'strong'):
+        return False
+    if ctx.prev_bet_raised:
+        return False
+    if _fragile_underpair_after_resistance(ctx):
+        return False
+    if _dangerous_non_nut_value_spot(ctx):
+        return False
+    nuts = _villain_nuts(ctx)
+    if nuts > _SAFE_VALUE_EXPAND_MAX_NUTS:
+        return False
+    if _paying_bucket_mass(ctx) < _SAFE_VALUE_EXPAND_MIN_PAYING:
+        return False
+
+    hero_wins, _ties, villain_wins, rel_eq = _relative_hero_wins(ctx)
+    if ctx.villain_vs_hero_dist:
+        return (
+            rel_eq >= _SAFE_VALUE_EXPAND_MIN_REL_EQ
+            and hero_wins >= villain_wins + 0.05
+            and villain_wins <= _SAFE_VALUE_EXPAND_MAX_LOSS
+        )
+
+    return (
+        ctx.equity_range >= _SAFE_VALUE_EXPAND_MIN_EQ
+        and ctx.equity_mc >= _SAFE_VALUE_EXPAND_MIN_MC
+    )
 
 
 def _no_fe_value_pressure(ctx: DecisionCtx) -> bool:
@@ -669,6 +797,36 @@ def _river_relative_value_ok(ctx: DecisionCtx) -> bool:
         and rel_eq >= 0.58
         and villain_wins <= _RIVER_THIN_VALUE_MAX_LOSS
         and nuts <= _RIVER_THIN_VALUE_MAX_NUTS
+    )
+
+
+def _river_checked_thin_value_probe(ctx: DecisionCtx) -> bool:
+    if ctx.street != 'river' or ctx.facing_bet or not ctx.villain_vs_hero_dist:
+        return False
+    if ctx.hero_bucket not in ('medium', 'strong'):
+        return False
+    if ctx.hero_bucket == 'medium' and not _safe_medium_protection_hand(ctx):
+        return False
+    if _villain_nuts(ctx) > _RIVER_CHECKED_THIN_MAX_NUTS:
+        return False
+
+    hero_wins, _ties, villain_wins, rel_eq = _relative_hero_wins(ctx)
+    min_rel = _RIVER_CHECKED_THIN_MIN_REL_EQ
+    max_loss = _RIVER_CHECKED_THIN_MAX_LOSS
+    min_gap = _RIVER_CHECKED_THIN_MIN_WIN_GAP
+    if _dangerous_non_nut_value_spot(ctx):
+        min_rel += 0.06
+        max_loss = min(max_loss, 0.25)
+        min_gap += 0.05
+    if rel_eq < min_rel or villain_wins > max_loss:
+        return False
+    if hero_wins < villain_wins + min_gap:
+        return False
+
+    return (
+        _sticky_value_target(ctx)
+        or _paying_bucket_mass(ctx) >= _RIVER_CHECKED_THIN_MIN_PAYING
+        or ctx.villain_stats.vpip >= 0.40
     )
 
 
@@ -1013,6 +1171,10 @@ class ThinValueBet(Purpose):
     def _river_relative_value(ctx: DecisionCtx) -> bool:
         return _river_relative_value_ok(ctx)
 
+    @staticmethod
+    def _river_checked_thin_value(ctx: DecisionCtx) -> bool:
+        return _river_checked_thin_value_probe(ctx)
+
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
         if ctx.facing_bet:
             return TriggerResult(False)
@@ -1022,11 +1184,20 @@ class ThinValueBet(Purpose):
         # 常在 0.45-0.55 区间，0.52 下限把几乎所有多人池 thin value 机会
         # 挡掉。0.48 对应 "赢得 call 后仍微领先" 的 Janda 薄 value 阈值。
         river_relative_value = self._river_relative_value(ctx)
-        if not ((0.48 <= ctx.equity_range <= 0.65) or river_relative_value):
+        river_checked_value = self._river_checked_thin_value(ctx)
+        safe_value_expand = _safe_thin_value_expand_ok(ctx)
+        if not (
+            (0.48 <= ctx.equity_range <= 0.65)
+            or river_relative_value
+            or river_checked_value
+            or safe_value_expand
+        ):
             return TriggerResult(False)
         if ctx.hero_bucket not in ('strong', 'medium'):
             return TriggerResult(False)
-        if ctx.board_sig.wetness >= 0.70 and not river_relative_value:
+        if ctx.board_sig.wetness >= 0.70 and not (
+            river_relative_value or river_checked_value or safe_value_expand
+        ):
             return TriggerResult(False)
         vs = ctx.villain_stats
         # sticky = 对手会用更弱的牌 call 到摊牌。三条连续指标独立证据：
@@ -1039,7 +1210,7 @@ class ThinValueBet(Purpose):
         # 指标），作为"可能 sticky"的先验触发。vpip 是低样本就可得到的指标
         # （server_priors 或 preflop 3-5 手即稳定）。
         sticky_any = _sticky_value_target(ctx)
-        if not sticky_any:
+        if not sticky_any and not river_checked_value and not safe_value_expand:
             return TriggerResult(False)
         # weight 由 river_fold_rate 基底 + sticky 证据累加，最多 0.9（原上限 ~0.8）
         base = (1.0 - vs.river_fold_rate) * 0.8 if vs.river_action_count >= 5 else 0.4
@@ -1052,11 +1223,27 @@ class ThinValueBet(Purpose):
             bonus += min(0.25, (ctx.equity_range - _RIVER_THIN_VALUE_MIN_EQ) * 1.5)
             if _paying_bucket_mass(ctx) < 0.30 and ctx.equity_range < 0.65:
                 return TriggerResult(False)
+        if river_checked_value:
+            bonus += 0.20
+            if _paying_bucket_mass(ctx) < 0.25 and not sticky_any and ctx.equity_range < 0.62:
+                return TriggerResult(False)
+        if safe_value_expand:
+            bonus += 0.18
         bonus += _no_fe_value_weight_add(ctx)
-        cap = 1.10 if _no_fe_value_pressure(ctx) else 0.9
+        cap = 1.10 if (_no_fe_value_pressure(ctx) or safe_value_expand) else 0.9
         return TriggerResult(True, max(0.3, min(cap, base + bonus)))
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
+        if _safe_thin_value_expand_ok(ctx) and not (
+            self._river_relative_value(ctx) or self._river_checked_thin_value(ctx)
+        ):
+            if ctx.street == 'turn':
+                return [(0.45, 0.45), (0.55, 0.45), (0.66, 0.10)]
+            return [(0.40, 0.45), (0.55, 0.45), (0.66, 0.10)]
+        if self._river_checked_thin_value(ctx):
+            if _no_fe_value_pressure(ctx):
+                return [(0.45, 0.45), (0.55, 0.55)]
+            return [(0.33, 0.45), (0.45, 0.40), (0.55, 0.15)]
         if _no_fe_value_pressure(ctx):
             if self._river_relative_value(ctx):
                 return [(0.55, 0.45), (0.66, 0.55)]
@@ -1385,6 +1572,8 @@ class SemiBluff(Purpose):
         w = 0.4 + 0.5 * ctx.equity_range + bucket_delta
         if premium:
             w += 0.10
+            if not low_fe and (blf.score >= 0.50 or ctx.villain_stats.fold_to_cbet >= 0.45):
+                w += 0.15
         if weak:
             w *= 0.70
         if ctx.spr < 3.0:
@@ -1858,32 +2047,36 @@ class DefaultStab(Purpose):
 
 
 # ---------------------------------------------------------------------------
-# 20. profit expansion v1 (default-off)
+# 20. profit expansion v1 + targeted default-on profit branches
 # ---------------------------------------------------------------------------
 
 
 class ProfitFlopCbet(Purpose):
-    """Default-off PFR small c-bet expansion.
+    """PFR small c-bet expansion.
 
-    Scope: heads-up / 3-way PFR pots where the board is not highly connected
-    or monotone and villain's range is not already strong-heavy.  This is a
-    range-realization bet, not a value jam path.
+    Broad expansion remains behind PF_POSTFLOP_PROFIT_EXPAND_V1.  Capped,
+    high-fold-equity bluff nodes are default-on because they are the narrow
+    profit branch we want, not a blanket c-bet frequency increase.
     """
 
     id = 'profit_flop_cbet'
     street_gate = ('flop',)
 
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
-        if not _PROFIT_EXPAND_V1:
-            return TriggerResult(False)
         if ctx.facing_bet or not ctx.is_pfr:
             return TriggerResult(False)
         if ctx.num_opponents > 2 or ctx.spr < 3.0:
             return TriggerResult(False)
-        if not _profit_expand_board_ok(ctx):
+        blf = bluff_context.evaluate(ctx)
+        capped_high_fe = _capped_high_fe_bluff_ok(ctx, blf, turn=False)
+        if not _PROFIT_EXPAND_V1 and not capped_high_fe:
+            return TriggerResult(False)
+        if _PROFIT_EXPAND_V1:
+            if not _profit_expand_board_ok(ctx):
+                return TriggerResult(False)
+        elif ctx.hero_bucket not in ('air', 'weak_draw', 'draw'):
             return TriggerResult(False)
 
-        blf = bluff_context.evaluate(ctx)
         if ctx.hero_bucket in ('air', 'weak_draw'):
             if no_fold_equity(ctx):
                 return TriggerResult(False)
@@ -1895,14 +2088,20 @@ class ProfitFlopCbet(Purpose):
                 or ctx.board_sig.high_card_rank >= 12
             ):
                 return TriggerResult(False)
-            return TriggerResult(True, 0.55 + 0.25 * blf.score)
+            weight = 0.55 + 0.25 * blf.score
+            if capped_high_fe:
+                weight += 0.20
+            return TriggerResult(True, weight)
 
         if ctx.hero_bucket == 'draw':
             if no_fold_equity(ctx) and not _realizable_no_fe_draw(ctx):
                 return TriggerResult(False)
             if ctx.equity_range < 0.22:
                 return TriggerResult(False)
-            return TriggerResult(True, 0.70 + 0.20 * blf.score)
+            weight = 0.70 + 0.20 * blf.score
+            if capped_high_fe:
+                weight += 0.15
+            return TriggerResult(True, weight)
 
         if ctx.hero_bucket == 'medium':
             if ctx.equity_range < 0.35 and not _safe_medium_protection_hand(ctx):
@@ -1925,19 +2124,16 @@ class ProfitFlopCbet(Purpose):
 
 
 class ProfitDelayedProbe(Purpose):
-    """Default-off turn stab after flop checks through.
+    """Turn stab after flop checks through.
 
-    Covers both PFR delayed c-bet and OOP probe after the aggressor checked
-    back, but only against capped ranges and only with either fold equity,
-    blockers/draw equity, or real showdown/value.
+    Broad delayed/probe expansion remains opt-in.  Capped high-FE bluff stabs
+    are default-on and still require fold equity plus blockers/draw support.
     """
 
     id = 'profit_delayed_probe'
     street_gate = ('turn',)
 
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
-        if not _PROFIT_EXPAND_V1:
-            return TriggerResult(False)
         if ctx.facing_bet or not ctx.flop_checked_through:
             return TriggerResult(False)
         delayed_path = ctx.is_pfr
@@ -1946,10 +2142,16 @@ class ProfitDelayedProbe(Purpose):
             return TriggerResult(False)
         if ctx.num_opponents > 2 or ctx.spr < 2.5:
             return TriggerResult(False)
-        if not _profit_expand_capped_turn(ctx):
+        blf = bluff_context.evaluate(ctx)
+        capped_high_fe = _capped_high_fe_bluff_ok(ctx, blf, turn=True)
+        if not _PROFIT_EXPAND_V1 and not capped_high_fe:
+            return TriggerResult(False)
+        if _PROFIT_EXPAND_V1:
+            if not _profit_expand_capped_turn(ctx):
+                return TriggerResult(False)
+        elif ctx.hero_bucket not in ('air', 'weak_draw', 'draw'):
             return TriggerResult(False)
 
-        blf = bluff_context.evaluate(ctx)
         if ctx.hero_bucket in ('air', 'weak_draw'):
             if no_fold_equity(ctx):
                 return TriggerResult(False)
@@ -1957,14 +2159,20 @@ class ProfitDelayedProbe(Purpose):
                 return TriggerResult(False)
             if not (ctx.blockers.count() > 0 or ctx.draw.overcards or ctx.draw.gutshot):
                 return TriggerResult(False)
-            return TriggerResult(True, 0.52 + 0.38 * blf.score)
+            weight = 0.52 + 0.38 * blf.score
+            if capped_high_fe:
+                weight += 0.18
+            return TriggerResult(True, weight)
 
         if ctx.hero_bucket == 'draw':
             if no_fold_equity(ctx) and not _realizable_no_fe_draw(ctx):
                 return TriggerResult(False)
             if ctx.equity_range < 0.28:
                 return TriggerResult(False)
-            return TriggerResult(True, 0.62 + 0.25 * blf.score)
+            weight = 0.62 + 0.25 * blf.score
+            if capped_high_fe:
+                weight += 0.12
+            return TriggerResult(True, weight)
 
         if ctx.hero_bucket == 'medium':
             if ctx.equity_range < 0.38 and not _safe_medium_protection_hand(ctx):
@@ -1992,7 +2200,7 @@ class ProfitDelayedProbe(Purpose):
 
 
 class ProfitPaidValueContinue(Purpose):
-    """Default-off multi-street value continuation after a prior call.
+    """Multi-street value continuation after a prior call.
 
     This purpose does not reduce losing hands.  It only adds a high-priority
     value candidate when villain has already paid a bet and hero still has a
@@ -2021,6 +2229,10 @@ class ProfitPaidValueContinue(Purpose):
         if ctx.street == 'river':
             if ctx.hero_bucket == 'nuts' and sticky:
                 return [(0.75, 0.35), (0.90, 0.45), (1.00, 0.20)]
+            if ctx.hero_bucket == 'medium':
+                if sticky:
+                    return [(0.55, 0.45), (0.66, 0.45), (0.75, 0.10)]
+                return [(0.40, 0.40), (0.55, 0.45), (0.66, 0.15)]
             if sticky:
                 return [(0.66, 0.35), (0.75, 0.45), (0.90, 0.20)]
             return [(0.55, 0.35), (0.66, 0.45), (0.75, 0.20)]
