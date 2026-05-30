@@ -22,7 +22,7 @@ def score(ctx: DecisionCtx, cand: ActionCandidate) -> ScoredCandidate:
     risk = risk_model.assess(ctx, action=action, frac=cand.frac, jammed=cand.jammed, purpose=cand.purpose)
     raw_ev = 0.0
     reason = ""
-    components = {"risk": risk.as_dict()}
+    components = {"risk": risk.as_dict(), "metadata": dict(cand.metadata or {})}
     confidence = 1.0
     if action == "fold":
         raw_ev = 0.0
@@ -68,7 +68,7 @@ def score(ctx: DecisionCtx, cand: ActionCandidate) -> ScoredCandidate:
             frac = cand.frac if cand.frac > 0 else bet / max(pot, 1.0)
             invested = bet
             kind = "bet"
-        rx = counterfactual.reaction_estimate(ctx, frac, kind)
+        rx = counterfactual.reaction_estimate(ctx, frac, kind, purpose=cand.purpose)
         call_ev = rx.eq_call * (pot + extra) - (1.0 - rx.eq_call) * invested
         raise_ev = rx.eq_raise * (pot + 2.0 * invested) - (1.0 - rx.eq_raise) * invested
         if ctx.hero_bucket != "nuts":
@@ -112,6 +112,12 @@ def robust_select(ctx: DecisionCtx, scored: list[ScoredCandidate]) -> tuple[Scor
     passive = next((s for s in ordered if s.action in {"check", "fold"}), None)
     if top.action in {"bet", "raise", "call"} and passive is not None:
         required = max(top.margin, passive.margin, 0.0)
+        meta = top.components.get("metadata") or {}
+        exploit_weight = float(meta.get("exploit_weight", 1.0) or 1.0)
+        if exploit_weight < 1.0:
+            required *= 1.0 + min(1.0, 1.0 - exploit_weight)
+        elif exploit_weight > 1.0:
+            required *= max(0.65, 1.0 - min(1.0, exploit_weight - 1.0) * 0.25)
         if top.action == "call" and ctx.pot_odds <= 0.30:
             required *= 0.35
         if top.ev < passive.ev + required:

@@ -90,7 +90,7 @@ def test_strong_commit_spot_keeps_thick_value_as_top_purpose() -> None:
     assert out.action == 'bet'
     assert out.purpose in ('thick_value_bet', 'range_cbet')
     assert candidate_prob(out, 'default_check') == 0.0
-    assert out.arbitration_mode == 'purpose_mix'
+    assert out.arbitration_mode == 'deterministic'
     assert 'low_spr' in out.leverage_flags
 
 
@@ -213,7 +213,7 @@ def test_fold_override_rescues_marginal_tracker_compressed_equity() -> None:
     out = V3Engine().decide(ctx)
 
     assert out.action == 'call'
-    assert out.purpose == 'call'
+    assert out.purpose == 'fold_override_call'
 
 
 def test_fold_override_rescues_low_spr_commit_spot_when_cheap_edge_is_clear() -> None:
@@ -248,7 +248,7 @@ def test_fold_override_rescues_low_spr_commit_spot_when_cheap_edge_is_clear() ->
     out = V3Engine().decide(ctx)
 
     assert out.action == 'call'
-    assert out.purpose == 'bluff_catch_call'
+    assert out.purpose == 'fold_override_call'
     assert 'call' in out.reason
 
 
@@ -283,7 +283,7 @@ def test_fold_override_rescues_committed_low_spr_when_range_edge_is_clear() -> N
     out = V3Engine().decide(ctx)
 
     assert out.action == 'call'
-    assert out.purpose == 'bluff_catch_call'
+    assert out.purpose == 'fold_override_call'
     assert out.action == 'call'
     assert 'call' in out.reason
 
@@ -320,7 +320,7 @@ def test_fold_override_rescues_cheap_committed_low_spr_call() -> None:
     out = V3Engine().decide(ctx)
 
     assert out.action == 'call'
-    assert out.purpose == 'bluff_catch_call'
+    assert out.purpose == 'fold_override_call'
     assert 'call' in out.reason
 
 
@@ -357,7 +357,7 @@ def test_fold_override_rescues_cheap_low_spr_river_call_with_range_edge() -> Non
     out = V3Engine().decide(ctx)
 
     assert out.action == 'call'
-    assert out.purpose == 'bluff_catch_call'
+    assert out.purpose == 'fold_override_call'
     assert 'call' in out.reason
 
 

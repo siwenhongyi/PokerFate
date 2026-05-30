@@ -37,6 +37,57 @@ def _pot(ctx: DecisionCtx) -> float:
     return max(1.0, float(ctx.pot or 0.0))
 
 
+def _mass(ctx: DecisionCtx, bucket: str) -> float:
+    dist = ctx.villain_bucket_dist or {}
+    return max(0.0, float(dist.get(bucket, 0.0) or 0.0))
+
+
+def _value_opportunity_cap(ctx: DecisionCtx, realization: float) -> float:
+    bucket = str(ctx.hero_bucket or "")
+    if bucket not in {"medium", "strong", "nuts"}:
+        return realization
+
+    spr = float(ctx.spr or 0.0)
+    low_spr = 0.0 < spr <= 1.8
+    pay_mass = (
+        _mass(ctx, "medium")
+        + 0.55 * _mass(ctx, "strong")
+        + 0.35 * _mass(ctx, "draw")
+        + 0.30 * _mass(ctx, "weak_draw")
+    )
+    deny_mass = _mass(ctx, "draw") + _mass(ctx, "weak_draw")
+    value_pressure = (
+        low_spr
+        or pay_mass >= 0.35
+        or deny_mass >= 0.18
+        or int(ctx.prev_bet_called_count or 0) > 0
+        or int(ctx.n_sticky or 0) > 0
+    )
+    if not value_pressure:
+        return realization
+
+    street = str(ctx.street or "")
+    if street == "river":
+        caps = (
+            {"medium": 0.56, "strong": 0.56, "nuts": 0.76}
+            if ctx.is_ip
+            else {"medium": 0.48, "strong": 0.56, "nuts": 0.68}
+        )
+    elif street == "turn":
+        caps = (
+            {"medium": 0.68, "strong": 0.78, "nuts": 0.86}
+            if ctx.is_ip
+            else {"medium": 0.52, "strong": 0.62, "nuts": 0.74}
+        )
+    else:
+        caps = (
+            {"medium": 0.62, "strong": 0.72, "nuts": 0.82}
+            if ctx.is_ip
+            else {"medium": 0.45, "strong": 0.56, "nuts": 0.68}
+        )
+    return min(realization, caps.get(bucket, realization))
+
+
 def assess(ctx: DecisionCtx, *, action: str, frac: float = 0.0, jammed: bool = False, purpose: str = "") -> RiskAssessment:
     tags: list[str] = []
     pot = _pot(ctx)
@@ -99,13 +150,37 @@ def assess(ctx: DecisionCtx, *, action: str, frac: float = 0.0, jammed: bool = F
 
 def check_value(ctx: DecisionCtx) -> float:
     eq, _mode, _conf = __import__("pokerfate.strategy.v3.counterfactual", fromlist=["effective_equity"]).effective_equity(ctx)
-    value = eq * max(0.0, float(ctx.pot or 0.0))
-    if ctx.is_ip:
-        value *= 0.22
+    pot = max(0.0, float(ctx.pot or 0.0))
+    if pot <= 0:
+        return 0.0
+
+    street = str(ctx.street or "")
+    if street == "river":
+        realization = 1.00 if ctx.is_ip else 0.62
+    elif street == "turn":
+        realization = 0.78 if ctx.is_ip else 0.58
     else:
-        value *= 0.12
-    if ctx.hero_bucket in {"strong", "nuts"}:
-        value *= 1.25
-    if ctx.hero_bucket in {"air", "weak"}:
-        value *= 0.40
-    return value
+        realization = 0.70 if ctx.is_ip else 0.48
+
+    bucket_adj = {
+        "nuts": 0.10,
+        "strong": 0.06,
+        "medium": 0.00,
+        "draw": -0.03,
+        "weak_draw": -0.08,
+        "weak": -0.16,
+        "air": -0.22,
+    }.get(ctx.hero_bucket or "", 0.0)
+    realization += bucket_adj
+
+    if ctx.num_opponents > 1:
+        realization -= min(0.18, 0.06 * (ctx.num_opponents - 1))
+    if ctx.board_sig.is_wet and ctx.hero_bucket in {"medium", "strong", "weak_draw", "draw"}:
+        realization -= 0.05
+    if 0 < float(ctx.spr or 0.0) <= 1.5 and ctx.hero_bucket in {"medium", "strong", "nuts"}:
+        realization += 0.06
+
+    realization = _value_opportunity_cap(ctx, realization)
+    lo = 0.20 if ctx.hero_bucket in {"air", "weak", "weak_draw"} else 0.30
+    realization = max(lo, min(1.0, realization))
+    return eq * pot * realization

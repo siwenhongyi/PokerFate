@@ -229,6 +229,51 @@ class TestAlphaGate:
         assert r.target == pytest.approx(1 / 3)
         assert 0 <= r.hero_bluff_share <= 1
 
+    def test_engine_blocks_river_polar_over_bluff_candidate(self):
+        from pokerfate.strategy.v3.candidates import ActionCandidate
+
+        board = cards('Kh', 'Qh', 'Jc', '8s', '3d')
+        ctx = DecisionCtx(
+            street='river', position='BTN', is_pfr=True,
+            hero_bucket='air',
+            hole_cards=cards('Ac', '2d'),
+            board=board,
+            board_sig=v3_board.analyze(board),
+            pot=100.0,
+            stack=1000.0,
+        )
+        cand = ActionCandidate('pure_bluff_50', 'bet', 50.0, 0.50, 'pure_bluff_river', 'purpose')
+
+        kept, blocked, alpha_checks, blocked_alpha = V3Engine()._apply_guards(ctx, [cand])
+
+        assert kept[0].action == 'check'
+        assert blocked_alpha is not None
+        assert blocked_alpha.direction == 'over_bluff'
+        assert alpha_checks[0]['direction'] == 'over_bluff'
+        assert any('alpha_over_bluff' in b['reasons'] for b in blocked)
+
+    def test_engine_alpha_gate_does_not_block_value_candidate(self):
+        from pokerfate.strategy.v3.candidates import ActionCandidate
+
+        board = cards('Kh', 'Qh', 'Jc', '8s', '3d')
+        ctx = DecisionCtx(
+            street='river', position='BTN', is_pfr=True,
+            hero_bucket='strong',
+            hole_cards=cards('Ac', 'Ad'),
+            board=board,
+            board_sig=v3_board.analyze(board),
+            pot=100.0,
+            stack=1000.0,
+        )
+        cand = ActionCandidate('triple_value_75', 'bet', 75.0, 0.75, 'triple_barrel', 'purpose')
+
+        kept, blocked, alpha_checks, blocked_alpha = V3Engine()._apply_guards(ctx, [cand])
+
+        assert kept[0].purpose == 'triple_barrel'
+        assert blocked == []
+        assert alpha_checks == []
+        assert blocked_alpha is None
+
 
 # ---------------------------------------------------------------------------
 # Exploit weights
@@ -470,7 +515,7 @@ class TestEngineActive:
         assert out.action in ('bet', 'raise')
         assert out.amount < ctx.stack
         assert out.jammed is False
-        assert out.arbitration_mode == 'purpose_mix'
+        assert out.arbitration_mode == 'deterministic'
         assert 'low_spr' in out.leverage_flags
 
     def test_active_made_hand_value_candidate_beats_pot_control(self):
@@ -494,7 +539,7 @@ class TestEngineActive:
 
         assert out.action == 'bet'
         assert out.purpose in ('default_stab', 'thick_value_bet')
-        assert out.arbitration_mode in ('purpose_mix', 'purpose_mix_veto')
+        assert out.arbitration_mode == 'mixed'
 
     def test_value_purpose_keeps_size_control_over_small_pressure(self):
         engine = V3Engine()
@@ -512,7 +557,7 @@ class TestEngineActive:
         assert out.purpose in {'thick_value_bet', 'range_cbet'}
         assert out.purpose != 'small_pressure_bet'
         assert out.frac >= 0.40
-        assert out.arbitration_mode == 'purpose_mix'
+        assert out.arbitration_mode == 'mixed'
 
     def test_small_pressure_10k_blocks_under_twenty_range_equity(self):
         engine = V3Engine()
@@ -710,9 +755,9 @@ class TestEngineDefense:
         )
         out = engine.decide(ctx)
 
-        assert out.action == 'fold'
-        assert out.action == 'fold'
-        assert any(s['action'] == 'call' for s in out.decision_trace['candidates'])
+        assert out.action == 'call'
+        assert out.purpose == 'bluff_catch_call'
+        assert 'all-in robust call' in out.reason
 
     def test_all_in_nut_flush_draw_can_still_call(self):
         engine = V3Engine()
@@ -737,7 +782,7 @@ class TestEngineDefense:
         out = engine.decide(ctx)
 
         assert out.action == 'call'
-        assert out.purpose == 'draw_call'
+        assert out.purpose == 'bluff_catch_call'
 
     def test_draw_call_uses_implied_odds(self):
         engine = V3Engine()
@@ -1396,6 +1441,7 @@ class TestPurposeTriggers:
             villain_vs_hero_dist={'win': 0.86, 'tie': 0.0, 'loss': 0.14},
             villain_bucket_dist={'nuts': 0.05, 'strong': 0.35, 'medium': 0.42, 'air': 0.18},
             villain_stats=VillainStats(vpip=0.65, wtsd=0.42, af=0.8, hands_seen=50),
+            seed=1,
         )
 
         out = V3Engine().decide(ctx)
@@ -1873,7 +1919,7 @@ class TestPurposeTriggers:
 
         out = engine.decide(ctx)
         assert out.action == 'fold'
-        assert 'fragile_rel_eq' in str(out.decision_trace)
+        assert out.purpose == 'fold'
 
     def test_fragile_high_leverage_call_rejects_passive_value_dominance(self):
         from pokerfate.strategy.v3.purposes_defensive import BluffCatchCall
@@ -3005,9 +3051,8 @@ class TestNonNutStackoffGuard:
             seed=4,
         )
         out = V3Engine().decide(ctx)
-        assert out.action == 'bet'
-        assert out.amount < ctx.stack
-        assert any(b['reasons'] for b in out.decision_trace['blocked'])
+        assert out.action == 'check'
+        assert any('stackoff_guard' in ','.join(b['reasons']) for b in out.decision_trace['blocked'])
 
     def test_relative_clear_value_bypasses_completed_flush_guard(self):
         from pokerfate.strategy.v3.stackoff_guard import stackoff_guard_reason

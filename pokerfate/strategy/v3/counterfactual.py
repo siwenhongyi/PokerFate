@@ -27,6 +27,23 @@ _HERO_MULT = {
     "strong": 1.24,
     "nuts": 1.62,
 }
+_CBET_LIKE_PURPOSES = {
+    "range_cbet",
+    "polarized_cbet",
+    "profit_flop_cbet",
+    "default_stab",
+    "delayed_cbet",
+    "double_barrel",
+    "triple_barrel",
+}
+_STAB_LIKE_PURPOSES = {
+    "probe_bet",
+    "float_bet",
+    "turn_donk",
+    "profit_delayed_probe",
+    "small_pressure_bet",
+    "semi_bluff",
+}
 
 
 @dataclass(frozen=True)
@@ -126,16 +143,88 @@ def _bayes(observed: float, n: int, prior: float, prior_weight: int = 12) -> flo
     return (observed * n + prior * prior_weight) / max(1, n + prior_weight)
 
 
-def _stat_fold_prior(ctx: DecisionCtx, action_kind: str) -> float:
+def _fold_stat_base(ctx: DecisionCtx, purpose: str) -> tuple[float, str, int]:
     vs = ctx.worst_villain_stats if ctx.num_opponents > 1 and ctx.worst_villain_stats.hands_seen else ctx.villain_stats
     if ctx.street == "river" and (vs.river_action_count >= 5 or vs.river_fold_rate > 0):
-        base = _bayes(vs.river_fold_rate, vs.river_action_count, 0.42, 8)
+        return _bayes(vs.river_fold_rate, vs.river_action_count, 0.42, 8), "river_fold", vs.river_action_count
     elif vs.fold_to_cbet_opps >= 3 or vs.fold_to_cbet > 0:
-        base = _bayes(vs.fold_to_cbet, vs.fold_to_cbet_opps, 0.42, 10)
-    else:
-        base = 0.42
+        prior = 0.42
+        source = "fold_to_cbet"
+        if purpose in _STAB_LIKE_PURPOSES and purpose not in _CBET_LIKE_PURPOSES:
+            prior = 0.38
+            source = "fold_to_cbet_proxy"
+        return _bayes(vs.fold_to_cbet, vs.fold_to_cbet_opps, prior, 10), source, vs.fold_to_cbet_opps
+    if purpose in _STAB_LIKE_PURPOSES:
+        return 0.36, "population_stab", 0
+    return 0.42, "population", 0
+
+
+def _size_fold_multiplier(frac: float) -> float:
+    f = max(0.0, float(frac or 0.0))
+    if f <= 0.30:
+        return 0.78
+    if f <= 0.55:
+        return 0.95
+    if f <= 0.85:
+        return 1.08
+    if f <= 1.20:
+        return 1.16
+    return 1.24
+
+
+def _bucket_fold_propensity(ctx: DecisionCtx, bucket: str, frac: float, purpose: str) -> float:
+    f = max(0.0, float(frac or 0.0))
+    size_lift = 0.00
+    if f > 0.30:
+        size_lift += 0.06
+    if f > 0.55:
+        size_lift += 0.06
+    if f > 0.85:
+        size_lift += 0.05
+    if f > 1.20:
+        size_lift += 0.04
+
+    river = ctx.street == "river"
+    table = {
+        "air": 0.76 + size_lift,
+        "weak": 0.56 + size_lift,
+        "weak_draw": (0.70 if river else 0.48) + size_lift,
+        "draw": (0.62 if river else 0.34) + size_lift * 0.8,
+        "medium": 0.22 + size_lift * 0.7,
+        "strong": 0.06 + size_lift * 0.3,
+        "nuts": 0.01,
+    }
+    if purpose in _STAB_LIKE_PURPOSES and purpose not in _CBET_LIKE_PURPOSES:
+        table["medium"] -= 0.04
+        table["draw"] -= 0.03
+    return clamp(table.get(bucket, 0.36), 0.01, 0.95)
+
+
+def _range_fold_prior(ctx: DecisionCtx, frac: float, purpose: str) -> float | None:
+    dist = ctx.villain_bucket_dist or {}
+    total = sum(max(0.0, float(v or 0.0)) for v in dist.values())
+    if total <= 0:
+        return None
+    folded = 0.0
+    for bucket, weight in dist.items():
+        w = max(0.0, float(weight or 0.0))
+        if w <= 0:
+            continue
+        folded += (w / total) * _bucket_fold_propensity(ctx, str(bucket), frac, purpose)
+    return clamp(folded, 0.03, 0.90)
+
+
+def _stat_fold_prior(ctx: DecisionCtx, action_kind: str, frac: float, purpose: str) -> tuple[float, str, int]:
+    base, source, sample_count = _fold_stat_base(ctx, purpose)
+    base *= _size_fold_multiplier(frac)
+    range_prior = _range_fold_prior(ctx, frac, purpose)
+    if range_prior is not None:
+        range_weight = 0.65 if sample_count <= 0 else max(0.25, 0.65 * (24.0 / (sample_count + 24.0)))
+        base = base * (1.0 - range_weight) + range_prior * range_weight
+        source += "+range"
     if action_kind == "raise":
         base *= 0.55
+        source += "+raise"
     if ctx.num_opponents > 1:
         base *= max(0.55, 1.0 - 0.15 * (ctx.num_opponents - 1))
     if ctx.prev_bet_called_count:
@@ -146,7 +235,17 @@ def _stat_fold_prior(ctx: DecisionCtx, action_kind: str) -> float:
         base *= 1.08
     if ctx.board_sig.is_wet:
         base *= 0.82
-    return clamp(base, 0.03, 0.90)
+    if purpose == "small_pressure_bet":
+        base *= 0.90
+    try:
+        from pokerfate.strategy.v3.exploit import no_fold_equity
+        if no_fold_equity(ctx):
+            cap = 0.16 if ctx.hero_bucket in {"air", "weak", "weak_draw"} else 0.24
+            base = min(base, cap)
+            source += "+no_fe_cap"
+    except Exception:
+        pass
+    return clamp(base, 0.03, 0.90), source, int(sample_count or 0)
 
 
 def _raise_prior(ctx: DecisionCtx, frac: float) -> float:
@@ -221,11 +320,14 @@ def effective_equity(ctx: DecisionCtx, *, conservative: bool = False) -> tuple[f
     return clamp(eq), f"blend:{alpha:.2f}", max(0.2, 1.0 - div)
 
 
-def reaction_estimate(ctx: DecisionCtx, frac: float, action_kind: str = "bet") -> ReactionEstimate:
-    source = "prior"
-    sample_count = 0
-    confidence = 0.35
-    p_fold = _stat_fold_prior(ctx, action_kind)
+def reaction_estimate(
+    ctx: DecisionCtx,
+    frac: float,
+    action_kind: str = "bet",
+    purpose: str = "",
+) -> ReactionEstimate:
+    p_fold, source, sample_count = _stat_fold_prior(ctx, action_kind, frac, purpose)
+    confidence = 0.25 + min(0.55, (sample_count / (sample_count + 24.0)) * 0.65) if sample_count > 0 else 0.25
     p_raise = _raise_prior(ctx, frac)
     p_fold = clamp(p_fold)
     p_raise = clamp(min(p_raise, 1.0 - p_fold))

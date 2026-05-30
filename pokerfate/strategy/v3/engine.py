@@ -1,29 +1,40 @@
-"""V3 postflop EV decision engine."""
+"""V3 purpose-first postflop decision engine."""
 
 from __future__ import annotations
 
 import os
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Tuple
 
-from pokerfate.strategy.v3 import active_value_sizing, calibrator, ev_scorer, hard_guards
+from pokerfate.strategy.v3 import active_value_sizing, alpha_gate, calibrator, exploit, hard_guards
 from pokerfate.strategy.v3.candidates import ActionCandidate
 from pokerfate.strategy.v3.context import DecisionCtx
 from pokerfate.strategy.v3.purpose import Purpose
-from pokerfate.strategy.v3.purposes_active import all_active
+from pokerfate.strategy.v3.purposes_active import all_active, monster_value_plan_kind
 from pokerfate.strategy.v3.purposes_defensive import all_defensive
+from pokerfate.strategy.v3.purposes_passive import all_passive
+from pokerfate.strategy.v3.stackoff_guard import stackoff_guard_reason
 
 
-_ACTIVE_OPPORTUNITY_V1 = os.environ.get("PF_ACTIVE_OPPORTUNITY_V1", "0").lower() in {
-    "1", "true", "yes", "on"
+_VOTE_BASELINE_THRESH = float(os.environ.get("PF_V3_VOTE_BASELINE_THRESH", "0.6"))
+_VOTE_LEVERAGE_TOP_GAP = float(os.environ.get("PF_V3_VOTE_LEVERAGE_TOP_GAP", "0.18"))
+_VOTE_LEVERAGE_MIN_TOP = float(os.environ.get("PF_V3_VOTE_LEVERAGE_MIN_TOP", "0.48"))
+_VOTE_LEVERAGE_DETERMINISTIC = os.environ.get("PF_V3_VOTE_LEVERAGE_DETERMINISTIC", "1").lower() not in {
+    "0", "false", "no", "off"
 }
-_AOC_BASE = 0.12
-_AOC_MAX_POT = 0.12
-_AOC_MIN_EQ = 0.34
 _SMALL_PRESSURE_MED_FRAC = 0.33
 _SMALL_PRESSURE_HIGH_FRAC = 0.50
 _SMALL_PRESSURE_HIGH_EQ = 0.40
+_FRAGILE_FOLD_OVERRIDE_SUBTYPES = {
+    "top_pair_weak_kicker",
+    "board_pair_kicker",
+    "board_pair_hero_pair",
+    "board_pair_pocket_underpair",
+    "board_two_pair",
+    "trips_weak_kicker",
+    "board_trips_kicker",
+}
 
 
 @dataclass
@@ -46,10 +57,13 @@ class DecisionOutput:
 
 
 class V3Engine:
-    """Candidate-generation + EV-scoring postflop decision engine."""
+    """Purpose injection + weighted purpose-vote postflop decision engine."""
 
     def __init__(self) -> None:
-        self.active_purposes = [p for p in all_active() if getattr(p, "default_action", "bet") != "check"]
+        self.active_purposes = [
+            p for p in all_active() + all_passive()
+            if not p.facing_bet and getattr(p, "default_action", "bet") != "fold"
+        ]
         self.defensive_purposes = [p for p in all_defensive()]
 
     def _fresh_seed(self, ctx: DecisionCtx) -> int:
@@ -79,21 +93,128 @@ class V3Engine:
 
     def decide(self, ctx: DecisionCtx) -> DecisionOutput:
         seed = self._fresh_seed(ctx)
+        if ctx.facing_bet and ctx.to_call >= ctx.stack:
+            return self._decide_all_in(ctx, seed)
         raw = self._defensive_candidates(ctx) if ctx.facing_bet else self._active_candidates(ctx)
-        candidates, blocked = self._apply_guards(ctx, raw)
-        scored = [ev_scorer.score(ctx, c) for c in candidates]
-        if ctx.facing_bet:
-            chosen, gap, mode = ev_scorer.robust_select(ctx, scored)
-        else:
-            chosen, gap, mode = self._select_active_purpose_first(ctx, scored)
+        return self._decide_by_vote(ctx, seed, raw)
+
+    def _decide_all_in(self, ctx: DecisionCtx, seed: int) -> DecisionOutput:
+        blended_eq = self._legacy_blended_eq(ctx)
+        flags = self._leverage_flags(ctx) or ["all_in"]
+        if blended_eq >= ctx.pot_odds:
+            return DecisionOutput(
+                action="call",
+                amount=min(ctx.to_call, ctx.stack),
+                purpose="bluff_catch_call",
+                seed=seed,
+                arbitration_mode="deterministic",
+                top_gap=1.0,
+                leverage_flags=flags,
+                reason=(
+                    f"all-in robust call blended_eq={blended_eq:.2f} "
+                    f">= pot_odds={ctx.pot_odds:.2f}"
+                ),
+            )
+        return DecisionOutput(
+            action="fold",
+            amount=0.0,
+            purpose="fold",
+            seed=seed,
+            arbitration_mode="deterministic",
+            top_gap=1.0,
+            leverage_flags=flags,
+            reason=(
+                f"all-in robust fold blended_eq={blended_eq:.2f} "
+                f"< pot_odds={ctx.pot_odds:.2f}"
+            ),
+        )
+
+    def _decide_by_vote(
+        self,
+        ctx: DecisionCtx,
+        seed: int,
+        candidates: list[ActionCandidate],
+    ) -> DecisionOutput:
+        chosen, probs, gap, mode = (
+            self._vote_select_defensive(ctx, candidates)
+            if ctx.facing_bet
+            else self._vote_select_active(ctx, candidates)
+        )
+        if ctx.facing_bet and chosen.action == "fold":
+            override, _override_reason = self._legacy_fold_override(ctx, candidates)
+            if override is not None:
+                chosen = override
+                mode = mode + "_override"
+                gap = max(gap, 0.0)
+        blocked: list[dict[str, Any]] = []
+        alpha_checks: list[dict[str, Any]] = []
+        blocked_alpha = None
+        stackoff_guard = self._selected_stackoff_guard(ctx, chosen)
+        if stackoff_guard:
+            blocked.append({
+                "label": chosen.label,
+                "purpose": chosen.purpose,
+                "reasons": [f"stackoff_guard:{stackoff_guard}"],
+            })
+            if ctx.facing_bet and chosen.action == "raise":
+                chosen = ActionCandidate(
+                    chosen.label,
+                    "call",
+                    min(ctx.to_call, ctx.stack),
+                    0.0,
+                    chosen.purpose,
+                    "fallback",
+                    jammed=ctx.to_call >= ctx.stack,
+                )
+                mode = mode + "_stackoff_call"
+            else:
+                chosen = ActionCandidate(
+                    chosen.label,
+                    "check",
+                    0.0,
+                    0.0,
+                    chosen.purpose,
+                    "fallback",
+                    metadata={"block_reason": f"stackoff_guard {stackoff_guard}"},
+                )
+                mode = mode + "_stackoff_check"
+        chosen_alpha = self._alpha_for_candidate(ctx, chosen)
+        if chosen_alpha is not None and not chosen_alpha.passed and chosen_alpha.direction == "over_bluff":
+            smaller = self._alpha_downsize_candidate(ctx, candidates, chosen)
+            if smaller is not None:
+                chosen = smaller
+                mode = mode + "_alpha_downsize"
+                chosen_alpha = self._alpha_for_candidate(ctx, chosen)
+        if chosen_alpha is not None:
+            summary = self._alpha_summary(chosen_alpha)
+            alpha_checks.append({"label": chosen.label, "purpose": chosen.purpose, **summary})
+            if not chosen_alpha.passed and chosen_alpha.direction == "over_bluff":
+                blocked_alpha = chosen_alpha
+                blocked.append({
+                    "label": chosen.label,
+                    "purpose": chosen.purpose,
+                    "reasons": ["alpha_over_bluff"],
+                    "alpha": summary,
+                })
+                chosen = ActionCandidate(
+                    chosen.label,
+                    "check",
+                    0.0,
+                    0.0,
+                    chosen.purpose,
+                    "fallback",
+                    metadata={"block_reason": "alpha_over_bluff"},
+                )
+                mode = mode + "_alpha"
+                chosen_alpha = None
+        alpha_out = chosen_alpha if chosen_alpha is not None and chosen_alpha.direction != "under_bluff" else blocked_alpha
         trace = {
-            "candidates": [s.summary() for s in sorted(scored, key=lambda x: x.ev, reverse=True)],
+            "candidates": [self._vote_summary(ctx, c) for c in candidates],
             "blocked": blocked,
+            "alpha": alpha_checks,
             "mode": mode,
         }
-        probs = self._candidate_probs(scored)
         flags = self._leverage_flags(ctx)
-        flags = list(dict.fromkeys(flags + list((chosen.components.get("risk") or {}).get("tags") or [])))
         return DecisionOutput(
             action=chosen.action,
             amount=chosen.amount,
@@ -101,201 +222,438 @@ class V3Engine:
             frac=chosen.frac,
             seed=seed,
             candidates=probs,
-            exploit_deltas={},
+            exploit_deltas=self._exploit_deltas(candidates),
             jammed=chosen.jammed,
-            downgraded_to_check=chosen.action == "check" and any(s.action in {"bet", "raise"} for s in scored),
+            downgraded_to_check=(
+                chosen.action in {"check", "fold"}
+                and any(c.action in {"bet", "raise", "call"} and c.action != chosen.action for c in candidates)
+            ),
             arbitration_mode=mode,
             top_gap=gap,
             leverage_flags=flags,
-            reason=self._reason(chosen, mode),
+            reason=self._vote_reason(ctx, chosen, mode),
+            alpha=alpha_out,
             decision_trace=trace,
         )
 
-    def _select_active_purpose_first(self, ctx: DecisionCtx, scored):
-        ordered = sorted(scored, key=lambda s: s.ev, reverse=True)
-        if not ordered:
-            return ev_scorer.robust_select(ctx, scored)
-        passive = next((s for s in ordered if s.action == "check"), None)
-        active = [s for s in ordered if s.action == "bet"]
-        if not active:
-            return ordered[0], 0.0, "purpose_first_no_bet"
-        purpose = self._active_purpose_anchor(ctx, active)
-        pool = [s for s in active if s.purpose == purpose] if purpose else active
-        ev_best = max(pool, key=lambda s: s.ev)
-        chosen = self._sample_scored_size(ctx, purpose, pool) or ev_best
-        if passive is not None:
-            required = max(ev_best.margin, passive.margin, 0.0)
-            opportunity_credit = self._active_opportunity_credit(ctx, ev_best)
-            if ev_best.ev + opportunity_credit < passive.ev + required:
-                return passive, passive.ev - ev_best.ev, "purpose_mix_veto"
-            if opportunity_credit > 0 and ev_best.ev < passive.ev + required:
-                return ev_best, ev_best.ev + opportunity_credit - passive.ev, "purpose_mix_opportunity"
-        gap = chosen.ev - (passive.ev if passive else 0.0)
-        return chosen, gap, "purpose_mix"
+    @staticmethod
+    def _selected_stackoff_guard(ctx: DecisionCtx, cand: ActionCandidate) -> str:
+        if cand.action not in {"bet", "raise"}:
+            return ""
+        will_jam = cand.jammed
+        if cand.action == "raise" and ctx.stack > 0:
+            will_jam = will_jam or cand.amount >= ctx.stack * 0.85
+        return stackoff_guard_reason(ctx, cand.purpose, will_jam=will_jam) or ""
 
-    def _active_opportunity_credit(self, ctx: DecisionCtx, active) -> float:
-        """Small counterweight for value/protection lost when passive check wins.
-
-        This is intentionally only used in the active-vs-check arbitration step.
-        Global check EV still represents equity realization; this credit targets
-        the narrower failure mode where check is reasonable but too conservative.
-        """
-        if not _ACTIVE_OPPORTUNITY_V1 or active is None or active.action != "bet":
-            return 0.0
-        pot = max(1.0, float(ctx.pot or 0.0))
-        eq = max(float(ctx.equity_range or 0.0), float(ctx.equity_mc or 0.0))
-        if eq < _AOC_MIN_EQ:
-            return 0.0
-
-        purpose = str(active.purpose or "")
-        value_purposes = {
-            "value_jam", "overbet_value", "monster_value_plan",
-            "thick_value_bet", "thin_value_bet", "profit_paid_value_continue",
-            "protection_bet", "block_bet", "range_cbet",
-            "delayed_cbet", "turn_donk", "probe_bet", "profit_flop_cbet",
-        }
-        semi_purposes = {"semi_bluff", "small_pressure_bet", "polarized_cbet", "pure_bluff_river"}
-
-        draw_or_blocker = (
-            bool(ctx.draw.flush_draw or ctx.draw.oesd or ctx.draw.gutshot or ctx.draw.overcards)
-            or ctx.blockers.count() > 0
+    def _alpha_downsize_candidate(
+        self,
+        ctx: DecisionCtx,
+        candidates: list[ActionCandidate],
+        chosen: ActionCandidate,
+    ) -> ActionCandidate | None:
+        smaller = sorted(
+            (
+                c for c in candidates
+                if c.action == "bet"
+                and c.purpose == chosen.purpose
+                and 0 < c.frac < chosen.frac
+            ),
+            key=lambda c: c.frac,
         )
-        if purpose in semi_purposes and not draw_or_blocker:
-            return 0.0
-        if purpose not in value_purposes and purpose not in semi_purposes:
-            return 0.0
+        for cand in smaller[:2]:
+            alpha = self._alpha_for_candidate(ctx, cand)
+            if alpha is None or alpha.passed or alpha.direction != "over_bluff":
+                return cand
+        return None
 
-        rel = ctx.villain_vs_hero_dist or {}
-        if rel:
-            win = float(rel.get("win", 0.0) or 0.0)
-            tie = float(rel.get("tie", 0.0) or 0.0)
-            loss = float(rel.get("loss", 0.0) or 0.0)
-            edge_signal = max(0.0, win + 0.5 * tie - loss)
-        else:
-            dist = ctx.villain_bucket_dist or {}
-            worse = (
-                float(dist.get("air", 0.0) or 0.0)
-                + float(dist.get("weak", 0.0) or 0.0)
-                + 0.8 * float(dist.get("weak_draw", 0.0) or 0.0)
-                + 0.7 * float(dist.get("draw", 0.0) or 0.0)
-                + 0.35 * float(dist.get("medium", 0.0) or 0.0)
-            )
-            better = float(dist.get("strong", 0.0) or 0.0) + float(dist.get("nuts", 0.0) or 0.0)
-            if better >= 0.45 and worse < 0.35:
-                return 0.0
-            edge_signal = max(0.0, worse - 0.45 * better)
-            if better < 0.30:
-                edge_signal = max(edge_signal, max(0.0, eq - 0.50) * 1.7)
+    @staticmethod
+    def _exploit_weight(ctx: DecisionCtx, purpose_id: str) -> float:
+        if not purpose_id:
+            return 1.0
+        return max(0.0, float(exploit.weight_for(purpose_id, ctx)))
 
-        bucket_mult = {
-            "nuts": 1.25,
-            "strong": 1.05,
-            "medium": 0.70,
-            "draw": 0.62,
-            "weak_draw": 0.50,
-            "weak": 0.15,
-            "air": 0.0,
-        }.get(ctx.hero_bucket or "", 0.45)
-        if purpose in semi_purposes:
-            if ctx.hero_bucket in {"draw", "weak_draw"} and draw_or_blocker:
-                bucket_mult = max(bucket_mult, 0.80)
+    @staticmethod
+    def _effective_weight(trigger_weight: float, exploit_weight: float) -> float:
+        return max(0.0, float(trigger_weight or 0.0) * float(exploit_weight or 0.0))
+
+    @staticmethod
+    def _exploit_deltas(candidates: list[ActionCandidate]) -> Dict[str, float]:
+        out: Dict[str, float] = {}
+        for cand in candidates:
+            meta = cand.metadata or {}
+            if "exploit_weight" not in meta or not cand.purpose:
+                continue
+            out[cand.purpose] = round(float(meta.get("exploit_weight") or 1.0), 4)
+        return out
+
+    @staticmethod
+    def _alpha_summary(alpha) -> dict[str, Any]:
+        return {
+            "passed": bool(alpha.passed),
+            "direction": str(alpha.direction or "ok"),
+            "target": round(float(alpha.target or 0.0), 4),
+            "hero_bluff_share": round(float(alpha.hero_bluff_share or 0.0), 4),
+        }
+
+    @staticmethod
+    def _alpha_for_candidate(ctx: DecisionCtx, cand: ActionCandidate):
+        if cand.action != "bet" or cand.frac <= 0:
+            return None
+        alpha = alpha_gate.check(ctx, cand.frac, cand.purpose)
+        return alpha if float(alpha.target or 0.0) > 0 else None
+
+    def _vote_select_active(self, ctx: DecisionCtx, candidates: list[ActionCandidate]):
+        bet_groups: dict[str, list[ActionCandidate]] = {}
+        check_by_purpose: dict[str, ActionCandidate] = {}
+        purpose_weights: dict[str, float] = {}
+        for cand in candidates:
+            weight = self._vote_weight(cand)
+            if weight <= 0:
+                continue
+            if cand.action == "bet":
+                bet_groups.setdefault(cand.purpose, []).append(cand)
+            elif cand.action == "check":
+                check_by_purpose[cand.purpose] = cand
             else:
-                bucket_mult *= 0.75
-        if bucket_mult <= 0:
-            return 0.0
+                continue
+            purpose_weights[cand.purpose] = max(purpose_weights.get(cand.purpose, 0.0), weight)
 
-        street_mult = {"flop": 0.70, "turn": 1.00, "river": 1.15}.get(ctx.street or "", 0.8)
-        spr_mult = 1.20 if 0 < float(ctx.spr or 0.0) <= 1.5 else 1.0
-        pos_mult = 1.10 if ctx.is_ip else 0.90
-        multi_mult = max(0.45, 1.0 - 0.20 * max(0, int(ctx.num_opponents or 1) - 1))
-        resistance_mult = max(0.65, 1.0 - 0.15 * max(0, int(ctx.prev_bet_called_count or 0)))
-        if ctx.prev_bet_raised:
-            resistance_mult *= 0.60
-
-        signal = min(1.0, edge_signal)
-        credit = pot * _AOC_BASE * signal * bucket_mult * street_mult * spr_mult * pos_mult * multi_mult * resistance_mult
-        return min(pot * _AOC_MAX_POT, max(0.0, credit))
-
-    def _sample_scored_size(self, ctx: DecisionCtx, purpose_id: str, pool):
-        purpose = next((p for p in self.active_purposes if p.id == purpose_id), None)
-        if purpose is None:
-            return None
-        sizes = list(purpose.sizer(ctx) or [])
-        if not sizes:
-            return None
-        total = sum(max(0.0, float(w or 0.0)) for _frac, w in sizes)
-        if total <= 0:
-            target = float(sizes[0][0] or 0.0)
+        max_alt = max(purpose_weights.values(), default=0.0)
+        if max_alt >= _VOTE_BASELINE_THRESH:
+            check_weight = 0.0
         else:
-            r = ctx.rng.random() * total
-            acc = 0.0
-            target = float(sizes[-1][0] or 0.0)
-            for frac, weight in sizes:
-                acc += max(0.0, float(weight or 0.0))
-                if r <= acc:
-                    target = float(frac or 0.0)
-                    break
-        return min(pool, key=lambda s: abs(float(s.frac or 0.0) - target))
+            check_weight = 0.30 * (1.0 - max_alt / max(_VOTE_BASELINE_THRESH, 1e-9))
 
-    def _active_purpose_anchor(self, ctx: DecisionCtx, active) -> str:
-        by_purpose = {p.id: p for p in self.active_purposes}
-        hits: list[tuple[int, float, str]] = []
-        for purpose_id in {s.purpose for s in active}:
-            purpose = by_purpose.get(purpose_id)
-            if purpose is None:
-                continue
-            tr = purpose.trigger(ctx)
-            if not tr.hit or tr.weight <= 0:
-                continue
-            hits.append((self._purpose_priority(ctx, purpose_id), float(tr.weight), purpose_id))
-        if not hits:
-            return active[0].purpose
-        hits.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        return hits[0][2]
-
-    def _purpose_priority(self, ctx: DecisionCtx, purpose_id: str) -> int:
-        if purpose_id == "small_pressure_bet":
-            return 20 if ctx.hero_bucket in {"air", "weak", "weak_draw", "draw"} else 5
-        if purpose_id in {"value_jam", "overbet_value", "monster_value_plan"}:
-            return 90
-        if purpose_id in {"thick_value_bet", "profit_paid_value_continue"}:
-            return 80
-        if purpose_id in {"protection_bet", "thin_value_bet", "range_cbet", "profit_flop_cbet"}:
-            return 70
-        if purpose_id == "block_bet":
-            return 45
-        return 50
-
-    def _candidate_probs(self, scored) -> List[Tuple[str, float]]:
-        positives = [(s.purpose or s.label, max(0.0, float(s.ev))) for s in scored]
-        total = sum(v for _, v in positives)
-        if total <= 0:
-            n = max(1, len(positives))
-            return [(k, 1.0 / n) for k, _ in positives]
-        return [(k, v / total) for k, v in positives]
-
-    def _reason(self, chosen, mode: str) -> str:
-        parts = [f"{chosen.label}: {chosen.reason}", f"ev={chosen.ev:.1f}", f"raw={chosen.raw_ev:.1f}"]
-        risk = chosen.components.get("risk") or {}
-        if risk.get("tags"):
-            parts.append("risk=" + ",".join(risk.get("tags") or []))
-        if mode == "robust_margin":
-            parts.append("robust_margin")
-        reaction = (chosen.components.get("reaction") or {})
-        if reaction:
-            parts.append(
-                f"pf={reaction.get('p_fold', 0):.2f} pc={reaction.get('p_call', 0):.2f} pr={reaction.get('p_raise', 0):.2f} src={reaction.get('source','')} n={reaction.get('sample_count',0)}"
+        groups = [
+            (purpose, weight)
+            for purpose, weight in purpose_weights.items()
+            if weight > 0 and purpose != "default_check"
+        ]
+        if check_weight > 0:
+            groups.append(("default_check", check_weight))
+        chosen_purpose, probs, gap, mode = self._vote_choose_group(ctx, groups)
+        if not chosen_purpose:
+            return ActionCandidate("default_check", "check", 0.0, 0.0, "default_check", "fallback"), probs, gap, mode
+        if chosen_purpose in check_by_purpose or chosen_purpose == "default_check":
+            check = check_by_purpose.get(chosen_purpose) or ActionCandidate(
+                "default_check", "check", 0.0, 0.0, "default_check", "baseline"
             )
-        return " | ".join(parts)
+            if chosen_purpose == "default_check":
+                meta = dict(check.metadata or {})
+                meta.update({
+                    "trigger_weight": check_weight,
+                    "exploit_weight": 1.0,
+                    "effective_weight": check_weight,
+                })
+                check = replace(check, metadata=meta)
+            return check, probs, gap, mode
+        return self._vote_choose_size(ctx, bet_groups[chosen_purpose]), probs, gap, mode
+
+    def _vote_select_defensive(self, ctx: DecisionCtx, candidates: list[ActionCandidate]):
+        purpose_candidates = [
+            c for c in candidates
+            if c.source == "purpose" and self._vote_weight(c) > 0
+        ]
+        forced = self._force_river_monster_raise(ctx, purpose_candidates)
+        if forced is not None:
+            total = sum(max(0.0, self._vote_weight(c)) for c in purpose_candidates)
+            probs = (
+                [(c.purpose, self._vote_weight(c) / total) for c in purpose_candidates]
+                if total > 0 else []
+            )
+            return forced, probs, 1.0, "deterministic"
+        overbet_jam = next(
+            (
+                c for c in purpose_candidates
+                if c.purpose == "overbet_raise_jam"
+                and c.action == "raise"
+                and self._vote_weight(c) >= 0.0
+            ),
+            None,
+        )
+        if overbet_jam is not None:
+            total = sum(max(0.0, self._vote_weight(c)) for c in purpose_candidates)
+            probs = (
+                [(c.purpose, self._vote_weight(c) / total) for c in purpose_candidates]
+                if total > 0 else []
+            )
+            return overbet_jam, probs, 1.0, "deterministic"
+        groups = [(c.purpose, self._vote_weight(c)) for c in purpose_candidates]
+        chosen_purpose, probs, gap, mode = self._vote_choose_group(ctx, groups)
+        if not chosen_purpose:
+            fold = next((c for c in candidates if c.action == "fold"), None)
+            return fold or ActionCandidate("fold", "fold", 0.0, 0.0, "fold", "fallback"), probs, gap, mode
+        chosen = next(c for c in purpose_candidates if c.purpose == chosen_purpose)
+        return chosen, probs, gap, mode
+
+    def _force_river_monster_raise(
+        self,
+        ctx: DecisionCtx,
+        candidates: list[ActionCandidate],
+    ) -> ActionCandidate | None:
+        if not (
+            ctx.street == "river"
+            and ctx.facing_bet
+            and ctx.is_ip
+            and monster_value_plan_kind(ctx, allow_facing_bet=True)
+        ):
+            return None
+        for purpose_id in ("overbet_raise_jam", "value_raise"):
+            match = next(
+                (
+                    c for c in candidates
+                    if c.purpose == purpose_id and c.action == "raise" and self._vote_weight(c) > 0
+                ),
+                None,
+            )
+            if match is not None:
+                return match
+        return None
+
+    def _legacy_fold_override(self, ctx: DecisionCtx, candidates: list[ActionCandidate]) -> tuple[ActionCandidate | None, str]:
+        if ctx.hero_bucket not in {"medium", "strong", "nuts"}:
+            return None, "bucket"
+        blended_eq = self._legacy_blended_eq(ctx)
+        allowed, reason = self._legacy_fold_override_allowed(ctx, candidates, blended_eq)
+        if not allowed or blended_eq < ctx.pot_odds:
+            return None, reason
+        return ActionCandidate(
+            "fold_override_call",
+            "call",
+            min(ctx.to_call, ctx.stack),
+            0.0,
+            "fold_override_call",
+            "override",
+            jammed=ctx.to_call >= ctx.stack,
+            metadata={"override_reason": reason, "blended_eq": blended_eq},
+        ), reason
+
+    @staticmethod
+    def _legacy_blended_eq(ctx: DecisionCtx) -> float:
+        penalty = 0.10
+        vs = ctx.worst_villain_stats if ctx.worst_villain_stats.hands_seen else ctx.villain_stats
+        stickyish = (
+            ctx.n_sticky >= 1
+            or ctx.max_value_lean >= 1.2
+            or (
+                vs.hands_seen >= 20
+                and vs.af <= 1.0
+                and (vs.wtsd >= 0.32 or vs.fold_to_cbet <= 0.30)
+            )
+        )
+        if stickyish:
+            penalty += 0.10
+        street_order = {"flop": 1, "turn": 2, "river": 3}
+        if (
+            street_order.get(ctx.street, 0) >= 2
+            and ctx.pot > 0
+            and ctx.to_call / max(ctx.pot, 1.0) >= 0.20
+            and ctx.equity_mc - ctx.equity_range >= 0.18
+        ):
+            penalty += 0.15
+        return max(
+            float(ctx.equity_range or 0.0) - float(ctx.equity_uncertainty or 0.0),
+            float(ctx.equity_mc or 0.0) - penalty,
+        )
+
+    def _legacy_fold_override_allowed(
+        self,
+        ctx: DecisionCtx,
+        candidates: list[ActionCandidate],
+        blended_eq: float,
+    ) -> tuple[bool, str]:
+        dist = ctx.villain_bucket_dist or {}
+        nut_prob = float(dist.get("nuts", 0.0) or 0.0)
+        strong_mass = nut_prob + float(dist.get("strong", 0.0) or 0.0)
+        range_edge = float(ctx.equity_range or 0.0) - float(ctx.pot_odds or 0.0)
+        stack_commit = ctx.to_call / ctx.stack if ctx.stack > 0 else 0.0
+        fragile = (ctx.hero_made_subtype or "") in _FRAGILE_FOLD_OVERRIDE_SUBTYPES
+        if fragile and ctx.hero_made_subtype in {"board_pair_kicker", "board_two_pair"} and ctx.street != "river":
+            fragile = False
+        if fragile:
+            fragile_high_leverage = (
+                stack_commit >= 0.25
+                or ctx.pot_odds >= 0.25
+                or ctx.spr <= 1.5
+            )
+            if (
+                fragile_high_leverage
+                and (
+                    strong_mass >= 0.55
+                    or range_edge < 0.08
+                    or blended_eq < ctx.pot_odds + 0.08
+                )
+            ):
+                return False, (
+                    f"fragile {ctx.hero_made_subtype} "
+                    f"edge {range_edge:.2f} strong {strong_mass:.2f}"
+                )
+        cheap_range_call = (
+            ctx.pot_odds <= 0.30
+            and ctx.equity_range >= ctx.pot_odds
+            and range_edge >= 0.08
+        )
+        commit_base = (
+            stack_commit >= 0.35
+            and ctx.street != "river"
+            and 0 < ctx.spr <= 1.00
+            and nut_prob < 0.40
+            and strong_mass < 0.60
+        )
+        standard_commit_call = (
+            commit_base
+            and range_edge >= 0.12
+            and blended_eq >= ctx.pot_odds + 0.12
+        )
+        cheap_commit_call = (
+            commit_base
+            and cheap_range_call
+            and blended_eq >= ctx.pot_odds + 0.08
+        )
+        commit_range_call = standard_commit_call or cheap_commit_call
+
+        if stack_commit >= 0.35 and not commit_range_call:
+            return False, "stack_commit"
+        if 0 < ctx.spr <= 1.00 and not (cheap_range_call or commit_range_call):
+            return False, "low_spr"
+
+        total = sum(max(0.0, self._vote_weight(c)) for c in candidates if c.source == "purpose")
+        if total > 0:
+            fold_prob = sum(
+                max(0.0, self._vote_weight(c))
+                for c in candidates
+                if c.source == "purpose" and c.purpose == "fold"
+            ) / total
+            has_call = any(
+                c.source == "purpose" and c.action == "call" and self._vote_weight(c) > 0
+                for c in candidates
+            )
+            if has_call and fold_prob > 0.80 and range_edge <= 0.15 and not cheap_range_call:
+                return False, "fold_prob"
+
+        if max(0.0, ctx.pot_odds - ctx.equity_range) > 0.03:
+            return False, "range_gap"
+        if ctx.street == "river" and strong_mass >= 0.55 and not cheap_range_call:
+            return False, "river_strong_mass"
+        if blended_eq < ctx.pot_odds:
+            return False, "blended_eq"
+        if cheap_range_call:
+            return True, "cheap_range_call"
+        if commit_range_call:
+            return True, "commit_range_call"
+        return True, "fold_only_extra_margin"
+
+    def _vote_choose_group(self, ctx: DecisionCtx, groups: list[tuple[str, float]]):
+        total = sum(max(0.0, float(weight or 0.0)) for _purpose, weight in groups)
+        if total <= 0:
+            return "", [], 0.0, "mixed"
+        ordered = sorted(groups, key=lambda item: item[1], reverse=True)
+        top_purpose, top_weight = ordered[0]
+        second_weight = ordered[1][1] if len(ordered) > 1 else 0.0
+        top_prob = top_weight / total
+        second_prob = second_weight / total
+        gap = top_prob - second_prob
+        probs = [(purpose, max(0.0, weight) / total) for purpose, weight in groups]
+        flags = self._leverage_flags(ctx)
+        if (
+            _VOTE_LEVERAGE_DETERMINISTIC
+            and flags
+            and top_prob >= _VOTE_LEVERAGE_MIN_TOP
+            and gap >= _VOTE_LEVERAGE_TOP_GAP
+        ):
+            return top_purpose, probs, gap, "deterministic"
+        r = ctx.rng.random() * total
+        acc = 0.0
+        for purpose, weight in groups:
+            acc += max(0.0, float(weight or 0.0))
+            if r <= acc:
+                return purpose, probs, gap, "mixed"
+        return groups[-1][0], probs, gap, "mixed"
+
+    @staticmethod
+    def _vote_weight(cand: ActionCandidate) -> float:
+        meta = cand.metadata or {}
+        if "effective_weight" in meta:
+            return max(0.0, float(meta.get("effective_weight") or 0.0))
+        if "trigger_weight" in meta:
+            return max(0.0, float(meta.get("trigger_weight") or 0.0))
+        return 0.0
+
+    @staticmethod
+    def _vote_choose_size(ctx: DecisionCtx, group: list[ActionCandidate]) -> ActionCandidate:
+        if len(group) <= 1:
+            return group[0]
+        total = sum(max(0.0, float((c.metadata or {}).get("size_weight", 1.0) or 0.0)) for c in group)
+        if total <= 0:
+            return group[0]
+        r = ctx.rng.random() * total
+        acc = 0.0
+        for cand in group:
+            acc += max(0.0, float((cand.metadata or {}).get("size_weight", 1.0) or 0.0))
+            if r <= acc:
+                return cand
+        return group[-1]
+
+    def _vote_summary(self, ctx: DecisionCtx, cand: ActionCandidate) -> dict[str, Any]:
+        weight = self._vote_weight(cand)
+        return {
+            "label": cand.label,
+            "action": cand.action,
+            "amount": round(float(cand.amount), 4),
+            "frac": round(float(cand.frac), 4),
+            "purpose": cand.purpose,
+            "vote_weight": round(weight, 4),
+            "reason": "purpose vote" if weight > 0 else "baseline/fallback",
+            "components": {"metadata": dict(cand.metadata or {})},
+            "blocked_by": [],
+        }
+
+    def _vote_reason(self, ctx: DecisionCtx, chosen: ActionCandidate, mode: str) -> str:
+        weight = self._vote_weight(chosen)
+        if chosen.source == "override":
+            meta = chosen.metadata or {}
+            return (
+                f"{chosen.label}: legacy fold→call override "
+                f"blended_eq={float(meta.get('blended_eq') or 0.0):.2f} "
+                f"reason={meta.get('override_reason', '')} | {mode}"
+            )
+        if chosen.source == "fallback" and (chosen.metadata or {}).get("block_reason"):
+            return f"{chosen.label}: {(chosen.metadata or {}).get('block_reason')} | {mode}"
+        if chosen.source == "baseline":
+            return f"{chosen.label}: baseline selected | {mode}"
+        return f"{chosen.label}: purpose vote weight={weight:.3f} | {mode}"
 
     def _active_candidates(self, ctx: DecisionCtx) -> list[ActionCandidate]:
-        out: list[ActionCandidate] = [ActionCandidate("check", "check", 0.0, 0.0, "check", "baseline")]
+        out: list[ActionCandidate] = []
         seen: set[tuple[str, int, str]] = set()
         for p in self.active_purposes:
-            tr = p.trigger(ctx)
-            if not tr.hit or tr.weight <= 0:
+            if ctx.street not in p.street_gate:
                 continue
-            for frac, _w in p.sizer(ctx) or []:
+            tr = p.trigger(ctx)
+            exploit_weight = self._exploit_weight(ctx, p.id)
+            effective_weight = self._effective_weight(tr.weight, exploit_weight)
+            if not tr.hit or effective_weight <= 0:
+                continue
+            metadata = {
+                "trigger_weight": tr.weight,
+                "exploit_weight": exploit_weight,
+                "effective_weight": effective_weight,
+            }
+            if getattr(p, "default_action", "bet") == "check" or not getattr(p, "emits_bet", True):
+                cand = ActionCandidate(
+                    label=p.id,
+                    action="check",
+                    amount=0.0,
+                    frac=0.0,
+                    purpose=p.id,
+                    source="purpose",
+                    metadata=metadata,
+                )
+                if cand.key not in seen:
+                    seen.add(cand.key)
+                    out.append(cand)
+                continue
+            for frac, size_weight in p.sizer(ctx) or []:
                 frac = self._active_value_frac(ctx, p, float(frac or 0.0))
                 cal = calibrator.calibrate(frac, ctx, p.id)
                 if cal.amount <= 0:
@@ -308,25 +666,14 @@ class V3Engine:
                     purpose=p.id,
                     source="purpose",
                     jammed=cal.jammed,
-                    metadata={"trigger_weight": tr.weight},
+                    metadata={
+                        **metadata,
+                        "size_weight": size_weight,
+                    },
                 )
                 if cand.key not in seen:
                     seen.add(cand.key)
                     out.append(cand)
-        for frac in self._small_pressure_fracs(ctx):
-            cal = calibrator.calibrate(frac, ctx, "small_pressure_bet")
-            cand = ActionCandidate(
-                label=f"small_pressure_{int(round(cal.frac * 100))}",
-                action="bet",
-                amount=cal.amount,
-                frac=cal.frac,
-                purpose="small_pressure_bet",
-                source="pressure",
-                jammed=cal.jammed,
-            )
-            if cal.amount > 0 and cand.key not in seen:
-                seen.add(cand.key)
-                out.append(cand)
         return out
 
     def _active_value_frac(self, ctx: DecisionCtx, purpose: Purpose, frac: float) -> float:
@@ -340,12 +687,22 @@ class V3Engine:
             return []
         if ctx.num_opponents > 3:
             return []
+        exploit_weight = self._exploit_weight(ctx, "small_pressure_bet")
+        if exploit_weight <= 0.35:
+            return []
+        if exploit.no_fold_equity(ctx) and ctx.hero_bucket in {"air", "weak", "weak_draw"}:
+            return []
         if self._small_pressure_blocked_by_live_limits(ctx):
             return []
         if ctx.hero_bucket in {"air", "weak", "weak_draw"}:
+            if exploit_weight < 0.85:
+                return []
             has_semibluff = ctx.draw.flush_draw or ctx.draw.oesd or ctx.draw.gutshot or ctx.draw.backdoor_flush or ctx.blockers.count() > 0
             range_spot = ctx.is_pfr and (ctx.is_ip or ctx.board_sig.is_dry) and max(ctx.equity_range, ctx.equity_mc) >= 0.20
             if not (has_semibluff or range_spot):
+                return []
+            eq_need = 0.24 if ctx.num_opponents <= 1 else 0.32
+            if max(ctx.equity_range, ctx.equity_mc) < eq_need and ctx.blockers.count() <= 0:
                 return []
         if ctx.num_opponents > 1 and ctx.board_sig.is_wet and ctx.hero_bucket in {"air", "weak", "weak_draw"}:
             return []
@@ -403,10 +760,19 @@ class V3Engine:
             out.append(cand)
 
         for p in self.defensive_purposes:
+            if ctx.street not in p.street_gate:
+                continue
             tr = p.trigger(ctx)
-            if not tr.hit or tr.weight <= 0:
+            exploit_weight = self._exploit_weight(ctx, p.id)
+            effective_weight = self._effective_weight(tr.weight, exploit_weight)
+            if not tr.hit or effective_weight <= 0:
                 continue
             action = getattr(p, "default_action", "raise")
+            metadata = {
+                "trigger_weight": tr.weight,
+                "exploit_weight": exploit_weight,
+                "effective_weight": effective_weight,
+            }
             if action == "call":
                 cand = ActionCandidate(
                     label=p.id,
@@ -416,7 +782,7 @@ class V3Engine:
                     purpose=p.id,
                     source="purpose",
                     jammed=ctx.to_call >= ctx.stack,
-                    metadata={"trigger_weight": tr.weight},
+                    metadata=metadata,
                 )
             elif action == "fold":
                 cand = ActionCandidate(
@@ -426,7 +792,7 @@ class V3Engine:
                     frac=0.0,
                     purpose=p.id,
                     source="purpose",
-                    metadata={"trigger_weight": tr.weight},
+                    metadata=metadata,
                 )
             elif action == "raise":
                 amount = self._raise_amount(ctx, p)
@@ -441,7 +807,7 @@ class V3Engine:
                     purpose=p.id,
                     source="purpose",
                     jammed=ctx.stack > 0 and amount >= ctx.stack,
-                    metadata={"trigger_weight": tr.weight},
+                    metadata=metadata,
                 )
             else:
                 continue
@@ -456,15 +822,38 @@ class V3Engine:
         size = max(ctx.to_call * 2.8, ctx.to_call + ctx.pot * 0.75)
         return min(size, ctx.stack)
 
-    def _apply_guards(self, ctx: DecisionCtx, candidates: list[ActionCandidate]) -> tuple[list[ActionCandidate], list[dict[str, Any]]]:
+    def _apply_guards(
+        self,
+        ctx: DecisionCtx,
+        candidates: list[ActionCandidate],
+    ) -> tuple[list[ActionCandidate], list[dict[str, Any]], list[dict[str, Any]], Any]:
         kept: list[ActionCandidate] = []
         blocked: list[dict[str, Any]] = []
+        alpha_checks: list[dict[str, Any]] = []
+        blocked_alpha = None
         for cand in candidates:
             ok, reasons = hard_guards.allowed(ctx, cand)
-            if ok:
-                kept.append(cand)
-            else:
+            if not ok:
                 blocked.append({"label": cand.label, "purpose": cand.purpose, "reasons": reasons})
+                continue
+            alpha = self._alpha_for_candidate(ctx, cand)
+            if alpha is not None:
+                summary = self._alpha_summary(alpha)
+                alpha_checks.append({"label": cand.label, "purpose": cand.purpose, **summary})
+                meta = dict(cand.metadata or {})
+                meta["alpha"] = summary
+                cand = replace(cand, metadata=meta)
+                if not alpha.passed and alpha.direction == "over_bluff":
+                    blocked.append({
+                        "label": cand.label,
+                        "purpose": cand.purpose,
+                        "reasons": ["alpha_over_bluff"],
+                        "alpha": summary,
+                    })
+                    if blocked_alpha is None:
+                        blocked_alpha = alpha
+                    continue
+            kept.append(cand)
         if not kept:
             kept.append(ActionCandidate("fold" if ctx.facing_bet else "check", "fold" if ctx.facing_bet else "check", 0.0, 0.0, "fallback", "fallback"))
-        return kept, blocked
+        return kept, blocked, alpha_checks, blocked_alpha

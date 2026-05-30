@@ -10,14 +10,12 @@ purpose EV gates, not in a river bluff-to-value formula.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os as _os
 
 from pokerfate.strategy.v3 import exploit, hero_range
 from pokerfate.strategy.v3.context import DecisionCtx
 
-_OVER_MULT = float(_os.environ.get('PF_ALPHA_OVER_MULT', '1.30'))
-_UNDER_MULT = float(_os.environ.get('PF_ALPHA_UNDER_MULT', '0.70'))
-_LOOSE_VPIP_MIN = float(_os.environ.get('PF_ALPHA_LOOSE_VPIP_MIN', '0.40'))
+_OVER_MULT = 1.30
+_UNDER_MULT = 0.70
 _POLAR_RIVER_PURPOSES = {
     'pure_bluff_river',
     'triple_barrel',
@@ -60,46 +58,6 @@ def _hero_facing_tag(ctx: DecisionCtx) -> str:
     return 'none'
 
 
-def _purpose_env_suffix(purpose_id: str) -> str:
-    return purpose_id.upper().replace('-', '_')
-
-
-def _env_float(name: str, default: float | None = None) -> float | None:
-    raw = _os.environ.get(name)
-    if raw is None or raw == '':
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        return default
-
-
-def _over_mult(ctx: DecisionCtx, purpose_id: str) -> float:
-    """Return the over-bluff tolerance multiplier for this node.
-
-    Defaults preserve the historical 1.30 gate.  Sweep-only overrides can relax
-    specific purposes or contexts without globally disabling alpha balance.
-    """
-    mult = _env_float(f'PF_ALPHA_OVER_MULT_{_purpose_env_suffix(purpose_id)}', _OVER_MULT)
-
-    if ctx.num_opponents == 1:
-        mult = max(mult, _env_float('PF_ALPHA_OVER_MULT_HU', mult) or mult)
-    if ctx.is_pfr:
-        mult = max(mult, _env_float('PF_ALPHA_OVER_MULT_PFR', mult) or mult)
-
-    vs = ctx.villain_stats
-    if vs.vpip >= _LOOSE_VPIP_MIN:
-        mult = max(mult, _env_float('PF_ALPHA_OVER_MULT_LOOSE', mult) or mult)
-
-    # No-fold-equity opponents should not get a free alpha relaxation unless
-    # explicitly requested in a sweep.
-    nofe = _env_float('PF_ALPHA_OVER_MULT_NOFE', None)
-    if nofe is not None and exploit.no_fold_equity(ctx):
-        mult = nofe
-
-    return mult
-
-
 def _applies(ctx: DecisionCtx, purpose_id: str) -> bool:
     if ctx.street != 'river':
         return False
@@ -139,7 +97,7 @@ def check(ctx: DecisionCtx, frac: float, purpose_id: str) -> AlphaCheckResult:
         return AlphaCheckResult(True, 'ok', target, 0.0)
     share = bluff_mass / total
 
-    if share > target * _over_mult(ctx, purpose_id):
+    if share > target * _OVER_MULT:
         if exploit.over_bluff_harmless(ctx):
             # vs whale/fish/calling_station → 对手不做 range 层 exploit；
             # 放弃平衡换 value 是 +EV。
