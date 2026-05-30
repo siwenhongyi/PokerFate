@@ -126,6 +126,28 @@ log = logging.getLogger("pf_proxy")
 
 from pf_intercept import codec, config
 
+
+class _ExpectedHandshakeNoiseFilter(logging.Filter):
+    """Drop expected WebSocket handshake noise from half-open client retries."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.getMessage() != "opening handshake failed":
+            return True
+        exc_info = record.exc_info
+        if not exc_info or len(exc_info) < 2:
+            return True
+        exc = exc_info[1]
+        if not isinstance(exc, websockets.exceptions.InvalidMessage):
+            return True
+        cause = getattr(exc, "__cause__", None)
+        return not isinstance(cause, EOFError)
+
+
+_handshake_noise_filter = _ExpectedHandshakeNoiseFilter()
+logging.getLogger("websockets").addFilter(_handshake_noise_filter)
+logging.getLogger("websockets.server").addFilter(_handshake_noise_filter)
+
+
 # ── Bot singleton (constructed in main() with CLI options) ────────────────────
 _bot: BotBridge | None = None
 _entertainment: EntertainmentRuntime | None = None
@@ -157,13 +179,37 @@ def _is_active_wss_session(session_id: int) -> bool:
     return session_id == _active_wss_session_id
 
 
-async def _close_ws_quietly(ws, *, code: int = 1001, reason: str = "") -> None:
+def _force_transport_close(ws) -> None:
+    transport = getattr(ws, "transport", None)
+    if transport is not None:
+        try:
+            transport.close()
+        except Exception:
+            log.debug("[WSS] transport.close ignored", exc_info=True)
+
+
+async def _close_ws_quietly(
+    ws,
+    *,
+    code: int = 1001,
+    reason: str = "",
+    timeout: float = 0.75,
+) -> None:
     if ws is None:
         return
     try:
-        await ws.close(code=code, reason=reason)
+        await asyncio.wait_for(ws.close(code=code, reason=reason), timeout=timeout)
+    except asyncio.TimeoutError:
+        log.debug("[WSS] close timeout; force transport close (%s)", reason)
+        _force_transport_close(ws)
     except Exception as exc:
         log.debug("[WSS] close ignored: %s", exc)
+
+
+def _schedule_ws_close(ws, *, code: int = 1001, reason: str = "") -> None:
+    if ws is None:
+        return
+    asyncio.create_task(_close_ws_quietly(ws, code=code, reason=reason))
 
 
 def _peer_is_loopback(peer) -> bool:
@@ -647,12 +693,50 @@ async def _run_wss_pair(client_ws, server_ws, session_id: int) -> None:
         ent_token = _entertainment.attach_session(
             _make_entertainment_sender(server_ws)
         )
+    tasks: dict[asyncio.Task, str] = {}
     try:
+        tasks = {
+            asyncio.create_task(_pipe_c2s(client_ws, server_ws, FrameBuffer())): "c2s",
+            asyncio.create_task(_pipe_s2c(client_ws, server_ws, FrameBuffer(), session_id)): "s2c",
+        }
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            name = tasks.get(task, "?")
+            try:
+                exc = task.exception()
+            except asyncio.CancelledError:
+                exc = None
+            if exc is None:
+                log.info("[WSS] pipe %s stopped first; closing paired sockets", name)
+            else:
+                log.info(
+                    "[WSS] pipe %s failed first (%s: %s); closing paired sockets",
+                    name,
+                    type(exc).__name__,
+                    exc,
+                )
+
         await asyncio.gather(
-            _pipe_c2s(client_ws, server_ws, FrameBuffer()),
-            _pipe_s2c(client_ws, server_ws, FrameBuffer(), session_id),
+            _close_ws_quietly(client_ws, reason="paired pipe stopped"),
+            _close_ws_quietly(server_ws, reason="paired pipe stopped"),
+            return_exceptions=True,
         )
+
+        if pending:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*pending, return_exceptions=True),
+                    timeout=1.5,
+                )
+            except asyncio.TimeoutError:
+                for task in pending:
+                    log.info("[WSS] cancelling stuck pipe %s", tasks.get(task, "?"))
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
     finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
         if _entertainment is not None and ent_token is not None:
             _entertainment.detach_session(ent_token)
 
@@ -672,8 +756,8 @@ async def _handle_wss(client_ws) -> None:
     _active_server_ws = None
     if prev_client_ws is not None or prev_server_ws is not None:
         log.info("[WSS] session #%s supersedes previous WSS session", session_id)
-        await _close_ws_quietly(prev_client_ws, reason="superseded by reconnect")
-        await _close_ws_quietly(prev_server_ws, reason="superseded by reconnect")
+        _schedule_ws_close(prev_client_ws, reason="superseded by reconnect")
+        _schedule_ws_close(prev_server_ws, reason="superseded by reconnect")
 
     req = getattr(client_ws, "request", None)
     path = (req.path if req else None) or "/"
