@@ -1,3 +1,4 @@
+
 local P = class("Level", UiFullView)
 
 function P:onAwake()
@@ -25,15 +26,25 @@ function P:onAwake()
     self.Item1 = self:find("Item1", self.RightList)
     self.Item1:SetActive(false)
 
+    self.PlayButton = self:find("PlayButton", self.Center)
+    self.GreyPlayButton = self:find("GreyPlayButton", self.Center)
+
     bee.addClick(self:find("UpgradeButton", self.LevelInfo), function()
+        if self._params and self._params.from == "table" then
+            UiManager:showToast(_T("LAB_LEVEL_TEXT_18"))
+            return
+        end
         Game:playSound("ui_button_confirm")
         UiManager:showUI("VIP")
         bee.logEvent("level-levelup")
     end)
-    bee.addClick(self:find("PlayButton", self.Center), function()
+    bee.addClick(self.PlayButton, function()
         Game:playSound("ui_button_confirm")
         UiManager:showUI("OmahaBlinds")
         bee.logEvent("level-playnow")
+    end)
+    bee.addClick(self.GreyPlayButton, function()
+        UiManager:showToast(_T("LAB_LEVEL_TEXT_18"))
     end)
     bee.addClick(self:find("InfoButton", self.Center), function()
         Game:playSound("ui_button_confirm")
@@ -82,6 +93,14 @@ function P:onShow()
     self:refreshUI()
 
     self:levelGuide()
+
+    if self._params and self._params.from == "table" then
+        self.GreyPlayButton:SetActive(true)
+        self.PlayButton:SetActive(false)
+    else
+        self.GreyPlayButton:SetActive(false)
+        self.PlayButton:SetActive(true)
+    end
 end
 
 function P:refreshUI()
@@ -167,7 +186,7 @@ end
 
 function P:evt_GetUserLevelInfoRSP(msg)
     if 0 == msg.code then
-        PlayerModel:setTodayHands(msg.hands, msg.sng_hands)
+        PlayerModel:setTodayHands(msg.hands, msg.sng_hands + msg.mtt_hands)
         self:refreshTodayHands()
     end
 end
@@ -178,7 +197,13 @@ end
 
 --引导
 function P:levelGuide()
-    GuideManager:startSystemGuide(8001, 0.65)
+    if bee.isInHome() then
+        GuideManager:startSystemGuide(8001, 0.65)
+    end
+end
+
+function P:evt_hideUiWhenAction(isVisible)
+    self:onUiBlur(not isVisible, "evt_hideUiWhenAction", true)
 end
 
 return P

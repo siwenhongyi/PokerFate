@@ -82,7 +82,19 @@ local function _initData()
 {75,1014,"cute","Emoji101401[emoji101401_cute]",0},
 {76,1014,"rain","Emoji101401[emoji101401_rain]",0},
 {77,1014,"yawn","Emoji101401[emoji101401_yawn]",6},
-{78,1014,"mock","Emoji101401[emoji101401_mock]",6}
+{78,1014,"mock","Emoji101401[emoji101401_mock]",6},
+{79,1015,"eat","Emoji101501[101501_eat]",0},
+{80,1015,"kiss","Emoji101501[101501_kiss]",0},
+{81,1015,"speechless","Emoji101501[101501_speechless]",0},
+{82,1015,"yeah","Emoji101501[101501_yeah]",0},
+{83,1015,"flower","Emoji101501[101501_flower]",6},
+{84,1015,"hang","Emoji101501[101501_hang]",6},
+{85,1016,"arrogant","Emoji101601[101601_arrogant]",0},
+{86,1016,"proud","Emoji101601[101601_proud]",0},
+{87,1016,"peep","Emoji101601[101601_peep]",0},
+{88,1016,"no","Emoji101601[101601_no]",0},
+{89,1016,"money","Emoji101601[101601_money]",6},
+{90,1016,"shy","Emoji101601[101601_shy]",6}
 }
     for _, v in pairs(bodys) do
         local m = {}

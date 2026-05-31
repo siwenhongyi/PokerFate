@@ -74,6 +74,8 @@ local function _initData()
 {"HTTP_SHOP_COST_NOT_ENOUGH",-404,nil,"购买消耗的道具不足","購買所需消耗的道具不足","Insufficient items to purchase","購入に必要な消費アイテムが足りません","구매에 필요한 아이템이 부족합니다"},
 {"HTTP_SHOP_REWARD_CLAIMED",-405,nil,"奖励在限制时间内已领取","獎勵已領取","Reward already claimed","報酬はすでに受け取り済みです","제한 시간 내에 이미 보상을 받았습니다"},
 {"HTTP_SHOP_UNAVAILABLE",-406,nil,"商品已下架！","商品已下架！","Currently unavailable!","商品は販売停止しました","商品已下架！"},
+{"HTTP_SHOP_PAYMENT_METHOD_UNAVAILABLE",-407,nil,"支付方式不可用",nil,nil,nil,nil},
+{"HTTP_SHOP_MONTHLY_CARD_BUY_LIMIT",-408,nil,"月卡购买限制",nil,nil,nil,nil},
 {"HTTP_MAIL_PACK_FULL_ERR",-500,nil,"背包已满","背包已滿","Backpack is full","バッグがいっぱいです","가방이 가득찼습니다"},
 {"HTTP_SEVEN_SIGN_MISS_FULL_ERR",-550,nil,"补签次数已满","補簽次數已用盡","No remaining make-up attempts","補填回数を使い果たしました","보충 출석 횟수가 가득찼습니다"},
 {"HTTP_SEVEN_SIGN_MONTHLY_REWARD_ERR",-551,nil,"月卡签到奖励配置错误","月卡簽到獎勵不存在","Shark Pass check-in reward does not exist","月間パスログイン報酬が存在しません","보충 출석 횟수가 가득찼습니다"},
@@ -102,7 +104,9 @@ local function _initData()
 {"HTTP_ASSOC_USER_PWD_ERR",-757,nil,"关联的账号密码错误","關聯的賬號密碼錯誤","Linked account password is incorrect","関連するアカウントのパスワードが間違っています","关联的账号密码错误"},
 {"HTTP_ASSOC_USER_PWD_INVALID",-758,nil,"设置关联密码格式错误","設置關聯密碼格式錯誤","Link password format error","関連パスワードのフォーマットエラー","设置关联密码格式错误"},
 {"HTTP_ASSOC_USER_FAIL",-759,nil,"关联失败","關聯失敗","Link failed","関連付けに失敗しました","关联失败"},
-{"HTTP_INSUFFICIENT_ITEM",-800,nil,"开启红包道具不足","开启红包道具不足","开启红包道具不足","开启红包道具不足","开启红包道具不足"}
+{"HTTP_INSUFFICIENT_ITEM",-800,nil,"开启红包道具不足","开启红包道具不足","开启红包道具不足","开启红包道具不足","开启红包道具不足"},
+{"HTTP_FOOTBALL_BET_REMOVED",-801,nil,"比赛已下架！","比賽已下架！","This match is no longer available!","この試合の掲載は終了しました！","This match is no longer available!"},
+{"HTTP_FOOTBALL_BET_PAUSE",-802,nil,"下注已锁定！","下注已鎖定！","Betting closed","ベット受付は終了しました！","Betting closed"}
 }
     for _, v in pairs(bodys) do
         local m = {}

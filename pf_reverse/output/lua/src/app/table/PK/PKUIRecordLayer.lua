@@ -2,6 +2,7 @@ local P = class("PKUIRecordLayer", UiBlurBase)
 
 function P:onAwake()
     local Repaly = self:find("Repaly")
+    self.LeftTop = self:find("LeftTop")
     self.TextTitle = self:find("ReplayInfo/TextTitle")
     self.TextTag = self:find("TextTag", Repaly)
     self.ImageTag = self:find("ImageTag", Repaly)
@@ -10,6 +11,8 @@ function P:onAwake()
     self.ButtonRight = self:find("ButtonRight", Repaly)
     self.PauseButton = self:find("PauseButton", Repaly)
     self.PlayButton = self:find("PlayButton", Repaly)
+
+    self.AssistantButton = self:find("AssistantButton", self.LeftTop)
 
     bee.addClick(self:find("ReplayCloseButton"), function()
         bee.enterScene("MainScene", {afterShow = function()
@@ -38,6 +41,12 @@ function P:onAwake()
             self._isPuased = false
             self:refreshButton()
         end
+    end)
+
+    bee.addClick(self.AssistantButton, function()
+        Game:playSound("ui_button_confirm")
+        UiManager:showUI("IngameAssistant", {data = GameModel.data:getRecord().msg})
+        -- bee.logEvent("ingame-replay-assistant", GameModel.data:getGameType(), GameModel.data:getRoomId())
     end)
 end
 
@@ -68,7 +77,7 @@ function P:refreshActor()
         self:showTag()
     end
     if actor then
-        bee.setText(self.TextName, actor.player.name)
+        bee.setTextCut(self.TextName, actor.player.name, 250)
     else
         bee.setText(self.TextName, "")
     end

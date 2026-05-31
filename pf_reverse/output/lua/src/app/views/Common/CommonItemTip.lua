@@ -28,7 +28,7 @@ function P:onShow()
     self._data = self._params.data
 
     local id = self._data.item_id or self._data.id
-    PropItem:create(self.PropItemObj, {id = id, count = 1, icon = self._params.icon}):bindPreview()
+    local prop = PropItem:create(self.PropItemObj, {id = id, count = 1, icon = self._params.icon})
 
     local d = tpl_props[self._data.item_id or self._data.id]
     bee.setText(self.TextName, _T(d.name))
@@ -40,12 +40,17 @@ function P:onShow()
 		bee.setText(self.TextDec, ItemModel:getItemDesText(d.id))
 	end
     if d.preview == 1 then
-    	self.ViewIcon:SetActive(true)
-    	if d.type == GPropKind.MusicLobby or d.type == GPropKind.MusicTable then
-    		bee.setIcon(self.ViewIcon, "backpack_icon_play", "Backpack")
-    	else
-    		bee.setIcon(self.ViewIcon, "backpack_icon_view", "Backpack")
-    	end
+		if d.type == GPropKind.AllInEff and bee.isInGame() then
+    		self.ViewIcon:SetActive(false)	-- 桌内不给预览 allin 效果
+		else
+			self.ViewIcon:SetActive(true)
+			if d.type == GPropKind.MusicLobby or d.type == GPropKind.MusicTable then
+				bee.setIcon(self.ViewIcon, "backpack_icon_play", "Backpack")
+			else
+				bee.setIcon(self.ViewIcon, "backpack_icon_view", "Backpack")
+			end
+			prop:bindPreview()
+		end
     else
     	self.ViewIcon:SetActive(false)
     end
@@ -91,6 +96,12 @@ function P:setContentPos()
 
 	self.Ani_root.transform.position = self.TopArrow.activeSelf and self.TopArrow.transform.position or self.BottomArrow.transform.position
 	self.ItemTips.transform:SetParent(self.Ani_root.transform, true)
+end
+
+function P:evt_hideUiWhenAction(isVisible)
+    if not isVisible then
+    	self:hideUIForce()
+    end
 end
 
 return P

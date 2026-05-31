@@ -15,6 +15,7 @@ local gamePath = {
 	{name = "ActivityManager", cls = require "app.model.activity.ActivityManager"},
 	{name = "ItemModel", cls = require "app.model.ItemModel"},
     {name = "VipModel", cls = require "app.model.VipModel"},
+	{name = "DecorationModel", cls = require "app.model.DecorationModel"},
     {name = "PlayerModel", cls = require "app.model.PlayerModel"},
     {name = "CharacterModel", cls = require "app.model.CharacterModel"},
     {name = "GachaModel", cls = require "app.model.GachaModel"},
@@ -38,7 +39,7 @@ local gamePath = {
     {name = "SignInModel", cls = require "app.model.SignInModel"},
     {name = "ThemeModel", cls = require "app.model.activity.ThemeModel"},
 	{name = "SpringFestivalModel", cls = require "app.model.activity.SpringFestivalModel"},
-	
+	{name = "SoccerGuessingModel", cls = require "app.model.activity.SoccerGuessingModel"}
     
 }
 

@@ -52,6 +52,9 @@ function P:onClickCommit()
 			bee.setText(self.TipsText, _T("LAB_SETTINGS_102"))
 		end
 	end
+	local succCb = function()
+		self:hideUI()
+	end
 	PlayerModel:requestRedeemCodeExchange(inputCode, succCb, errCb, limitCb)
 end
 

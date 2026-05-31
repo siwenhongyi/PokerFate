@@ -84,7 +84,7 @@ function P:onShow()
 
     local View = self.RoomView
     local isMoved = false
-    if SCREEN_WIDTH < w then
+    if SCREEN_WIDTH_SAFE < w then
         View = self:find("Viewport/Content", self.RoomList)
 
         if #self._datas >= 4 then
@@ -136,11 +136,11 @@ function P:onShow()
             View:GetComponent("HorizontalLayoutGroup").enabled = false
             View:GetComponent("ContentSizeFitter").enabled = false
         end)
-        if SCREEN_WIDTH < w then
+        if SCREEN_WIDTH_SAFE < w then
             self._horizontalNormalizedPosition = 1
         end
     else
-        if SCREEN_WIDTH < w then
+        if SCREEN_WIDTH_SAFE < w then
             if not isMoved then
                 if self._curStep >= 4 then
                     self.RoomList:GetComponent("ScrollRect").horizontalNormalizedPosition = 1
@@ -170,6 +170,8 @@ function P:onShow()
         if not bee.isNull(obj) then
             obj.transform:SetParent(self.LeftBottom.transform, false)
             obj.transform.localPosition = bee.v3(-78, -122)
+            local c = ObjectPool:getCls(obj)
+            c:setParams({game_type = self._gameType})
             self.HotSpringAddition = obj
             if View then
                 local pos = View.transform.localPosition

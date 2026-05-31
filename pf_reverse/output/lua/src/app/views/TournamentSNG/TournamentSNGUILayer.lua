@@ -18,6 +18,8 @@ function P:onAwake()
     bee.addClick(self:find("StatsButton", self.RightTop), function()
         UiManager:showUI("TournamentSNGingame")
         Game:playSound("ui_button_confirm")
+
+        bee.logEvent("tournament-sng-detail", GameModel.data.room_info.tour_id)
     end)
 end
 
@@ -32,7 +34,7 @@ end
 
 function P:getBlindText(sb, bb, ante)
     if ante and ante > 0 then
-        return _F("<color=#FFBE18>{p1}({p2})</color>", _N(sb) .. "/" .. _N(bb), _N(ante))
+        return _F("<color=#FFBE18>{p1} ({p2})</color>", _N(sb) .. "/" .. _N(bb), _N(ante))
     else
         return _F("<color=#FFBE18>{p1}</color>", _N(sb) .. "/" .. _N(bb))
     end

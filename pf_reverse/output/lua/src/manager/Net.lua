@@ -429,6 +429,7 @@ function P:getHttpHeader()
 		"Content-Type: application/json; charset=utf-8",
 		"Version: " .. G_UPDATE_VERSION,
 		"Authorization: " .. (PlayerModel and PlayerModel:getAuthorization() or ""),
+		"Lang: " .. (LAN and LAN:getLanguage() or "en"),
 	}, "\n")
 end
 

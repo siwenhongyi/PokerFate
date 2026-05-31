@@ -195,6 +195,7 @@ function P:initInfo2()
             title = 65,
             entry = 90,
         })
+        self.VoiceTree:setTopBottom(5, 5)
         self.VoiceTree:setCreateFunc(function(data)
             if data.__kind == "title" then
                 return CU.GameObject.Instantiate(self.VoiceTitle)

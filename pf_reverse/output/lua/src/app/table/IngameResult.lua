@@ -174,6 +174,11 @@ function P:onShow()
         self.BgReward:SetActive(true)
         local msg = self._params.msg or {}
         local rewards = {{GPropId.FirePower, msg.fire_power}, {GPropId.Exp, msg.win_exp}, {GPropId.Bond, msg.bond_add}}
+        if msg.act_reward_list then
+            for _, v in ipairs(msg.act_reward_list) do
+                table.insert(rewards, {v.item_id, v.item_num})
+            end
+        end
         for _, v in ipairs(rewards) do
             if v[2] and v[2] > 0 then
                 local item = ItemModel:getItem(v[1], true)
@@ -190,7 +195,7 @@ function P:onShow()
     end
 
     self.SaveButton:SetActive(false)
-    if not GuideManager:isInGuide() and GameModel.data then
+    if not GuideManager:isInGuide() and GameModel.data and not GameModel.data:isInObserve() then
         self:once(-1, function()
             if GameModel.data and GameModel.data:isCanSaveRecord() then
                 self.SaveButton:SetActive(true)

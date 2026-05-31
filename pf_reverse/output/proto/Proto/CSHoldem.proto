@@ -24,6 +24,7 @@ message RoundStartBRC
 message RoundOverBRC
 {
     repeated int64 pool = 1; //奖池
+    repeated PoolRD pool_rd = 2; // 底池详情
 }
 
 //发手牌
@@ -70,6 +71,7 @@ message WinningProfit
     optional int32 win_exp = 4[default = 0]; // 胜利者获得的经验
     optional int32 bond_add = 5[default = 0]; // 胜利者获得的好感度
     optional int64 uid = 6;
+    repeated ItemIdUnit act_reward_list = 7; // 获得的活动奖励
 }
 
 message WinnerRSP
@@ -286,7 +288,36 @@ message BlindStatusBRC
 }
 
 //停止涨盲
-// message BlindStopBRC
-// {
-//     optional int32 type = 1; // 1 休息  2 addon
-// }
+message BlindStopBRC
+{
+    optional int32 type = 1; // 1 休息  2 addon
+}
+
+// 局内发表情请求
+message SendEmojiREQ
+{
+    optional int32 id = 1;//表情id
+    optional int64 to_uid = 2;//接收方
+}
+message SendEmojiRSP
+{
+    optional int32 code = 1;
+}
+
+message EmojiBRC
+{
+    optional string name = 1;//发送方名字
+    optional string to_name = 2;//接收方名字
+    optional int32 id = 3;//表情id
+}
+
+message GetEmojiInfoREQ
+{
+
+}
+message GetEmojiInfoRSP
+{
+    optional int32 code = 1;
+	optional string conf = 2;//json格式
+    optional int32 free_num = 3;//剩余免费次数
+}

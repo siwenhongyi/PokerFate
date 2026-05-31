@@ -87,7 +87,9 @@ function P:getTableData(tag)
 	local cacheStr = CU.PlayerPrefs.GetString(tag, "")
 	if cacheStr and cacheStr ~= "" then
 		dataTb = json.decode(cacheStr)
-		self._datas[tag] = dataTb
+		if type(dataTb) == "table" then
+			self._datas[tag] = dataTb
+		end
 	end
 	return dataTb
 end

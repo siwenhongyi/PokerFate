@@ -137,6 +137,7 @@ function P:refreshThemeItem(data, item, isInit, index)
     reddot:SetActive(RedManager:isTag(AchievementModel.reddotLink[data.data.id]))
 
     bee.addClick(item, function()
+        bee.logEvent("achievement-tag-theme", data.data.id)
         Game:playSound("ui_tab_switch_1")
         if self.curThemeType == data.data.id then
             return
@@ -301,10 +302,10 @@ end
 function P:sortCT(a, b)
     if self.curSortState == self.sortState.Up then
         if a.data.status >= 2 and b.data.status >= 2 then
-            if a.data.updated_at == b.data.updated_at then
+            if a.data.created_at == b.data.created_at then
                 return a.cfg.id < b.cfg.id
             else
-                return a.data.updated_at > b.data.updated_at
+                return a.data.created_at > b.data.created_at
             end
         elseif a.data.status == 1 and b.data.status == 1 then
             return a.cfg.id < b.cfg.id
@@ -313,10 +314,10 @@ function P:sortCT(a, b)
         end
     else
         if a.data.status >= 2 and b.data.status >= 2 then
-            if a.data.updated_at == b.data.updated_at then
+            if a.data.created_at == b.data.created_at then
                 return a.cfg.id > b.cfg.id
             else
-                return a.data.updated_at < b.data.updated_at
+                return a.data.created_at < b.data.created_at
             end
         elseif a.data.status == 1 and b.data.status == 1 then
             return a.cfg.id > b.cfg.id
@@ -434,7 +435,7 @@ function P:refreshContentItem(data, item, isInit, index)
         schedule:SetActive(false)
         completed:SetActive(true)
         local time = self:find("Time", completed)
-        local timeDate = TimeHelp:getDateStr(d.updated_at, "/")
+        local timeDate = TimeHelp:getDateTimeStr(d.created_at, "/", ":")
         bee.setText(time, timeDate)
     end
 
@@ -461,6 +462,7 @@ function P:changeState(isOn, state)
     end
 
     self.curSelectState = state
+    bee.logEvent("achievement-tag-filtration", self.curThemeType, self.curSelectState)
     self:refreshContent()
 end
 
@@ -470,6 +472,7 @@ function P:sortEvent()
     self.SortDown:SetActive(self.curSortState == self.sortState.Down)
     self.SortUp:SetActive(self.curSortState == self.sortState.Up)
     self:refreshContent()
+    bee.logEvent("achievement-sort-change", self.curThemeType, self.curSortState)
 end
 
 --筛选
@@ -495,6 +498,7 @@ function P:InitDropDown()
             bee.setText(self.FilterText, str)
             self:refreshContent()
             self:switchDropDown(false)
+            bee.logEvent("achievement-sort-condition", self.curThemeType, self.curFilterState)
         end)
         table.insert(self.dropItems, item)
     end

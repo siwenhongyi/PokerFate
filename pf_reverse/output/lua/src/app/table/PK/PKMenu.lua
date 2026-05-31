@@ -45,14 +45,22 @@ function P:refreshUI()
             self.ByinButton:SetActive(true)
         end
 
-        if GameModel.data:isSNG() then
+        if GameModel.data:isSNG() or GameModel.data:isMTT() then
             self.SwitchButton:SetActive(false)
             self.NextExitButton:SetActive(false)
             self.CancelExitButton:SetActive(false)
+            self.ByinButton:SetActive(false)
         else
             if GameModel.data:isFriendsRoom() then
                 self.SwitchButton:SetActive(false)
             end
+        end
+
+        if GameModel.data:isInObserve() then
+            self.ByinButton:SetActive(false)
+            self.SwitchButton:SetActive(false)
+            self.NextExitButton:SetActive(false)
+            self.CancelExitButton:SetActive(false)
         end
     end
 end
@@ -122,6 +130,8 @@ function P:onBtRules()
     local name = "IngameRules"
     if GameModel.data:isSNG() then
         name = "TournamentSNGRules"
+    elseif GameModel.data:isMTT() then
+        name = "TournamentMTTRules"
     end
     local ui = UiManager:getUI(name)
     if ui and not bee.isNull(ui.node) then
@@ -141,7 +151,7 @@ function P:onBtSwitch()
         GameModel:switchTable(true)
     end
     self:hideUI()
-    bee.logEvent("ingame-menu-switch", GameModel.data:getGameType(), GameModel.data:getRoomId())
+    bee.logEvent("ingame-menu-switch-table", GameModel.data:getGameType(), GameModel.data:getRoomId())
 end
 
 function P:onBtNextExit()

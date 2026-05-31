@@ -38,6 +38,8 @@ function P:ctor()
     self._shopLimitList = {}
     self._newitems = {}
     self._timeLimitItems = {}
+    self._currency_id = 1
+    self._currency_code = tpl_shop_cur_type[self._currency_id].code
 
     P.super.ctor(self)
 end
@@ -129,19 +131,12 @@ function P:getPidData(buy_id, avenue)
     return nil
 end
 
-function P:getPidDataByPid(pid, avenue)
-    if not avenue then
-        avenue = G_CHNL_ID
-    end
+function P:getPidDataByPid(pid)
     local datas = get_tpl_subKey(tpl_shop_pid_list, "pid", pid)
     if not datas then
         return
     end
-    for _, v in ipairs(datas) do
-        if v.avenue_id == avenue and v.pid == pid then
-            return v
-        end
-    end
+    return datas[1]
 end
 
 function P:getShopCfg(shop_type, buy_id)
@@ -189,8 +184,8 @@ function P:pay(data, cb, tag, parentTag)
     args.id = data.id
     args.avenue_id = pidCfg.avenue_id
     args.pid = pidCfg.pid
-    args.cur_id = PlayerModel:getCurId()
-    args.currency = tpl_shop_cur_type[args.cur_id].code
+    args.cur_id = self._currency_id
+    args.currency = self._currency_code
     Net:post("shop/createOrder", args, function(info)
         if info.code ~= 0 then
             self:doPayFail(true)
@@ -238,7 +233,7 @@ function P:PayTest(data)
             self:doPayFail(true)
             return
         end
-        ShopModel:onPaySucces(args, data, 5)
+        ShopModel:onPaySucces(args, data)
         self:doPaySuc()
     end)
 end
@@ -273,8 +268,8 @@ function P:doPaySuc(info)
     -- self:onSave()
 end
 
-function P:onPaySucces(info, data, testId)
-    local pidData = self:getPidDataByPid(info.pid, testId)
+function P:onPaySucces(info, data)
+    local pidData = self:getPidDataByPid(info.pid)
     if pidData and data.item_list then
         local shopCfg = self:getShopCfg(pidData.shop_type, pidData.buy_id)
         -- 购买月卡后刷新
@@ -377,6 +372,8 @@ function P:buyWithProp(shop_type, id, num)
             bee.logEvent("onsen-shop_exchange", id, num)
         elseif shop_type == SHOP_TYPE.gala_season then
             bee.logEvent("galaseason-shop_exchange", id, num)
+        elseif shop_type == SHOP_TYPE.activity_sports then
+            bee.logEvent("activity-theme-shop-exchange", ActivityId.Sports, id, num)
         end
     end)
 end
@@ -409,6 +406,8 @@ function P:requestShopPid()
         end
 
         self._initShopPid = true
+        self._currency_id = data.currency_id
+        self._currency_code = data.currency_code
         self._shopPidList = {}
         for k, v in pairs(data.list) do
             self._shopPidList[v.id] = v
@@ -636,8 +635,11 @@ function P:getShopPackageList(shop_type)
     for k, v in pairs(cfg) do
         if self:getPidData(v.buy_id) then
             if v.shop_type == shop_type and self:productIsCanShow(v) then
-                local buyCount = self:getLimitGoodsBoughtCount(shop_type, v.id)
-                table.insert(list, {cfg = v, soldOut = buyCount == v.limit_count, buyCount = buyCount})
+                if shop_type ~= SHOP_TYPE.activity_gifts or 
+                    (shop_type == SHOP_TYPE.activity_gifts and v.activity == ThemeModel:getConfId()) then
+                    local buyCount = self:getLimitGoodsBoughtCount(shop_type, v.id)
+                    table.insert(list, {cfg = v, soldOut = buyCount == v.limit_count, buyCount = buyCount})
+                end
             end
         end
     end
@@ -671,7 +673,7 @@ end
 function P:getShopExchangeList(shop_type)
     local list = {}
     local ownList = {}
-    for k, v in pairs(SHOP_TYPE_CFG[shop_type] or tpl_shop_exchange) do
+    for k, v in pairs(SHOP_TYPE_CFG[shop_type]) do
         if v.shop_type == shop_type then
             if self:productIsCanShow(v) then
                 local buyCount = self:getLimitGoodsBoughtCount(shop_type, v.id)
@@ -1453,9 +1455,9 @@ function P:getPriText(pidCfg)
     else
         if not self._shopPidList then
             self:initInfo()
-            return tpl_shop_cur_type[PlayerModel:getCurId()].code .. " " .. pidCfg["pri_" .. PlayerModel:getCurId()]
+            return self._currency_code .. " " .. pidCfg["pri_" .. self._currency_id]
         else
-            return tpl_shop_cur_type[PlayerModel:getCurId()].code .. " " .. self._shopPidList[pidCfg.id]["pri_" .. PlayerModel:getCurId()]
+            return self._currency_code .. " " .. self._shopPidList[pidCfg.id]["pri_" .. self._currency_id]
         end
     end
 end
@@ -1503,6 +1505,11 @@ function P:tryAutoPop()
             if activityId == ActivityId.BunnyGirl then
                 if LocalStore:isDailyTagValidCrossDay("activity_packet_push" .. PlayerModel:getUid()) then
                     bee.showUiTask("BunnyGirlPackage", nil, nil, LOBBY_POP_PRIORITY.ActivityGift)
+                    return
+                end
+            elseif activityId == ActivityId.Sports then
+                if LocalStore:isDailyTagValidCrossDay("activity_packet_push" .. PlayerModel:getUid()) then
+                    bee.showUiTask("SportsPackage", nil, nil, LOBBY_POP_PRIORITY.ActivityGift)
                     return
                 end
             end

@@ -10,6 +10,7 @@ local SubView = {
 		[2] = {view = "views/ActivityGalaSeasonCheckin/ActivityGalaSeasonCheckin"},	-- 礼服季
 		[3] = {view = "views/ActivitySchoolCheckin/ActivitySchoolCheckin"},	-- 开学季
 		[4] = {view = "views/ActivityBunnyGirlCheckin/ActivityBunnyGirlCheckin"},	-- 兔女郎
+		[5] = {view = "views/ActivitySportsCheckin/ActivitySportsCheckin"},	-- 运动会
 	}
 }
 

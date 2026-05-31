@@ -3,7 +3,8 @@ local P = class("InformationMainNew", UiFullView)
 function P:onAwake()
     self.AnimRoot = self:find("AnimRoot")
     self.Center = self:find("Center", self.AnimRoot)
-    self.Panel = self:find("Panel", self.Center)
+    self.Right = self:find("Right", self.AnimRoot)
+    self.Panel = self:find("Panel", self.Right)
     self.RightTop = self:find("RightTop", self.AnimRoot)
     self.LeftTop = self:find("LeftTop", self.AnimRoot)
 
@@ -121,9 +122,9 @@ function P:onAwake()
     	bee.logEvent("profile-copy-uid")
     end)
     bee.addClick(self:find("Rank", self.Info1), function()
-        if self._uid == PlayerModel:getUid() and not self._hideOperate then
+        if self._uid == PlayerModel:getUid() then
             Game:playSound("ui_button_confirm")
-            UiManager:showUI("Level")
+            UiManager:showUI("Level", {from = self._fromTable and "table"})
             bee.logEvent("level-profile")
         end
     end)
@@ -265,12 +266,18 @@ function P:onAwake()
         TaskModel:reportTask(TaskType.CheckView, TaskTargetId.InfoInGame)
     end
 
-    self._filter_game_types = {GAME_GAME_TYPE.LOBBY_HOLDEM_GAME, GAME_GAME_TYPE.LOBBY_OMAHA_GAME, GAME_GAME_TYPE.SNG_HOLDEM_GAME, GAME_GAME_TYPE.FRIEND_HOLDEM_GAME}
+    self._filter_game_types = {
+        GAME_GAME_TYPE.LOBBY_HOLDEM_GAME, 
+        GAME_GAME_TYPE.LOBBY_OMAHA_GAME, 
+        GAME_GAME_TYPE.SNG_HOLDEM_GAME, 
+        GAME_GAME_TYPE.MTT_HOLDEM_GAME, 
+        GAME_GAME_TYPE.FRIEND_HOLDEM_GAME}
     self.Filter = UiFilterBox:create(self.GameFilter, self:find("MusicFilteItem", self.GameFilter), self.node)
     self.Filter:setDatas({
         _T("LAB_POKER_GAME"),
         _T("LAB_OMAHA"),
         _T("LAB_SNG"),
+        _T("LAB_TOURNAMENT_MTT"),
         _T("LAB_FRIROOM_001"),
     })
     self.Filter:setSelectFunc(function(idx, data)
@@ -294,9 +301,11 @@ function P:onShow()
     if self._uid == PlayerModel:getUid() then
         bee.setText(self.TextName, PlayerModel:getName())
         bee.setText(self.TextLevel, PlayerModel:getCurLevel())
+        self:find("Rank/icon_rank_01", self.Info1):SetActive(true)
         bee.setIcon(self:find("Rank/icon_rank_01", self.Info1), tpl_level[PlayerModel:getCurLevel()].icon)
         bee.setIcon(self:find("Mask/ImageIcon", self.Avatar), PlayerModel:getAvatarIcon())
         bee.invoke(self.CharacterImage, "setSkinImage", CharacterModel:getUsingRole():getSkinData())
+        bee.invoke(self.CharacterImage, "setSkinRotate")
         self:evt_ChangeTitleRSP()
         self:evt_ChangeFrameRSP()
         bee.setText(self.TextDec, PlayerModel:getDeclaration())
@@ -360,6 +369,7 @@ function P:onShow()
         self.ZoomButton:SetActive(not self._hideOperate)
     else
         bee.setText(self.TextName, "")
+        self:find("Rank/icon_rank_01", self.Info1):SetActive(false)
         self.ImageFrame:SetActive(false)
         self.ImageTitle:SetActive(false)
 
@@ -464,6 +474,7 @@ function P:refreshGameData(data)
     self.InfoUnlock:SetActive(ShopModel:isMonthlyCard())
     self.InfoLock:SetActive(not ShopModel:isMonthlyCard())
 
+    self._game_type = data.game_type
     self:removeAllChildren(self.InfoView)
     -- bee.setText(self.TextGameType, GF.getGameTypeName(data.game_type, true))
     if data.game_type == GAME_GAME_TYPE.LOBBY_HOLDEM_GAME or data.game_type == GAME_GAME_TYPE.LOBBY_OMAHA_GAME or data.game_type == GAME_GAME_TYPE.LOBBY_HOLDEM_ALLIN then
@@ -504,8 +515,34 @@ function P:refreshGameData(data)
         self.MaxWinCardtype:SetActive(false)
 
         self.Trend:SetActive(true)
+        self:find("SNG", self.Trend):SetActive(true)
+        self:find("MTT", self.Trend):SetActive(false)
         self:refreshTrend()
-        Net:post("/player/sngRecord", {player_uid = self._uid}, function(resp)
+        Net:post("/player/tourRecord", {player_uid = self._uid, game_type = data.game_type}, function(resp)
+            if not bee.isNull(self.node) and 0 == resp.code then
+                self._sng_list = resp.list
+                self:refreshTrend()
+            end
+        end)
+    elseif GF.isMTT(data.game_type) then
+        self:_addInfoItem(_T("LAB_INFO_070"), data.tour_round)
+        self:_addInfoItem(_T("LAB_INFO_071"), data.tour_win_round)
+        self:_addInfoItem(_T("LAB_INFO_051"), _N(data.tour_max_profit))
+        self:_addInfoItem(_T("LAB_INFO_052"), _N(data.tour_profit))
+        self.ItemGameNum:SetActive(true)
+        self:find("information_icon_title_01", self.ItemGameNum):SetActive(false)
+        self:find("information_icon_title_02", self.ItemGameNum):SetActive(true)
+        self.InfoView.transform.localPosition = self.InfoViewPos
+
+        bee.setText(self.TextGameNum, data.champion_points)
+
+        self.MaxWinCardtype:SetActive(false)
+
+        self.Trend:SetActive(true)
+        self:find("SNG", self.Trend):SetActive(false)
+        self:find("MTT", self.Trend):SetActive(true)
+        self:refreshTrend()
+        Net:post("/player/tourRecord", {player_uid = self._uid, game_type = data.game_type}, function(resp)
             if not bee.isNull(self.node) and 0 == resp.code then
                 self._sng_list = resp.list
                 self:refreshTrend()
@@ -577,7 +614,8 @@ function P:refreshCardType(data, item)
 end
 
 function P:refreshTrend()
-    bee.setText(self:find("Session/TextCount", self.Trend), _F("LAB_INFO_066", self._sng_count))
+    local text = GF.isSNG(self._game_type) and "LAB_INFO_066" or "LAB_INFO_069"
+    bee.setText(self:find("Session/TextCount", self.Trend), _F(text, self._sng_count))
     self:find("Session/common_slider_02_button_plus", self.Trend):SetActive(self._sng_count_index < #self._sng_count_list)
     self:find("Session/common_slider_02_button_minus", self.Trend):SetActive(self._sng_count_index > 1)
 
@@ -681,6 +719,7 @@ function P:evt_GetOtherDetailInfoRSP(msg)
     if msg.brief.uid == self._uid then
         bee.setText(self.TextName, msg.brief.name)
         bee.setText(self.TextLevel, msg.brief.level)
+        self:find("Rank/icon_rank_01", self.Info1):SetActive(true)
         bee.setIcon(self:find("Rank/icon_rank_01", self.Info1), tpl_level[msg.brief.level].icon)
         bee.setIcon(self:find("Mask/ImageIcon", self.Avatar), PlayerModel:getAvatarIcon(msg.brief.avatar))
         GF.setTitleImage(self.ImageTitle, msg.brief.title)
@@ -699,6 +738,7 @@ function P:evt_GetOtherDetailInfoRSP(msg)
         if skin then
             self.CharacterImage:SetActive(true)
             bee.invoke(self.CharacterImage, "setSkinImage", skin)
+            bee.invoke(self.CharacterImage, "setSkinRotate")
         end
 
         bee.removeAllClick(self.CertificationIcon)
@@ -766,8 +806,12 @@ function P:evt_SetBlockChatRSP(msg)
     end
 end
 
-function P:evt_updateScheme(msg)
+function P:evt_updateScheme()
     bee.invoke(self.CharacterImage, "setSkinImage", CharacterModel:getUsingRole():getSkinData())
+    bee.invoke(self.CharacterImage, "setSkinRotate")
+    self:evt_ChangeAvatarRSP()
+    self:evt_ChangeFrameRSP()
+    self:evt_ChangeTitleRSP()
 end
 
 function P:evt_SwitchRoleSkinRSP(msg)
@@ -830,6 +874,13 @@ function P:infoGuide()
     if bee.isInHome() then
         GuideManager:startSystemGuide(9001, 0.65)
     end
+end
+
+function P:evt_uiBlur(flag, name)
+    if self._fromTable and name == "Level" then
+        return
+    end
+    self:onUiBlur(flag, name)
 end
 
 return P

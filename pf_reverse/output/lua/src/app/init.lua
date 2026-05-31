@@ -54,7 +54,9 @@ if not G_RUN_IN_JOB then
     GameABTestManager:init()
     
     require("app.mgr.MobileNotificationsManager")
-    MobileNotificationsManager:init()
+    if not bee.isPc then
+        MobileNotificationsManager:init()
+    end
 end
 
 
@@ -415,6 +417,6 @@ end
 VibrateManager:init()
 math.randomseed(os.time())
 
-if bee.isPc then
+if LocalStore:getIntegerForKey("pf_vsyncCount", 1) == 0 then
     CS.Utils.SetvSyncCount(0)
 end

@@ -6,7 +6,7 @@ function net:RoleListRSP(msg)
     -- CharacterModel.using_role_id = msg.using_role_id
     CharacterModel:setOwnedSkinIds(msg.owned_skin_ids)
     -- 角色数据返回后再请求装饰方案
-    PlayerModel:requestDecorationScheme()
+    DecorationModel:requestDecorationScheme()
 
     bee.emit("evt_refreshLobbyRole")
 end

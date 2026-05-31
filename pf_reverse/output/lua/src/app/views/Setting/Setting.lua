@@ -258,6 +258,17 @@ function P:initTabGeneral()
             end
         end)
     end
+    self.vSyncCountSwitch = self:find("panel1/Switch", GeneralItem3)
+    self.vsyncCount = LocalStore:getIntegerForKey("pf_vsyncCount", 1)
+    bee.setCheck(self.vSyncCountSwitch, nil, self.vsyncCount ~= 0)
+    bee.onCheck(self.vSyncCountSwitch, function(isOn)
+        self.vsyncCount = isOn and 1 or 0
+        
+        LocalStore:setIntegerForKey("pf_vsyncCount", self.vsyncCount)
+        Game:playSound("ui_button_disabled")
+        bee.logEvent("settings-vsync", isOn and 1 or 2)
+        CS.Utils.SetvSyncCount(self.vsyncCount)
+    end)
 
     self.GeneralItem4 = self:find("GeneralItem04", Content)
     self.Filter = self:find("Filter", self.GeneralItem4)
@@ -876,7 +887,7 @@ function P:onHide()
             val = self._bet_steps[v]
             s[#s + 1] = string.format("%.2f", val[1] / (val[2] or 1))
         end
-        bee.logEvent("ingame-menu-setting-custom-betting", GameModel.data:getGameType(), GameModel.data:getRoomId(), 1, table.concat(s, ","))
+        bee.logEvent("ingame-menu-setting-custom-betting", GameModel.data:getGameType(), GameModel.data:getRoomId(), 1, self._curRaiseKind, table.concat(s, ","))
     end
     if self._isSetRaises then
         local bets = SettingModel:getRaisePkValues(self._gameType, nil, self._curRaiseKind)
@@ -890,7 +901,7 @@ function P:onHide()
                 s[#s + 1] = tostring(val)
             end
         end
-        bee.logEvent("ingame-menu-setting-custom-betting", GameModel.data:getGameType(), GameModel.data:getRoomId(), 2, table.concat(s, ","))
+        bee.logEvent("ingame-menu-setting-custom-betting", GameModel.data:getGameType(), GameModel.data:getRoomId(), 2, self._curRaiseKind, table.concat(s, ","))
     end
 end
 

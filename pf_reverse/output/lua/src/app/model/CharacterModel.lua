@@ -389,34 +389,38 @@ function P:getCurRole()
     return self._roleMap[self.using_role_id]
 end
 
-function P:changeUsingRole(roleId)
-    if roleId == self.using_role_id then
-        return
-    end
-    local schemeInfo = PlayerModel:getCurScheme()
-    local skin_id = self:getRole(roleId):getSkinData().id
-    local property_list = {}
-    property_list[1] = PlayerModel.CharacterDefaultPosX * 10
-    property_list[2] = PlayerModel.CharacterDefaultPosY * 10
-    property_list[3] = PlayerModel.CharacterDefaultPosSize * 100
-    property_list[4] = schemeInfo.property_list[4]
-    PlayerModel:requestSaveDecorationScheme(schemeInfo.scheme_id, skin_id, schemeInfo.lobby_scene_id, schemeInfo.lobby_bgm_list, property_list, true)
-end
+-- function P:changeUsingRole(roleId)
+--     if roleId == self.using_role_id then
+--         return
+--     end
+--     local schemeInfo = DecorationModel:getCurScheme()
+--     local skin_id = self:getRole(roleId):getSkinData().id
+--     local property_list = {}
+--     property_list[1] = PlayerModel.CharacterDefaultPosX * 10
+--     property_list[2] = PlayerModel.CharacterDefaultPosY * 10
+--     property_list[3] = PlayerModel.CharacterDefaultPosSize * 100
+--     property_list[4] = schemeInfo.property_list[4]
+--     property_list[5] = schemeInfo.property_list[5]
+--     DecorationModel:requestSaveDecorationScheme(
+--         schemeInfo.scheme_id, skin_id, schemeInfo.lobby_scene_id, schemeInfo.lobby_bgm_list, schemeInfo.avatar, schemeInfo.frame, schemeInfo.title, property_list, true)
+-- end
 
-function P:changeUsingSkin(skinId)
-    local skinCfg = tpl_character_skin[skinId]
-    local schemeInfo = PlayerModel:getCurScheme()
-    local property_list = schemeInfo.property_list
-    if skinCfg.role ~= self:getUsingRoleId() then
-        property_list[1] = PlayerModel.CharacterDefaultPosX * 10
-        property_list[2] = PlayerModel.CharacterDefaultPosY * 10
-        property_list[3] = PlayerModel.CharacterDefaultPosSize * 100
-    end
-    PlayerModel:requestSaveDecorationScheme(schemeInfo.scheme_id, skinId, schemeInfo.lobby_scene_id, schemeInfo.lobby_bgm_list, schemeInfo.property_list, true)
-end
+-- function P:changeUsingSkin(skinId)
+--     local skinCfg = tpl_character_skin[skinId]
+--     local schemeInfo = DecorationModel:getCurScheme()
+--     local property_list = schemeInfo.property_list
+--     if skinCfg.role ~= self:getUsingRoleId() then
+--         property_list[1] = PlayerModel.CharacterDefaultPosX * 10
+--         property_list[2] = PlayerModel.CharacterDefaultPosY * 10
+--         property_list[3] = PlayerModel.CharacterDefaultPosSize * 100
+--         property_list[5] = 0
+--     end
+--     DecorationModel:requestSaveDecorationScheme(
+--         schemeInfo.scheme_id, skinId, schemeInfo.lobby_scene_id, schemeInfo.lobby_bgm_list, schemeInfo.avatar, schemeInfo.frame, schemeInfo.title, schemeInfo.property_list, true)
+-- end
 
 function P:updateUsingRole()
-    local schemeInfo = PlayerModel:getCurScheme()
+    local schemeInfo = DecorationModel:getCurScheme()
     if schemeInfo then
         local skinCfg = tpl_character_skin[schemeInfo.skin_id]
         local r = self:getRole(skinCfg.role)
@@ -443,7 +447,7 @@ function P:getUsingRoleId()
 end
 
 function P:getUsingRole()
-    return self._roleMap[self.using_role_id]
+    return self._roleMap[self:getUsingRoleId()]
 end
 
 function P:setRoles(roles)
@@ -490,9 +494,16 @@ function P:addRole(role)
 end
 
 function P:sortRoles(datas)
+    for _, v in ipairs(datas) do
+        if DecorationModel:isInGameSchemeRandom() then
+            v.__is_in_user = DecorationModel:checkRoleInRandomList(v.role_id)
+        else
+            v.__is_in_user = DecorationModel:checkRoleInSpecify(v.role_id)
+        end
+    end
     table.sort(datas, function(a, b)
-        if a.role_id == self.using_role_id or b.role_id == self.using_role_id then
-            return a.role_id == self.using_role_id
+        if a.__is_in_user ~= b.__is_in_user then
+            return a.__is_in_user
         end
         if a.is_star ~= b.is_star then
             return a.is_star
@@ -988,7 +999,7 @@ end
 
 function P:getCharacterSound()
     -- 每次刷新语音的时候刷新一下播放列表
-    local schemeInfo = PlayerModel:getCurScheme()
+    local schemeInfo = DecorationModel:getCurScheme()
     local skinId = schemeInfo.skin_id
     self._character_sound_list = self:getCharacterChatList(skinId)
     self._max_sound_count = #self._character_sound_list

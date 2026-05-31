@@ -24,7 +24,7 @@ function P:loadLocalData()
 		end
 		--print("读缓存数据")
 		local d = json.decode(jstr)
-		if d then
+		if d and type(d) == "table" then
 			for k, v in pairs(self.saveData or {}) do
 				if d[k]==nil then
 					d[k]=v

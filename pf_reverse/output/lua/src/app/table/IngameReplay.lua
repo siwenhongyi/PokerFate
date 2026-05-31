@@ -88,6 +88,7 @@ function P:onAwake()
 end
 
 function P:onShow()
+    self._scheme = DecorationModel:getInGameCurScheme()
     self.NoDataTip:SetActive(false)
     self.ScrollBar:SetActive(true)
     bee.setToggle(self.NearGameToggle, true)
@@ -240,10 +241,10 @@ function P:refreshItem(data, item)
         self:find("ImageCard4", item),
         self:find("ImageCard5", item),
     }
-    local d = tpl_card_back[PlayerModel:getCurCardBack()]
+    local d = tpl_card_back[DecorationModel:getCurCardBack(self._scheme)]
     for i = 1, 5 do
         if data.cards[i] and data.cards[i] > 0 then
-            bee.setIcon(ImageCards[i], GF.getCardImageByCode(data.cards[i]))
+            bee.setIcon(ImageCards[i], GF.getCardImageByCode(data.cards[i], self._scheme))
         else
             bee.setIcon(ImageCards[i], d.image)
         end

@@ -115,7 +115,10 @@ function P:getShowIndex()
 	return self.show_index
 end
 
-function P:isMe()
+function P:isMe(isRealMe)
+	if not isRealMe and self.seatid == self.data:getObserveSeatid() then
+		return true
+	end
 	return self.seatid == self.data:getMyPosition()
 end
 

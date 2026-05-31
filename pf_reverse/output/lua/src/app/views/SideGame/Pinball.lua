@@ -189,6 +189,7 @@ function P:onAwake()
 	bee.addClick(self.CloseButton, function()
 		UiManager:hideUI("SideGameView")
 		self:checkPushGift(self._curLvl)
+		bee.emit("evt_pinballOver")
 	end)
 	bee.addClick(self.LotteryButton, function()
 		Game:playSound("ui_button_confirm")
@@ -204,6 +205,7 @@ function P:onAwake()
         end
         bee.emit("evt_hideSideGame")
 		self:checkPushGift(self._curLvl)
+		bee.emit("evt_pinballOver")
     end)
     bee.addClick(self.TipMask, function()
     	Game:playSound("ui_button_disabled")
@@ -287,7 +289,7 @@ function P:onStart()
 
 	self._totalBetting = 0
 	self._selectChip = 0
-	self._selectQuantity = 0
+	self._selectQuantity = SideGameModel:getPinballLastBallCount()
 	self._gold = PlayerModel:getGold()
 	bee.setText(self.BalanceNumText, _N2(self._gold))
 	bee.setText(self.ProfitNumText, 0)
@@ -298,8 +300,8 @@ end
 function P:evt_setPinballConf()
 	self._isInit = true
 	self:initExports()
-	self:initBettingCont()
 	self:initQuantityCont()
+	self:initBettingCont()
 	self:refreshBettingNum()
 end
 
@@ -313,6 +315,10 @@ function P:onDestroy()
 		self._balanceTween:Kill()
 		self._balanceTween = nil
 	end
+
+	SideGameModel:setPinballLastLv(self._curLvl)
+	SideGameModel:setPinballLastChip(self._selectChip)
+	SideGameModel:setPinballLastBallCount(self._selectQuantity)
 end
 
 function P:evt_refreshTopInfo()
@@ -320,6 +326,7 @@ function P:evt_refreshTopInfo()
 		return
 	end
 	bee.setText(self.BalanceNumText, _N2(PlayerModel:getGold()))
+	self:checkBettingChips()
 end
 
 -- ================================ 界面处理 ================================
@@ -341,8 +348,20 @@ function P:initBettingCont()
 		end
 	end
 	self._bettingItemList = {}
-
-	self._selectChip = self._chips[1]
+	if self._curLvl == SideGameModel:getPinballLastLv() then
+		local lastChip = SideGameModel:getPinballLastChip()
+		if lastChip then
+			if curGold > lastChip * self._selectQuantity then
+				self._selectChip = lastChip
+			end
+		end
+	else
+		self._selectChip = self._chips[1]
+	end
+	SideGameModel:setPinballLastLv(self._curLvl)
+	if not self._selectChip or self._selectChip <= 0 then
+		self._selectChip = self._chips[1]
+	end
 	for i, v in ipairs(self._chips) do
 		local copyBettingItem = CU.GameObject.Instantiate(self.BettingFilterItem)
 		copyBettingItem.transform:SetParent(self.BettingFilter.transform)
@@ -372,6 +391,9 @@ function P:checkBettingChips()
 	local lvl
 	local curGold = PlayerModel:getGold()
 	local cfg = SideGameModel:getPinballConf()
+	if not cfg then
+		return
+	end
 	for i = #cfg, 1, -1 do
 		if curGold >= cfg[i].balance then
 			lvl = cfg[i].id
@@ -409,7 +431,10 @@ end
 function P:initQuantityCont()
 	self._quantityItemList = {}
 	local balls = SideGameModel:getPinballBalls()
-	self._selectQuantity = balls[1]
+	if not self._selectQuantity or self._selectQuantity <= 0 then
+		self._selectQuantity = balls[1]
+	end
+	
 	for i, v in ipairs(balls) do
 		local copyQuantityItem = CU.GameObject.Instantiate(self.QuantityFilterItem)
 		copyQuantityItem.transform:SetParent(self.QuantityFilter.transform)
@@ -507,6 +532,7 @@ function P:onClickLottery()
 	self.LotteryButton.transform:GetComponent("Button").enabled = false
 	self.LotteryButton.transform:GetComponent("ButtonZoom").enabled = false
 	self.LotteryTips:SetActive(false)
+	bee.emit("evt_pinballStart")
 end
 
 -- 断线重连
@@ -549,9 +575,9 @@ function P:evt_PinballActionRSP(msg)
 	local effName
 	if totalReward > self._beatGold * 5 then
 		effName = "Prefab/Pinball/Eff_poker_Ui_pinball_chouma04"
-	elseif totalReward > self._beatGold * 3  then
+	elseif totalReward > self._beatGold * 2.5  then
 		effName = "Prefab/Pinball/Eff_poker_Ui_pinball_chouma03"
-	elseif totalReward > self._beatGold * 2 then
+	elseif totalReward > self._beatGold * 1 then
 		effName = "Prefab/Pinball/Eff_poker_Ui_pinball_chouma02"
 	else
 		effName = "Prefab/Pinball/Eff_poker_Ui_pinball_chouma01"
@@ -891,6 +917,7 @@ function P:endDropAnim(goldParams)
 			if self._beginProfit > self._totalBetting then
 				bee.emit("evt_PinballWin")
 			end
+			bee.emit("evt_pinballOver")
 		end)
 	end
 end

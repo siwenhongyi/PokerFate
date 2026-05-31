@@ -53,6 +53,7 @@ function P:onAwake()
             if isOn then
                 self:showView(k)
 		        Game:playSound("ui_tab_switch_1")
+                bee.logEvent("tournament-sng-detail-type", GameModel.data.room_info.tour_id, k)
             end
         end)
     end
@@ -114,7 +115,7 @@ end
 
 function P:getBlindText(sb, bb, ante)
     if ante and ante > 0 then
-        return _F("{p1}({p2})", _N(sb) .. "/" .. _N(bb), _N(ante))
+        return _F("{p1} ({p2})", _N(sb) .. "/" .. _N(bb), _N(ante))
     else
         return _F("{p1}", _N(sb) .. "/" .. _N(bb))
     end
@@ -157,6 +158,7 @@ function P:refreshBlindItem(data, item)
 
     self:find("tournament_sng_details_blind_list_frame_01", item):SetActive(data.blind_level % 2 == 1)
     self:find("tournament_sng_details_blind_list_frame_02", item):SetActive(data.blind_level % 2 == 0)
+    self:find("tournament_mttlist_img_xuanzhong", item):SetActive(GameModel.data:getBlindLevel() == data.blind_level)
 end
 
 function P:refreshRankList(msg)

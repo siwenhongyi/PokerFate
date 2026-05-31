@@ -123,6 +123,16 @@ function P:onStart()
 	self:onClickTabToggle(startIndex)
 	
     FriendModel:initFriendList()
+
+	self:schedule(5, function()
+		if self._selectedIndex == TabIndex.FriendsList then
+			FriendModel:requestFriendList(function()
+				if not bee.isNull(self.node) then
+					self:refreshList()
+				end
+			end)
+		end
+	end)
 end
 
 function P:onClickTabToggle(index)
@@ -271,8 +281,10 @@ function P:setFriendItem(item, data)
 	
 	local Online = self:find("Online", FriendCont)
 	local OfflineText = self:find("OfflineText", FriendCont)
-	local BlockButton = self:find("BlockButton", FriendCont)
-	local DeleteButton = self:find("DeleteButton", FriendCont)
+	local IngameText = self:find("IngameText", FriendCont)
+	local BlockButton = self:find("Buttons/BlockButton", FriendCont)
+	local DeleteButton = self:find("Buttons/DeleteButton", FriendCont)
+	local ObserveButton = self:find("Buttons/ObserveButton", FriendCont)
 
 	local AppliedText = self:find("AppliedText", SearchCont)
 	local AddButton = self:find("AddButton", SearchCont)
@@ -308,8 +320,10 @@ function P:setFriendItem(item, data)
 		ApplyCont:SetActive(false)
 		BlockedCont:SetActive(false)
 
-		Online:SetActive(data.is_online)
-		OfflineText:SetActive(not data.is_online)
+		IngameText:SetActive(data.roomid and data.roomid > 0)
+		Online:SetActive(not IngameText.activeSelf and data.is_online)
+		OfflineText:SetActive(not IngameText.activeSelf and not data.is_online)
+		ObserveButton:SetActive(data.roomid and data.roomid > 0)
 		if not data.is_online then
 			bee.setText(OfflineText, FriendModel:getOfflineTimeText(data.last_login_time))
 		end
@@ -326,6 +340,11 @@ function P:setFriendItem(item, data)
 			Game:playSound("ui_button_confirm")
 			self:onClickDeleteFriend(data)
 		end)
+		bee.addClick(ObserveButton, function()
+			Game:playSound("ui_button_confirm")
+			bee.logEvent("friends-main-view", data.uid)
+			Net:sendReq("pb.EnterRoomREQ", {roomid = data.roomid, is_observer = true, uid_being_observed = data.uid})
+		end, true)
 	elseif self._selectedIndex == TabIndex.FindFriends then
 		FriendCont:SetActive(false)
 		SearchCont:SetActive(true)

@@ -89,6 +89,16 @@ function P:onAwake()
         end)
     end)
     bee.addClick(self.UnRegisterButton, function()
+        Game:playSound("ui_button_confirm")
+        if not bee.checkCd("SngCancelSignREQ", 2) then
+            return
+        end
+        TournamentModel:reqSngCancelSign(self._listData, function()
+            if bee.isNull(self.node) then
+                return
+            end
+            self:refreshUI()
+        end)
     end)
 end
 
@@ -107,6 +117,7 @@ function P:onShow()
     })
 
     self:refreshUI()
+    bee.logEvent("tournament-detail", 1, self._data.tour_id)
 end
 
 function P:refreshUI()
@@ -229,9 +240,10 @@ function P:refreshUI()
     end
 
     local isLock = self._data.level > PlayerModel:getCurLevel()
-    self.EnterButton:SetActive(not isLock and self._data.tour_status == TOUR_STATUS.Inprocess)
+    self.EnterButton:SetActive(not isLock and (self._data.tour_status == TOUR_STATUS.Inprocess or self._data.tour_status == TOUR_STATUS.Register))
     self.RegisterButton:SetActive(not isLock and self._data.tour_status == TOUR_STATUS.Unregister)
-    self.UnRegisterButton:SetActive(not isLock and self._data.tour_status == TOUR_STATUS.Register)
+    -- self.UnRegisterButton:SetActive(not isLock and self._data.tour_status == TOUR_STATUS.Register)
+    self.UnRegisterButton:SetActive(false)
     self.RewardButton:SetActive(not isLock and self._data.tour_status == TOUR_STATUS.Finished)
     self.LockButton:SetActive(isLock)
 

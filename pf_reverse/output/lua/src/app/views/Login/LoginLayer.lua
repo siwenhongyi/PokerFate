@@ -2,8 +2,11 @@ local P = class("LoginLayer", require("app.views.Login.LoginBase"))
 
 function P:onAwake()
     self.Panel = self:find("AnimRoot/Panel")
+    self.CloseButton = self:find("CloseButton", self.Panel)
+    self.CloseButton:SetActive(false)
     self.Center = self:find("AnimRoot/Center")
     self.BgMain = self:find("BgMain", self.Center)
+    self.BgEmail = self:find("BgEmail", self.Center)
     self.BgLogin = self:find("BgLogin", self.Center)
     self.BgStove = self:find("BgStove", self.Center)
 
@@ -20,7 +23,9 @@ function P:onAwake()
         [LOGIN_TYPE.STOVE] = self:find("ButtonStove", self.BgMain),
         [LOGIN_TYPE.STEAM] = self:find("ButtonSteam", self.BgMain),
     }
+    self.LogoEmailButton = self:find("ButtonEmail", self.BgEmail)
     self.ButtonStoveMobile = self:find("ButtonStove", self.BgStove)
+    self.logoEmailLogin = false
 
     self.LoginBtPoses = {}
     for k, v in pairs(self.LoginButtons) do
@@ -67,6 +72,23 @@ function P:onAwake()
         bee.logEvent("login-steam-click")
     end)
 
+    bee.addClick(self.LogoEmailButton, function()
+        self:onBtEmail()
+        bee.logEvent("login-email-click")
+    end)
+
+    bee.addClick(self.CloseButton, function ()
+        self.logoEmailLogin = false
+        self.CloseButton:SetActive(false)
+        if not self.logoEmailLogin then
+            self.BgMain:SetActive(true)
+            self.BgEmail:SetActive(false)
+        else
+            self.Panel:SetActive(false)
+            self.BgEmail:SetActive(false)
+        end
+        LAN:refreshLan(self.node)
+    end)
 
     bee.addClick(self:find("ButtonRegister", self.BgMain), function()
         self:onBtRegister()
@@ -88,9 +110,14 @@ function P:onAwake()
         bee.logEvent("login-email-forget-password")
     end)
     bee.addClick(self:find("ButtonClose", self.BgLogin), function()
-        self.BgMain:SetActive(true)
+        if not self.logoEmailLogin then
+            self.BgMain:SetActive(true)
+        else
+            self.BgEmail:SetActive(true)
+            self.CloseButton:SetActive(true)
+        end
         self.BgLogin:SetActive(false)
-        LAN:refreshLan(self.BgMain)
+        LAN:refreshLan(self.node)
     end)
 end
 
@@ -128,11 +155,13 @@ function P:onShow()
         self.BgStove:SetActive(true)
         self.Panel:SetActive(false)
         self.BgMain:SetActive(false)
+        self.BgEmail:SetActive(false)
         self.BgLogin:SetActive(false)
     else
         self.BgStove:SetActive(false)
         self.Panel:SetActive(true)
         self.BgMain:SetActive(true)
+        self.BgEmail:SetActive(false)
         self.BgLogin:SetActive(false)
     end
     
@@ -168,19 +197,42 @@ function P:onShow()
     end
 end
 
+function P:showEmailLogin()
+    if self.BgLogin.activeSelf then
+        return
+    end
+
+    self.Panel:SetActive(true)
+    self.CloseButton:SetActive(true)
+    self.BgMain:SetActive(false)
+    self.BgEmail:SetActive(true)
+    self:find("ButtonEmail/ImageTip", self.BgEmail):SetActive(PlayerModel:getLoginType() == LOGIN_TYPE.EMAIL)
+
+    LAN:refreshLan(self.node, true)
+    self.logoEmailLogin = true
+end
+
 function P:setEmailLoginShow()
     bee.setText(self.InputFieldName, PlayerModel:getLoginEmail(), "InputField")
     bee.setText(self.InputFieldPwd, "", "InputField")
 
     self:initInputSeek(self.InputFieldName, true)
     self:initInputSeek(self.InputFieldPwd, false)
+
+    if self.logoEmailLogin then
+        self:find("ButtonRegister", self.BgLogin):SetActive(false)
+        local loginBtn = self:find("ButtonLogin", self.BgLogin)
+        loginBtn.transform.localPosition = bee.v3(0, loginBtn.transform.localPosition.y, 0)
+    end
 end
 
 function P:onBtEmail()
     self.BgMain:SetActive(false)
+    self.BgEmail:SetActive(false)
     self.BgLogin:SetActive(true)
+    self.CloseButton:SetActive(false)
     self:setEmailLoginShow()
-    LAN:refreshLan(self.BgLogin)
+    LAN:refreshLan(self.node)
 end
 
 -- 游客登录

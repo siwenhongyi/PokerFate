@@ -13,18 +13,37 @@ end
 
 function P:onShow()
     self.clearIds = self._params.clearIds
-    table.sort( self.clearIds, function (a, b)
+    table.sort(self.clearIds, function (a, b)
         return a < b
     end)
 
-
-    local gachaShowUI = UiManager:getUI("GachaResultShow")
-    local gachaVideoUI = UiManager:getUI("GachaWheelMask")
-    if gachaShowUI or gachaVideoUI then
+    if AchievementModel:checkPuase() then
         self.Ani:SetActive(false)
     else
         self:showTip()
     end
+
+    -- local gachaShowUI = UiManager:getUI("GachaResultShow")
+    -- local gachaVideoUI = UiManager:getUI("GachaWheelMask")
+    -- if gachaShowUI or gachaVideoUI then
+    --     self.Ani:SetActive(false)
+    -- else
+    --     self:showTip()
+    -- end
+end
+
+function P:checkNewClearIds()
+    if #AchievementModel.saveIds == 0 then
+        return
+    end
+
+    for _,v in pairs(AchievementModel.saveIds) do
+        table.insert(self.clearIds, v)
+    end
+    AchievementModel:clearSaveIds()
+    table.sort(self.clearIds, function (a, b)
+        return a < b
+    end)
 end
 
 function P:showTip()
@@ -37,7 +56,15 @@ function P:showTip()
     self:playAnimator(self._openAnim)
     self:once(2, function ()
         if table.nums(self.clearIds) == 0 then
-            self:hideUI()
+            self:checkNewClearIds()
+            if table.nums(self.clearIds) == 0 then
+                self:hideUI()
+            else
+                self:playAnimator(self._closeAnim)
+                self:once(0.5, function ()
+                    self:showTip()
+                end)
+            end
         else
             self:playAnimator(self._closeAnim)
             self:once(0.5, function ()
@@ -48,6 +75,19 @@ function P:showTip()
 end
 
 function P:evt_gachaOver()
+    self:reshowTip()
+end
+
+function P:evt_oathOver()
+    self:reshowTip()
+end
+
+function P:evt_pinballOver()
+    self:reshowTip()
+end
+
+function P:reshowTip()
+    -- AchievementModel:clearPause()
     self.Ani:SetActive(true)
     self:showTip()
 end

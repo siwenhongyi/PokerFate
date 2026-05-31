@@ -204,20 +204,20 @@ function P:setSkinShow()
 		self.skinCharacterCls:setRole(CharacterModel:getRoleData(roleCfg.id, true), true)
 		self.skinCharacterCls:setSkin(skinCfg, true)
 
-		if not CharacterModel:getRole(roleCfg.id) then
-			self.WearButton:SetActive(false)
-		end
+		-- if not CharacterModel:getRole(roleCfg.id) then
+		-- 	self.WearButton:SetActive(false)
+		-- end
 
-		bee.removeAllClick(self.WearButton)
-		bee.addClick(self.WearButton, function()
-			Game:playSound("ui_button_confirm")
-	        Net:sendReq("pb.SwitchRoleSkinREQ", {
-	            role_id = skinCfg.role,
-	            new_skin_id = skinCfg.id,
-	        })
+		-- bee.removeAllClick(self.WearButton)
+		-- bee.addClick(self.WearButton, function()
+		-- 	Game:playSound("ui_button_confirm")
+	    --     Net:sendReq("pb.SwitchRoleSkinREQ", {
+	    --         role_id = skinCfg.role,
+	    --         new_skin_id = skinCfg.id,
+	    --     })
 			self.WearButton:SetActive(false)
-			self.DressedText:SetActive(true)
-		end)
+			-- self.DressedText:SetActive(true)
+		-- end)
 	end)
 end
 
@@ -318,6 +318,9 @@ function P:onClickNext()
 	end
 
 	self._curShow = table.remove(self._showList, 1)
+	if self._isShowCharacter then
+		Game:stopRoleSound()
+	end
 	if not self._curShow then
 		self:onClickClose()
 		return
@@ -363,7 +366,6 @@ function P:onClickClose()
 		self:hideUI(nil, true)
 	end)
 
-	bee.emit("evt_gachaOver")
 end
 
 function P:evt_shareShot()

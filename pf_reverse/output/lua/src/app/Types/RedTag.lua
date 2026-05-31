@@ -67,6 +67,7 @@ local TagLinks =
     SideGame = {
         "Pinball",
     },
+    Soccer = {},
 
     ------------------ 角色 ------------------
     Character = {   -- 角色
@@ -104,6 +105,11 @@ local TagLinks =
     BunnyGirl = {
         BunnyGirlPlot = {},    -- 剧情解锁
         BunnyGirlTask = {},    -- 任务奖励
+    },
+    ------------------ 活动 运动会 ------------------
+    Sports = {
+        SportsPlot = {},    --剧情解锁
+        SportsTask = {},    --任务奖励
     },
 
     ------------------ 活动 新春 ------------------

@@ -84,6 +84,7 @@ function P:onStart()
 	end
 	
 	self:setShareCont()
+	bee.emit("evt_gachaOver")
 end
 
 function P:evt_ItemChangeRSP(msg)
@@ -380,6 +381,11 @@ function P:onClickRecruit()
             ItemModel:jumpView(propCfg.accesses[1])
         end
         UiManager:showTip(params)
+        if self._recruitNum == 1 then
+        	bee.logEvent("recruit-click", self._params.pool_id, 0)
+        elseif self._recruitNum == 10 then
+        	bee.logEvent("recruit-click-10", self._params.pool_id, 0)
+        end
         return
     end
 
@@ -389,9 +395,12 @@ end
 
 function P:reRecruit()
 	if self._costList and next(self._costList) then
+		bee.emit("evt_gachaStart")
 		if self._recruitNum == 10 then
+			bee.logEvent("recruit-click-10", self._params.pool_id, 1)
 			GachaModel:recruitTen(self._params.pool_id, self._costList)
 		else
+			bee.logEvent("recruit-click", self._params.pool_id, 1)
 			GachaModel:recruitOne(self._params.pool_id, self._costList)
 		end
 	end

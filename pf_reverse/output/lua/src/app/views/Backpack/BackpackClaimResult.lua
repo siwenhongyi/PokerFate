@@ -1,7 +1,7 @@
 local P = class("BackpackClaimResult", UiDialog)
 
 function P:onAwake()
-    self._closeAnim = ""
+    self._openAnim, self._closeAnim = "", ""
     
     local Center = self:find("AnimRoot/Center")
 
@@ -39,27 +39,32 @@ function P:onShow()
     for k,v in pairs(self._params.items) do
         -- 判断是否为新道具
         local d = v.org_item or v
-        if not d.major_type or d.major_type == GMajorType.PROP then
+        if not d.major_type then
+            d.major_type = GMajorType.PROP
+        end
+        if d.major_type == GMajorType.PROP and tpl_props[d.item_id or d.id] then
             d.new = ItemModel:checkIsNewItem(d.item_id or d.id, true)
-        end
-        if v.decompose_item then
-            v.decompose_item.new = ItemModel:checkIsNewItem(d.item_id or d.id, true)
-        end
+            if v.decompose_item then
+                v.decompose_item.new = ItemModel:checkIsNewItem(d.item_id or d.id, true)
+            end
 
-        local isIn = false
-        for k1, v1 in pairs(self._items) do
-            local d1 = v1.org_item or v1
-            if v.decompose_item and v.decompose_item.item_id and v.decompose_item.item_id > 0 then
-            else
-                -- 分解道具不合并
-                if d.item_id and d1.item_id == d.item_id then
-                    d1.num = d.num + d1.num
-                    isIn = true
-                    break
+            local isIn = false
+            for k1, v1 in pairs(self._items) do
+                local d1 = v1.org_item or v1
+                if v.decompose_item and v.decompose_item.item_id and v.decompose_item.item_id > 0 then
+                else
+                    -- 分解道具不合并
+                    if d.item_id and d1.item_id == d.item_id then
+                        d1.num = d.num + d1.num
+                        isIn = true
+                        break
+                    end
                 end
             end
-        end
-        if not isIn then
+            if not isIn then
+                table.insert(self._items, v)
+            end
+        else
             table.insert(self._items, v)
         end
     end

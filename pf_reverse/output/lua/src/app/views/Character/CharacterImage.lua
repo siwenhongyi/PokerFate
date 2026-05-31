@@ -386,6 +386,7 @@ function P:setSkin(skinData, use_image_with_bg, allinAmin)
 end
 
 function P:setSkinImage(skinData, use_image_with_bg)
+    self._skinData = skinData
     self:removeRoleSpine()
     if use_image_with_bg and skinData.image_with_bg then
         bee.setIcon(self.ImageRole, skinData.image_with_bg, true)
@@ -406,6 +407,27 @@ function P:setSkinImage(skinData, use_image_with_bg)
         else
             self.ImageRole.transform.localScale = bee.v3one
         end
+    end
+end
+
+function P:setSkinRotate(flag)
+    if not self._skinData then
+        return
+    end
+    if false ~= flag then
+        if self._skinData.spine_rotation then
+            if self._roleSpine then
+                self.RoleSpine.transform.localEulerAngles = bee.v3(0, 0, self._skinData.spine_rotation)
+            else
+                self.ImageRole.transform.localEulerAngles = bee.v3(0, 0, self._skinData.spine_rotation)
+            end
+        else
+            self.RoleSpine.transform.localEulerAngles = bee.v3zero
+            self.ImageRole.transform.localEulerAngles = bee.v3zero
+        end
+    else
+        self.RoleSpine.transform.localEulerAngles = bee.v3zero
+        self.ImageRole.transform.localEulerAngles = bee.v3zero
     end
 end
 

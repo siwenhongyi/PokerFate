@@ -84,6 +84,7 @@ function P:onAwake()
 
 	self.Right = self:find("Right", AnimRoot)
 	self.ItemDetail = self:find("ItemDetail", self.Right)
+
 	self.ItemCountText = self:find("ItemCountText", self.ItemDetail)
 	self.DetailGridBg = self:find("DetailGridBg", self.ItemDetail)
 	self.DetailImgBg = self:find("DetailImgBg", self.ItemDetail)
@@ -96,19 +97,23 @@ function P:onAwake()
 	self.ItemDescText = self:find("DescTextCont/Viewport/Content/ItemDescText", self.ItemDetail)
 	self.ItemButtonYellow = self:find("ItemButtonYellow", self.ItemDetail)
 	self.ItemButtonBlue = self:find("ItemButtonBlue", self.ItemDetail)
+	self.ItemButtonJump = self:find("ItemButtonJump", self.ItemDetail)
 	self.Limited = self:find("Limited", self.ItemDetail)
 	self.TimeText = self:find("TimeText", self.ItemDetail)
 	self.UsedTag = self:find("UsedTag", self.ItemDetail)
+	self.RandomTag = self:find("RandomTag", self.ItemDetail)
 	self.GiftBtnCont = self:find("GiftBtnCont", self.ItemDetail)
 	self.ItemButtonUse = self:find("ItemButtonUse", self.GiftBtnCont)
 	self.ItemButtonRecycle = self:find("ItemButtonRecycle", self.GiftBtnCont)
 	self.TimeText:SetActive(false)
 	self.UsedTag:SetActive(false)
+	self.RandomTag:SetActive(false)
 	self.PreviewButton:SetActive(false)
 
 	self.RightTop = self:find("RightTop", AnimRoot)
 	self.GiftCurrency = self:find("CurrencyColumn/GiftCurrency", self.RightTop)
 	self.GiftCurrency:SetActive(false)
+	self.DecorationSchemeItem = self:find("DecorationSchemeItem", self.RightTop)
 
 	self.Quantity = self:find("Quantity", self.ItemDetail)
 	self.MinButton = self:find("MinButton", self.Quantity)
@@ -233,6 +238,7 @@ function P:onStart()
 	self:setItemDetailShow()
 
 	self:initCurrency()
+	self:initShcemeButton()
 end
 
 function P:initCurrency()
@@ -244,6 +250,27 @@ function P:initCurrency()
 	bee.addClick(self.GiftCurrency, function()
         UiManager:showUI("CommonItemTip", {data = ItemModel:getItem(GPropId.GiftFragment, true), target = self:find("ItemIcon", self.GiftCurrency)})
 	end, true)
+end
+
+function P:initShcemeButton()
+	bee.addClick(self.DecorationSchemeItem, function ()
+		local jumpId = self:checkSchemeJump(self._clickItemData.type)
+		ItemModel:jumpView(jumpId, nil, function()
+			self.itemList:refreshShowingUi()
+			self:setDisplayPropDetailShow()
+		end)
+
+		local subPage = 0
+		for _,v in pairs(tpl_backpack) do
+			if v.props_type then
+				if table.keyof(v.props_type, self._clickItemData.type) ~= nil then
+					subPage = v.id
+					break
+				end
+			end
+		end 
+		bee.logEvent("style-preset-bag", subPage)
+	end)
 end
 
 function P:setLeftToggleCont()
@@ -395,6 +422,7 @@ function P:initToggleItem(data)
 		end
 		if isOn then
 			self:logEventById(data.id)
+			self.DecorationSchemeItem:SetActive(data.id > 3)
 			-- Animroot:GetComponent("Animator"):Play("UI_1_BackpackMain_ToggleScrollView_into")
 		else
 			-- Animroot:GetComponent("Animator"):Play("UI_1_BackpackMain_ToggleScrollView_idle2")
@@ -473,10 +501,12 @@ function P:initSubToggle(id, parent, toggle)
 
 		if isOn then
 			self:logEventById(data.id)
+			self.DecorationSchemeItem:SetActive(data.id > 3)
 			-- Animroot:GetComponent("Animator"):Play("UI_1_BackpackMain_SubTabToggleCont_into")
 		else
 			-- Animroot:GetComponent("Animator"):Play("UI_1_BackpackMain_SubTabToggleCont_idle2")
 		end
+		
 		ItemModel:refreshReddot()
 	end)
 end
@@ -736,6 +766,7 @@ function P:setPropItemShow(item, data)
 	local Decorate = self:find("Decorate", item)
 	local Selected = self:find("Selected", PropItemObj)
 	local NewIcon = self:find("NewIcon", item)
+	local RandomSign = self:find("RandomSign", item)
 
 	local isSelected = self._clickItemData.item_id == data.item_id
 	if self._clickItemData.item_uniq_id then
@@ -766,23 +797,51 @@ function P:setPropItemShow(item, data)
 		else
 			LockMask:SetActive(false)
 			LockIcon:SetActive(false)
-			Decorate:SetActive(true)
-
+			
+			local inRandom = false
+			if data.cfg.type == GPropKind.MusicLobby or data.cfg.type == GPropKind.LobbyScene then
+				inRandom = DecorationModel:isLobbySchemeRandom()
+			else
+				inRandom = DecorationModel:isInGameSchemeRandom()
+			end
 			local isCurUsed = self:_isInUse(data.cfg)
 			local MusicUsed = self:find("MusicUsed", Decorate)
 			local Used = self:find("Used", Decorate)
+			if isCurUsed and inRandom then
+				Decorate:SetActive(false)
+				RandomSign:SetActive(true)
+			else
+				Decorate:SetActive(true)
+				RandomSign:SetActive(false)
+				if isCurUsed then
+					if data.cfg.type == GPropKind.MusicLobby or data.cfg.type == GPropKind.MusicTable then
+						local randomMusic = false
+						if data.cfg.type == GPropKind.MusicLobby then
+							local scheme = DecorationModel:getCurScheme()
+							randomMusic = scheme.property_list[4] == 3
+						elseif data.cfg.type == GPropKind.MusicTable then
+							local scheme = DecorationModel:getInGameSchemeInfoById(DecorationModel:getInGameSpecifySchemeId())
+							randomMusic = scheme.rand % 2 == 1
+						end
+						Used:SetActive(false)
+						MusicUsed:SetActive(not randomMusic)
+						RandomSign:SetActive(randomMusic)
 
-			if isCurUsed then
-				if data.cfg.type == GPropKind.MusicLobby or data.cfg.type == GPropKind.MusicTable then
-					MusicUsed:SetActive(true)
-					Used:SetActive(false)
+						-- if randomMusic then
+						-- 	MusicUsed:SetActive(true)
+						-- 	Used:SetActive(false)
+						-- else
+						-- 	MusicUsed:SetActive(true)
+						-- 	Used:SetActive(false)
+						-- end
+					else
+						MusicUsed:SetActive(false)
+						Used:SetActive(true)
+					end
 				else
 					MusicUsed:SetActive(false)
-					Used:SetActive(true)
+					Used:SetActive(false)
 				end
-			else
-				MusicUsed:SetActive(false)
-				Used:SetActive(false)
 			end
 		end
 	end
@@ -870,6 +929,7 @@ function P:setItemDetailShow()
 	end
 
 	self.UsedTag:SetActive(false)
+	self.RandomTag:SetActive(false)
 	self.Quantity:SetActive(false)
 	self.TimeText:SetActive(false)
 
@@ -1123,27 +1183,63 @@ function P:setAwakePropDetailShow()
 	end
 end
 
-function P:_getCurDisplay(checkType)
-	local curDisplay
-	if checkType == GPropKind.CardBack then
-		curDisplay = PlayerModel:getCurCardBack()
-	elseif checkType == GPropKind.Table then
-		curDisplay = PlayerModel:getCurCardTable()
-	elseif checkType == GPropKind.MusicLobby then
-		curDisplay = PlayerModel:getCurMusicLobby()
-	elseif checkType == GPropKind.MusicTable then
-		curDisplay = PlayerModel:getCurMusicBattle()
-	elseif checkType == GPropKind.LobbyScene then
-		curDisplay = PlayerModel:getCurLobbyScene()
-	elseif checkType == GPropKind.AllInEff then
-		curDisplay = PlayerModel:getCurAllInEff()
-	elseif checkType == GPropKind.NameplateEff then
-		curDisplay = PlayerModel:getCurNameplateEff()
-	elseif checkType == GPropKind.CardFace then
-		curDisplay = PlayerModel:getCurCardFace()
+function P:_getIngameDisplay(key)
+	local curDisplay = {}
+	local list = DecorationModel:getInGameCurSchemeList()
+	for _, v in ipairs(list) do
+		if v[key] then
+			for _, vv in ipairs(v[key]) do
+				table.insert(curDisplay, tpl_props[vv].mapId)
+			end
+		end
 	end
-
 	return curDisplay
+end
+
+function P:_getLobbyDisplay(key)
+	local curDisplay = {}
+	local list = DecorationModel:getLobbyCurSchemeList()
+	for _, v in ipairs(list) do
+		if v[key] then
+			if type(v[key]) == "table" then
+				for _, vv in ipairs(v[key]) do
+					table.insert(curDisplay, tpl_props[vv].mapId)
+				end
+			else
+				table.insert(curDisplay, tpl_props[v[key]].mapId)
+			end
+		end
+	end
+	return curDisplay
+end
+
+function P:_getCurDisplay(checkType)
+	if not self._curDisplayInfos then
+		self._curDisplayInfos = {}
+	end
+	if not self._curDisplayInfos[checkType] then
+		local curDisplay
+		if checkType == GPropKind.CardBack then
+			curDisplay = self:_getIngameDisplay("card_back")
+		elseif checkType == GPropKind.Table then
+			curDisplay = self:_getIngameDisplay("table")
+		elseif checkType == GPropKind.MusicLobby then
+			curDisplay = self:_getLobbyDisplay("lobby_bgm_list")
+		elseif checkType == GPropKind.MusicTable then
+			curDisplay = self:_getIngameDisplay("bgm_list")
+		elseif checkType == GPropKind.LobbyScene then
+			curDisplay = self:_getLobbyDisplay("lobby_scene_id")
+		elseif checkType == GPropKind.AllInEff then
+			curDisplay = self:_getIngameDisplay("all_in_animation")
+		elseif checkType == GPropKind.NameplateEff then
+			curDisplay = self:_getIngameDisplay("show_card")
+		elseif checkType == GPropKind.CardFace then
+			curDisplay = self:_getIngameDisplay("card_front")
+		end
+
+		self._curDisplayInfos[checkType] = curDisplay
+	end
+	return self._curDisplayInfos[checkType]
 end
 
 function P:_isInUse(cfg)
@@ -1160,6 +1256,13 @@ function P:_isInUse(cfg)
 				break
 			end
 		end
+	elseif type(curDisplay) == "table" then
+		for k,v in pairs(curDisplay) do
+			if v == cfg.mapId then
+				isIn = true
+				break
+			end
+		end
 	else
 		isIn = tpl_props[cfg.id].mapId == curDisplay
 	end
@@ -1170,6 +1273,7 @@ end
 function P:setButtonUseExpCard()
 	self.ItemButtonYellow:SetActive(true)
 	self.ItemButtonBlue:SetActive(false)
+	self.ItemButtonJump:SetActive(false)
 	self.Limited:SetActive(false)
 	self.GiftBtnCont:SetActive(false)
 
@@ -1199,11 +1303,60 @@ function P:setDisplayPropDetailShow()
 		self.PreviewButtonView:SetActive(true)
 	end
 
-	if self:_isInUse(cfg) then
-		self.UsedTag:SetActive(true)
-		self:setButtonUsed()
+	local inRandom = false
+	if cfg.type == GPropKind.MusicLobby or cfg.type == GPropKind.LobbyScene then
+		inRandom = DecorationModel:isLobbySchemeRandom()
+	else
+		inRandom = DecorationModel:isInGameSchemeRandom()
+	end
+
+	if inRandom and self:_isInUse(cfg) then
+		self.RandomTag:SetActive(true)
+		self.UsedTag:SetActive(false)
+		self:setButtonJump2(cfg)
+	elseif self:_isInUse(cfg) then
+		-- if data.cfg.type == GPropKind.MusicLobby or data.cfg.type == GPropKind.MusicTable then
+		-- 	local randomMusic = false
+		-- 	if data.cfg.type == GPropKind.MusicLobby then
+		-- 		local scheme = DecorationModel:getCurScheme()
+		-- 		randomMusic = scheme.property_list[4] == 3
+		-- 	elseif data.cfg.type == GPropKind.MusicTable then
+		-- 		local scheme = DecorationModel:getInGameSchemeInfoById(DecorationModel:getInGameSpecifySchemeId())
+		-- 		randomMusic = scheme.rand % 2 == 1
+		-- 	end
+		-- 	Used:SetActive(false)
+		-- 	MusicUsed:SetActive(not randomMusic)
+		-- 	RandomSign:SetActive(randomMusic)
+		-- else
+		-- 	MusicUsed:SetActive(false)
+		-- 	Used:SetActive(true)
+		-- end
+
+		if cfg.type == GPropKind.MusicLobby or cfg.type == GPropKind.MusicTable then
+			local randomMusic = false
+			if cfg.type == GPropKind.MusicLobby then
+				local scheme = DecorationModel:getCurScheme()
+				randomMusic = scheme.property_list[4] == 3
+			elseif cfg.type == GPropKind.MusicTable then
+				local scheme = DecorationModel:getInGameSchemeInfoById(DecorationModel:getInGameSpecifySchemeId())
+				randomMusic = scheme.rand % 2 == 1
+			end
+			self.RandomTag:SetActive(randomMusic)
+			self.UsedTag:SetActive(not randomMusic)
+			self:setButtonJump2(cfg)
+		else
+			self.UsedTag:SetActive(true)
+			self.RandomTag:SetActive(false)
+			self:setButtonUsed()
+		end
 	elseif ItemModel:getItemNumById(self._clickItemData.cfg.id) > 0 then
-		self:setButtonUse()
+		if cfg.type == GPropKind.MusicLobby or cfg.type == GPropKind.MusicTable then
+			self.RandomTag:SetActive(false)
+			self.UsedTag:SetActive(false)
+			self:setButtonJump2(cfg)
+		else
+			self:setButtonUse()
+		end
 	elseif cfg.accesses then
 		self:setButtonAccess()
 	else
@@ -1215,6 +1368,7 @@ end
 function P:setButtonJump(jump)
 	self.ItemButtonYellow:SetActive(true)
 	self.ItemButtonBlue:SetActive(false)
+	self.ItemButtonJump:SetActive(false)
 	self.Limited:SetActive(false)
 	self.GiftBtnCont:SetActive(false)
 
@@ -1231,6 +1385,31 @@ function P:setButtonJump(jump)
 		self:onClickJump()
 	end)
 end
+function P:setButtonJump2(cfg)
+	self.ItemButtonYellow:SetActive(false)
+	self.ItemButtonBlue:SetActive(false)
+	self.ItemButtonJump:SetActive(true)
+	self.Limited:SetActive(false)
+	self.GiftBtnCont:SetActive(false)
+	bee.addClick(self.ItemButtonJump, function()
+		Game:playSound("ui_button_confirm")
+		local jumpId = self:checkSchemeJump(cfg.type)
+		ItemModel:jumpView(jumpId, nil, function()
+			self.itemList:refreshShowingUi()
+			self:setDisplayPropDetailShow()
+		end)
+		bee.logEvent("style-preset-bag-change", self._clickItemData.cfg.id)
+	end, true)
+end
+function P:checkSchemeJump(ctype)
+	local jumpId
+	if ctype == GPropKind.MusicLobby or ctype == GPropKind.LobbyScene then
+		jumpId = 13001
+	else
+		jumpId = 13002
+	end
+	return jumpId
+end
 
 -- 前往获得按钮
 function P:setButtonAccess()
@@ -1243,6 +1422,7 @@ function P:setButtonAccess()
 
 	self.ItemButtonYellow:SetActive(false)
 	self.ItemButtonBlue:SetActive(true)
+	self.ItemButtonJump:SetActive(false)
 	self.Limited:SetActive(false)
 	self.GiftBtnCont:SetActive(false)
 
@@ -1258,6 +1438,7 @@ end
 function P:setGiftButtonCont()
 	self.ItemButtonYellow:SetActive(false)
 	self.ItemButtonBlue:SetActive(false)
+	self.ItemButtonJump:SetActive(false)
 	self.Limited:SetActive(false)
 	self.GiftBtnCont:SetActive(true)
 
@@ -1273,20 +1454,51 @@ end
 function P:setButtonUse()
 	self.ItemButtonYellow:SetActive(true)
 	self.ItemButtonBlue:SetActive(false)
+	self.ItemButtonJump:SetActive(false)
 	self.Limited:SetActive(false)
 	self.GiftBtnCont:SetActive(false)
 
 	bee.setText(self:find("Text", self.ItemButtonYellow), _T("LAB_BACKPACK_DES_16"))
 
+	local cfg = self._clickItemData.cfg
+	local inRandom = false
+	if cfg.type == GPropKind.MusicLobby or cfg.type == GPropKind.LobbyScene then
+		inRandom = DecorationModel:isLobbySchemeRandom()
+	else
+		inRandom = DecorationModel:isInGameSchemeRandom()
+	end
+	if inRandom then
+		self.ItemButtonYellow:SetActive(false)
+	end
+
 	bee.removeAllClick(self.ItemButtonYellow)
 	bee.addClick(self.ItemButtonYellow, function()
 		if self._clickItemData.cfg.type == GPropKind.MusicLobby then
-			PlayerModel:useLobbyBgm(self._clickItemData.cfg.id)
+			DecorationModel:useLobbyBgm(self._clickItemData.cfg.id)
 		elseif self._clickItemData.cfg.type == GPropKind.LobbyScene then
-			PlayerModel:useLobbyScene(self._clickItemData.cfg.id)
+			DecorationModel:useLobbyScene(self._clickItemData.cfg.id)
 		elseif self._clickItemData.cfg.type == GPropKind.AllInEff or self._clickItemData.cfg.type == GPropKind.NameplateEff 
-			or self._clickItemData.cfg.type == GPropKind.CardFace  then
-			ItemModel:reqChangeAnimation(self._clickItemData)
+			or self._clickItemData.cfg.type == GPropKind.CardFace or self._clickItemData.cfg.type == GPropKind.CardBack
+			or self._clickItemData.cfg.type == GPropKind.Table or self._clickItemData.cfg.type == GPropKind.MusicTable then
+			local list = DecorationModel:getInGameCurSchemeList()
+			if #list == 1 and list[1].scheme_id then
+				local scheme = list[1]
+				if self._clickItemData.cfg.type == GPropKind.AllInEff then
+					scheme.all_in_animation = {self._clickItemData.cfg.id}
+				elseif self._clickItemData.cfg.type == GPropKind.NameplateEff then
+					scheme.show_card = {self._clickItemData.cfg.id}
+				elseif self._clickItemData.cfg.type == GPropKind.CardFace then
+					scheme.card_front = {self._clickItemData.cfg.id}
+				elseif self._clickItemData.cfg.type == GPropKind.CardBack then
+					scheme.card_back = {self._clickItemData.cfg.id}
+				elseif self._clickItemData.cfg.type == GPropKind.Table then
+					scheme.table = {self._clickItemData.cfg.id}
+				elseif self._clickItemData.cfg.type == GPropKind.MusicTable then
+					scheme.bgm_list = {self._clickItemData.cfg.id}
+				end
+				DecorationModel:requestSaveInGameDecorationScheme(scheme)
+			end
+			-- ItemModel:reqChangeAnimation(self._clickItemData)
 		else
 			ItemModel:reqUseItem(self._clickItemData)
 		end
@@ -1298,6 +1510,7 @@ end
 function P:setButtonUsed()
 	self.ItemButtonYellow:SetActive(false)
 	self.ItemButtonBlue:SetActive(true)
+	self.ItemButtonJump:SetActive(false)
 	self.Limited:SetActive(false)
 	self.GiftBtnCont:SetActive(false)
 
@@ -1315,6 +1528,7 @@ function P:setButtonUseTreasureBox()
 	local count = ItemModel:getItemNumById(cfg.id)
 
 	self.ItemButtonBlue:SetActive(false)
+	self.ItemButtonJump:SetActive(false)
 	self.Limited:SetActive(false)
 	self.GiftBtnCont:SetActive(false)
 	if count <= 0 then
@@ -1348,6 +1562,7 @@ end
 function P:setAccessText()
 	self.ItemButtonYellow:SetActive(false)
 	self.ItemButtonBlue:SetActive(false)
+	self.ItemButtonJump:SetActive(false)
 	self.Limited:SetActive(true)
 end
 
@@ -1376,10 +1591,9 @@ function P:onClickPreviewButton()
 	
 	if self._clickItemData.cfg.type == GPropKind.CardBack or self._clickItemData.cfg.type == GPropKind.CardFace
 		or self._clickItemData.cfg.type == GPropKind.Table or self._clickItemData.cfg.type == GPropKind.NameplateEff then
-		UiManager:showUI("BackpackPreview", {data = self._clickItemData})
+		UiManager:showUI("BackpackPreview", {data = self._clickItemData, scheme = DecorationModel:getInGameCurScheme()})
 	elseif self._clickItemData.cfg.type == GPropKind.AllInEff then
-		local themeInfo = PlayerModel:getCurScheme()
-		local skinCfg = tpl_character_skin[themeInfo.skin_id]
+		local skinCfg = DecorationModel:getSkinCfgInScheme()
 		UiManager:showUI(GameModel:getAllinUiName(self._clickItemData.cfg.id), {role = CharacterModel:getRoleData(skinCfg.role), skin = skinCfg})
 	elseif self._clickItemData.cfg.type == GPropKind.MusicLobby or self._clickItemData.cfg.type == GPropKind.MusicTable then
 		UiManager:showUI("BackpackMusic", {data = self._clickItemData, list = self.itemSubDatas[self._clickItemData.cfg.type], cb = function(data)
@@ -1657,8 +1871,17 @@ function P:evt_ChangeOutFitsRSP(msg)
 end
 
 function P:evt_updateScheme()
+	self._curDisplayInfos = nil
 	self:setItemListShow()
 	self:setItemDetailShow()
+end
+
+function P:evt_SaveRoomDCSchemeRSP()
+	self:evt_updateScheme()
+end
+
+function P:evt_SetSchemeInfoRSP()
+	self:evt_updateScheme()
 end
 
 function P:evt_ItemChangeRSP(msg)

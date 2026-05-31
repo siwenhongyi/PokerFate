@@ -36,7 +36,7 @@ function P:onStart()
 	bee.setText(self.RoleNameText, _T(roleCfg.name))
 
 	local currencyCfg = tpl_props[cfg.pri[1]]
-	bee.setIconInAtlas(self.CurrencyIcon, currencyCfg.icon)
+	bee.setIconInAtlas(self.CurrencyIcon, currencyCfg.icon, true)
 	bee.setText(self.PriceText, cfg.pri[2])
 
 	bee.setIcon(self.SkinIcon, skinCfg.image_with_bg or skinCfg.image, true)

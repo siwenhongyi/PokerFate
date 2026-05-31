@@ -1,16 +1,24 @@
 local P = class("TournamentBlindStructure", UiBase)
 
 function P:onAwake()
+    self._closeAnim = "UI_1_TournamentBlindStructure_back"
     self.AnimRoot = self:find("AnimRoot")
     self.Right = self:find("Right", self.AnimRoot)
 
     self.SidePanel = self:find("SidePanel", self.Right)
+    self.InfoButton = self:find("InfoButton", self.SidePanel)
 
     bee.addClick(self:find("TouchMask", self.AnimRoot), function()
         self:hideUI()
     end)
     bee.addClick(self:find("SideButton", self.SidePanel), function()
         self:hideUI()
+    end)
+    bee.addClick(self.InfoButton, function()
+        Game:playSound("ui_button_confirm")
+        if self._params and self._params.infoCb then
+            self._params.infoCb()
+        end
     end)
 
     local BlindList = self:find("BlindList", self.SidePanel)
@@ -24,7 +32,6 @@ function P:onAwake()
     self.ListBlind:setRefreshFunc(function(data, item)
         self:refreshBlindItem(data, item)
     end)
-
 end
 
 function P:onShow()
@@ -42,12 +49,18 @@ function P:onShow()
             {blind_level = 8, small_blind = 500, big_blind = 1000, ante = 100, duration = 300},
         })
     end
+
+    if self._params and self._params.infoCb then
+        self.InfoButton:SetActive(true)
+    else
+        self.InfoButton:SetActive(false)
+    end
 end
 
 function P:refreshBlindItem(data, item)
     bee.setText(self:find("TextLevel", item), data.blind_level)
     if data.ante > 0 then
-        bee.setText(self:find("TextBlind", item), _N(data.small_blind) .. "/" .. _N(data.big_blind) .. "(" .. _N(data.ante) .. ")")
+        bee.setText(self:find("TextBlind", item), _N(data.small_blind) .. "/" .. _N(data.big_blind) .. " (" .. _N(data.ante) .. ")")
     else
         bee.setText(self:find("TextBlind", item), _N(data.small_blind) .. "/" .. _N(data.big_blind))
     end

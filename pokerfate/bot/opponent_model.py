@@ -39,6 +39,7 @@ from dataclasses import dataclass, asdict, fields
 from typing import Dict, List, Optional
 
 from pokerfate.core.config import MIN_HANDS_FOR_CLASSIFICATION
+from pokerfate.strategy.range_v2.empirical_model import population_rate
 
 log = logging.getLogger(__name__)
 
@@ -477,13 +478,13 @@ class OpponentModel:
     def fold_to_cbet_rate(self, player_id: int) -> float:
         s = self.get(player_id)
         if s.fold_to_cbet_opps < 5:
-            return 0.45  # Default assumption
+            return population_rate('fold_to_cbet', 0.45)
         return s.fold_to_cbet
 
     def river_fold_rate(self, player_id: int) -> float:
         s = self.get(player_id)
         if s.river_facing_bet_opps < 5:
-            return 0.40
+            return population_rate('river_fold_rate', 0.40)
         return s.river_fold_rate
 
     def preferred_exploit_target(self, player_ids: List[int]) -> int:
@@ -537,6 +538,9 @@ class OpponentModel:
             return adj
 
         af = s.aggression_factor
+        ftc_base = population_rate('fold_to_cbet', 0.45)
+        river_fold_base = population_rate('river_fold_rate', 0.45)
+        wtsd_base = population_rate('wtsd', 0.25)
 
         # ──────────────────────────────────────────────────────────────
         # 连续指数：作为下游连续 scale 的共享输入
@@ -545,21 +549,21 @@ class OpponentModel:
         # 缺样本的路贡献 0（不惩罚），最终归一化。
         sticky_parts = []
         if s.fold_to_cbet_opps >= 5:
-            sticky_parts.append(_clip((0.50 - s.fold_to_cbet) / 0.35, 0.0, 1.0))
+            sticky_parts.append(_clip((ftc_base - s.fold_to_cbet) / max(ftc_base, 0.20), 0.0, 1.0))
         if s.flop_seen_count >= 15 or s.server_wtsd_prior > 0:
-            sticky_parts.append(_clip((s.wtsd - 0.22) / 0.22, 0.0, 1.0))
+            sticky_parts.append(_clip((s.wtsd - wtsd_base) / max(1.0 - wtsd_base, 0.20), 0.0, 1.0))
         if s.river_facing_bet_opps >= 5:
-            sticky_parts.append(_clip((0.45 - s.river_fold_rate) / 0.30, 0.0, 1.0))
+            sticky_parts.append(_clip((river_fold_base - s.river_fold_rate) / max(river_fold_base, 0.20), 0.0, 1.0))
         sticky_score = sum(sticky_parts) / len(sticky_parts) if sticky_parts else 0.0
 
         # fold_lean_score ∈ [0, 1]：对手"易弃牌"强度（与 sticky 对称）。
         fold_lean_parts = []
         if s.fold_to_cbet_opps >= 5:
-            fold_lean_parts.append(_clip((s.fold_to_cbet - 0.45) / 0.25, 0.0, 1.0))
+            fold_lean_parts.append(_clip((s.fold_to_cbet - ftc_base) / max(1.0 - ftc_base, 0.20), 0.0, 1.0))
         if s.river_facing_bet_opps >= 5:
-            fold_lean_parts.append(_clip((s.river_fold_rate - 0.45) / 0.25, 0.0, 1.0))
+            fold_lean_parts.append(_clip((s.river_fold_rate - river_fold_base) / max(1.0 - river_fold_base, 0.20), 0.0, 1.0))
         if s.flop_seen_count >= 15 or s.server_wtsd_prior > 0:
-            fold_lean_parts.append(_clip((0.25 - s.wtsd) / 0.15, 0.0, 1.0))
+            fold_lean_parts.append(_clip((wtsd_base - s.wtsd) / max(wtsd_base, 0.15), 0.0, 1.0))
         fold_lean_score = sum(fold_lean_parts) / len(fold_lean_parts) if fold_lean_parts else 0.0
 
         # ──────────────────────────────────────────────────────────────
@@ -604,8 +608,7 @@ class OpponentModel:
         #   fold-lean 进一步上提。最低 0.08（原 'bluff_freq=none' 等价效果），
         #   最高 1.15（原 'bluff_freq=high' + fold_to_cbet 高的等价效果）。
         if s.fold_to_cbet_opps >= 5:
-            # fold_to_cbet 0.20→0.40, 0.40→0.80, 0.60→1.10, 0.75→1.15(cap)
-            base_bluff = _clip(s.fold_to_cbet / 0.50, 0.25, 1.15)
+            base_bluff = _clip(0.55 + (s.fold_to_cbet - ftc_base) * 1.4, 0.25, 1.15)
         elif action_samples >= 10:
             # AF 兜底只在缺 fold_to_cbet 时使用。AF 低不是"更容易被诈唬"，
             # 它通常意味着 check/call 多；AF 过高则容易被反加。两端都降，
@@ -725,6 +728,9 @@ class OpponentModel:
         }
         if showdown_data is not None:
             data["showdown"] = showdown_data
+        parent = os.path.dirname(filepath)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 

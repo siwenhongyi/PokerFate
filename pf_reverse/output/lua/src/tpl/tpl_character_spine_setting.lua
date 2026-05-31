@@ -8,7 +8,7 @@ local function _initData()
 {100501,{"mao_tail","mao_body"}},
 {100204,{"Chair"}},
 {100304,{"zhentou","chuang"}},
-{100704,{"bj_2"}},
+{100704,{"bj_2","daoju"}},
 {100604,{"bj_1jb"}},
 {100405,{"bj_f"}},
 {100107,{"qianjing"}},
@@ -18,8 +18,8 @@ local function _initData()
 {100605,{"chair"}},
 {101205,{"jiazi","shuyedai","yizi_yy2","yizi_yy","yizi","yijiao3","yijiao2","yijiao1","dengzi","hushou","xiezi"}},
 {101204,{"shuijinqiu"}},
-{101401,{"umbrella bow","umbrella handle","umbrella wind bell","umbrella_hou","umbrella_qian"}},
-{101404,{"A23","A47","A38","A39","A40","A42","A62","A6","A8","A11"}}
+{100106,{"shafa","shafa_yy1","shafa_yy2","shafa_yy4","shafa_yy5","shafa_yy6"}},
+{101604,{"hulan2"}}
 }
     for _, v in pairs(bodys) do
         local m = {}

@@ -133,6 +133,7 @@ function P:onAwake()
                 self._tmpInfos[k] = 0
             end
             self._undos = {}
+            self:_initLastBets()
             self:refreshUI()
         end
         bee.logEvent("colorgame-clear")
@@ -145,6 +146,9 @@ function P:onAwake()
                 self._betInfos[v.id] = self._betInfos[v.id] - v.value
                 self._tmpInfos[v.id] = self._tmpInfos[v.id] - v.value
                 self._gold = self._gold + v.value
+            end
+            if #self._undos <= 0 then
+                self:_initLastBets()
             end
             self:refreshUI()
         else
@@ -189,6 +193,17 @@ function P:onAwake()
             })
             self.GuideHand:SetActive(false)
             Game:playSound("ui_button_confirm")
+
+            -- 记录操作
+            local lastBets = {}
+            for _, v in ipairs(self._undos) do
+                for _, vv in ipairs(v) do
+                    table.insert(lastBets, vv)
+                end
+            end
+            lastBets = self:mergeChips(lastBets)
+            SideGameModel:setColorGameLastBets(lastBets)
+            self:_initLastBets(lastBets)
         else
             UiManager:showToast(_T("LAB_COLORGAME_020"))
         end
@@ -214,6 +229,11 @@ function P:onAwake()
     self._rateName = {"Color[color_game_bet_2x]", "Color[color_game_bet_3x]", "Color[color_game_bet_10x]"}
 end
 
+function P:onDestroy()
+    SideGameModel:setColorGameLastChipIndex(self._chipIndex)
+    SideGameModel:setColorGameLastLv(self.lvlId)
+end
+
 function P:onShow()
     self.HistoricalRecords:SetActive(false)
     bee.emit("evt_sideGameRecords", false)
@@ -226,6 +246,7 @@ function P:onShow()
     self._chipValues = {0, 0, 0}
     self._gold = PlayerModel:getGold()
     self._recordDatas = {}  -- 历史记录列表 {{bet_data = list, bet_result = {}}}
+
     self:refreshUI()
 
     self._drawIndex = 1
@@ -254,6 +275,27 @@ function P:refreshColorGame()
     self:_refreshColorGame()
 end
 
+function P:_initLastBets()
+    self._lastBets = nil
+    if self.lvlId == SideGameModel:getColorGameLastLv() then
+        local lastbets = SideGameModel:getColorGameLastBets()
+        if lastbets and next(lastbets) then
+            local totalGold = 0
+            for k,v in pairs(lastbets) do
+                totalGold = totalGold + v.value
+            end
+            if totalGold <= PlayerModel:getGold() then
+                self._lastBets = lastbets
+                self:refreshDoubleButton()
+                if self._isInit then
+                    self._chipIndex = SideGameModel:getColorGameLastChipIndex()
+                    self:onBtChipAt(self._chipIndex)
+                end
+            end
+        end
+    end
+end
+
 function P:_refreshColorGame()
     self.lvlId = 1
     local gold = PlayerModel:getGold()
@@ -264,6 +306,12 @@ function P:_refreshColorGame()
             break
         end
     end
+
+    if not self._isInit then
+        self:_initLastBets()
+        self._isInit = true
+    end
+
     self._data = self._color_datas[self.lvlId]
     for k, v in ipairs(self.ChipButtons) do
         self._chipValues[k] = self._data["chips" .. k]
@@ -309,6 +357,36 @@ function P:_addBets(bets)
         return
     end
 
+    -- 每个id最多飞10个金币
+    local temp = {}
+    for k,v in pairs(bets) do
+        if not temp[v.id] then
+            temp[v.id] = {}
+        end
+        table.insert(temp[v.id], v)
+    end
+    for k, v in pairs(temp) do
+        local perCount = #v
+        if perCount > 10 then
+            table.sort(v, function(a, b) return a.value > b.value end)
+            local totalValue = 0
+            for i = perCount, 11, -1 do
+                totalValue = totalValue + v[i].value
+                v[i] = nil
+            end
+            v[10].value = v[10].value + totalValue
+        end
+    end
+
+    local temp1 = {}
+    for i = 1, 6 do
+        if temp[i] then
+            for _,v in ipairs(temp[i]) do
+                table.insert(temp1, v)
+            end
+        end
+    end
+
     -- local bet = 0
     -- for k, v in ipairs(bets) do
     --     bet = bet + v.value
@@ -323,12 +401,12 @@ function P:_addBets(bets)
         if dt > 0.1 then
             dt = 0.1
         end
-        for k, v in ipairs(bets) do
+        for k, v in ipairs(temp1) do
             self._betInfos[v.id] = self._betInfos[v.id] + v.value
             self._gold = self._gold - v.value
             self:doFlyChip(nil, v.value, v.id, dt * (k - 1))
         end
-        table.insert(self._undos, bets)
+        table.insert(self._undos, temp1)
         self:refreshUI()
     else
         UiManager:showToast(_T("LAB_COLORGAME_017"))
@@ -388,7 +466,7 @@ function P:doFlyChip(chipIndex, chipValue, toIndex, delay)
         chipIndex = 1
         if chipValue == self._data.chips2 then
             chipIndex = 2
-        elseif chipValue == self._data.chips3 then
+        elseif chipValue >= self._data.chips3 then
             chipIndex = 3
         end
     end
@@ -405,6 +483,7 @@ function P:_doFlyChip(chipIndex, chipValue, toIndex)
     if self._ishide then
         return
     end
+    
     local chip = self._nodeCache:getItem(chipIndex, self.ImageChips[chipIndex], self.Left.transform)
     chip.transform.localPosition = self.ImageChips[chipIndex].transform.localPosition
     chip.transform.localScale = bee.v3one
@@ -670,7 +749,7 @@ function P:doShowRewards(msg)
                         
                         local chips = self:getBetChips(k)
                         local flyNums = {0, 0, 0, 0, 0, 0}
-                        for _, v in ipairs(chips) do
+                        -- for _, v in ipairs(chips) do
                             for i = 1, profitRates[counts[k]] do
                                 flyNums[k] = flyNums[k] + 1
                                 local dt = (flyNums[k] - 1) * 0.1
@@ -693,7 +772,7 @@ function P:doShowRewards(msg)
                                     : link()
                                 end)
                             end
-                        end
+                        -- end
                     end)
 
                     -- bee.tween(chipNode, true)

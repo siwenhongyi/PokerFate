@@ -795,10 +795,22 @@ function P:isCanJump(accesses, id)
 							end
 						end
 					end
+				elseif jumpCfg.sub_page[1] == 4 then
+					-- 兑换商城
+					local shopPageCfg = tpl_shop_page[jumpCfg.sub_page[2]]
+					local list = ShopModel:getShopExchangeList(shopPageCfg.shop_type)
+					for k,v in pairs(list) do
+						if v.cfg.props[2] == id then
+							return true
+						end
+					end
 				else
 					return true
 				end
 			elseif jumpCfg.view == "GachaMain" and not jumpCfg.select then
+				if tpl_character_skin[id] then
+					id = tpl_character_skin[id].role
+				end
 				return GachaModel:getContainCardPoolId(self:_getJumpId(jumpCfg, id))
 			else
 				return true

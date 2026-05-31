@@ -30,12 +30,12 @@ function P:initUI()
     self.Item1:SetActive(false)
 
     self.RewardItems = {
-        self:find("item01", AwakenReward),
-        self:find("item02", AwakenReward),
-        self:find("item03", AwakenReward),
-        self:find("item04", AwakenReward),
-        self:find("item05", AwakenReward),
-        self:find("item06", AwakenReward),
+        self:find("Item1/item01", AwakenReward),
+        self:find("Item1/item02", AwakenReward),
+        self:find("Item1/item03", AwakenReward),
+        self:find("Item2/item04", AwakenReward),
+        self:find("Item2/item05", AwakenReward),
+        self:find("Item2/item06", AwakenReward),
     }
 
     bee.addClick(self:find("BackButton", LeftTop), function()
@@ -86,6 +86,7 @@ function P:initUI()
             end
         end
         self._isInAwakening = true
+        bee.emit("evt_oathStart")
         Net:sendReq("pb.RoleAwakenREQ", {
             role_id = self._role.role_id
         })

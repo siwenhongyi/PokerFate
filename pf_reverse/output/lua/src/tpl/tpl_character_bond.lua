@@ -82,7 +82,19 @@ local function _initData()
 {75,1014,3,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_3]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
 {76,1014,4,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_4]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
 {77,1014,5,nil,nil,{10800001,15,10700001,50},{20211401,20411401,20111404},"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
-{78,1014,6,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"}
+{78,1014,6,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{79,1015,1,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_1]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{80,1015,2,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_2]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{81,1015,3,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_3]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{82,1015,4,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_4]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{83,1015,5,nil,nil,{10800001,15,10700001,50},{20211501,20411501,20111504},"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{84,1015,6,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{85,1016,1,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_1]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{86,1016,2,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_2]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{87,1016,3,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_3]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{88,1016,4,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_4]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{89,1016,5,nil,nil,{10800001,15,10700001,50},{20211601,20411601,20111604},"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{90,1016,6,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"}
 }
     for _, v in pairs(bodys) do
         local m = {}

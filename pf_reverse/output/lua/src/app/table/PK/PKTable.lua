@@ -102,6 +102,8 @@ function P:onEnable()
 			self.uiLayer = UiManager:showUI("PKFriendsRoomLayer")
 		elseif GameModel.data:isSNG() then
 			self.uiLayer = UiManager:showUI("TournamentSNGUILayer")
+		elseif GameModel.data:isMTT() then
+			self.uiLayer = UiManager:showUI("TournamentMTTUILayer")
 		else
 			self.uiLayer = UiManager:showUI("PKUILayer")
 		end
@@ -142,7 +144,7 @@ function P:initTableCards()
 end
 
 function P:refreshCardBack()
-	local cardBackImage = PlayerModel:getCurCardBackImage()
+	local cardBackImage = DecorationModel:getCurCardBackImage(self.data:getIngameScheme())
 	bee.setIcon(self.ImageCardUI, cardBackImage)
 	bee.setSpriteImg(self.ImageCard, cardBackImage)
 	-- for _, v in ipairs(self.Boards) do
@@ -203,6 +205,10 @@ function P:refreshUI()
 	if self._winnerAction then
 		self._winnerAction:Kill()
 		self._winnerAction = nil
+	end
+
+	if self.data:isInObserve() then
+		UiManager:showUI("IngameSpectate")
 	end
 end
 
@@ -342,6 +348,12 @@ function P:onStandUpBrc(event)
 end
 
 function P:refreshWaitingPlayerTip()
+	if self.data:isInObserve() then
+		self:showTips()
+		self.BgWaitBBTip:SetActive(false)
+		self.BgPayBBTip:SetActive(false)
+		return
+	end
 	if not self.data:isSNG() and not self.data:isMTT() then
 		if self.data:isMeOnSeat() then
 			if self.data:getOnSeatNum() == 1 then
@@ -643,11 +655,13 @@ function P:evt_RoundStartBRC(params)
 							bee.setSprite(target, GF.getCardImageByCode(code))
 							self:refreshCardType(true)
 							Net:sendReq("pb.RoundStartDisplayFinishREQ", {gameid = self.data:getGameId(), stage = stage})
+							bee.emit(EventDef.evt_assistant_show_board)
 						end
 					end, eft)
 				else
 					self:refreshCardType(true)
 					Net:sendReq("pb.RoundStartDisplayFinishREQ", {gameid = self.data:getGameId(), stage = stage})
+					bee.emit(EventDef.evt_assistant_show_board)
 				end
 			elseif isAllAllin then
 				-- self:refreshCardType(true)
@@ -686,7 +700,9 @@ function P:evt_ActionNotifyBRC(msg)
 		if msg.pre_action_result == 2 then
 		else
 			Game:playSound("action_tip")
-			bee.emit(EventDef.evt_hideUiWhenAction, false)
+			if not self.data:isInObserve() then
+				bee.emit(EventDef.evt_hideUiWhenAction, false)
+			end
 		end
 	end
 	for i, v in ipairs(self.seatController) do
@@ -741,7 +757,7 @@ function P:evt_ActionBRC(msg)
 					self.seatController[seatid]:playSound(ROLE_VOICE.call)
 				end
 			elseif action_type == POKER_ACTION.RAISE then
-				if msg.chips < player.bet_chip then
+				if self.data:getRaiseCount() >= 2 then
 					self.seatController[seatid]:playSound(ROLE_VOICE.reRaise)
 				elseif msg.chips == self.data:getLastPotNum() then
 					self.seatController[seatid]:playSound(ROLE_VOICE.pot)
@@ -768,7 +784,9 @@ function P:evt_ActionBRC(msg)
 		self.seatController[seatid]:refreshActionUI(true)
 	end
 	if player:isMe() then
-		bee.emit(EventDef.evt_hideUiWhenAction, true)
+		if not self.data:isInObserve() then
+			bee.emit(EventDef.evt_hideUiWhenAction, true)
+		end
 	end
 end
 
@@ -853,7 +871,7 @@ function P:evt_WinnerRSP(params)
 				seatid, chips = v.seatid, chips + v.chips
 			end
 		end
-		if seatid and chips and chips <= self.data:getMyPlayerInfo().begin_chips then
+		if seatid and chips and chips <= (self.data:getMyPlayerInfo() and self.data:getMyPlayerInfo().begin_chips or 0) then
 			for _, v in ipairs(params.profit) do
 				if v.seatid == seatid then
 					if v.chips <= 0 then
@@ -1028,6 +1046,8 @@ function P:evt_ShowHandRSP(msg)
 		local player = self.data:getPlayer(seatid)
 		if seatid ~= myPosition then
 			self.seatController[seatid]:showCardAndFlop()
+		elseif seatid == self.data:getObserveSeatid() then
+			self.seatController[seatid]:showCardAndFlop()
 		end
 
 		local cards, cardType, pkType = PKHelper.getCardType(player.hand_cards, boards, self.data:getRoomType())
@@ -1109,7 +1129,7 @@ end
 function P:evt_NoticeRebyRSP(msg)
 	if msg then
 		local seatid = msg.seatid + 1
-		if seatid == self.data:getMyPosition() then
+		if seatid == self.data:getMyPosition() and not self.data:isInObserve() then
 			local data = GF.getTableDataBySB(self.data:getGameType(), self.data:getSmallBlind())
 			if data then
 				if self.data:isFriendsRoom() then
@@ -1140,7 +1160,7 @@ function P:evt_RebyBRC(msg)
 				self.seatController[seatid]:refreshChip(player)
 			end
 
-			if seatid ~= self.data:getMyPosition() then
+			if seatid ~= self.data:getMyPosition() or self.data:isInObserve() then
 				self.seatController[seatid]:refreshAddingChips(false, msg.chips, msg.type)
 			end
 		end

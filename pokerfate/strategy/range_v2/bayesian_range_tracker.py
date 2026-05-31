@@ -37,6 +37,11 @@ from pokerfate.strategy.range_v2.action_model import (
     PlayerProfile,
 )
 from pokerfate.strategy.range_v2.bucket_ml_calibration import calibrate_bucket_probs
+from pokerfate.strategy.range_v2.empirical_model import (
+    CAT_ORDER as EMPIRICAL_CAT_ORDER,
+    empirical_preflop_bucket_prior,
+    set_current_big_blind,
+)
 from pokerfate.strategy.range_v2.runtime_formula_calibration import load_params
 
 log = logging.getLogger(__name__)
@@ -51,6 +56,11 @@ _BUCKET_CAL_MIN_FACTOR = float(_os.environ.get('PF_BUCKET_CAL_MIN_FACTOR', '0.25
 _BUCKET_CAL_MAX_FACTOR = float(_os.environ.get('PF_BUCKET_CAL_MAX_FACTOR', '8.0'))
 _BUCKET_CAL_CATS = ('nuts', 'strong', 'medium', 'draw', 'weak_draw', 'air')
 _BUCKET_CAL_IDX = {cat: i for i, cat in enumerate(_BUCKET_CAL_CATS)}
+_PREFLOP_CAT_IDX = np.array(
+    [_BUCKET_CAL_IDX.get(hcat.categorize(idx, []), _BUCKET_CAL_IDX['air'])
+     for idx in range(1326)],
+    dtype=np.int8,
+)
 _RUNTIME_BUCKET_CAL_CACHE: Dict[str, Optional[Dict[str, tuple[float, Dict[str, float]]]]] = {}
 
 # Safe subset fitted on 2-5 logs and cross-validated on 6 logs with full
@@ -423,6 +433,7 @@ class BayesianRangeTracker:
 
     def set_big_blind(self, big_blind: float) -> None:
         self._big_blind = float(big_blind or 0.0)
+        set_current_big_blind(self._big_blind)
 
     def set_known_cards(self, cards: List[Card]) -> None:
         """Call once per hand with bot's hole cards."""
@@ -616,6 +627,31 @@ class BayesianRangeTracker:
             else:
                 w[idx] = 0.03
 
+        empirical_prior = empirical_preflop_bucket_prior(
+            position, profile, self._big_blind,
+        )
+        if empirical_prior is not None:
+            target_dist, blend, _key, _n = empirical_prior
+            active_total = float(w.sum())
+            if active_total > 1e-15 and blend > 0.0:
+                current = {}
+                for cat in EMPIRICAL_CAT_ORDER:
+                    cat_idx = _BUCKET_CAL_IDX.get(cat)
+                    if cat_idx is None:
+                        continue
+                    current[cat] = float(w[_PREFLOP_CAT_IDX == cat_idx].sum()) / active_total
+                multipliers = np.ones(len(EMPIRICAL_CAT_ORDER), dtype=np.float64)
+                for i, cat in enumerate(EMPIRICAL_CAT_ORDER):
+                    cur = current.get(cat, 0.0)
+                    if cur <= 1e-12:
+                        continue
+                    target = (
+                        (1.0 - blend) * cur
+                        + blend * float(target_dist.get(cat, cur) or 0.0)
+                    )
+                    multipliers[i] = max(0.25, min(4.0, target / cur))
+                w *= multipliers[_PREFLOP_CAT_IDX]
+
         total = w.sum()
         if total > 0:
             w /= total
@@ -780,6 +816,8 @@ class BayesianRangeTracker:
             signal_strength *= _NEW_SIGNAL_FACTOR
         if player_id not in self._weights:
             self.reset_hand(player_id, context.position or 'CO', profile)
+        if context.big_blind <= 0 and self._big_blind:
+            context.big_blind = float(self._big_blind)
 
         w = self._weights[player_id]
 

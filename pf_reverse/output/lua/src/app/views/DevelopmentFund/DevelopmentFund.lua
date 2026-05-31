@@ -33,6 +33,7 @@ function P:onAwake()
     end)
     bee.addClick2(self:find("Title/InfoButton", self.Panel), function()
         Game:playSound("ui_button_confirm")
+        bee.logEvent("development-fund-rule")
         table.sort(self._data.levels, function(a, b)
             return a.level < b.level
         end)
@@ -49,6 +50,7 @@ function P:onAwake()
 
     bee.addClick2(self:find("MatchButton", self.Panel), function()
         Game:playSound("ui_button_confirm")
+        bee.logEvent("development-fund-match")
         UiManager:showUI("OmahaBlinds", {gameType = GAME_GAME_TYPE.LOBBY_HOLDEM_GAME})
     end)
 
@@ -62,8 +64,16 @@ function P:onAwake()
         pos.y = pos.y - 40
         development_fund_title_en.transform.localPosition = pos
     else
-        self:find("Title/InfoButton", self.Panel).transform.localPosition = bee.v3(129, 43)
+        self:find("Title/InfoButton", self.Panel).transform.localPosition = bee.v3(129, 10)
+        local development_fund_title_en = self:find("Title/development_fund_title_en", self.Panel)
+        local pos = development_fund_title_en.transform.localPosition
+        pos.y = pos.y - 30
+        development_fund_title_en.transform.localPosition = pos
     end
+    
+    self:find("Eff_poker_Ui_Development_js01", self.Amount):SetActive(false)
+    self:find("Eff_poker_Ui_Development_js02", self.Amount):SetActive(false)
+    self:find("Eff_poker_Ui_Development_sx", self.FundLevel):SetActive(false)
 end
 
 function P:onShow()

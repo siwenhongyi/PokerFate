@@ -18,10 +18,10 @@ function P:onAwake()
 	bee.addValueChanged(self.CheckToggle, function(isOn)
 		Game:playSound("ui_button_disabled")
 		if isOn then
-			PlayerModel:requestUpdateDCSchemeRandFlag(1)
+			DecorationModel:requestUpdateDCSchemeRandFlag(1)
     		bee.logEvent("lobby-custom-random")
 		else
-			PlayerModel:requestUpdateDCSchemeRandFlag(0)
+			DecorationModel:requestUpdateDCSchemeRandFlag(0)
 		end
 	end)
 
@@ -35,7 +35,7 @@ function P:onStart()
 	self:initItemList()
 	self:setItemList()
 
-	if PlayerModel:isRandomDecorationScheme() then
+	if DecorationModel:isRandomDecorationScheme() then
 		bee.setCheck(self.CheckToggle)
 	else
 		bee.setUncheck(self.CheckToggle)
@@ -63,7 +63,7 @@ end
 
 function P:setItemList()
 	local list = {}
-	for k,v in pairs(PlayerModel:getDecorationSchemeList()) do
+	for k,v in pairs(DecorationModel:getLobbySchemeList()) do
 		table.insert(list, v)
 	end
 	local listCount = #list
@@ -72,7 +72,7 @@ function P:setItemList()
 	end
 	self.itemList:setDatas(list)
 
-	local curSchemeInfo = PlayerModel:getCurScheme()
+	local curSchemeInfo = DecorationModel:getCurScheme()
 	if curSchemeInfo then
 		self.itemList:moveToYItem(curSchemeInfo.index)
 	end
@@ -131,7 +131,7 @@ function P:setNormalItem(item, data)
 	local Using = self:find("Using", Normal)
 	local Selected = self:find("Selected", Normal)
 
-	local curId = PlayerModel:getCurSchemeId()
+	local curId = DecorationModel:getCurLobbySchemeId()
 
 	bee.setText(IndexText, data.index)
 	DeleteButton:SetActive(data.scheme_id ~= curId)
@@ -172,7 +172,7 @@ function P:setNormalItem(item, data)
 		UiManager:showTip({
         text = _T("LAB_CUSTOM_5"),
         onSure = function()
-            	PlayerModel:requestDeleteDCSchemeREQ(data.scheme_id)
+            	DecorationModel:requestDeleteDCSchemeREQ(data.scheme_id)
 	        end
 	    })
 	end)
@@ -180,7 +180,7 @@ function P:setNormalItem(item, data)
 	bee.removeAllClick(UseButton)
 	bee.addClick(UseButton, function()
 		Game:playSound("ui_button_confirm")
-		PlayerModel:requestChangeScheme(data.scheme_id)
+		DecorationModel:requestChangeScheme(data.scheme_id)
     	bee.logEvent("lobby-custom-change")
 	end)
 end

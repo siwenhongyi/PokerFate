@@ -41,6 +41,8 @@ function net:UserLoginRSP(msg)
             bee.logEvent("http_delay", dt, UrlManager:getHttpUrl())
         end
         UiManager:hideUI("LoginQueue")
+
+        Net:sendReq("pb.SngMatchPlayerNumREQ", {})
     elseif tpl_RetCode.LOGIN_ERR_ENTER_QUEUE.code == msg.code then
         UiManager:showUI("LoginQueue", {pos = msg.pos, est_wait_time = msg.est_wait_time})
         LoginModel:resetHeartBeat()
@@ -265,7 +267,9 @@ function net:NoticeBRC(msg)
     elseif msg.type == tpl_PushConsts.GAME_REBATE_SETTLE.code then
         ClientDataModel:reqDevelopmentFundData()
         bee.emit(EventDef.evt_developmentFund_refresh)
-    elseif msg.type >= 10091 and msg.type <= 100100 then -- pay success for stove
+    elseif msg.type == tpl_PushConsts.BACKEND_PRICE_CONFIG_UPDATED.code then
+        ShopModel:requestShopPid()
+    elseif msg.type >= 10091 and msg.type < 10100 then -- pay success for stove
         if msg.message then
             local d = json.decode(msg.message)
             if d then
@@ -278,8 +282,33 @@ function net:NoticeBRC(msg)
         if msg.message then
             local d = json.decode(msg.message)
             if d then
-                -- UiManager:showUI("AchievementTips", {clearId = d[1]})
                 bee.emit("evt_clearAchievement", {clearIds = d})
+            end
+        end
+    elseif msg.type == tpl_PushConsts.MTT_START.code then
+        if msg.message then
+            local d = json.decode(msg.message)
+            if d then
+                if not bee.isInStart() and not GuideManager:isInGuide() then
+	                UiManager:showUI("TournamentMTThint", d)
+                end
+            end
+        end
+    elseif msg.type == tpl_PushConsts.MTT_CANCEL.code then
+        if msg.message then
+            local d = json.decode(msg.message)
+            if d then
+	            bee.emit("evt_MTT_CANCEL", d)
+                if bee.isInGame() and GameModel.data and GameModel.data:isMTT() and GameModel.data.room_info.tour_id == d.tour_id then
+                    if "" ~= d.reason then
+                        bee.once(1, function()
+                            local code = tonumber(d.reason)
+                            if code then
+                                Net:onErrorCode({code = code})
+                            end
+                        end)
+                    end
+                end
             end
         end
 	end

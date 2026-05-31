@@ -16,7 +16,7 @@ local function _initData()
 {"LAB_TIME_HOURS","{p1}小时","{p1}小時","{p1}h","{p1}時間","{p1}h"},
 {"LAB_TIME_DAY","{p1}天","{p1}天","{p1}d","{p1}日","{p1}d"},
 {"LAB_TIME_DES","剩余时间：{p1}","剩餘時間：{p1}","Time Remaining: {p1}","残り時間：{p1}","Time Remaining: {p1}"},
-{"LAB_COMMON_1","玩家","玩家","Player","Player","Player"},
+{"LAB_COMMON_1","玩家","玩家","Player","プレイヤー","玩家"},
 {"LAB_CARD_REPORT","牌局回放","牌局回放","Hand Replay","ラウンドリプレイ","게임 기록"},
 {"LAB_LAN_JP","日本語","日本語","日本語","日本語","日本語"},
 {"LAB_LAN_EN","English","English","English","English","English"},
@@ -140,7 +140,7 @@ Exclusive Gift]],[[新会長
 {"LAB_SHOP_COMMON_19","已达最高数量！","已達最高數量！","Max amount reached!","すでに最大値です","已达最高数量！"},
 {"LAB_SHOP_COMMON_20","已达最少数量！","已達最少數量！","Min amount reached!","すでに最小値です","已达最少数量！"},
 {"LAB_SHOP_COMMON_21","免费","免費","Free","無料","免费"},
-{"LAB_SHOP_COMMON_22","礼包详情","禮包詳情","Pack Details","パックの詳細","礼包详情"},
+{"LAB_SHOP_COMMON_22","详情","詳情","Details","詳細","礼包详情"},
 {"LAB_SHOP_COMMON_23","持有：{p1}","持有：{p1}","Owned: {p1}","所持中：{p1}","持有：{p1}"},
 {"LAB_SHOP_COMMON_24","{p1}不足！","{p1}不足！","Insufficient {p1}!","{p1}が足りません","{p1}不足！"},
 {"LAB_SHOP_COMMON_25","{p1}分","{p1}分","{p1}m","{p1}分","{p1}分"},
@@ -176,7 +176,7 @@ Exclusive Gift]],[[新会長
 {"LAB_MONTHLY_CARD_8","专属头像框","專屬頭像框","Exclusive Avatar Frame","専用フレーム","专属框"},
 {"LAB_MONTHLY_CARD_9","补签权益","補簽權益","Make-Up Check-In","補填特典","补签权益"},
 {"LAB_MONTHLY_CARD_10","专属任务","專屬任務","Exclusive Missions","専用ミッション","专属任务"},
-{"LAB_MONTHLY_CARD_11","月卡剩余天数＞180天，不可进行续费购买！","月卡剩餘天數＞180天，不可續費！","Renewal failed. Shark Pass remaining days already exceed 180","月間パスの有効期限が181日以上あるため、期間を延長できません","月卡剩余天数＞180天，不可进行续费购买！"},
+{"LAB_MONTHLY_CARD_11","月卡剩余天数＞360天，不可进行续费购买！","月卡剩餘天數＞360天，不可續費！","Renewal failed. Shark Pass remaining days already exceed 360","月間パスの残り有効期間が360日を超えているため、期間を延長できません","Renewal failed. Shark Pass remaining days already exceed 360"},
 {"LAB_MONTHLY_CARD_12","鲨鱼月卡说明","鯊魚月卡說明","Shark Pass Description","シャーク月間パスについて","鲨鱼月卡说明"},
 {"LAB_MONTHLY_CARD_13","确认购买","確認購買","Confirmation","購入確認","确认购买"},
 {"LAB_MONTHLY_CARD_14","购买天数","購買天數","Days","購入日数","购买天数"},
@@ -212,8 +212,8 @@ Exclusive Gift]],[[新会長
 4. 鲨鱼月卡生效期间，可在【个人信息-战绩】界面查看所有玩家的摊牌率（WTSD）、激进系数（AFq）、持续下注率（C-Bet%）。
 
 <color=#1a1a1a><size=36>月卡续费</size></color>
-1. 鲨鱼月卡剩余天数≤180天时，可续费购买
-2. 鲨鱼月卡剩余天数>180天时，不可续费购买]],[[<color=#1a1a1a><size=36>月卡獎勵</size></color>
+1. 鲨鱼月卡剩余天数≤360天时，可续费购买
+2. 鲨鱼月卡剩余天数>360天时，不可续费购买]],[[<color=#1a1a1a><size=36>月卡獎勵</size></color>
 1. 訂閱鯊魚月卡後可立即獲得 <color=#eb0c89>輪盤彩晶x100</color>、<color=#eb0c89>籌碼x850K</color>
 2. 鯊魚月卡生效期間，每日登入簽到可自動領取 <color=#eb0c89>輪盤彩晶x30</color>、<color=#eb0c89>籌碼x175K</color> ，每日03:00（UTC+8）刷新
 3. 鯊魚月卡生效期間，因未登入簽到導致未領取的獎勵將無法補發
@@ -227,8 +227,8 @@ Exclusive Gift]],[[新会長
 4. 鯊魚月卡生效期間，可於【個人資訊－戰績】介面查看所有玩家的攤牌率（WTSD）、激進頻率（AFq）、持續下注率（C-Bet）
 
 <color=#1a1a1a><size=36>月卡續費</size></color>
-1. 鯊魚月卡剩餘天數≤180天時可進行續費
-2. 鯊魚月卡剩餘天數＞180天時將無法續費]],[[<color=#1a1a1a><size=36>Shark Pass Rewards</size></color>
+1. 鯊魚月卡剩餘天數≤360天時可進行續費
+2. 鯊魚月卡剩餘天數＞360天時將無法續費]],[[<color=#1a1a1a><size=36>Shark Pass Rewards</size></color>
 1. Upon activating the Shark Pass, you'll instantly receive <color=#eb0c89>Roulette Crystal x100</color> and <color=#eb0c89>Chip x850K</color>.
 2. While the Shark Pass is active, check in daily to receive <color=#eb0c89>Roulette Crystal x30</color> and <color=#eb0c89>Chip x175K</color>. The daily check-in resets at 04:00 (UTC+9).
 3. If you miss a daily check-in while the pass is active, that day's rewards will be forfeited.
@@ -242,7 +242,7 @@ Exclusive Gift]],[[新会長
 4. While the Shark Pass is active, you may view detailed statistics (including VPIP, AFq, and C-Bet) for yourself and other players via Profile → Record.
 
 <color=#1a1a1a><size=36>Shark Pass Renewal</size></color>
-Renewal is only available when the Shark Pass has 180 days or fewer remaining.]],[[<color=#1a1a1a><size=36>月間パス報酬</size></color>
+Renewal is only available when the Shark Pass has 360 days or fewer remaining.]],[[<color=#1a1a1a><size=36>月間パス報酬</size></color>
 1.シャーク月間パスを購入すると、すぐに<color=#eb0c89>ルーレットジェムx100</color>、<color=#eb0c89>チップx850K</color>を獲得できます。
 2.シャーク月間パス有効期間中、毎日ログインすると<color=#eb0c89>ルーレットジェムx30</color>、<color=#eb0c89>チップx175K</color>を獲得できます。デイリーログイン報酬は、毎日04:00更新されます。
 3.シャーク月間パス有効期間中、ログインしなかった日の報酬は受け取れません。
@@ -256,23 +256,22 @@ Renewal is only available when the Shark Pass has 180 days or fewer remaining.]]
 4.シャーク月間パス有効期限中、【プロフィール-戦績】画面ですべてのプレイヤーのWTSD、AFq、Cベット率を確認できます。
 
 <color=#1a1a1a><size=36>月間パス期間延長</size></color>
-1.シャーク月間パスの有効期間が180日以下になると、期間を延長できます。
-2.シャーク月間パスの有効期限が181日以上ある場合は期間を延長できません。]],[[<color=#1a1a1a><size=36>月卡奖励</size></color>
-1. 购买鲨鱼月卡后可立即获得 <color=#eb0c89>轮盘彩晶x100</color>、<color=#eb0c89>筹码x850K</color>
-2. 鲨鱼月卡生效期间，每日登录签到自动领取 <color=#eb0c89>轮盘彩晶x30</color>、<color=#eb0c89>筹码x175K</color> ，每日03:00（UTC+8）刷新
-3. 鲨鱼月卡生效期间，因未登录签到导致未领取的奖励将不会返还
+1.シャーク月間パスの有効期間が360日以下になると、期間を延長できます。
+2.月間パスの残り有効期間が360日を超えているため、期間を延長できません]],[[<color=#1a1a1a><size=36>Shark Pass Rewards</size></color>
+1. Upon activating the Shark Pass, you'll instantly receive <color=#eb0c89>Roulette Crystal x100</color> and <color=#eb0c89>Chip x850K</color>.
+2. While the Shark Pass is active, check in daily to receive <color=#eb0c89>Roulette Crystal x30</color> and <color=#eb0c89>Chip x175K</color>. The daily check-in resets at 04:00 (UTC+9).
+3. If you miss a daily check-in while the pass is active, that day's rewards will be forfeited.
 
-<color=#1a1a1a><size=36>月卡权益</size></color>
-1. 鲨鱼月卡生效期间，可使用<color=#eb0c89>专属称号·蓝湾捕食者</color>和<color=#eb0c89>头像框·逐月之鲨</color>
-2. 鲨鱼月卡生效期间，【七日签到】每周获得1次免费补签，补签可领取对应的签到奖励和当日月卡奖励（轮盘彩晶x30）
-<color=#bd0838>※免费补签次数每周重置，不会累计</color>
-3. 鲨鱼月卡生效期间，可在【每日任务】中完成月卡专属任务，获得额外奖励
-<color=#bd0838>※专属任务会在鲨鱼月卡激活时开启；鲨鱼月卡有效期结束时，专属任务可继续完成，直到下次任务刷新</color>
-4.鲨鱼月卡生效期间，可在【个人信息-战绩】界面查看所有玩家的摊牌率（WTSD）、激进系数（AFq）、持续下注率（C-Bet%）。
+<color=#1a1a1a><size=36>Shark Pass Perks</size></color>
+1. While active, the Shark Pass lets you equip the <color=#eb0c89>Exclusive Title · Azure Bay Predator</color> and <color=#eb0c89>Avatar Frame · Moon-Chasing Shark</color>.
+2. You may make up for a missed check-in once per week for free via the 7-Day Check-In section. Making up grants both the missed day's regular rewards and <color=#eb0c89>30 Roulette Crystals</color> from the Shark Pass.
+<color=#bd0838>※ Free make-up attempts reset weekly and do not accumulate.</color>
+3. Complete exclusive missions in Daily Missions to earn additional rewards while the pass is active.
+<color=#bd0838>※ Exclusive missions unlock only when the Shark Pass is active. Even after expiration, they remain available until the next mission refresh.</color>
+4. While the Shark Pass is active, you may view detailed statistics (including VPIP, AFq, and C-Bet) for yourself and other players via Profile → Record.
 
-<color=#1a1a1a><size=36>月卡续费</size></color>
-1. 鲨鱼月卡剩余天数≤180天时，可续费购买
-2. 鲨鱼月卡剩余天数>180天时，不可续费购买]]},
+<color=#1a1a1a><size=36>Shark Pass Renewal</size></color>
+Renewal is only available when the Shark Pass has 360 days or fewer remaining.]]},
 {"LAB_MONTHLY_CARD_MAIL_TITLE_1","月卡补偿","月卡補償","Shark Pass Compensation","月間パス補償","月卡补偿"},
 {"LAB_MONTHLY_CARD_MAIL_DEC_1",[[亲爱的会长大人：
 
@@ -344,10 +343,10 @@ Azure Bay Poker Association]],[[会長様へ
 {"LAB_SHOP_ROLE_SKIN_14","该服饰已拥有，无法重复购买！","已擁有該服飾，無法重複購買！","You already own this outfit!","すでに所持中の衣装を再度購入する必要はありません。","You already own this outfit!"},
 {"LAB_SHOP_EXCHANGE_1","确认兑换","確認兌換","Confirmation","交換確認","确认兑换"},
 {"LAB_SHOP_EXCHANGE_2","兑换","兌換","Exchange","交換","兑换"},
-{"LAB_SHOP_EXCHANGE_3","本日剩余次数：","本日剩餘次數：",[[Remaining attempts today: ]],"今日の残りの回数：","本日剩余次数："},
-{"LAB_SHOP_EXCHANGE_4","本周剩余次数：","本週剩餘次數：",[[Remaining attempts this week: ]],"今週の残りの回数：","本周剩余次数："},
-{"LAB_SHOP_EXCHANGE_5","本月剩余次数：","本月剩餘次數：",[[Remaining attempts this month: ]],"今月の残りの回数：","本月剩余次数："},
-{"LAB_SHOP_EXCHANGE_6","剩余次数：","剩餘次數：",[[Remaining attempts: ]],"残りの回数：","剩余次数："},
+{"LAB_SHOP_EXCHANGE_3","本日剩余次数：","本日剩餘次數：",[[Remaining attempts today: ]],"今日の残り回数：","本日剩余次数："},
+{"LAB_SHOP_EXCHANGE_4","本周剩余次数：","本週剩餘次數：",[[Remaining attempts this week: ]],"今週の残り回数：","本周剩余次数："},
+{"LAB_SHOP_EXCHANGE_5","本月剩余次数：","本月剩餘次數：",[[Remaining attempts this month: ]],"今月の残り回数：","本月剩余次数："},
+{"LAB_SHOP_EXCHANGE_6","剩余次数：","剩餘次數：",[[Remaining attempts: ]],"残り回数：","剩余次数："},
 {"LAB_SHOP_EXCHANGE_7","1000 筹码","1000 籌碼","1000 Chips","1000 チップ","1000 Chips"},
 {"LAB_SHOP_RECHARGE_1","双倍","雙倍","Double","2倍！","双倍"},
 {"LAB_SHOP_RECHARGE_2","额外赠送+{p1}","額外贈送+{p1}","Bonus +{p1}","ボーナス+{p1}","额外赠送+{p1}"},
@@ -400,8 +399,10 @@ Azure Bay Poker Association]],[[会長様へ
 {"TAB_SHOP_THEME_NAME_1","【娱乐街】","【娛樂街】","[Entertainment Street]","【娛樂街】","[Entertainment Street]"},
 {"TAB_SHOP_THEME_DEC_1","娱乐中心的室内与外面仿佛存在不同的时间流速，在黎明时分离场的客人，不论输赢，都会感叹夜晚结束得如此之快。","娛樂中心內與外頭彷彿存在不同的時間流速。在黎明時分離場的客人，不論贏或輸，都會感嘆夜晚結束得如此之快。","Inside the Entertainment Center, time seems to flow at a different speed. Every customer who leaves at dawn—win or lose—remarks on how quickly the night has passed.","エンターテイメントセンターの中と外では、まるで時間の流れが違うかのようだ。明け方に会場を後にする客は皆、勝ち負けに関わらず「夜はあっという間だった」とこぼす。","Inside the Entertainment Center, time seems to flow at a different speed. Every customer who leaves at dawn—win or lose—remarks on how quickly the night has passed."},
 {"TAB_SHOP_THEME_DEC_2","这里永远都为会长留着一间房，结束忙碌的一天后，不妨到温泉旅馆内充分放松，洗去今日的烦闷，在惬意的牌局后，好好睡上一觉吧。","這裡永遠都為會長留著一間房。忙碌了一天後，不妨在溫泉旅館中好好放鬆，讓溫泉洗去今日的煩憂，在愉悅的牌局過後，沉沉睡上一覺吧。","There's always a room reserved for you. When your busy day finally ends, come rest at the retreat—let the hot springs wash away your worries, enjoy a comfortable game, and drift into a peaceful sleep.","ずっと会長のために取ってある部屋。忙しい一日を終えたら、温泉旅館で十分にリラックスし、その日の悩みを洗い流して、楽しく対局をした後でぐっすり眠ろう。","There's always a room reserved for you. When your busy day finally ends, come rest at the retreat—let the hot springs wash away your worries, enjoy a comfortable game, and drift into a peaceful sleep."},
+{"TAB_SHOP_THEME_DEC_3","与会长在私人海滩共度假日，是在场所有牌手的期望。大概是天气的缘故，这是最容易留下热烈回忆的季节。","与会长在私人海滩共度假日，是在场所有牌手的期望。大概是天气的缘故，这是最容易留下热烈回忆的季节。","与会长在私人海滩共度假日，是在场所有牌手的期望。大概是天气的缘故，这是最容易留下热烈回忆的季节。","与会长在私人海滩共度假日，是在场所有牌手的期望。大概是天气的缘故，这是最容易留下热烈回忆的季节。","与会长在私人海滩共度假日，是在场所有牌手的期望。大概是天气的缘故，这是最容易留下热烈回忆的季节。"},
 {"TAB_SHOP_THEME_PRODUCT_NAME_1","娱乐街礼包","娛樂街禮包","Neon Street Pack","娯楽街パック","Neon Street Pack"},
 {"TAB_SHOP_THEME_PRODUCT_NAME_2","温泉旅馆礼包","溫泉旅館禮包","Onsen Retreat Pack","温泉旅館パック","Onsen Retreat Pack"},
+{"TAB_SHOP_THEME_PRODUCT_NAME_3","海滩假日礼包","海滩假日礼包","海滩假日礼包","海滩假日礼包","海滩假日礼包"},
 {"TAB_SHOP_THEME_1","主题预览","主題預覽","Preview","プレビュー","Preview"},
 {"TAB_SHOP_THEME_2","※单独购买装饰不享受礼包折扣优惠※","※單獨購買裝飾將不享受禮包折扣優惠※","※ The discount is only available when purchased as a pack. ※","※デコレーションを単独で購入した場合、パック割引の対象外となります※","※ The discount is only available when purchased as a pack. ※"},
 {"TAB_SHOP_THEME_3","全部","全部","All","すべて","All"},
@@ -413,8 +414,8 @@ Azure Bay Poker Association]],[[会長様へ
 {"TAB_SHOP_THEME_10","主题已拥有！","已擁有該主題！","You already own this theme","テーマを所有済み！","You already own this theme"},
 {"TAB_SHOP_THEME_11","该装饰已拥有！","已擁有該裝飾！","You already own this decoration","このデコレーションを所有済み！","You already own this decoration"},
 {"TAB_SHOP_THEME_NAME_206","牌桌·{p1}","牌桌·{p1}","Table · {p1}","テーブル・{p1}","Table · {p1}"},
-{"TAB_SHOP_THEME_NAME_207","BGM（大厅）・{p1}","BGM（大廳）・{p1}","BGM (Lobby) · {p1}","BGM（ロビー）・{p1}","BGM (Lobby) · {p1}"},
-{"TAB_SHOP_THEME_NAME_208","BGM（对局）・{p1}","BGM（對局）・{p1}","BGM (In-Game) · {p1}","BGM（試合）・{p1}","BGM（对局）・{p1}"},
+{"TAB_SHOP_THEME_NAME_207","BGM（大厅）・{p1}","BGM（大廳）・{p1}","Lobby BGM · {p1}","ロビーBGM・{p1}","BGM (Lobby) · {p1}"},
+{"TAB_SHOP_THEME_NAME_208","BGM（对局）・{p1}","BGM（對局）・{p1}","Table BGM · {p1}","対局BGM・{p1}","BGM（对局）・{p1}"},
 {"TAB_SHOP_THEME_NAME_209","场景・{p1}","大廳・{p1}","Lobby · {p1}","ロビー・{p1}","Lobby · {p1}"},
 {"TAB_ICEBREAKER_PACK_1","新会长特惠","新會長特惠","Newcomer\nOffer","新会長セール","Newcomer Offer"},
 {"TAB_ICEBREAKER_PACK_2","新会长专属礼","新會長專屬好禮","Newcomer Exclusive Gift","新会長限定ギフト","Newcomer Exclusive Gift"},
@@ -447,7 +448,7 @@ Azure Bay Poker Association]],[[会長様へ
 {"LAB_ACTIVITY_GIFTS_302","养成礼盒·典藏","養成禮盒・典藏","Bonding Box · Premium","育成BOX・デラックス","养成礼盒·典藏"},
 {"LAB_STARTING_GAME","开始游戏","開始遊戲","Play","プレイ","게임 시작"},
 {"LAB_DEALING_CARD","发牌中","發牌中","Dealing cards","カード配布中","카드 배분 중"},
-{"LAB_WAIT_FOR_PLAYER","等待其他玩家开始","等待其他玩家開始","Wait for other players","ほかのプレイヤーが準備完了までしばらくお待ちください","다른 플레이어 대기 중"},
+{"LAB_WAIT_FOR_PLAYER","等待其他玩家开始","等待其他玩家開始","Waiting for other players...","ほかのプレイヤーが準備完了までしばらくお待ちください","다른 플레이어 대기 중"},
 {"LAB_NEXT_ROUND_CD","开局倒计时：{p1}秒","開局倒計時：{p1}秒","Starts in {p1}s","開始まで：{p1}秒","게임 시작 카운트다운: {p1}초"},
 {"LAB_POKER_CALL_TIP","{p1}跟注{p2}","{p1}跟注{p2}","{p1} calls {p2}","{p1}が{p2}をコール","{p1}님이 {p2} 만큼 콜했습니다"},
 {"LAB_POKER_BET_TIP","{p1}下注{p2}","{p1}下注{p2}","{p1} bets {p2}","{p1}が{p2}にベット","{p1}님이 {p2} 만큼 베팅했습니다"},
@@ -483,8 +484,8 @@ Azure Bay Poker Association]],[[会長様へ
 {"LAB_TWO_PAIRS","两对","兩對","Two Pair","ツーペア","투 페어"},
 {"LAB_ONE_PAIR","一对","一對","One Pair","ワンペア","원 페어"},
 {"LAB_HIGH_CARD","高牌","高牌","High Card","ハイカード","하이 카드"},
-{"LAB_SMALL_BLIND","小盲","小盲","SB","スモールブラインド","스몰 블라인드"},
-{"LAB_BIG_BLIND","大盲","大盲","BB","ビッグブラインド","빅 블라인드"},
+{"LAB_SMALL_BLIND","小盲","小盲","SB","SB","스몰 블라인드"},
+{"LAB_BIG_BLIND","大盲","大盲","BB","BB","빅 블라인드"},
 {"LAB_FOLD","弃牌","棄牌","Fold","フォールド","폴드"},
 {"LAB_CHECK","过牌","過牌","Check","チェック","체크"},
 {"LAB_CALL","跟注","跟注","Call","コール","콜"},
@@ -739,6 +740,22 @@ Practice Mode does not contribute to Mission or Achievement progress.]],[[練習
 エントリーするだけで参加可能、バイインは一切かかりません。]],[[会长大人！SNG开放练习赛啦！
 
 报名即可参与，无需任何报名费用哦。]]},
+{"LAB_GAME_061","当前牌局详情","當前牌局詳情","Hand Details","対局詳細","当前牌局详情"},
+{"LAB_GAME_062","底池分布","底池分布","Pot","ポット内訳","底池分布"},
+{"LAB_GAME_063","翻牌前","翻牌前","Preflop","プリフロップ","翻牌前"},
+{"LAB_GAME_064","翻牌圈","翻牌圈","Flop","フロップ","翻牌圈"},
+{"LAB_GAME_065","转牌圈","轉牌圈","Turn","ターン","转牌圈"},
+{"LAB_GAME_066","河牌圈","河牌圈","River","リバー","河牌圈"},
+{"LAB_GAME_067","比牌阶段","比牌階段","Showdown","ショーダウン","比牌阶段"},
+{"LAB_GAME_068","主池","主池","Main Pot","メインポット","主池"},
+{"LAB_GAME_069","边池{p1}","邊池{p1}","Side Pot {p1}","サイドポット{p1}","边池{p1}"},
+{"LAB_GAME_070","游戏中","遊戲中","Playing","プレイ中","游戏中"},
+{"LAB_GAME_071","围观中","圍觀中","Spectating","観戦中","围观中"},
+{"LAB_GAME_072","可点击其他玩家的视角切换按钮，切换围观主视角。","可點擊其他玩家的視角切換按鈕，切換圍觀主視角。","You can tap the icon next to a player to switch to their perspective.","プレイヤー横のアイコンをタップすると、観戦視点の切り替えが可能です。","可点击其他玩家的视角切换按钮，切换围观主视角。"},
+{"LAB_GAME_073","胜","勝","Win","勝利","胜"},
+{"LAB_GAME_074","平","平","Tie","引分","平"},
+{"LAB_GAME_075","当前手牌尚未开始","當前手牌尚未開始","Hand not started","現在のハンドはまだ開始されていません","当前手牌尚未开始"},
+{"LAB_GAME_076","所剩余额","所剩餘額","Balance","残りチップ","所剩余额"},
 {"LAB_OMAHA_RULE_01","·奥马哈玩法中每位玩家有4张手牌，玩家必须用其中<color=#E2BD5F>2张牌</color>，与5张公共牌中的<color=#E2BD5F>3张</color>，组成自己的牌型。","在奧馬哈中，每位玩家有4張底牌，玩家必須用其中的<color=#E2BD5F>2張</color>，與5張公共牌中的<color=#E2BD5F>3張</color>，組成自己的最終牌型。","In Omaha, each player is dealt four hole cards. To form a final five-card hand, players must use <color=#E2BD5F>two</color> of their hole cards combined with <color=#E2BD5F>three</color> community cards from the board.","オマハでは、各プレイヤーは配られた4枚のホールカードから<color=#E2BD5F>2枚</color>、5枚のコミュニティカードから<color=#E2BD5F>3枚</color>を選んで役を作成する必要があります。","오마하에서 각 플레이어는 4장의 홀 카드를 받으며, 그 중 <color=#E2BD5F>정확히 2장</color>과 커뮤니티 카드 5장 중 <color=#E2BD5F>정확히 3장</color>을 조합해 최종 핸드를 완성합니다."},
 {"LAB_OMAHA_RULE_02","底牌\n必须取两张","底牌\n必須取兩張","Two hole cards","ホールカード\n必ず2枚を選択",[[홀 카드
 반드시 2장 사용]]},
@@ -823,7 +840,7 @@ client to try again.]]},
 {"LAB_LOGIN_DEVICELIMIT","进入游戏失败，本设备登录账号个数已超上限。","登入失敗，此裝置已達可登入帳號上限","Failed. This device has reached the max number of accounts","本端末でログイン可能なアカウント数の上限に達しています","进入游戏失败，本设备登录账号个数已超上限。"},
 {"LAB_LOGIN_LOADING","加载中...","載入中...","Loading...","読み込み中...","加载中"},
 {"LAB_LOGIN_BIND_01","帐号关联","帳號關聯","Link Account","アカウント連携","帐号关联"},
-{"LAB_LOGIN_BIND_02","可设置引继码和对应密码，在其它设置上登录该帐号","可設定引繼碼與對應密碼，於其他裝置登入該帳號。","Set a Transfer Code and Password to log in to this account on another device.","引継ぎコードと対応パスワードを設定すると、他の端末からこのアカウントにログインできます。","可设置引继码和对应密码，在其它设置上登录该帐号"},
+{"LAB_LOGIN_BIND_02","可设置引继码和对应密码，在其它设置上登录该帐号","可設定引繼碼與對應密碼，於其他裝置登入該帳號。","Set a Transfer Code and Password to log in to this account on another device.","引継ぎコードと対応するパスワードを設定すると、他の端末からこのアカウントにログインできます。","可设置引继码和对应密码，在其它设置上登录该帐号"},
 {"LAB_LOGIN_BIND_03","生成","生成","Generate","生成","生成"},
 {"LAB_LOGIN_BIND_04","引继码生成","引繼碼生成","Generate Transfer Code","引継ぎコード生成","引继码生成"},
 {"LAB_LOGIN_BIND_05","引继码：","引繼碼：",[[Transfer Code: ]],"引継ぎコード：","引继码："},
@@ -879,6 +896,8 @@ This action cannot be undone. Proceed?]],[[連携すると、現在のアカウ�
 {"LAB_MAIL_TITLE_2","【提醒】背包已满","【提醒】背包已滿","Backpack Full","【お知らせ】バッグがいっぱいです","[알림] 가방 가득참"},
 {"LAB_MAIL_TITLE_3","活动结束！","活動結束！","Event Ended!","イベントは終了しました！","Event Ended!"},
 {"LAB_MAIL_TITLE_4","活动即将结束！","活動即將結束！","Event Ending Soon!","イベント終了間近！","活动即将结束！"},
+{"LAB_MAIL_TITLE_5","足球竞猜比赛结算通知","足球競猜比賽結算通知","Football Predictor Winnings","サッカー勝敗予想試合結果のお知らせ","Football Predictor Winnings"},
+{"LAB_MAIL_TITLE_6","足球竞猜比赛下架通知","足球競猜比賽下架通知","Football Match Canceled","サッカー勝敗予想試合中止のお知らせ","Football Match Canceled"},
 {"LAB_MAIL_SENDER_1","系统","系統","System","システム","시스템"},
 {"LAB_MAIL_MAIN_TEXT_1",[[亲爱的会长大人：
 
@@ -976,6 +995,77 @@ Azure Bay Poker Association]],[[会長、{p1}期間限定イベントへのご�
 再次感谢您在蓝湾市的热情参与！愿幸运与策略常伴您左右，我们下次活动再见。
 
 蓝湾扑克总会运营部 敬上]]},
+{"LAB_MAIL_MAIN_TEXT_5",[[亲爱的会长大人：
+
+{p1}{p2}对阵{p3}的比赛结果已揭晓。
+恭喜您在本场比赛中竞猜命中，请及时查收您的奖励。
+感谢您的参与，祝您游戏愉快！
+
+蓝湾扑克总会运营部 敬上]],[[親愛的會長大人：
+
+{p1}{p2}對陣{p3}的比賽結果已揭曉。
+
+恭喜您在本場比賽中競猜命中，請及時查收您的獎勵。
+
+感謝您的參與，祝您遊戲愉快！
+
+藍灣撲克總會運營部 敬上]],[[Dear President,
+
+Great call! You correctly predicted the outcome of the {p2} vs {p3} match on {p1}.
+
+Your winnings have been attached below. Thank you for your participation, and good luck with your next prediction!
+
+Azure Bay Poker Association]],[[会長様へ：
+
+{p1}{p2}対{p3}の試合結果が出ました！
+
+予想的中おめでとうございます！報酬をお送りしましたので、お受け取りください。
+
+ご参加ありがとうございました。引き続きゲームをお楽しみください！
+
+藍湾ポーカー協会運営部]],[[Dear President,
+
+Great call! You correctly predicted the outcome of the {p2} vs {p3} match on {p1}.
+
+Your winnings have been attached below. Thank you for your participation, and good luck with your next prediction!
+
+Azure Bay Poker Association]]},
+{"LAB_MAIL_MAIN_TEXT_6",[[亲爱的会长大人：
+
+关于{p1}{p2}对阵{p3}的比赛，由于不可抗力因素被取消。
+我们已将您在本场比赛的下注全额返还，请及时查收。给您带来的不便，我们深表歉意。
+
+感谢您的理解与支持。
+
+蓝湾扑克总会运营部 敬上]],[[親愛的會長大人：
+
+關於{p1}{p2}對陣{p3}的比賽，由於不可抗力因素被取消。
+
+我們已將您在本場比賽的下注全額返還，請及時查收。給您帶來的不便，我們深表歉意。
+
+感謝您的理解與支持。
+
+藍灣撲克總會運營部 敬上]],[[Dear President,
+
+Please note that the match between {p2} and {p3} on {p1} has been canceled due to force majeure. Your bet for this match has been refunded in full.
+
+We apologize for any inconvenience and thank you for your understanding.
+
+Azure Bay Poker Association]],[[会長様へ：
+
+{p1}{p2}対{p3}の試合ですが、不可抗力により中止となりました。
+
+つきましては、本試合へのベット額を全額返還いたしましたので、ご確認ください。ご不便をおかけしましたことを深くお詫び申し上げます。
+
+ご理解とご協力のほど、よろしくお願いいたします。
+
+藍湾ポーカー協会運営部]],[[Dear President,
+
+Please note that the match between {p2} and {p3} on {p1} has been canceled due to force majeure. Your bet for this match has been refunded in full.
+
+We apologize for any inconvenience and thank you for your understanding.
+
+Azure Bay Poker Association]]},
 {"LAB_MAIL_001","未读：","未讀：",[[Unread: ]],"未読：",[[읽지 않음: ]]},
 {"LAB_MAIL_002","普通","普通","Regular","通常","일반"},
 {"LAB_MAIL_003","特殊","特殊","Special","スペシャル","특별"},
@@ -1279,8 +1369,8 @@ Azure Bay Poker Association]],[[親愛なる会長様
 {"LAB_BACKPACK_TAB_5","牌背","牌背","Cards","カードバック","뒷면"},
 {"LAB_BACKPACK_TAB_6","牌桌","牌桌","Table","テーブル","테이블"},
 {"LAB_BACKPACK_TAB_7","音乐","音樂","BGM","音楽","음악"},
-{"LAB_BACKPACK_TAB_8","BGM（大厅）","BGM（大廳）","BGM (Lobby)","BGM（ロビー）","BGM·로비"},
-{"LAB_BACKPACK_TAB_9","BGM（对局）","BGM（對局）","BGM (In-Game)","BGM（試合）","BGM·대전"},
+{"LAB_BACKPACK_TAB_8","BGM（大厅）","BGM（大廳）","Lobby BGM","ロビーBGM","BGM·로비"},
+{"LAB_BACKPACK_TAB_9","BGM（对局）","BGM（對局）","Table BGM","対局BGM","BGM·대전"},
 {"LAB_BACKPACK_TAB_10","大厅","大廳","Lobby","ロビー","배경"},
 {"LAB_BACKPACK_TAB_11","礼物礼包","禮物禮包","Gift Pack","ギフトパック","Gift Pack"},
 {"LAB_BACKPACK_TAB_12","特效","特效","Animation","エフェクト","特效"},
@@ -1391,6 +1481,8 @@ This medal cannot be directly converted into chips—its true value lies in the 
 {"LAB_PROPS_NAME_104_1_2","手工巧克力","手工巧克力","Handmade Chocolate","手作りチョコレート","Handmade Chocolate"},
 {"LAB_PROPS_NAME_104_1_3","樱色书签","櫻色書籤","Sakura Bookmark","桜色のしおり","开学季活动道具"},
 {"LAB_PROPS_NAME_104_1_4","气泡香槟茶","氣泡香檳茶","Champagne Tea","シャンパンティー","气泡香槟茶"},
+{"LAB_PROPS_NAME_104_1_5","应援彩球","應援彩球","Cheer Pompom","応援ポンポン","Cheer Pompom"},
+{"LAB_PROPS_NAME_104_1_6","果味棒冰","果味冰棒","Fruity Ice Pop","フルーツアイスバー","フルーツアイスバー"},
 {"LAB_PROPS_NAME_104_2_1","福饰","福飾","Fortune Sticker","福字の飾り","Fortune Sticker"},
 {"LAB_PROPS_DES_104_1_1",[[在浮世商铺中兑换奖励所需的道具，可在温泉秘话活动期间获取。
 
@@ -1420,6 +1512,18 @@ An exquisitely designed sakura-colored bookmark. When tucked between pages, it f
 A non-alcoholic sparkling tea made from oolong and green tea—its color mirrors that of champagne.]],[[バーカウンターで報酬と交換するのに必要なアイテム。「秘密の酒場」のイベント期間中に獲得できる。
 烏龍茶と緑茶をベースにした、それぞれノンアルコールのスパークリングティードリンク。シャンパンの色合いを完璧に再現している。]],[[An item required for exchanging rewards at the Bar Counter. They can be obtained during the Secret Bar event.
 A non-alcoholic sparkling tea made from oolong and green tea—its color mirrors that of champagne.]]},
+{"LAB_PROPS_DES_104_1_5",[[在补给站中兑换奖励所需的道具，可于蓝湾跃动活动期间取得。
+蓬松而充满活力的应援彩球，每一次挥动都伴随着最真挚的呐喊。]],[[在補給站中兌換獎勵所需的道具，可於藍灣躍動活動期間取得。
+蓬鬆而充滿活力的應援彩球，每一次揮動都伴隨著最真摯的吶喊。]],[[An item required for exchanging rewards at the Supply Station. They can be obtained during Azure Bay in Motion event.
+Fluffy and full of energy—every wave carries a heartfelt cheer.]],[[補給ステーションで報酬と交換するのに必要なアイテム。「藍湾の躍動」のイベント期間中に獲得できる。
+ふわふわで元気いっぱいの応援ポンポン。振るたびに、最も心のこもった声援が響き渡る。]],[[在补给站中兑换奖励所需的道具，可于蓝湾跃动活动期间取得。
+蓬松而充满活力的应援彩球，每一次挥动都伴随着最真挚的呐喊。]]},
+{"LAB_PROPS_DES_104_1_6",[[在蓝天之家中兑换奖励所需的道具，可于湛蓝假日活动期间取得。
+棒冰锁住了水果诱人的甜味和鲜艳的色彩，在盛夏时节缓慢地释放。]],[[在藍天之家中兌換獎勵所需的道具，可於湛藍假日活動期間取得。
+冰棒鎖住了水果誘人的甜味和鮮豔的色彩，在盛夏時節緩慢地釋放。]],[[An item required for exchanging rewards at the Blue-Sky Boutique during the Azure Holiday event.
+This ice pop locks in the irresistible sweetness and bright colors of summer fruit, slowly melting under the scorching sun.]],[[「青空ハウス」で報酬と交換するのに必要なアイテム。「サマー・バカンス」のイベント期間中に獲得できる。
+フルーツの豊かな甘みと鮮やかな色彩を閉じ込めたアイスバー。真夏のひとときに、その美味しさがゆっくりと溶け出してゆく。]],[[「青空ハウス」で報酬と交換するのに必要なアイテム。「サマー・バカンス」のイベント期間中に獲得できる。
+フルーツの豊かな甘みと鮮やかな色彩を閉じ込めたアイスバー。真夏のひとときに、その美味しさがゆっくりと溶け出してゆく。]]},
 {"LAB_PROPS_DES_104_2_1",[[开启红包所需的道具，可在蓝湾新春礼活动期间获取。
 写有福字的装饰贴纸，承载着关于新一年的所有愿望。]],[[開啟紅包所需的道具，可於藍灣新春禮活動期間獲得。
 寫有「福」字的裝飾貼紙，承載著對新一年的所有祝願。]],[[An item used to open Red Envelopes, obtainable during the Azure Bay New Year Gifts event.
@@ -1427,12 +1531,12 @@ A decorative sticker featuring the character Fu (good fortune), carrying wishes 
 「福」の字が書かれた装飾シール。新たな一年への願いが込められている。]],[[An item used to open Red Envelopes, obtainable during the Azure Bay New Year Gifts event.
 A decorative sticker featuring the character Fu (good fortune), carrying wishes for the year ahead.]]},
 {"LAB_PROPS_NAME_105_1","礼物碎片","禮物碎片","Gift Fragment","ギフトシャード","Gift Fragment"},
-{"LAB_PROPS_DES_105_1","回收礼物可获得礼物碎片，可用于兑换结缘晶片或随机礼物盒。","回收禮物可獲得禮物碎片，可用於兌換結緣晶片或隨機禮物盒。","Obtained by recycling gifts. Can be exchanged for Kismet Chips or random Gift Boxes.","ギフトを回収すると、ギフトシャードを入手できます。ギフトシャードは縁結びチップやランダムギフトボックスと交換できます。","Obtained by recycling gifts. Can be exchanged for Kismet Chips or random Gift Boxes."},
+{"LAB_PROPS_DES_105_1","回收礼物可获得礼物碎片，可用于兑换结缘晶片或随机礼物盒。","回收禮物可獲得禮物碎片，可用於兌換結緣晶片或隨機禮物盒。","Obtained by recycling gifts. Can be exchanged for Kismet Chips or random Gift Boxes.","ギフトを回収すると、ギフトシャードを入手できる。ギフトシャードは縁結びチップやランダムギフトボックスと交換できる。","Obtained by recycling gifts. Can be exchanged for Kismet Chips or random Gift Boxes."},
 {"LAB_PROPS_NAME_106_1_1","豚骨杯面","豚骨杯麵","Tonkotsu Cup Noodle","豚骨カップ麺","Tonkotsu Cup Noodle"},
 {"LAB_PROPS_NAME_106_1_2","金平糖","金平糖","Konpeitou","金平糖","Konpeitou"},
 {"LAB_PROPS_NAME_106_1_3","新月酿","新月釀","Crescent Brew","新月醸","Crescent Brew"},
 {"LAB_PROPS_NAME_106_1_4","奥德赛银币","奧德賽銀幣","Odyssey Silver Coin","オデッセイ銀貨","Odyssey Silver Coin"},
-{"LAB_PROPS_NAME_106_1_5","狂月之渊","狂月之淵","Abyss of the Mad Moon","狂月の淵","Abyss of the Mad Moon"},
+{"LAB_PROPS_NAME_106_1_5","狂月之渊","狂月之淵","Abyss of the Mad Moon","月グルイ","Abyss of the Mad Moon"},
 {"LAB_PROPS_NAME_106_1_6","捏捏吐司","捏捏吐司","Squishy Toast","トーストスクイーズ","Squishy Toast"},
 {"LAB_PROPS_NAME_106_1_7","电子宠物","電子寵物","Virtual Pet","バーチャルペット","Virtual Pet"},
 {"LAB_PROPS_NAME_106_1_8","雪女保养霜","雪女保養霜","Snow Maiden Cream","雪女BBクリーム","Snow Maiden Cream"},
@@ -1983,6 +2087,9 @@ Your everyday practice finally gets a chance to shine—Honor Points trace a pla
 {"LAB_PROPS_NAME_111_407","草莓蛋糕","草莓蛋糕","Strawberry Cake","イチゴケーキ","Strawberry Cake"},
 {"LAB_PROPS_NAME_111_408","真心话卡牌","真心話卡牌","Truth Card Deck","正直カード","Truth Card Deck"},
 {"LAB_PROPS_NAME_111_409","决胜骰子","決勝骰子","Decisive Die","勝負サイコロ","Decisive Die"},
+{"LAB_PROPS_NAME_111_410","运动毛巾","運動毛巾","Sports Towel","スポーツタオル","运动毛巾"},
+{"LAB_PROPS_NAME_111_411","金鵄彩旗","金鵄彩旗","Kinshi Cheer Flag","金鵄の応援旗","金鵄彩旗"},
+{"LAB_PROPS_NAME_111_412","沁凉一刻","沁涼一刻","Chilly Pop","ひんやりのひととき","沁凉一刻"},
 {"LAB_PROPS_DES_111_1","鲨鱼月卡生效期间，每周可获得<color=#fb61d0>1次7日签到免费补签</color>","月卡生效期間，每週可獲得<color=#fb61d0>1次7日簽到免費補簽</color>","When the Shark Pass is active, you can <color=#fb61d0>make up one missed check-in</color> per week.","月間パス有効期間中、毎週<color=#fb61d0>7日ログインの1日分の報酬を補填で入手可能</color>","When the Shark Pass is active, you can <color=#fb61d0>make up one missed check-in</color> per week."},
 {"LAB_PROPS_DES_111_2","鲨鱼月卡生效期间，可在【每日任务】中完成<color=#fb61d0>鲨鱼月卡专属任务</color>，获得额外的任务奖励！","月卡生效期間，可在【每日任務】中完成<color=#fb61d0>鯊魚月卡專屬任務</color>，獲得額外的任務獎勵！","When the Shark Pass is active, you can complete an <color=#fb61d0>exclusive Shark Pass mission</color> in Daily Missions to earn extra rewards!","月間パス有効期間中、【デイリーミッション】で<color=#fb61d0>シャーク月間パス限定ミッション</color>をクリアして、追加ミッション報酬を獲得できます","When the Shark Pass is active, you can complete <color=#fb61d0>exclusive Shark Pass missions</color> in Daily Missions to earn extra rewards!"},
 {"LAB_PROPS_DES_111_3","经验丰富的牌手如同鲨鱼，冷静且敏锐地狩猎筹码，购买月卡即可领取专属奖励，享受专属权益","經驗豐富的牌手如同鯊魚，冷靜且敏銳地狩獵籌碼，購買月卡即可領取專屬獎勵，享受專屬權益","Experienced players are like sharks—calm and sharp in hunting chips. Get Shark Pass to enjoy exclusive rewards and perks.","経験豊富なポーカープレイヤーはシャークのように、常に冷静で勝機を敏感に察知してチップを勝ち取る。月間パスを購入すると、専用報酬や特典が利用できます","Experienced players are like sharks-calm and sharp in hunting chips. Get Shark Pass to enjoy exclusive rewards and perks."},
@@ -2051,6 +2158,24 @@ A deck printed with questions that must be answered truthfully—the perfect pro
 A six-sided die engraved with mysterious markings—the perfect prop for a game with Mochizuki Himiya.]],[[「対局の後に」キャラクターストーリーをアンロックできる。
 神秘的な模様が彫られた六面体のサイコロ。望月氷見夜との試合に最適なアイテム。]],[[可用于解锁对局之后中的牌手剧情。
 雕刻着神秘图案的六面骰子，适合作为和望月冰见夜对局的游戏道具。]]},
+{"LAB_PROPS_DES_111_410",[[可用于解锁应援时光中的牌手剧情。
+吸汗性能极佳的运动毛巾，适合赠送给白石伊莉娜的礼物。]],[[可用於解鎖應援時光中的牌手劇情。
+吸汗性能極佳的運動毛巾，是贈送給白石伊莉娜的理想禮物。]],[[Can be used to unlock stories in Cheer Memories.
+A high-performance, moisture-wicking towel—the perfect gift for Shiraishi Irina.]],[[「応援タイム」キャラクターストーリーをアンロックできる。
+吸汗性に優れたスポーツタオル。白石イリーナに贈ると、きっと喜んでくれる。]],[[可用于解锁应援时光中的牌手剧情。
+吸汗性能极佳的运动毛巾，适合赠送给白石伊莉娜的礼物。]]},
+{"LAB_PROPS_DES_111_411",[[可用于解锁应援时光中的牌手剧情。
+印有金鵄标志的应援旗帜，适合赠送给沐娜的礼物。]],[[可用於解鎖應援時光中的牌手劇情。
+印有金鵄標誌的應援旗幟，是贈送給沐娜的理想禮物。]],[[Can be used to unlock stories in Cheer Memories.
+A cheerleading flag bearing the Kinshi logo—the perfect gift for Moona.]],[[「応援タイム」キャラクターストーリーをアンロックできる。
+金鵄のマークがあしらわれた応援旗。ムーナに贈ると、きっと喜んでくれる。]],[[可用于解锁应援时光中的牌手剧情。
+印有金鵄标志的应援旗帜，适合赠送给沐娜的礼物。]]},
+{"LAB_PROPS_DES_111_412",[[可用于解锁应援时光中的牌手剧情。
+能掰成两半的冰棍，解暑的最佳选择。适合赠送给天月绘里奈的礼物。]],[[可用於解鎖應援時光中的牌手劇情。
+可掰成兩半的冰棒，是消暑的最佳選擇。適合贈送給天月繪里奈的禮物。]],[[Can be used to unlock stories in Cheer Memories.
+An ice pop designed to be shared—the perfect way to beat the heat, and the perfect gift for Amatsuki Erina.]],[[「応援タイム」キャラクターストーリーをアンロックできる。
+半分に割れるアイスキャンディー。暑さをしのぐのに最適。天月えりなに贈ると、きっと喜んでくれる。]],[[可用于解锁应援时光中的牌手剧情。
+能掰成两半的冰棍，解暑的最佳选择。适合赠送给天月绘里奈的礼物。]]},
 {"LAB_PROPS_NAME_112_1","经验卡","經驗卡","EXP Card","EXPカード","EXP Card"},
 {"LAB_PROPS_DES_112_1","使用获得{p1}经验","使用後可獲得{p1}經驗","Can be used to gain {p1} EXP.","使用すると、{p1}EXPを獲得できる","Can be used to gain {p1} EXP."},
 {"LAB_PROPS_NAME_113_1","绿色入场券","綠色入場券","Green Ticket","グリーンチケット","绿色入场券"},
@@ -2109,6 +2234,8 @@ This ticket is valid for 5 days and will be automatically reclaimed upon expirat
 手にしたチケットの色は幾度となく変わり、他のプレイヤーから奪い取った色彩が、この勝利の証を形作っている。
 チケットの有効期限は5日間です。期限切れになると自動的に回収されます。お早めにご使用ください。]],[[用于参加协会联赛的五级赛事，在四级联赛中获胜即可获取。
 手中入场券的颜色几经变化，从其他牌手那里夺来的色彩，构成了这张胜利的凭证。]]},
+{"LAB_PROPS_NAME_114_1","送礼卡","送礼卡","送礼卡","送礼卡","送礼卡"},
+{"LAB_PROPS_DES_114_1","送礼卡描述","送礼卡描述","送礼卡描述","送礼卡描述","送礼卡描述"},
 {"LAB_PROPS_NAME_201101_1","星宫加奈","星宮加奈","Hoshimiya Kana","星宮かな","호시미야 가나"},
 {"LAB_PROPS_NAME_201101_2","誓约星宫加奈","誓約星宮加奈","Oath with Hoshimiya Kana","星宮かなと誓約","Oath with Hoshimiya Kana"},
 {"LAB_PROPS_NAME_201101_3","必然的相遇","必然的相遇","Fateful Meetup","運命の邂逅","必然的相遇"},
@@ -2125,21 +2252,25 @@ This ticket is valid for 5 days and will be automatically reclaimed upon expirat
 {"LAB_PROPS_NAME_201105_1","天濑千寻","天瀨千尋","Amase Chihiro","天瀬千尋","아마세 치히로"},
 {"LAB_PROPS_NAME_201105_2","誓约天濑千寻","誓約天瀨千尋","Oath with Amase Chihiro","天瀬千尋と誓約","Oath with Amase Chihiro"},
 {"LAB_PROPS_NAME_201105_3","水温试探","水溫試探","Testing the Water","水温の探索","Testing the Water"},
+{"LAB_PROPS_NAME_201105_4","璀璨折射","璀璨折射","Dazzling Refraction","煌めきの屈折","煌めきの屈折"},
 {"LAB_PROPS_NAME_201106_1","诺诺","諾諾","Nono","ノノ","노노"},
 {"LAB_PROPS_NAME_201106_2","誓约诺诺","誓約諾諾","Oath with Nono","ノノと誓約","Oath with Nono"},
 {"LAB_PROPS_NAME_201106_5","春意落于掌心","春意落於掌心","Spring in the Palm","掌に落ちる春の息吹","掌に落ちる春の息吹"},
 {"LAB_PROPS_NAME_201107_1","雾间琉华","霧間琉華","Kirima Ruka","霧間るか","키리마 루카"},
 {"LAB_PROPS_NAME_201107_2","誓约雾间琉华","誓約霧間琉華","Oath with Kirima Ruka","霧間るかと誓約","Oath with Kirima Ruka"},
 {"LAB_PROPS_NAME_201107_5","后半夜的开始","後半夜的開始","After Midnight","夜更けの始まり","After Midnight"},
+{"LAB_PROPS_NAME_201107_6","防晒对策","防曬對策","Sunscreen Strategy","日焼け対策","日焼け対策"},
 {"LAB_PROPS_NAME_201108_1","早乙女心","早乙女心","Saotome Kokoro","早乙女こころ","사토메 코코로"},
 {"LAB_PROPS_NAME_201108_2","誓约早乙女心","誓約早乙女心","Oath with Saotome Kokoro","早乙女こころと誓約","Oath with Saotome Kokoro"},
 {"LAB_PROPS_NAME_201108_3","比白雪更耀眼","比白雪更耀眼","Brighter Than Snow","雪よりも輝いて","Brighter Than Snow"},
 {"LAB_PROPS_NAME_201109_1","白石伊莉娜","白石伊莉娜","Shiraishi Irina","白石イリーナ","Shiraishi Irina"},
 {"LAB_PROPS_NAME_201109_4","誓约白石伊莉娜","誓約白石伊莉娜","Oath with Shiraishi Irina","白石イリーナ誓約","Oath with Shiraishi Irina"},
 {"LAB_PROPS_NAME_201109_5","马车载有繁星","馬車滿載繁星","Starlit Carriage","馬車に星々を乗せて","Starlit Carriage"},
+{"LAB_PROPS_NAME_201109_6","海风拂过脸颊","海風拂過臉頰","Sea Breeze Caress","頬を撫でる潮風","頬を撫でる潮風"},
 {"LAB_PROPS_NAME_201110_1","莉莉丝","莉莉絲","Lilith","リリス","Lilith"},
 {"LAB_PROPS_NAME_201110_4","誓约莉莉丝","誓約莉莉絲","Oath with Lilith","リリス誓約","Oath with Lilith"},
 {"LAB_PROPS_NAME_201110_5","当月色被染红","當月色被染紅","Crimson Moonlight","月が赤く染まりし時","Crimson Moonlight"},
+{"LAB_PROPS_NAME_201110_6","浅滩夜色","淺灘夜色","Shallow Twilight","浅瀬の宵闇","浅瀬の宵闇"},
 {"LAB_PROPS_NAME_201112_1","薇尔","薇爾","Veil","ヴェール","Oath with Lilith"},
 {"LAB_PROPS_NAME_201112_4","誓约薇尔","誓約薇爾","Oath with Veil","ヴェール誓約","Crimson Moonlight"},
 {"LAB_PROPS_NAME_201112_5","特殊诊疗方式","特殊診療方式","Special Treatment","特別な診療方法","Oath with Lilith"},
@@ -2149,6 +2280,16 @@ This ticket is valid for 5 days and will be automatically reclaimed upon expirat
 {"LAB_PROPS_NAME_201114_1","凉风薰","涼風薰","Suzukaze Kaoru","涼風薫","Suzukaze Kaoru"},
 {"LAB_PROPS_NAME_201114_4","誓约凉风薰","誓約涼風薰","Oath with Suzukaze Kaoru","涼風薫誓約","Oath with Suzukaze Kaoru"},
 {"LAB_PROPS_NAME_201114_5","清酒马天尼","清酒馬天尼","Saketini","清酒マティーニ","Saketini"},
+{"LAB_PROPS_NAME_201115_1","沐娜","沐娜","Moona","ムーナ","ムーナ"},
+{"LAB_PROPS_NAME_201115_4","誓约沐娜","誓約沐娜","Oath with Moona","ムーナ誓約","ムーナ"},
+{"LAB_PROPS_NAME_201115_5","专属应援频道","專屬應援頻道","Private Frequency","専用応援チャンネル","専用応援チャンネル"},
+{"LAB_PROPS_NAME_201116_1","天月绘里奈","天月繪里奈","Amatsuki Erina","天月えりな","天月えりな"},
+{"LAB_PROPS_NAME_201116_4","誓约天月绘里奈","誓約天月繪里奈","Oath with Amatsuki Erina","天月えりな誓約","天月えりな誓約"},
+{"LAB_PROPS_NAME_201116_5","反锁的心跳声","反鎖的心跳聲","Stifled Heartbeat","鍵のかかった鼓動","Stifled Heartbeat"},
+{"LAB_PROPS_NAME_201117_1","冈田纱佳","岡田紗佳","Okada Sayaka","岡田紗佳","岡田紗佳"},
+{"LAB_PROPS_NAME_201117_4","誓约冈田纱佳","誓約岡田紗佳","Oath with Okada Sayaka","岡田紗佳誓約","岡田紗佳誓約"},
+{"LAB_PROPS_NAME_201117_5","解放冈田纱佳","解放岡田紗佳","Okada Sayaka's Liberation","岡田紗佳・解放","岡田紗佳・解放"},
+{"LAB_PROPS_NAME_201117_6","纵情夏日","縱情夏日","Heartfelt Summer","夏の謳歌","夏の謳歌"},
 {"LAB_PROPS_DES_201101_1",[[星宫加奈的头像。
 未来的扑克之星绽放的自信笑容。]],[[星宮加奈的頭像。
 未來的撲克之星綻放的自信笑容。]],[[Hoshimiya Kana's Avatar.
@@ -2245,6 +2386,12 @@ Our biggest difference from real cats? Probably how clingy we are.]]},
 Hesitant… yet full of anticipation.]],[[アバター「水温の探索」。
 ためらっているようで、実は期待に胸を膨らませている。]],[[Testing the Water Avatar.
 Hesitant… yet full of anticipation.]]},
+{"LAB_PROPS_DES_201105_4",[[璀璨折射头像。
+仿佛要将整片大海都染作橙黄。]],[[璀璨折射頭像。
+彷彿要將整片大海都染作橙黃。]],[[Dazzling Refraction avatar.
+It's as though the sunset has dyed the entire sea in breathtaking shades of orange and gold.]],[[アバター「煌めきの屈折」。
+まるで大海原のすべてを、鮮やかなオレンジ色に染め上げていくかのよう。]],[[アバター「煌めきの屈折」。
+まるで大海原のすべてを、鮮やかなオレンジ色に染め上げていくかのよう。]]},
 {"LAB_PROPS_DES_201106_1",[[诺诺的头像。
 惺忪的睡眼倒映着能够取胜的手牌。]],[[諾諾的頭像。
 惺忪的睡眼倒映著能夠取勝的手牌。]],[[Nono's Avatar.
@@ -2281,6 +2428,12 @@ I treasure moments like these-just like when we were young, always side by side.
 The season of exchanging gifts has come to an end. What follows is the exchange of something more personal—time spent together.]],[[アバター「夜更けの始まり」。
 贈り物の交換時間は終わり、これから交換するのは、お互いの、誰にも邪魔されないプライベートな時間だ。]],[[After Midnight Avatar.
 The season of exchanging gifts has come to an end. What follows is the exchange of something more personal—time spent together.]]},
+{"LAB_PROPS_DES_201107_6",[[防晒对策头像。
+看似老套的戏码，实则是两人的日常。]],[[防曬對策頭像。
+看似老套的戲碼，實則是兩人的日常。]],[[Sunscreen Strategy avatar.
+A scene that might look like a classic romance cliché, but to them, it's just everyday life.]],[[アバター「日焼け対策」。
+お決まりのシチュエーションのようでいて、その実、二人にとってはいつもの日常。]],[[アバター「日焼け対策」。
+お決まりのシチュエーションのようでいて、その実、二人にとってはいつもの日常。]]},
 {"LAB_PROPS_DES_201108_1",[[早乙女心的头像。
 今天的妆容也十分上镜。]],[[早乙女心的頭像。
 今天的妝容也十分上鏡。]],[[Saotome Kokoro's Avatar.
@@ -2317,6 +2470,12 @@ The figure following behind you longs for the day we can walk side by side.]]},
 You hold close the stars that will not fade, even when dawn arrives.]],[[アバター「馬車に星々を乗せて」。
 夜明けを迎えても消えることのない星々を、胸の奥にそっと抱きしめて。]],[[Starlit Carriage Avatar.
 You hold close the stars that will not fade, even when dawn arrives.]]},
+{"LAB_PROPS_DES_201109_6",[[海风拂过脸颊头像。
+飞驰的轮迹终会停歇，只有迎面而来的海风，记得少女额前落下的汗滴。]],[[海風拂過臉頰頭像。
+飛馳的輪跡終會停歇，唯有迎面而來的海風，仍記得少女額前滑落的汗滴。]],[[Sea Breeze Caress Avatar.
+The tracks of a full sprint will fade, but the sea breeze rushing to meet her remembers every drop of sweat on her brow.]],[[アバター「頬を撫でる潮風」。
+疾走するタイヤの跡はいずれ消え去るけれど、頬を撫でる潮風だけは、少女の額に伝った汗のしずくを覚えている。]],[[アバター「頬を撫でる潮風」。
+疾走するタイヤの跡はいずれ消え去るけれど、頬を撫でる潮風だけは、少女の額に伝った汗のしずくを覚えている。]]},
 {"LAB_PROPS_DES_201110_1",[[莉莉丝的头像。
 属于她的时刻，往往在夜幕降临后。]],[[莉莉絲的頭像。
 屬於她的時刻，往往在夜幕降臨後。]],[[Lilith's Avatar.
@@ -2335,6 +2494,12 @@ Fate has already bound us together through blood.]]},
 This is the first time you've seen her remain so calm beneath a blood-red moon—was it the effect of that crimson drink?]],[[アバター「月が赤く染まりし時」。
 血月の下で、これほどまでに冷静な彼女を見るのは初めてだった。あの赤い飲み物の影響だろうか？]],[[Crimson Moonlight Avatar.
 This is the first time you've seen her remain so calm beneath a blood-red moon—was it the effect of that crimson drink?]]},
+{"LAB_PROPS_DES_201110_6",[[浅滩夜色头像。
+为沉寂的夜晚笼上神秘的魅惑之色。]],[[淺灘夜色頭像。
+為沉寂的夜晚籠上神秘的魅惑之色。]],[[Shallow Twilight avatar.
+Draping the silent night in an atmosphere of mysterious allure.]],[[アバター「浅瀬の宵闇」。
+神秘に満ちた魅惑の輝きが、静まり返った夜を優しく包み込む。]],[[アバター「浅瀬の宵闇」。
+神秘に満ちた魅惑の輝きが、静まり返った夜を優しく包み込む。]]},
 {"LAB_PROPS_DES_201112_1",[[薇尔的头像。
 未来在水晶球中，也在她的眼中。]],[[薇爾的頭像。
 未來映照於水晶球中，也映照在她的眼中。]],[[Veil's Avatar.
@@ -2389,6 +2554,66 @@ Let the rain fall—as long as it means keeping you beneath the umbrella.]]},
 At the blurred boundary between tradition and modernity, place a glass of something strong.]],[[アバター「清酒マティーニ」。
 伝統と現代の曖昧な境界に、一杯の芳醇な酒を添えて。]],[[Saketini Avatar.
 At the blurred boundary between tradition and modernity, place a glass of something strong.]]},
+{"LAB_PROPS_DES_201115_1",[[沐娜的头像。
+从天而降的月兔少女，只为守护命中注定之人而来。]],[[沐娜的頭像。
+從天而降的月兔少女，只為守護命中注定之人而來。]],[[Moona's avatar.
+The Moon Rabbit girl who fell from the sky—she came for one reason only: to protect her fated one.]],[[ムーナのアバター。
+月より舞い降りた月兎族の少女。運命の人を守護するためにこの星を訪れた。]],[[ムーナのアバター。
+月より舞い降りた月兎族の少女。運命の人を守護するためにこの星を訪れた。]]},
+{"LAB_PROPS_DES_201115_4",[[与沐娜誓约的证明。
+芭蕾的每一圈旋转，都只为跃入你的臂弯。]],[[與沐娜誓約的證明。
+芭蕾的每一圈旋轉，都只為躍入你的臂彎。]],[[A token of the oath with Moona.
+Every pirouette, every spin—all of it leading to the moment she leaps into your arms.]],[[ムーナと誓約した証。
+バレエを踊り続けるのは、いつかあなたの腕の中へ飛び込むために。]],[[A token of the oath with Moona.
+Every pirouette, every spin—all of it leading to the moment she leaps into your arms.]]},
+{"LAB_PROPS_DES_201115_5",[[专属应援频道头像。
+无论赛场上的呼喊多么震耳欲聋，沐娜的接收器里，永远只播放主人的专属波段。]],[[專屬應援頻道頭像。
+無論賽場上的呼喊多麼震耳欲聾，沐娜的接收器裡，始終只播放主人的專屬頻段。]],[[Private Frequency Avatar.
+No matter how deafening the crowd's roar, Moona's receiver is tuned to only one signal: her master's.]],[[アバター「専用応援チャンネル」。
+競技場の歓声がどれほど轟こうとも、ムーナの受信機に流れるのは、いつも主人のためだけの専用周波数。]],[[アバター「専用応援チャンネル」。
+競技場の歓声がどれほど轟こうとも、ムーナの受信機に流れるのは、いつも主人のためだけの専用周波数。]]},
+{"LAB_PROPS_DES_201116_1",[[天月绘里奈的头像。
+完美无瑕的学生会长，藏着一颗不坦率的少女心。]],[[天月繪里奈的頭像。
+完美無瑕的學生會長，藏著一顆不坦率的少女心。]],[[Amatsuki Erina's Avatar.
+The flawless student council president—hiding a heart that can never quite say what it means.]],[[天月えりなのアバター。
+完璧な生徒会長の仮面の下に隠しているのは、素直になれない少女心。]],[[天月えりなのアバター。
+完璧な生徒会長の仮面の下に隠しているのは、素直になれない少女心。]]},
+{"LAB_PROPS_DES_201116_4",[[与天月绘里奈誓约的证明。
+在弥漫着咖啡香气的街角，少女正期待着你的到来。]],[[與天月繪里奈誓約的證明。
+在瀰漫著咖啡香氣的街角，少女正期待著你的到來。]],[[A token of the oath with Amatsuki Erina.
+On a street corner filled with the scent of coffee, she waits quietly, hoping you will come.]],[[天月えりなと誓約した証。
+コーヒーの香りが漂う街角で、少女はあなたの来訪を待ちわびている。]],[[與天月繪里奈誓約的證明。
+在瀰漫著咖啡香氣的街角，少女正期待著你的到來。]]},
+{"LAB_PROPS_DES_201116_5",[[反锁的心跳声头像。
+和会长一起被锁在闷热的仓库里，绘里奈嘴上抱怨个不停，心跳却诚实地出卖了自己。]],[[反鎖的心跳聲頭像。
+和會長一起被困在悶熱的倉庫裡，繪里奈嘴上抱怨不停，心跳卻誠實地出賣了自己。]],[[Stifled Heartbeat Avatar.
+Trapped in a sweltering storage room, Erina keeps complaining—but the frantic rhythm of her heart tells a very different story.]],[[アバター「鍵のかかった鼓動」。
+会長と一緒に蒸し暑い倉庫に閉じ込められて、えりなは口では文句を言い続けるけれど、心臓の鼓動は、彼女の本心をこぼしてしまった。]],[[アバター「鍵のかかった鼓動」。
+会長と一緒に蒸し暑い倉庫に閉じ込められて、えりなは口では文句を言い続けるけれど、心臓の鼓動は、彼女の本心をこぼしてしまった。]]},
+{"LAB_PROPS_DES_201117_1",[[冈田纱佳的头像。
+多重身份共同勾勒出她的风采。]],[[岡田紗佳的頭像。
+多重身份共同勾勒出她的風采。]],[[Okada Sayaka's avatar.
+Her many facets, all at once, are what define her brilliance.]],[[岡田紗佳のアバター。
+多彩な顔を持つ彼女の、輝かしい魅力を写し出した一品。]],[[岡田紗佳のアバター。
+多彩な顔を持つ彼女の、輝かしい魅力を写し出した一品。]]},
+{"LAB_PROPS_DES_201117_2",[[与冈田纱佳誓约的证明。
+享受着与你共同踏上的挑战之路。]],[[與岡田紗佳誓約的證明。
+享受著與你共同踏上的挑戰之路。]],[[A token of the oath with Okada Sayaka.
+Savoring every step of the challenge we walk together.]],[[岡田紗佳と誓約した証。
+あなたと共に歩む、挑戦の道のりを心から楽しんでいる。]],[[岡田紗佳と誓約した証。
+あなたと共に歩む、挑戦の道のりを心から楽しんでいる。]]},
+{"LAB_PROPS_DES_201117_3",[[与冈田纱佳进一步誓约的证明。
+不要尝试驾驭运势，而是让运势带领我们夺取胜利。]],[[與岡田紗佳進一步誓約的證明。
+不要嘗試駕馭運勢，而是讓運勢帶領我們奪取勝利。]],[[A token of a deeper oath with Okada Sayaka.
+Don't try to tame fate. Instead, let it guide you to victory.]],[[岡田紗佳とさらなる誓約を結んだ証。
+運勢をコントロールしようとするのではなく、運勢に身を委ねて勝利を掴み取るのだ。]],[[岡田紗佳とさらなる誓約を結んだ証。
+運勢をコントロールしようとするのではなく、運勢に身を委ねて勝利を掴み取るのだ。]]},
+{"LAB_PROPS_DES_201117_4",[[纵情夏日头像。
+全力面对挑战，尽情享受假日，如夏日的骄阳般热烈。]],[[縱情夏日頭像。
+全力面對挑戰，盡情享受假日，如夏日的驕陽般熱烈。]],[[Heartfelt Summer avatar.
+Facing every challenge head-on and living every moment of the holiday to the fullest—burning as bright and fierce as the summer sun.]],[[アバター「夏の謳歌」。
+全力で挑戦に立ち向かい、心ゆくまでバカンスを楽しむ――夏の太陽のように熱く、情熱的に。]],[[アバター「夏の謳歌」。
+全力で挑戦に立ち向かい、心ゆくまでバカンスを楽しむ――夏の太陽のように熱く、情熱的に。]]},
 {"LAB_PROPS_NAME_202_2","逐月之鲨","逐月之鯊","Moon-Chasing Shark","月追いの鮫","Moon-Chasing Shark"},
 {"LAB_PROPS_NAME_202_3","赏花野餐","賞花野餐","Hanami Picnic","花見ピクニック","Hanami Picnic"},
 {"LAB_PROPS_NAME_202_4","暑气为伴","暑氣為伴","Summer Heatwave","夏を楽しもう","Summer Heatwave"},
@@ -2408,6 +2633,12 @@ At the blurred boundary between tradition and modernity, place a glass of someth
 {"LAB_PROPS_NAME_202_1_6","晴空轨迹","晴空軌跡","Clear Sky Trail","晴空の軌跡","晴空の軌跡"},
 {"LAB_PROPS_NAME_202_1_7","跃动装束","躍動裝束","Tailored Rebellion","躍動のアタイア","Tailored Rebellion"},
 {"LAB_PROPS_NAME_202_1_8","调酒达人","調酒達人","Mixology Master","カクテルマスター","Mixology Master"},
+{"LAB_PROPS_NAME_202_1_9","领奖台上","領獎台上","On the Podium","表彰台","领奖台上"},
+{"LAB_PROPS_NAME_202_1_10","绿茵赛场","綠茵賽場","Green Field","サッカースタジアム","绿茵赛场"},
+{"LAB_PROPS_NAME_202_1_11","私人海滩","私人海灘","Private Beach","プライベートビーチ","泳装抽取"},
+{"LAB_PROPS_NAME_202_1_12","浪花来时","浪花來時","Crashing Waves","寄せ波","泳装兑换"},
+{"LAB_PROPS_NAME_202_1_13","九莲宝灯","九蓮寶燈","Chuuren Poutou","九蓮宝燈","联动售卖"},
+{"LAB_PROPS_NAME_202_1_14","岭上开花","嶺上開花","Rinshan Kaihou","嶺上開花","联动兑换"},
 {"LAB_PROPS_NAME_202101_1","星宫加奈头像框","星宮加奈頭像框","Kana's Avatar Frame","星宮かなのフレーム","Kana's Avatar Frame"},
 {"LAB_PROPS_NAME_202102_1","望月冰见夜头像框","望月冰見夜頭像框","Himiya's Avatar Frame","望月氷見夜のフレーム","Himiya's Avatar Frame"},
 {"LAB_PROPS_NAME_202103_1","绯宫紫苑头像框","緋宮紫苑頭像框","Shion's Avatar Frame","緋宮紫苑のフレーム","Shion's Avatar Frame"},
@@ -2416,11 +2647,14 @@ At the blurred boundary between tradition and modernity, place a glass of someth
 {"LAB_PROPS_NAME_202106_1","诺诺头像框","諾諾頭像框","Nono's Avatar Frame","ノノのフレーム","Nono's Avatar Frame"},
 {"LAB_PROPS_NAME_202107_1","雾间琉华头像框","霧間琉華頭像框","Ruka's Avatar Frame","霧間るかのフレーム","Ruka's Avatar Frame"},
 {"LAB_PROPS_NAME_202108_1","早乙女心头像框","早乙女心頭像框","Kokoro's Avatar Frame","早乙女こころのフレーム","Kokoro's Avatar Frame"},
-{"LAB_PROPS_NAME_202109_1","白石伊莉娜头像框","白石伊莉娜頭像框","Shiraishi Irina's Avatar Frame","白石イリーナのフレーム","Shiraishi Irina's Avatar Frame"},
+{"LAB_PROPS_NAME_202109_1","白石伊莉娜头像框","白石伊莉娜頭像框","Irina's Avatar Frame","白石イリーナのフレーム","Shiraishi Irina's Avatar Frame"},
 {"LAB_PROPS_NAME_202110_1","莉莉丝头像框","莉莉絲頭像框","Lilith's Avatar Frame","リリスのフレーム","Lilith's Avatar Frame"},
 {"LAB_PROPS_NAME_202112_1","薇尔头像框","薇爾頭像框","Veil's Avatar Frame","ヴェールのフレーム","ヴェールのフレーム"},
 {"LAB_PROPS_NAME_202113_1","朱朱头像框","朱朱頭像框","Syusyu's Avatar Frame","朱々のフレーム","朱々のフレーム"},
-{"LAB_PROPS_NAME_202114_1","凉风薰头像框","涼風薰頭像框","Suzukaze Kaoru's Avatar Frame","涼風薫のフレーム","涼風薫のフレーム"},
+{"LAB_PROPS_NAME_202114_1","凉风薰头像框","涼風薰頭像框","Kaoru's Avatar Frame","涼風薫のフレーム","涼風薫のフレーム"},
+{"LAB_PROPS_NAME_202115_1","沐娜头像框","沐娜頭像框","Moona's Avatar Frame","ムーナのフレーム","ムーナのフレーム"},
+{"LAB_PROPS_NAME_202116_1","天月绘里奈头像框","天月繪里奈頭像框","Erina's Avatar Frame","天月えりなのフレーム","天月えりなのフレーム"},
+{"LAB_PROPS_NAME_202117_1","冈田纱佳头像框","岡田紗佳頭像框","Okada Sayaka's Avatar Frame","岡田紗佳のフレーム","岡田紗佳のフレーム"},
 {"LAB_PROPS_DES_202_2",[[鲨鱼月卡专属头像框。
 月光照出鲨鱼的影子，鱼群却仍然毫无察觉。]],[[鯊魚月卡專屬頭像框。
 月光照出鯊魚的影子，魚群卻仍然毫無察覺。]],[[Shark Pass exclusive avatar frame.
@@ -2539,6 +2773,42 @@ Yet no one wears the uniform as-is; each person alters it to highlight their own
 Liquids of different hues blend into something entirely new—much like the inseparable bond between two people.]],[[味わいを予測できないフレーム。
 色とりどりの液体がグラスの中で混ざり合い、全く新しい色彩を生み出す。まるで、二人の境界が溶け合う関係のように。]],[[An avatar frame with flavors no one could ever predict.
 Liquids of different hues blend into something entirely new—much like the inseparable bond between two people.]]},
+{"LAB_PROPS_DES_202_1_9",[[充满了欢呼与喝彩的头像框。
+站上领奖台的那一刻，所有的汗水都化作了胸前最耀眼的光芒。]],[[充滿歡呼與喝采的頭像框。
+站上領獎台的那一刻，所有的汗水都化作胸前最耀眼的光芒。]],[[An avatar frame filled with echoes of applause.
+The moment you step onto the podium, every drop of sweat transforms into the brightest light upon your chest.]],[[歓声と喝采に満ちたフレーム。
+表彰台に立つその瞬間、全ての汗が胸元で最も輝く光へと変わる。]],[[充满了欢呼与喝彩的头像框。
+站上领奖台的那一刻，所有的汗水都化作了胸前最耀眼的光芒。]]},
+{"LAB_PROPS_DES_202_1_10",[[仿佛能听见足球入网时清脆声响的头像框。
+绿茵场上追逐的每一秒，都是通向荣耀之巅的必经之路。]],[[彷彿能聽見足球入網時清脆聲響的頭像框。
+綠茵場上追逐的每一秒，都是通往榮耀之巔的必經之路。]],[[An avatar frame where you can almost hear the crisp snap of the net.
+Every second spent chasing glory on the green field is a step toward the summit.]],[[ボールがゴールネットを揺らす清々しい音が聞こえてきそうなフレーム。
+緑の芝生の上でボールを追いかけた一秒一秒が、栄光の頂へと続く道のり。]],[[仿佛能听见足球入网时清脆声响的头像框。
+绿茵场上追逐的每一秒，都是通向荣耀之巅的必经之路。]]},
+{"LAB_PROPS_DES_202_1_11",[[能听到浪花声的头像框。
+不要被看似温柔的海浪欺骗，它们随时等待着，在你放松警惕的时候，打湿你的双脚。]],[[能聽到浪花聲的頭像框。
+不要被看似溫柔的海浪欺騙，它們隨時等待著，在你放鬆警惕的時候，打濕你的雙腳。]],[[An avatar frame where you can almost hear the sound of tide.
+Don't be fooled by how gentle they look—those waves are just waiting for you to let your guard down, ready to sweep you off your feet.]],[[波の音が聞こえてきそうなフレーム。
+優しげに見える波に騙されてはいけない。波はいつだって、あなたが油断した隙を狙って、その足元を濡らそうと待ち構えているのだから。]],[[波の音が聞こえてきそうなフレーム。
+優しげに見える波に騙されてはいけない。波はいつだって、あなたが油断した隙を狙って、その足元を濡らそうと待ち構えているのだから。]]},
+{"LAB_PROPS_DES_202_1_12",[[海滩度假风格的头像框。
+将草帽摘下挡在脸前，暂时克制下亲吻的欲望，毕竟双唇还沾染这棒冰的凉意。]],[[海灘度假風格的頭像框。
+將草帽摘下擋在臉前，暫時克制下親吻的欲望，畢竟雙唇還沾染著冰棒的涼意。]],[[An avatar frame radiating pure beach vacation vibes.
+Tipping your straw hat down to hide your face, you resist the urge to kiss me—at least for now. After all, your lips still taste like a cool, sweet ice pop.]],[[ビーチリゾート風のフレーム。
+麦わら帽子を外して顔を隠し、キスしたい衝動をそっと抑える。だって、唇にはまだ、アイスバーのひんやりとした涼しさが残っているのだから。]],[[ビーチリゾート風のフレーム。
+麦わら帽子を外して顔を隠し、キスしたい衝動をそっと抑える。だって、唇にはまだ、アイスバーのひんやりとした涼しさが残っているのだから。]]},
+{"LAB_PROPS_DES_202_1_13",[[以冈田纱佳为主题的头像框。
+骄傲绽放的绚烂樱花，将她的明媚色彩，带进了蓝湾市的扑克对局。]],[[以岡田紗佳為主題的頭像框。
+驕傲綻放的絢爛櫻花，將她的明媚色彩，帶進了藍灣市的撲克對局。]],[[An avatar frame dedicated to Okada Sayaka.
+Radiant sakura blooms with pride, bringing her signature brilliance to the poker tables of Azure Bay.]],[[岡田紗佳をモチーフにデザインされたフレーム。
+美しく咲き誇る桜のように、彼女の華やかな存在感が藍湾市のポーカー対局を鮮やかに彩ってくれる。]],[[岡田紗佳をモチーフにデザインされたフレーム。
+美しく咲き誇る桜のように、彼女の華やかな存在感が藍湾市のポーカー対局を鮮やかに彩ってくれる。]]},
+{"LAB_PROPS_DES_202_1_14",[[以役种九莲宝灯为主题的头像框。
+八朵莲花在池中依次绽放，她在池中的倒影，也如同莲花般美丽。]],[[以役種九蓮寶燈為主題的頭像框。
+八朵蓮花在池中依次綻放，她在池中的倒影，也如同蓮花般美麗。]],[[An avatar frame themed after the legendary Yakuman hand, Chuuren Poutou.
+As the eight lotus flowers bloom one by one across the quiet pond, her reflection in the water rivals their beauty.]],[[役「九蓮宝燈」をモチーフにデザインされたフレーム。
+池の中で八輪の蓮の花が次々と咲き誇り、水面に映る彼女の姿もまた、蓮の花のように美しい。]],[[役「九蓮宝燈」をモチーフにデザインされたフレーム。
+池の中で八輪の蓮の花が次々と咲き誇り、水面に映る彼女の姿もまた、蓮の花のように美しい。]]},
 {"LAB_PROPS_DES_202101_1",[[与星宫加奈誓约的证明。
 把我的感情注入进去，蛋包饭的美味程度恐怕就不止三倍了。]],[[與星宮加奈誓約的證明。
 把我的感情注入進去，蛋包飯的美味程度恐怕就不止三倍了。]],[[A token of the oath with Hoshimiya Kana.
@@ -2617,6 +2887,24 @@ Fend off the threats with fists, and kindle the heart with flames.]]},
 Let the rain fall—as long as it means keeping you beneath the umbrella.]],[[涼風薫との誓約の証。
 この傘の下であなたと共に過ごすひと時のために。どうか雨風が訪れますように。]],[[A token of the oath with Suzukaze Kaoru.
 Let the rain fall—as long as it means keeping you beneath the umbrella.]]},
+{"LAB_PROPS_DES_202115_1",[[与沐娜誓约的证明。
+芭蕾的每一圈旋转，都只为跃入你的臂弯。]],[[與沐娜誓約的證明。
+芭蕾的每一圈旋轉，都只為躍入你的臂彎。]],[[A token of the oath with Moona.
+Every pirouette, every spin—all of it leading to the moment she leaps into your arms.]],[[ムーナと誓約した証。
+バレエを踊り続けるのは、いつかあなたの腕の中へ飛び込むために。]],[[ムーナと誓約した証。
+バレエを踊り続けるのは、いつかあなたの腕の中へ飛び込むために。]]},
+{"LAB_PROPS_DES_202116_1",[[与天月绘里奈誓约的证明。
+在弥漫着咖啡香气的街角，少女正期待着你的到来。]],[[與天月繪里奈誓約的證明。
+在瀰漫著咖啡香氣的街角，少女正期待著你的到來。]],[[A token of the oath with Amatsuki Erina.
+On a street corner filled with the scent of coffee, she waits quietly, hoping you will come.]],[[天月えりなと誓約した証。
+コーヒーの香りが漂う街角で、少女はあなたの来訪を待ちわびている。]],[[A token of the oath with Amatsuki Erina.
+On a street corner filled with the scent of coffee, she waits quietly, hoping you will come.]]},
+{"LAB_PROPS_DES_202117_1",[[与冈田纱佳誓约的证明。
+享受着与你共同踏上的挑战之路。]],[[與岡田紗佳誓約的證明。
+享受著與你共同踏上的挑戰之路。]],[[A token of the oath with Okada Sayaka.
+Savoring every step of the challenge we walk together.]],[[岡田紗佳と誓約した証。
+あなたと共に歩む、挑戦の道のりを心から楽しんでいる。]],[[岡田紗佳と誓約した証。
+あなたと共に歩む、挑戦の道のりを心から楽しんでいる。]]},
 {"LAB_PROPS_NAME_203_1","名字框","名字框","Name Frame","名字框","Name Frame"},
 {"LAB_PROPS_DES_203_1","名字框","名字框","Name Frame","名字框","Name Frame"},
 {"LAB_PROPS_NAME_204_1","蓝湾初航","藍灣初航","Azure Bay Voyage","藍湾就航","Azure Bay Voyage"},
@@ -2625,10 +2913,13 @@ Let the rain fall—as long as it means keeping you beneath the umbrella.]]},
 {"LAB_PROPS_NAME_204_4","蓝湾精选直播主","藍灣精選實況主","Azure Bay Top Streamer","藍湾トップ配信者","Azure Bay Top Streamer"},
 {"LAB_PROPS_NAME_204_5","扑克之星","撲克之星","Poker Star","ポーカースター","Poker Star"},
 {"LAB_PROPS_NAME_204_6","蓝图共绘者","藍圖共繪者","Blueprint Contributor","共に未来を創る者","Blueprint Contributor"},
+{"LAB_PROPS_NAME_204_7","打哭运营的勇者","打哭運營的勇者","Weepermaker","運営泣かせの勇者","運営泣かせの勇者"},
 {"LAB_PROPS_NAME_204_1_1","守秘人","守秘人","Secret Keeper","秘密の守り人","Secret Keeper"},
 {"LAB_PROPS_NAME_204_1_2","受邀者","獲邀者","The Invited","招かれた者","The Invited"},
 {"LAB_PROPS_NAME_204_1_3","新学年的伊始","新學年的伊始","New School Year","新学年の始まり","新学年の始まり"},
 {"LAB_PROPS_NAME_204_1_4","彻夜密会","徹夜密會","Midnight Rendezvous","徹夜の逢瀬","Midnight Rendezvous"},
+{"LAB_PROPS_NAME_204_1_5","决胜时刻","決勝時刻","Moment of Victory","決勝の瞬間","决胜时刻"},
+{"LAB_PROPS_NAME_204_1_6","夏日余暇","夏日餘暇","Summer Leisure","夏の余暇","夏の余暇"},
 {"LAB_PROPS_NAME_204_2_1","联赛王牌","聯賽王牌","League Ace","リーグのエース","联赛王牌"},
 {"LAB_PROPS_NAME_204_4_1","天选之人","天選之人","The Chosen One","選ばれし者","天选之人"},
 {"LAB_PROPS_NAME_204_4_2","千锤百炼","千錘百鍊","Forged in Fire","百戦錬磨","千锤百炼"},
@@ -2654,6 +2945,9 @@ Let the rain fall—as long as it means keeping you beneath the umbrella.]]},
 {"LAB_PROPS_NAME_204112_1","薇尔的命中注定","薇爾的命中注定","Veil's Chosen One","ヴェールの運命の人","Veil's Chosen One"},
 {"LAB_PROPS_NAME_204113_1","朱朱的保护对象","朱朱的保護對象","Syusyu's Protected One","朱々の護衛対象","Syusyu's Protected One"},
 {"LAB_PROPS_NAME_204114_1","薰的伞下客","薰的傘下客","Kaoru's Umbrella Guest","薫の傘を共に","Kaoru's Umbrella Guest"},
+{"LAB_PROPS_NAME_204115_1","沐娜的舞伴","沐娜的舞伴","Moona's Dance Partner","ムーナの踊り相手","Moona's Dance Partner"},
+{"LAB_PROPS_NAME_204116_1","绘里奈的约会对象","繪里奈的約會對象","Erina's Date","えりなのデート相手","えりなのデート相手"},
+{"LAB_PROPS_NAME_204117_2","强毅端正优美","強毅端正優美","Strong, Righteous, Beautiful","強く正しく美しく","強く正しく美しく"},
 {"LAB_PROPS_DES_204_1","蓝湾市，这座新兴的科技都市，像一艘在众声喧哗中行驶的巨轮。穿过重重迷雾抵达的未来，是否会让起航的见证者们感到意外呢？","藍灣市，這座新興的科技都市，如同一艘在眾聲喧嘩中行駛的巨輪。穿越重重迷霧後抵達的未來，究竟會不會讓啟航的見證者們感到意外呢？","Azure Bay – this emerging tech metropolis moves like a great ship sailing through a sea of noise. When it reaches its future beyond the fog, will those who witnessed its departure be surprised by what they find?","藍湾市――この新興のテクノロジー都市は、ざわめき渦巻く世論の海を切り進む巨大な船のようだ。幾重もの霧を突き抜けて辿り着いたその未来は、あの出航を目撃した者たちを、果たして驚かせることができるのだろうか？","Azure Bay – this emerging tech metropolis moves like a great ship sailing through a sea of noise. When it reaches its future beyond the fog, will those who witnessed its departure be surprised by what they find?"},
 {"LAB_PROPS_DES_204_2",[[鲨鱼月卡专属称号。
 掠夺性与统治力的象征，牌桌上的捕食者。]],[[鯊魚月卡專屬稱號。
@@ -2670,6 +2964,12 @@ Both time and skill are required to earn this honor.]]},
 {"LAB_PROPS_DES_204_6","为蓝湾市建设提供重要建议的市民可获取的特殊称号，这片土地将拥有相同理想的人们聚集在一起，而理想的实现，离不开每一位市民的努力。","為藍灣市建設提供重要建議的市民可獲取的特殊稱號。這片土地，將擁有相同理想的人們聚集在一起，而理想的實現，離不開每一位市民的努力。",[[A special title granted to citizens who have contributed valuable suggestions to the development of Azure Bay.
 This land brings together those who share the same ideals—and the realization of those ideals depends on the efforts of every citizen.]],"藍湾市の建設において重要な提案を行った市民に授与される、特別な称号。この地は同じ理想を掲げる者たちを集め、その理想を実現するには、市民一人ひとりの尽力が欠かせない。",[[A special title granted to citizens who have contributed valuable suggestions to the development of Azure Bay.
 This land brings together those who share the same ideals—and the realization of those ideals depends on the efforts of every citizen.]]},
+{"LAB_PROPS_DES_204_7",[[战胜开发者的专属称号。
+蓝湾市扑克总会的工作人员，在下班后偷偷抹眼泪的原因究竟是……]],[[戰勝開發者的專屬稱號。
+藍灣市撲克總會的工作人員，在下班後偷偷抹眼淚的原因究竟是……]],[[An exclusive title awarded for defeating the developers.
+The real reason the Azure Bay Poker Association staff were secretly wiping away tears after work... well, that remains a mystery.]],[[開発者に勝った者に贈られる限定称号。
+藍湾市ポーカー協会のスタッフが、仕事終わりにひそかに涙を拭っていた理由とは、一体……]],[[開発者に勝った者に贈られる限定称号。
+藍湾市ポーカー協会のスタッフが、仕事終わりにひそかに涙を拭っていた理由とは、一体……]]},
 {"LAB_PROPS_DES_204_1_1",[[温泉秘话活动专属称号。
 总是在为别人保守秘密的人将自己的秘密托付于你。]],[[溫泉秘話活動專屬稱號。
 總是為他人守口如瓶的人也將自己的秘密託付於你。]],[[Onsen Whispers event exclusive title.
@@ -2696,6 +2996,18 @@ A new beginning, new encounters.]]},
 When morning came, the story of that night was sealed away.]],[[「秘密の酒場」イベント限定称号。
 朝日が、あの夜の物語を秘密に変えた。]],[[Secret Bar event exclusive title.
 When morning came, the story of that night was sealed away.]]},
+{"LAB_PROPS_DES_204_1_5",[["蓝湾跃动活动专属称号。
+冲过终点线的瞬间，汗水与欢呼一同定格——这是属于你的决胜时刻。"]],[[藍灣躍動活動專屬稱號。
+衝過終點線的瞬間，汗水與歡呼一同定格——這是屬於你的決勝時刻。]],[[Azure Bay in Motion event exclusive title.
+The moment you cross the finish line, sweat and cheers are frozen in time—this is your moment of victory.]],[[「藍湾の躍動」イベント専用称号。
+ゴールラインを駆け抜けた瞬間、汗と歓声がひとつに重なり、永遠に刻まれる——これが、あなたの決勝の瞬間。]],[["蓝湾跃动活动专属称号。
+冲过终点线的瞬间，汗水与欢呼一同定格——这是属于你的决胜时刻。"]]},
+{"LAB_PROPS_DES_204_1_6",[[湛蓝假日活动专属称号。
+共同努力固然有趣，却也想与你共度闲暇。]],[[湛藍假日活動專屬稱號。
+共同努力固然有趣，卻也想與你共度閒暇。]],[[Azure Holiday event exclusive title.
+Working together is its own kind of fun, but right now, I just want to spend some quiet time with you.]],[[サマー・バカンスイベント限定称号。
+みんなで力を合わせるのも楽しいけれど、あなたと二人で、のんびりとしたひとときを過ごしたい。]],[[サマー・バカンスイベント限定称号。
+みんなで力を合わせるのも楽しいけれど、あなたと二人で、のんびりとしたひとときを過ごしたい。]]},
 {"LAB_PROPS_DES_204_4_1",[[蓝湾市扑克总会为成就斐然之人颁发的称号。
 命运女神的眷顾者，牌桌上的奇迹化身。]],[[藍灣市撲克總會為成就斐然者所頒發的稱號。
 命運女神的眷顧者，牌桌上的奇蹟化身。]],[[A title issued by the Azure Bay Poker Association to those of exceptional achievement.
@@ -2807,6 +3119,24 @@ This dance carries the true essence of the Blazing Flame Fist. No matter what em
 The feelings once hidden beneath that umbrella... President now understands them all too well.]],[[涼風薫との誓約の証。
 傘の生地に隠されていた気持ちを、会長は今、心に深く刻んでいる。]],[[A token of the oath with Suzukaze Kaoru.
 The feelings once hidden beneath that umbrella... President now understands them all too well.]]},
+{"LAB_PROPS_DES_204115_1",[[与沐娜誓约的证明。
+月面之上，她曾独自起舞；而此刻，她总算等到了共舞之人。]],[[與沐娜誓約的證明。
+月面之上，她曾獨自起舞；而此刻，她終於等到了與她共舞之人。]],[[A token of the oath with Moona.
+She once danced alone on the lunar surface. Now, at last, she has found her lead.]],[[ムーナと誓約した証。
+月の面上で、彼女は一人舞っていた。そして今、ようやく共に踊る伴侶に出会えた。]],[[ムーナと誓約した証。
+月の面上で、彼女は一人舞っていた。そして今、ようやく共に踊る伴侶に出会えた。]]},
+{"LAB_PROPS_DES_204116_1",[[与天月绘里奈誓约的证明。
+阳光倾洒在她的金发上，那是独属于约会日里的温柔晨曦。]],[[與天月繪里奈誓約的證明。
+陽光傾灑在她的金髮上，那是只屬於約會之日的溫柔晨曦。]],[[A token of the oath with Amatsuki Erina.
+Sunlight pours over her golden hair—a gentle morning glow reserved for you alone.]],[[天月えりなと誓約した証。
+陽光が彼女の金色の髪に降り注ぐ、それはデートの日だけに輝く優しい朝の光。]],[[A token of the oath with Amatsuki Erina.
+Sunlight pours over her golden hair—a gentle morning glow reserved for you alone.]]},
+{"LAB_PROPS_DES_204117_1",[[与冈田纱佳誓约的证明。
+会长也会逐渐被冈田纱佳的美德感染。]],[[與岡田紗佳誓約的證明。
+會長也會逐漸被岡田紗佳的美德感染。]],[[A token of the oath with Okada Sayaka.
+President, too, will gradually be touched by Okada Sayaka's virtues.]],[[岡田紗佳と誓約した証。
+会長もまた、岡田紗佳の持つ美徳に、次第に感化されていくのだろう。]],[[岡田紗佳と誓約した証。
+会長もまた、岡田紗佳の持つ美徳に、次第に感化されていくのだろう。]]},
 {"LAB_PROPS_NAME_205_1","牌背・默认","牌背・預設","Cards · Default","カードバック・デフォルト","Cards · Default"},
 {"LAB_PROPS_NAME_205_2","牌背・金鵄","牌背・金鵄","Cards · Kinshi","カードバック・金鵄","Cards · Kinshi"},
 {"LAB_PROPS_NAME_205_3","牌背・月兔","牌背・月兔","Cards · Moon Rabbit","カードバック・月兎","Cards · Moon Rabbit"},
@@ -2823,10 +3153,16 @@ The feelings once hidden beneath that umbrella... President now understands them
 {"LAB_PROPS_NAME_205_14","牌背・雪貂运输","牌背・雪貂運輸","Cards · Ferret Transit","カードバック・フェレット交通","Cards · Ferret Transit"},
 {"LAB_PROPS_NAME_205_15","牌背・情书","牌背・情書","Cards · Love Letter","カードバック・ラブレター","カードバック・ラブレター"},
 {"LAB_PROPS_NAME_205_16","牌背・迷兔","牌背・迷兔","Cards · Bewitching Bunny","カードバック・魅惑のバニー","Cards · Bewitching Bunny"},
+{"LAB_PROPS_NAME_205_17","牌背・奖牌","牌背・獎牌","Cards · Medal","カードバック・メダル","牌背·奖牌"},
+{"LAB_PROPS_NAME_205_18","牌背・海岸","牌背・海岸","Cards · Shoreline","カードバック・コースト","泳装兑换"},
+{"LAB_PROPS_NAME_205_19","牌背・冈田纱佳","牌背・岡田紗佳","Cards · Okada Sayaka","カードバック・岡田紗佳","冈田纱佳兑换"},
 {"LAB_PROPS_NAME_205_2_1","牌背・浮世","牌背・浮世","Cards · Ukiyo","カードバック・浮世","Cards · Ukiyo"},
 {"LAB_PROPS_NAME_205_2_2","牌背・巧克力板","牌背・巧克力板","Cards · Chocolate Bar","カードバック・板チョコ","Cards · Chocolate Bar"},
 {"LAB_PROPS_NAME_205_2_3","牌背・水手服","牌背・水手服","Cards · Sailor Uniform","カードバック・セーラー服","カードバック・セーラー服"},
 {"LAB_PROPS_NAME_205_2_4","牌背・酒标","牌背・酒標","Cards · Wine Label","カードバック・ラベル","Cards · Wine Label"},
+{"LAB_PROPS_NAME_205_2_5","牌背・绿茵赛场","牌背・綠茵賽場","Cards · Green Field","カードバック・サッカースタジアム","牌背・绿茵赛场"},
+{"LAB_PROPS_NAME_205_2_6","牌背・刨冰","牌背・刨冰","Cards · Shaved Ice","カードバック・かき氷","泳装抽取"},
+{"LAB_PROPS_NAME_205_2_7","牌背・金鵄雀士","牌背・金鵄雀士","Cards · Kinshi Mahjong Pro","カードバック・金鵄の雀士","冈田纱佳售卖"},
 {"LAB_PROPS_DES_205_1",[[蓝湾市扑克总会设计的牌背，是目前蓝湾市最常见的牌背。
 同时，扑克总会也鼓励民间组织自己设计牌背，但都要经过总会审核，确认没有用于作弊的标记。]],[[由藍灣市撲克總會設計的通用牌背，是目前藍灣市最常見的款式。
 撲克總會同時也鼓勵民間團體自行設計牌背，但須經過總會審核，以確保其中沒有可用於作弊的標記。]],[[Designed by the Azure Bay Poker Association, this is the most common card style seen across the city.
@@ -2925,6 +3261,24 @@ That note quietly slipped into a shoe locker during school days carries feelings
 What is it that makes a bunny girl truly "bunny"? The spring in her step? The flick of alert ears? The shy back-and-forth of a timid heart? Or perhaps...]],[[バニーガールの衣装をモチーフにデザインされたカードバック。
 バニーガールは、ウサギのどのような特徴を備えているのだろう？飛び跳ねる際の活発さか？耳をピンと立てる機敏さか？臆病さゆえに見せる、拒みつつも誘うような仕草か？それとも……]],[[A card deck inspired by bunny girl fashion.
 What is it that makes a bunny girl truly "bunny"? The spring in her step? The flick of alert ears? The shy back-and-forth of a timid heart? Or perhaps...]]},
+{"LAB_PROPS_DES_205_17",[[以赛事颁发的奖牌为灵感设计的扑克牌背。
+这是属于你的加冕时刻。]],[[以賽事頒發的獎牌為靈感設計的撲克牌牌背。
+這是屬於你的加冕時刻。]],[[Inspired by the medals of champions.
+This is your crowning moment.]],[[大会で授与されるメダルをモチーフにデザインされたカードバック。
+これは、あなたが栄冠を手にした瞬間。]],[[以赛事颁发的奖牌为灵感设计的扑克牌背。
+这是属于你的加冕时刻。]]},
+{"LAB_PROPS_DES_205_18",[[以刨冰为灵感设计的扑克牌背。
+连闷热的盛夏，都仿佛是为了让人们能吃到刨冰在存在的。]],[[以刨冰為靈感設計的撲克牌背。
+連悶熱的盛夏，都彷彿是為了讓人們能吃到刨冰而存在的。]],[[Inspired by refreshing shaved ice.
+It feels as though the sweltering heat of midsummer exists for the sole purpose of making this shaved ice taste so divine.]],[[かき氷をモチーフにデザインされたカードバック。
+うだるような猛暑さえも、まるで人々にかき氷を美味しく味わってもらうために存在しているかのようだ。]],[[かき氷をモチーフにデザインされたカードバック。
+うだるような猛暑さえも、まるで人々にかき氷を美味しく味わってもらうために存在しているかのようだ。]]},
+{"LAB_PROPS_DES_205_19",[[以冈田纱佳为灵感的牌背。
+金鵄扑克协会的新锐牌手，竟然是一位雀士？！]],[[以岡田紗佳為靈感的牌背。
+金鵄撲克協會的新銳牌手，竟然是一位雀士？！]],[[Inspired by Okada Sayaka.
+The brilliant rising star of the Kinshi Poker Association... is actually a professional mahjong player?!]],[[岡田紗佳をモチーフにデザインされたカードバック。
+金鵄ポーカー協会の新鋭プレイヤーが、まさかプロ雀士だったなんて？！]],[[岡田紗佳をモチーフにデザインされたカードバック。
+金鵄ポーカー協会の新鋭プレイヤーが、まさかプロ雀士だったなんて？！]]},
 {"LAB_PROPS_DES_205_2_1",[[以名为浮世的温泉旅馆为灵感设计的扑克牌背。
 独特的外观和精心设计的照明让旅馆尤为显眼，天守阁却往往隐藏在夜色中。]],[[以名為「浮世」的溫泉旅館為靈感打造的撲克牌背。
 獨特的外觀與精心設計的燈光使旅館在夜晚格外醒目，而天守閣則常常隱沒於深邃的夜色之中。]],[[A card style inspired by the Ukiyo Onsen Retreat.
@@ -2951,6 +3305,24 @@ With this deck equipped, even battles at the table feel like a cheerful after-sc
 The hand-drawn vintage label carries more than two centuries of history. Like an authentic label, this design even uses special anti-counterfeit ink.]],[[酒瓶のラベルをモチーフにデザインされたカードバック。
 レトロな手描きの酒ラベルは、200年以上にわたる変遷を物語っている。このカードバックには、本物の酒ラベルと同様に、特殊な偽造防止インクが使用されている。]],[[A card deck inspired by the label of a wine bottle.
 The hand-drawn vintage label carries more than two centuries of history. Like an authentic label, this design even uses special anti-counterfeit ink.]]},
+{"LAB_PROPS_DES_205_2_5",[[以竞技与赛场为主题的扑克牌背。
+换上这副牌背，每次翻牌都像在赛场上发起一次新的进攻。]],[[以競技與賽場為主題的撲克牌牌背。
+換上這款牌背，每次翻牌都彷彿在賽場上發起一次新的進攻。]],[[Inspired by the spirit of competition.
+Equip these, and every flip feels like launching a fresh offense on the field.]],[[競技とスタジアムをモチーフにデザインされたカードバック。
+このカードバックに変えれば、カードをめくるたびに競技場で新たな攻撃を仕掛けるかのようだ。]],[[以竞技与赛场为主题的扑克牌背。
+换上这副牌背，每次翻牌都像在赛场上发起一次新的进攻。]]},
+{"LAB_PROPS_DES_205_2_6",[[以潮水为灵感设计的扑克牌背。
+深不可测的大海最温柔的一部分，就是拍打在温热沙滩上的轻柔海浪。]],[[以潮水為靈感設計的撲克牌背。
+深不可測的大海最溫柔的一部分，就是拍打在溫熱沙灘上的輕柔海浪。]],[[Inspired by the rolling tides.
+The gentlest side of the unfathomable sea is the soft wave that laps against warm, sun-soaked sand.]],[[満ち引きする潮をモチーフにデザインされたカードバック。
+底知れぬ大海原が魅せる最も優しい一面――それは、温まった砂浜にそっと打ち寄せる、穏やかなさざ波。]],[[満ち引きする潮をモチーフにデザインされたカードバック。
+底知れぬ大海原が魅せる最も優しい一面――それは、温まった砂浜にそっと打ち寄せる、穏やかなさざ波。]]},
+{"LAB_PROPS_DES_205_2_7",[[联动活动特殊牌背。
+冈田纱佳来到蓝湾市的纪念。]],[[聯動活動特殊牌背。
+岡田紗佳來到藍灣市的紀念。]],[[Collaboration event exclusive cards.
+A special memento to commemorate Okada Sayaka's visit to Azure Bay.]],[[コラボイベント限定のカードバック。
+岡田紗佳が藍湾市を訪れた記念の品。]],[[コラボイベント限定のカードバック。
+岡田紗佳が藍湾市を訪れた記念の品。]]},
 {"LAB_PROPS_NAME_206_1","贵宾雅间","貴賓雅間","VIP Lounge","VIPの個室","VIP Lounge"},
 {"LAB_PROPS_NAME_206_2","林间空地","林間空地","Forest Clearing","林間の空き地","Forest Clearing"},
 {"LAB_PROPS_NAME_206_3","艇上时光","艇上時光","Yacht Voyage","ヨットでのひと時","Yacht Voyage"},
@@ -2959,6 +3331,7 @@ The hand-drawn vintage label carries more than two centuries of history. Like an
 {"LAB_PROPS_NAME_206_6","娱乐中心","娛樂中心","Entertainment Center","エンターテイメントセンター","Entertainment Center"},
 {"LAB_PROPS_NAME_206_7","温泉房间","溫泉房間","Onsen Suite","旅館の部屋","Onsen Suite"},
 {"LAB_PROPS_NAME_206_8","古堡房间","古堡房間","Ancient Castle","古城の間","Ancient Castle"},
+{"LAB_PROPS_NAME_206_9","无边泳池","無邊泳池","Infinity Pool","インフィニティプール","インフィニティプール"},
 {"LAB_PROPS_DES_206_1",[[位于N-Z酒吧内的贵宾雅间，只有收到邀请函的人才能参加这里的牌局。是否有参加资格并不取决于在这家酒吧里取得过的战绩，而是一个人在蓝湾市的所有过去。
 表面上完全中立的N-Z酒吧，欢迎着来自所有协会的牌手在这里切磋，同时他们也在默默观察着所有协会。]],[[位於N-Z酒吧內的貴賓雅間，只有收到邀請函的人才能參加這裡的牌局。是否有參加資格取決於一個人在藍灣市的所有過去，而非在這家酒吧裡取得過的戰績。
 表面上完全中立的N-Z酒吧，歡迎著來自所有協會的牌手在這裡切磋，同時他們也在默默觀察著所有協會。]],[[A private room inside the N-Z Bar, where only those with an invitation may join the games. Eligibility is determined not by one's record in this bar, but by their entire past in Azure Bay.
@@ -3027,14 +3400,30 @@ This is perhaps the least private place in all of Ukiyo—no one weaves or trade
 藍灣市邊緣的古堡經過整修後煥然一新，其中一間帶有露台的房間被選作錦標賽的比賽場地。
 為了重現古堡昔日的奢華，房間內擺滿了精心購置的復古物件。然而，這張牌桌竟是一件被遺留於此的古物——莫非藍灣市的選址，在遙遠的過去就已埋下伏筆？]],[[A poker table and setting inspired by a room within an ancient castle.
 On the outskirts of Azure Bay stands a recently restored castle, and one of its terrace rooms has been chosen as the tournament venue. To revive the castle's former splendor, the space is furnished with carefully curated antiques. Yet the poker table itself turns out to be an original piece left behind long ago—was Azure Bay's choice of location somehow foretold in the distant past?]],[[古城の間スタイルのテーブルと対局背景。
+
 藍湾市郊外にある古城が改修され、バルコニー付きの一室がトーナメント会場に選ばれた。
 古城がかつて誇った豪奢さを再現するため、部屋には買い集めたアンティーク調の品々が並べられている。しかし、このポーカーテーブルは、なんと城に残されていた古物だった。藍湾市のこの場所選定は、遥か昔から伏線が張られていたのだろうか？]],[[A poker table and setting inspired by a room within an ancient castle.
 On the outskirts of Azure Bay stands a recently restored castle, and one of its terrace rooms has been chosen as the tournament venue. To revive the castle's former splendor, the space is furnished with carefully curated antiques. Yet the poker table itself turns out to be an original piece left behind long ago—was Azure Bay's choice of location somehow foretold in the distant past?]]},
+{"LAB_PROPS_DES_206_9",[[无边泳池风格的牌桌和对局场景。
+
+会长至今都不知道，雾间琉华是用何种手段包下了整座带有私人海滩的度假酒店，直觉告诉会长不要去向酒店打探。
+只需要放松心态，和牌手们享受一段绝对不会被打扰的时光就好，可以在沙滩上、海水中，也可以是在酒店的无边泳池里。]],[[無邊泳池風格的牌桌和對局場景。
+
+會長至今都不知道，霧間琉華是用何種手段包下了整座帶有私人海灘的度假酒店，直覺告訴會長不要去向酒店打探。
+只需要放鬆心態，和牌手們享受一段絕對不會被打擾的時光就好，可以在沙灘上、海水中，也可以是在酒店的無邊泳池裡。]],[[A poker table and settings styled after an infinity pool.
+
+You still don't know how Kirima Ruka managed to book an entire resort hotel with a private beach—and instinct says: don't ask. Just relax and enjoy some uninterrupted time with the characters, whether it's on the sand, in the water, or by the hotel's stunning infinity pool.]],[[インフィニティプール風のテーブルと対局背景。
+
+霧間るかがどのような手段でプライベートビーチ付きのリゾートホテルを丸ごと貸し切ったのか、会長は未だに知らない。直感が会長に「ホテルに探りを入れるな」と告げている。
+今はただ心を落ち着かせ、プレイヤーたちと誰にも邪魔されない時間を楽しめばいい。砂浜でも、海の中でも、あるいはホテルのインフィニティプールの中でも。]],[[インフィニティプール風のテーブルと対局背景。
+
+霧間るかがどのような手段でプライベートビーチ付きのリゾートホテルを丸ごと貸し切ったのか、会長は未だに知らない。直感が会長に「ホテルに探りを入れるな」と告げている。
+今はただ心を落ち着かせ、プレイヤーたちと誰にも邪魔されない時間を楽しめばいい。砂浜でも、海の中でも、あるいはホテルのインフィニティプールの中でも。]]},
 {"LAB_PROPS_NAME_207_1","夜色渐深","夜色漸深","Nightfall Reverie","次第に深まる夜","Nightfall Reverie"},
 {"LAB_PROPS_NAME_207_2","步行天国","步行天國","Paradise Walk","歩行者天国","Paradise Walk"},
 {"LAB_PROPS_NAME_207_3","浮世俯瞰","浮世俯瞰","Worldly View","浮世を見下ろして","Worldly View"},
 {"LAB_PROPS_NAME_207_4","春季日常","春季日常","Springtime Routine","春の日常","Music·Hall 4"},
-{"LAB_PROPS_NAME_207_5","音乐·大厅5","音乐·大厅5","Music·Hall 5","音乐·大厅5","Music·Hall 5"},
+{"LAB_PROPS_NAME_207_5","蔚蓝之梦","蔚藍之夢","Azure Dream","紺碧の夢","紺碧の夢"},
 {"LAB_PROPS_DES_207_1",[[默认大厅的背景音乐。
 
 N-Z酒吧的露台总能让人感觉出奇的平静，连牌桌上的输赢都变得比在别处时更能欣然接受。
@@ -3099,11 +3488,26 @@ So if a shared, beautiful dream allowed people to return to the school gates ben
 
 There's a legend passed down at Azure Bay High: three years is far too short, and those bound by fate will never truly miss each other—they're destined to meet on the very first day of school.
 So if a shared, beautiful dream allowed people to return to the school gates beneath falling sakura, memories intact... would someone go to any lengths to appear before the one they admire, turning the legend into a heart-fluttering encounter?]]},
-{"LAB_PROPS_DES_207_5","音乐·大厅5","音乐·大厅5","Music·Hall 5","音乐·大厅5","Music·Hall 5"},
+{"LAB_PROPS_DES_207_5",[[度假酒店私人海滩的大厅背景音乐。
+
+在金鵄协会举办的夏季赛中胜出的三人，获得了度假酒店私人海滩一个月的使用权，按照规则，她们还可以各邀请一位同行者，而她们最终都不约而同选择了会长。
+夏季赛中上演的争夺战，是否会在海滩上继续上演呢？这样真的能得到放松吗？还是说牌手们乐在其中？]],[[度假酒店私人海灘的大廳背景音樂。
+
+在金鵄協會舉辦的夏季賽中勝出的三人，獲得了度假酒店私人海灘一個月的使用權，按照規則，她們還可以各邀請一位同行者，而她們最終都不約而同選擇了會長。
+夏季賽中上演的爭奪戰，是否會在海灘上繼續上演呢？這樣真的能得到放鬆嗎？還是說牌手們樂在其中？]],[[Lobby background music for the resort hotel's private beach.
+
+The three characters who won the Kinshi Association's summer tournament each claimed a month of access to the resort hotel's private beach—and by the rules, each could invite one companion. Without a word to one another, they all chose you, President.
+Will the rivalry from the summer tournament spill over onto the beach? Can they actually unwind—or is competing just their idea of fun?]],[[リゾートホテルのプライベートビーチのロビーBGM。
+
+金鵄協会が主催する夏季大会を制した3人の勝者は、リゾートホテルのプライベートビーチを1ヶ月間使用できる権利を手に入れた。ルールにより、彼女たちはそれぞれ同行者を1人招待できたのだが、最終的に全員が申し合わせたかのように会長を選んだのだった。
+夏季大会で繰り広げられたあの争奪戦は、この砂浜でも続いてしまうのだろうか？ 本当にリフレッシュできるのか、それともプレイヤーたちはこの状況を楽しんでいるのだろうか？]],[[リゾートホテルのプライベートビーチのロビーBGM。
+
+金鵄協会が主催する夏季大会を制した3人の勝者は、リゾートホテルのプライベートビーチを1ヶ月間使用できる権利を手に入れた。ルールにより、彼女たちはそれぞれ同行者を1人招待できたのだが、最終的に全員が申し合わせたかのように会長を選んだのだった。
+夏季大会で繰り広げられたあの争奪戦は、この砂浜でも続いてしまうのだろうか？ 本当にリフレッシュできるのか、それともプレイヤーたちはこの状況を楽しんでいるのだろうか？]]},
 {"LAB_PROPS_NAME_208_1","逃离霓虹灯","逃離霓虹燈","Escape from Neon","ネオンサインから逃れて","Escape from Neon"},
 {"LAB_PROPS_NAME_208_2","身在场中","身在場中","In the Spotlight","試合参加中","In the Spotlight"},
 {"LAB_PROPS_NAME_208_3","雾中催马","霧中催馬","Galloping in the Mist","霧のさいばら","Galloping in the Mist"},
-{"LAB_PROPS_NAME_208_4","音乐·对战4","音乐·对战4","Music·Battle 4","音乐·对战4","Music·Battle 4"},
+{"LAB_PROPS_NAME_208_4","水面反射","水面反射","Surface Reflections","水面のリフレクション","水面のリフレクション"},
 {"LAB_PROPS_NAME_208_5","音乐·对战5","音乐·对战5","Music·Battle 5","音乐·对战5","Music·Battle 5"},
 {"LAB_PROPS_DES_208_1",[[默认对局的背景音乐。
 
@@ -3155,12 +3559,29 @@ Water trickles softly, and somewhere in the distance a startled deer cries out. 
 Most guests staying in the suites stop by these rooms to unwind. For the people of Azure Bay, a poker table is much like this humble yet luxurious retreat—capable of hosting tense battles or serving as a quiet way to pass the time.
 
 Water trickles softly, and somewhere in the distance a startled deer cries out. Moonlight lays a cool silver sheen over rising hot spring mist. Players call and raise in gentler voices than usual. Those who have folded stare into some far corner of the garden, as though gazing long enough might reveal the quiet essence of empathy toward things.]]},
-{"LAB_PROPS_DES_208_4","音乐·对战4","音乐·对战4","Music·Battle 4","音乐·对战4","Music·Battle 4"},
+{"LAB_PROPS_DES_208_4",[[度假酒店无边泳池的对局背景音乐。
+
+每个人对于夏天的长短都有不同的认知，有些人觉得炎炎夏日太过漫长，有些人觉得玩乐的时光太过短暂。
+而有些人回忆起那一天，和大家一起在无边泳池中推出筹码，等待着最后一张牌翻开，却不巧让海鸥叼走了扑克的经历，也许会觉得这年夏天永远都不会结束吧。]],[[度假酒店無邊泳池的對局背景音樂。
+
+每個人對於夏天的長短都有不同的認知，有些人覺得炎炎夏日太過漫長，有些人覺得玩樂的時光太過短暫。
+而有些人回憶起那一天，和大家一起在無邊泳池中推出籌碼，等待著最後一張牌翻開，卻不巧讓海鷗叼走了撲克的經歷，也許會覺得這年夏天永遠都不會結束吧。]],[[In-game background music for the resort hotel's infinity pool.
+
+Everyone measures summer differently—some find the heat endless, while others wish the fun would never stop.
+And some, when they look back on that afternoon—pushing chips into the pot by the pool, waiting for the river card to flip, only for a seagull to snatch it right out of the air—might feel like that summer never really ends.]],[[リゾートホテルのインフィニティプールの対局BGM。
+
+夏の長さに対する感覚は人それぞれだ。猛暑の夏を長すぎると感じる人もいれば、遊び尽くす時間が短すぎると惜しむ人もいる。
+そして、あの日みんなと一緒にインフィニティプールの中でチップを押し出し、最後の1枚が開かれるのを待っていたところ、運悪くカモメにカードを連れ去られてしまった。そんな出来事を思い出すとき、今年の夏は永遠に終わらないように感じられるかもしれない。]],[[リゾートホテルのインフィニティプールの対局BGM。
+
+夏の長さに対する感覚は人それぞれだ。猛暑の夏を長すぎると感じる人もいれば、遊び尽くす時間が短すぎると惜しむ人もいる。
+そして、あの日みんなと一緒にインフィニティプールの中でチップを押し出し、最後の1枚が開かれるのを待っていたところ、運悪くカモメにカードを連れ去られてしまった。そんな出来事を思い出すとき、今年の夏は永遠に終わらないように感じられるかもしれない。]]},
 {"LAB_PROPS_DES_208_5","音乐·对战5","音乐·对战5","Music·Battle 5","音乐·对战5","Music·Battle 5"},
 {"LAB_PROPS_NAME_209_1","N-Z酒吧","N-Z酒吧","N-Z Bar","N-Zバー","N-Z Bar"},
 {"LAB_PROPS_NAME_209_2","娱乐街","娛樂街","Entertainment Street","娯楽街","Entertainment Street"},
 {"LAB_PROPS_NAME_209_3","浮世旅馆","浮世旅館","Ukiyo Retreat","旅館「浮世」","Ukiyo Retreat"},
 {"LAB_PROPS_NAME_209_4","校园中庭","校園中庭","School Courtyard","キャンパスの中庭","キャンパスの中庭"},
+{"LAB_PROPS_NAME_209_5","海边小店","海邊小店","Beachside Shop","海辺の小さな店","海辺の小さな店"},
+{"LAB_PROPS_NAME_209_6","纵情夏日","縱情夏日","Heartfelt Summer","夏の謳歌","夏の謳歌"},
 {"LAB_PROPS_DES_209_1",[[初始大厅背景。
 
 位于蓝湾市直辖区的N-Z酒吧，顶层的露天区域能够欣赏到城市的夜景。
@@ -3225,8 +3646,39 @@ In earlier years, tourists would visit every spring to take photos, but in recen
 
 桜の木が植えられたキャンパスの中庭は、生徒たちが休み時間や昼休みにくつろぐ場所。窓から中庭が見える席は、席替えのたびに皆が狙う人気席だ。
 以前は毎年春になると、多くの観光客が学校に押し寄せて写真を撮っていたが、安全上の配慮により、近年は学外者の立ち入りが許可されていない。]]},
+{"LAB_PROPS_DES_209_5",[[私人海滩上空置小店大厅背景。
+
+为了避免打扰前来度假的牌手，酒店特意在私人海滩上设置了无人看管的小店，并趁没人的时候补充小店里的物品。
+牌手们可以免费取用店内任何物品，让这次海边度假尽可能接近预想中最完美的模样。]],[[私人海灘上空置小店大廳背景。
+
+為了避免打擾前來度假的牌手，酒店特意在私人海灘上設置了無人看管的小店，並趁沒人的時候補充小店裡的物品。
+牌手們可以免費取用店內任何物品，讓這次海邊度假盡可能接近預想中最完美的模樣。]],[[An unmanned shop on the private beach, serving as the lobby background.
+
+To avoid disturbing the characters on vacation, the hotel sets up this unmanned shop and restocks it while no one is around. Help yourself to anything inside—it's all on the house! This getaway is meant to be exactly as perfect as you imagined it.]],[[プライベートビーチに佇む、無人の小さな店をモチーフにしたロビー背景。
+
+バカンスに訪れたプレイヤーたちの邪魔をしないよう、ホテルが気を利かせてプライベートビーチに設けた無人の売店。人がいない時間を見計らって、ひっそりと商品の補充を行っている。
+プレイヤーは店内のあらゆるものを無料で自由に利用でき、この海辺でのバカンスを、思い描く最も完璧な形へと仕上げてくれる。]],[[プライベートビーチに佇む、無人の小さな店をモチーフにしたロビー背景。
+
+バカンスに訪れたプレイヤーたちの邪魔をしないよう、ホテルが気を利かせてプライベートビーチに設けた無人の売店。人がいない時間を見計らって、ひっそりと商品の補充を行っている。
+プレイヤーは店内のあらゆるものを無料で自由に利用でき、この海辺でのバカンスを、思い描く最も完璧な形へと仕上げてくれる。]]},
+{"LAB_PROPS_DES_209_6",[[纵情夏日大厅背景。
+
+纵情夏日服饰专属大厅背景。
+准备完全，时间充裕，为了让自己的热情不输给烈日，从今天开始纵情享受夏日吧。毕竟海滩上的牌手们，都是全力以赴才赢得这段来之不易的假期，大家都选择了会长作为同行者，会长可不要辜负大家的期待哦。]],[[縱情夏日大廳背景。
+
+縱情夏日服飾專屬大廳背景。
+準備萬全，時間充裕，為了讓自己的熱情不輸給烈日，從今天開始縱情享受夏日吧。畢竟海灘上的牌手們，都是全力以赴才贏得這段來之不易的假期，大家都選擇了會長作為同行者，會長可不要辜負大家的期待哦。]],[[An exclusive lobby background for the Heartfelt Summer outfit.
+
+All set, with plenty of time—let your enthusiasm match the blazing sun and dive into summer starting today! After all, every character on that beach fought hard to earn this well-deserved vacation. They all chose you to share it with, President—don't let them down.]],[[ロビー背景・夏の謳歌。
+
+衣装「夏の謳歌」専用のロビー背景。
+準備は万端、時間もたっぷりある。この熱い日差しに負けないくらいの情熱で、今日から思いきり夏を満喫しよう。ビーチにいるプレイヤーたちは皆、全力で戦ってようやくこの休暇を勝ち取ったのだ。そして全員が同行者として会長を選んでくれた。会長、みんなの期待を裏切ってはいけないよ。]],[[ロビー背景・夏の謳歌。
+
+衣装「夏の謳歌」専用のロビー背景。
+準備は万端、時間もたっぷりある。この熱い日差しに負けないくらいの情熱で、今日から思いきり夏を満喫しよう。ビーチにいるプレイヤーたちは皆、全力で戦ってようやくこの休暇を勝ち取ったのだ。そして全員が同行者として会長を選んでくれた。会長、みんなの期待を裏切ってはいけないよ。]]},
 {"LAB_PROPS_NAME_210_1","ALL IN・默认","All In・預設","All-In · Default","オールイン・デフォルト","All-In · Default"},
 {"LAB_PROPS_NAME_210_2","ALL IN・霓虹","All In・霓虹","All-In · Neon","オールイン・ネオン","All-In · Neon"},
+{"LAB_PROPS_NAME_210_3","ALL IN·浪花","ALL IN·浪花","All-In · Splash","オールイン・浪花","オールイン・浪花"},
 {"LAB_PROPS_DES_210_1",[[默认的ALL IN特效。
 像是要撕裂牌桌的沉闷一般，推出自己的全部筹码。]],[[預設的All In特效。
 像是要撕裂牌桌的沉悶一般，推出自己的全部籌碼。]],[[Default all-in animation.
@@ -3239,9 +3691,16 @@ With a force that feels strong enough to shake the table, you shove all your chi
 Neon signs flicker to life in the alleys, and the deep-blue streets slowly warm with color.]],[[ネオンをテーマにデザインされたオールインエフェクト。
 路地裏の酒場が看板に明かりを灯し、深藍の街並みが少しずつ温度を帯びていく。]],[[A neon-themed all-in animation.
 Neon signs flicker to life in the alleys, and the deep-blue streets slowly warm with color.]]},
+{"LAB_PROPS_DES_210_3",[[浪花主题的ALL IN特效。
+用气势留下浪花也无法带走的印记。]],[[浪花主題的ALL IN特效。
+用氣勢留下浪花也無法帶走的印記。]],[[A wave-themed all-in animation.
+Leave a mark that even the tide cannot wash away.]],[[浪花をテーマにしたオールインエフェクト。
+その凄まじい気迫で、激しい波ですら消し去れない足跡を残す。]],[[浪花をテーマにしたオールインエフェクト。
+その凄まじい気迫で、激しい波ですら消し去れない足跡を残す。]]},
 {"LAB_PROPS_NAME_211_1","铭牌・默认","銘牌・預設","Nameplate · Default","ネームプレート・デフォルト","Nameplate · Default"},
 {"LAB_PROPS_NAME_211_2","铭牌・霓虹","銘牌・霓虹","Nameplate · Neon","ネームプレート・ネオン","Nameplate · Neon"},
 {"LAB_PROPS_NAME_211_3","铭牌・飞羽","銘牌・飛羽","Nameplate · Feather","ネームプレート・羽","Nameplate · Feather"},
+{"LAB_PROPS_NAME_211_4","铭牌·樱花","銘牌·櫻花","Nameplate · Sakura","ネームプレート・桜","ネームプレート・桜"},
 {"LAB_PROPS_DES_211_1",[[默认的ALL IN后铭牌特效。
 牌桌的气氛被推出的筹码点燃，响应你的究竟会有几人呢？]],[[預設的All In後銘牌特效。
 牌桌的氣氛被推出的籌碼點燃，響應你的究竟會有幾人呢？]],[[Default nameplate animation after going all-in.
@@ -3260,6 +3719,12 @@ Streetlights switch on along the main roads, while glowing signs deep in the all
 Each feather carries a story written by the wind among the clouds, capturing the boundless expanse of the sky.]],[[羽をテーマにした、オールイン後のネームプレートエフェクト。
 羽根の紋様は、風が雲の上に書き記した、大空の広大さを静かに語りかける物語。]],[[A feather-themed nameplate animation after going all-in.
 Each feather carries a story written by the wind among the clouds, capturing the boundless expanse of the sky.]]},
+{"LAB_PROPS_DES_211_4",[[樱花主题的ALL IN后铭牌特效。
+樱花随风飘落，将围绕胜者的风染成粉色。]],[[櫻花主題的ALL IN後銘牌特效。
+櫻花隨風飄落，將圍繞勝者的風染成粉色。]],[[A sakura-themed nameplate animation after going all-in.
+Petals drift on the wind, painting the champion's aura in shades of pink.]],[[桜をテーマにした、オールイン後のネームプレートエフェクト。
+風に舞い散る桜の花びらが、勝者を包み込む風を鮮やかなピンク色に染め上げる。]],[[桜をテーマにした、オールイン後のネームプレートエフェクト。
+風に舞い散る桜の花びらが、勝者を包み込む風を鮮やかなピンク色に染め上げる。]]},
 {"LAB_PROPS_NAME_212_1","牌面・默认","牌面・預設","Card Front · Default","カードフロント・デフォルト","Card Front · Default"},
 {"LAB_PROPS_NAME_212_2","牌面・四色花色","牌面・四色花色","Card Front · 4-Color Suits","カードフロント・四色スート","Card Front · 4-Color Suits"},
 {"LAB_PROPS_NAME_212_3","牌面・四色底色","牌面・四色底色","Card Front · 4-Color Base","カードフロント・四色背景","Card Front · 4-Color Base"},
@@ -3281,6 +3746,13 @@ Extended play can cause visual fatigue; using four colors helps prevent suits fr
 Even at a distance, the suits are easy to tell apart, making it convenient for both players and spectators.]],[[四つのスートをベースに、カードの背景色そのものを四色に塗り分けたカードデザイン。
 遠くからでもスートをひと目で判別できるため、プレイヤーにとっても観客にとっても非常に扱いやすい。]],[[A poker card design with the card background colored by suit.
 Even at a distance, the suits are easy to tell apart, making it convenient for both players and spectators.]]},
+{"LAB_PROPS_NAME_213_1","开牌·莲花","開牌·蓮花","Reveal · Lotus","ショーダウン・蓮の花","ショーダウン・蓮の花"},
+{"LAB_PROPS_DES_213_1",[[莲花主题的ALL IN后开牌特效。
+迎着艳阳，与之争艳的决胜之花。]],[[蓮花主題的ALL IN後開牌特效。
+迎著艷陽，與之爭艷的決勝之花。]],[[A lotus-themed card reveal animation, triggered when the river card is flipped after going all-in.
+A flower that blooms to rival the blazing sun—the decisive blossom of victory.]],[[蓮の花をテーマにした、オールイン後のショーダウンエフェクト。
+真夏の太陽にも見劣りしない美しさで、決着の瞬間に咲き誇る。]],[[蓮の花をテーマにした、オールイン後のショーダウンエフェクト。
+真夏の太陽にも見劣りしない美しさで、決着の瞬間に咲き誇る。]]},
 {"LAB_PROPS_NAME_301_1","普通礼包","普通礼包","Common Package","普通礼包","Common Package"},
 {"LAB_PROPS_DES_301_1","普通礼包","普通礼包","Common Package","普通礼包","Common Package"},
 {"LAB_PROPS_NAME_302_1","随机・绿色礼物礼包","隨機・綠色禮物禮包","Random Green Gift Pack","ランダムグリーンパック","Random Green Gift Pack"},
@@ -3291,25 +3763,25 @@ Even at a distance, the suits are easy to tell apart, making it convenient for b
 向牌手赠送该礼物，能够提升牌手的好感度。也可以通过回收获得礼物碎片。]],[[開啟後，將隨機獲得一件綠色品質的禮物。
 向牌手贈送此禮物可提升好感度，也可透過回收換取禮物碎片。]],[[Open to obtain a random gift of Green rarity.
 Send it to a character to increase your Affinity with them, or recycle it for Gift Fragments.]],[[開封すると、グリーン品質のギフトを1つランダムで獲得できる。
-キャラクターに贈ると、そのキャラクターの好感度がアップする。ギフトを回収すると、ギフトシャードを入手できます。]],[[Open to obtain a random gift of Green rarity.
+キャラクターに贈ると、そのキャラクターの好感度がアップする。ギフトを回収すると、ギフトシャードを入手できる。]],[[Open to obtain a random gift of Green rarity.
 Send it to a character to increase your Affinity with them, or recycle it for Gift Fragments.]]},
 {"LAB_PROPS_DES_302_2",[[开启后，会任意获得一件蓝色品质礼物。
 向牌手赠送该礼物，能够提升牌手的好感度。也可以通过回收获得礼物碎片。]],[[開啟後，將隨機獲得一件藍色品質的禮物。
 向牌手贈送此禮物可提升好感度，也可透過回收換取禮物碎片。]],[[Open to obtain a random gift of Blue rarity.
 Send it to a character to increase your Affinity with them, or recycle it for Gift Fragments.]],[[開封すると、ブルー品質のギフトを1つランダムで獲得できる。
-キャラクターに贈ると、そのキャラクターの好感度がアップする。ギフトを回収すると、ギフトシャードを入手できます。]],[[Open to obtain a random gift of Blue rarity.
+キャラクターに贈ると、そのキャラクターの好感度がアップする。ギフトを回収すると、ギフトシャードを入手できる。]],[[Open to obtain a random gift of Blue rarity.
 Send it to a character to increase your Affinity with them, or recycle it for Gift Fragments.]]},
 {"LAB_PROPS_DES_302_3",[[开启后，会任意获得一件紫色品质礼物。
 向牌手赠送该礼物，能够提升牌手的好感度。也可以通过回收获得礼物碎片。]],[[開啟後，將隨機獲得一件紫色品質的禮物。
 向牌手贈送此禮物可提升好感度，也可透過回收換取禮物碎片。]],[[Open to obtain a random gift of Purple rarity.
 Send it to a character to increase your Affinity with them, or recycle it for Gift Fragments.]],[[開封すると、パープル品質のギフトを1つランダムで獲得できる。
-キャラクターに贈ると、そのキャラクターの好感度がアップする。ギフトを回収すると、ギフトシャードを入手できます。]],[[Open to obtain a random gift of Purple rarity.
+キャラクターに贈ると、そのキャラクターの好感度がアップする。ギフトを回収すると、ギフトシャードを入手できる。]],[[Open to obtain a random gift of Purple rarity.
 Send it to a character to increase your Affinity with them, or recycle it for Gift Fragments.]]},
 {"LAB_PROPS_DES_302_4",[[开启后，会任意获得一件金色品质礼物。
 向牌手赠送该礼物，能够提升牌手的好感度。也可以通过回收获得礼物碎片。]],[[開啟後，將隨機獲得一件金色品質的禮物。
 向牌手贈送此禮物可提升好感度，也可透過回收換取禮物碎片。]],[[Open to obtain a random gift of Orange rarity.
 Send it to a character to increase your Affinity with them, or recycle it for Gift Fragments.]],[[開封すると、オレンジ品質のギフトを1つランダムで獲得できる。
-キャラクターに贈ると、そのキャラクターの好感度がアップする。ギフトを回収すると、ギフトシャードを入手できます。]],[[Open to obtain a random gift of Orange rarity.
+キャラクターに贈ると、そのキャラクターの好感度がアップする。ギフトを回収すると、ギフトシャードを入手できる。]],[[Open to obtain a random gift of Orange rarity.
 Send it to a character to increase your Affinity with them, or recycle it for Gift Fragments.]]},
 {"LAB_PROPS_NAME_303_1","自选・特殊礼物礼包","自選・特殊禮物禮包","Special Gift Pack","スペシャルギフトセレクトパック","Special Gift Pack"},
 {"LAB_PROPS_NAME_303_2","自选・橙色礼物礼包","自選・橙色禮物禮包","Orange Gift Pack","オレンジギフトセレクトパック","Orange Gift Pack"},
@@ -3326,26 +3798,59 @@ Bound gifts cannot be recycled.]]},
 向牌手赠送该礼物，能够提升牌手的好感度。也可以通过回收获得礼物碎片。]],[[開啟後，可以自選一件橙色品質的禮物。
 向牌手贈送該禮物可提升好感度，也能透過回收獲得禮物碎片。]],[[Open to select a gift of Orange rarity.
 Send it to a character to increase your Affinity with them, or recycle it for Gift Fragments.]],[[開封すると、オレンジ品質のギフトを1つ選んで獲得できる。
-キャラクターに贈ると、そのキャラクターの好感度がアップする。ギフトを回収すると、ギフトシャードを入手できます。]],[[Open to select a gift of Orange rarity.
+キャラクターに贈ると、そのキャラクターの好感度がアップする。ギフトを回収すると、ギフトシャードを入手できる。]],[[Open to select a gift of Orange rarity.
 Send it to a character to increase your Affinity with them, or recycle it for Gift Fragments.]]},
 {"LAB_PROPS_DES_303_3",[[开启后，可选择一件紫色品质礼物获得。
 向牌手赠送该礼物，能够提升牌手的好感度。也可以通过回收获得礼物碎片。]],[[開啟後，可以自選一件紫色品質的禮物。
 向牌手贈送該禮物可提升好感度，也能透過回收獲得禮物碎片。]],[[Open to select a gift of Purple rarity.
 Send it to a character to increase your Affinity with them, or recycle it for Gift Fragments.]],[[開封すると、パープル品質のギフトを1つ選んで獲得できる。
-キャラクターに贈ると、そのキャラクターの好感度がアップする。ギフトを回収すると、ギフトシャードを入手できます。]],[[Open to select a gift of Purple rarity.
+キャラクターに贈ると、そのキャラクターの好感度がアップする。ギフトを回収すると、ギフトシャードを入手できる。]],[[Open to select a gift of Purple rarity.
 Send it to a character to increase your Affinity with them, or recycle it for Gift Fragments.]]},
 {"LAB_PROPS_DES_303_4",[[开启后，可选择一件蓝色品质礼物获得。
 向牌手赠送该礼物，能够提升牌手的好感度。也可以通过回收获得礼物碎片。]],[[開啟後，可以自選一件藍色品質的禮物。
 向牌手贈送該禮物可提升好感度，也能透過回收獲得禮物碎片。]],[[Open to select a gift of Blue rarity.
 Send it to a character to increase your Affinity with them, or recycle it for Gift Fragments.]],[[開封すると、ブルー品質のギフトを1つ選んで獲得できる。
-キャラクターに贈ると、そのキャラクターの好感度がアップする。ギフトを回収すると、ギフトシャードを入手できます。]],[[Open to select a gift of Blue rarity.
+キャラクターに贈ると、そのキャラクターの好感度がアップする。ギフトを回収すると、ギフトシャードを入手できる。]],[[Open to select a gift of Blue rarity.
 Send it to a character to increase your Affinity with them, or recycle it for Gift Fragments.]]},
 {"LAB_PROPS_DES_303_5",[[开启后，可选择一件绿色品质礼物获得。
 向牌手赠送该礼物，能够提升牌手的好感度。也可以通过回收获得礼物碎片。]],[[開啟後，可以自選一件綠色品質的禮物。
 向牌手贈送該禮物可提升好感度，也能透過回收獲得禮物碎片。]],[[Open to select a gift of Green rarity.
 Send it to a character to increase your Affinity with them, or recycle it for Gift Fragments.]],[[開封すると、グリーン品質のギフトを1つ選んで獲得できる。
-キャラクターに贈ると、そのキャラクターの好感度がアップする。ギフトを回収すると、ギフトシャードを入手できます。]],[[Open to select a gift of Green rarity.
+キャラクターに贈ると、そのキャラクターの好感度がアップする。ギフトを回収すると、ギフトシャードを入手できる。]],[[Open to select a gift of Green rarity.
 Send it to a character to increase your Affinity with them, or recycle it for Gift Fragments.]]},
+{"LAB_PROPS_NAME_401","幸运星","幸運星","Lucky Star","ラッキースター","ラッキースター"},
+{"LAB_PROPS_DES_401",[[饱满的五角星水晶，可用于在对局内发送特殊互动表情。
+传闻将其抛出便能收获好运，而将情绪具象为互动表情，其实只是它的附加功能。]],[[飽滿的五角星水晶，可用於在對局內發送特殊互動表情。
+傳聞將其拋出便能收穫好運，而將情緒具象為互動表情，其實只是它的附加功能。]],[[A plump, five-pointed crystal star used to send emojis during a game.
+Legend has it that tossing one your way brings good luck—though turning your feelings into emojis is a pretty great bonus feature.]],[[ぷっくりとした星型の水晶。対局中に特別なインタラクティブエモートを送信するためのアイテム。
+投げると幸運が訪れるという噂だが、感情をエモートとして具現化するのは、実はほんのオマケの機能に過ぎない。]],[[ぷっくりとした星型の水晶。対局中に特別なインタラクティブエモートを送信するためのアイテム。
+投げると幸運が訪れるという噂だが、感情をエモートとして具現化するのは、実はほんのオマケの機能に過ぎない。]]},
+{"LAB_PROPS_NAME_401_1","比心","比心","Finger Heart","指ハート","指ハート"},
+{"LAB_PROPS_NAME_401_2","干杯","乾杯","Cheers","乾杯","乾杯"},
+{"LAB_PROPS_NAME_401_3","送花","送花","Flower","フラワーギフト","フラワーギフト"},
+{"LAB_PROPS_NAME_401_4","泼水","潑水","Splash","お水をどうぞ","お水をどうぞ"},
+{"LAB_PROPS_NAME_401_5","抓鸡","抓雞","Bluff Catcher","ブラフキャッチ","ブラフキャッチ"},
+{"LAB_PROPS_NAME_401_6","捕食","捕食","Predation","捕食","捕食"},
+{"LAB_PROPS_NAME_401_7","长草","長草","LOL","生草","生草"},
+{"LAB_PROPS_NAME_401_8","猫猫拳","貓貓拳","Kitty Punch","ネコパンチ","ネコパンチ"},
+{"LAB_PROPS_NAME_401_9","咸鱼寿司","鹹魚壽司","Salted Fish Sushi","塩漬け魚のお寿司","塩漬け魚のお寿司"},
+{"LAB_PROPS_NAME_401_10","哑弹","啞彈","Dud","不発弾","不発弾"},
+{"LAB_PROPS_NAME_401_11","闹钟","鬧鐘","Alarm","目覚まし時計","目覚まし時計"},
+{"LAB_PROPS_NAME_401_12","应援","應援","Cheer","全力応援","全力応援"},
+{"LAB_PROPS_NAME_401_13","汽水","汽水","Soda","炭酸ジュース","炭酸ジュース"},
+{"LAB_PROPS_DES_401_1","做出这个动作时，切勿将食指朝向他人，否则发射的就不是爱心了。","做出這個動作時，切勿將食指朝向他人，否則發射的就不是愛心了。","A word of caution: never point your index finger at someone while doing this, or what you launch might not be a heart.","このポーズをとる時は、絶対に人差し指を相手に向けてはいけないよ。じゃないと、発射されるのがハートではなくなっちゃうからね。","このポーズをとる時は、絶対に人差し指を相手に向けてはいけないよ。じゃないと、発射されるのがハートではなくなっちゃうからね。"},
+{"LAB_PROPS_DES_401_2","啤酒由娱乐中心免费提供，同时也提供无酒精版本。","啤酒由娛樂中心免費提供，同時也提供無酒精版本。","The beer is on the house, courtesy of the Entertainment Center. Non-alcoholic options are also available!","ビールはエンターテイメントセンターからの無料提供。ノンアルコールバージョンもある。","ビールはエンターテイメントセンターからの無料提供。ノンアルコールバージョンもある。"},
+{"LAB_PROPS_DES_401_3","玫瑰的花语是红桃同花，一大束玫瑰的花语是红桃同花顺。","玫瑰的花語是紅心同花，一大束玫瑰的花語是紅心同花順。","The language of a single rose is a Flush of Hearts. A whole bouquet? That says Royal Flush.","バラの花言葉は「ハートのフラッシュ」。そして、大きなバラの花束の花言葉は「ハートのストレートフラッシュ」。","バラの花言葉は「ハートのフラッシュ」。そして、大きなバラの花束の花言葉は「ハートのストレートフラッシュ」。"},
+{"LAB_PROPS_DES_401_4","看来有人需要冷静一下，巧了，这里刚好有一杯水。","看來有人需要冷靜一下，巧了，這裡剛好有一杯水。","Looks like someone needs to cool down! Funny enough, there happens to be a glass of water right here...","どうやら頭を冷やす必要がある人がいるみたいだね。おあつらえ向きに、ここにちょうど一杯の水があるよ。","どうやら頭を冷やす必要がある人がいるみたいだね。おあつらえ向きに、ここにちょうど一杯の水があるよ。"},
+{"LAB_PROPS_DES_401_5","表演实在太过浮夸，想要抓捕易如反掌。","表演實在太過浮誇，想要抓捕易如反掌。","That bluff was way too over the top—catching you was almost too easy.","演技があまりにも大げさすぎて、見破るのは朝飯前だ。","演技があまりにも大げさすぎて、見破るのは朝飯前だ。"},
+{"LAB_PROPS_DES_401_6","不要以为桌上没有鲨鱼，当你发现的时候往往已经晚了。","不要以為桌上沒有鯊魚，當你發現的時候往往已經晚了。","Never assume there are no sharks at the table. By the time you spot one, it's usually too late.","テーブルにサメがいないなんて思わないことだ。君がその存在に気づいた時には、大抵もう手遅れなのだから。","テーブルにサメがいないなんて思わないことだ。君がその存在に気づいた時には、大抵もう手遅れなのだから。"},
+{"LAB_PROPS_DES_401_7","草，长了出来。","草，長了出來。","Look, the grass is growing.","草、生えてきた。","草、生えてきた。"},
+{"LAB_PROPS_DES_401_8","以为隔着屏幕就打不到你了吗？看拳！","以為隔著螢幕就打不到你了嗎？看拳！","Think a screen is enough to protect you? Take this!","画面越しだからって攻撃が届かないと思ってない？ パンチをくらえ！","画面越しだからって攻撃が届かないと思ってない？ パンチをくらえ！"},
+{"LAB_PROPS_DES_401_9","鱼哭了水知道，咸鱼哭了谁知道？","魚哭了水知道，鹹魚哭了誰知道？","The water knows when a fish cries. But when a salted fish cries… does anyone even notice?","魚の涙は水が知っているけれど、塩漬け魚の涙は誰が知るというのだろう？","魚の涙は水が知っているけれど、塩漬け魚の涙は誰が知るというのだろう？"},
+{"LAB_PROPS_DES_401_10","惊吓的背后隐藏着惊喜，但并非每一次都有惊喜。","驚嚇的背後隱藏著驚喜，但並非每一次都有驚喜。","Behind every scare, there might be a surprise... but don't count on it every time.","ドッキリの裏にはサプライズが隠されていることもあるが、毎回都合よくサプライズが起きるとは限らない。","ドッキリの裏にはサプライズが隠されていることもあるが、毎回都合よくサプライズが起きるとは限らない。"},
+{"LAB_PROPS_DES_401_11","不论听了多少年，听到闹钟的声音始终还是会吓一跳。","不論聽了多少年，聽到鬧鐘的聲音始終還是會嚇一跳。","No matter how many years go by, that alarm sound still manages to startle you every single time.","何年聞き続けていても、目覚まし時計の音にはどうしてもビクッとしてしまう。","何年聞き続けていても、目覚まし時計の音にはどうしてもビクッとしてしまう。"},
+{"LAB_PROPS_DES_401_12","点亮应援棒，准备好全力应援！","點亮應援棒，準備好全力應援！","Light up your glow stick and cheer with everything you've got!","ペンライト準備OK！よっしゃ行くぜー！","ペンライト準備OK！よっしゃ行くぜー！"},
+{"LAB_PROPS_DES_401_13","请你喝汽水，猜猜有没有摇晃过？","請你喝汽水，猜猜有沒有搖晃過？","Here's a soda for you. Care to guess whether it's been shaken?","炭酸ジュースを奢ってあげる。さあ、事前に振ってあるかどうか、当ててみて？","炭酸ジュースを奢ってあげる。さあ、事前に振ってあるかどうか、当ててみて？"},
 {"LAB_CHAR_NAME_1001","星宫加奈","星宮加奈","Hoshimiya Kana","星宮かな","호시미야 가나"},
 {"LAB_CHAR_NAME_1002","望月冰见夜","望月冰見夜","Mochizuki Himiya","望月氷見夜","모치즈키 히미야"},
 {"LAB_CHAR_NAME_1003","绯宫紫苑","緋宮紫苑","Hinomiya Shion","緋宮紫苑","히노미야 시온"},
@@ -3359,6 +3864,9 @@ Send it to a character to increase your Affinity with them, or recycle it for Gi
 {"LAB_CHAR_NAME_1012","薇尔","薇爾","Veil","ヴェール","Veil"},
 {"LAB_CHAR_NAME_1013","朱朱","朱朱","Syusyu","朱々","朱々"},
 {"LAB_CHAR_NAME_1014","凉风薰","涼風薰","Suzukaze Kaoru","涼風薫","涼風薫"},
+{"LAB_CHAR_NAME_1015","沐娜","沐娜","Moona","ムーナ","Moona"},
+{"LAB_CHAR_NAME_1016","天月绘里奈","天月繪里奈","Amatsuki Erina","天月えりな","Amatsuki Erina"},
+{"LAB_CHAR_NAME_3001","冈田纱佳","岡田紗佳","Okada Sayaka","岡田紗佳","冈田纱佳"},
 {"LAB_ARCHIVE_UNLOCK_1","·解锁档案·一","解鎖檔案・一","Unlock Dossier · I","アーカイブ・1をアンロック","·解鎖檔案·一"},
 {"LAB_ARCHIVE_UNLOCK_2","·解锁档案·二","解鎖檔案・二","Unlock Dossier · II","アーカイブ・2をアンロック","·解鎖檔案·二"},
 {"LAB_ARCHIVE_UNLOCK_3","·解锁档案·三","解鎖檔案・三","Unlock Dossier · III","アーカイブ・3をアンロック","·解鎖檔案·三"},
@@ -3377,6 +3885,9 @@ Send it to a character to increase your Affinity with them, or recycle it for Gi
 {"LAB_CHAR_DEC_1012","N-Z酒吧的常驻占卜师。每当午夜降临，薇尔便会准时出现在占卜台前。只需请她一杯酒，她便愿意为你占卜你想知道的任何事情。","N-Z酒吧的常駐占卜師。每當午夜降臨，薇爾便會準時現身於占卜台前。只要請她喝上一杯酒，她便願意為你占卜你想知道的任何事情。","The resident fortune teller of the N-Z Bar. When midnight rolls around, Veil takes her seat at the fortune-telling table. Buy her a drink, and she'll divine whatever you wish to know.","N-Zバーの常駐占い師。夜の帳が下りると、ヴェールは占い台の前に決まって姿を現す。彼女にお酒を一杯おごるだけで、あなたが知りたいことが何であれ、占ってくれる。","N-Zバーの常駐占い師。夜の帳が下りると、ヴェールは占い台の前に決まって姿を現す。彼女にお酒を一杯おごるだけで、あなたが知りたいことが何であれ、占ってくれる。"},
 {"LAB_CHAR_DEC_1013","“离火拳”传人，N-Z酒吧的兼职保镖。朱朱是位活泼开朗的少女，她热衷于各式各样的打工，你总能在蓝湾的大街小巷瞧见她忙碌的身影。","「離火拳」傳人，N-Z酒吧的兼職保鏢。朱朱是一位活潑開朗的少女，熱衷於各式各樣的打工，你總能在藍灣的大街小巷，看見她忙碌的身影。",[[The inheritor of the "Blazing Flame Fist" and a part-time bouncer at the N-Z Bar, Syusyu is a lively, cheerful girl with a passion for all kinds of part-time work. You can always spot her bustling through the streets and alleys of Azure Bay.]],"「離火拳」の継承者であり、N-Zバーのアルバイト用心棒。朱々は明るく活発な少女で、ありとあらゆるアルバイトに精を出している。藍湾の街のあちこちで、忙しく立ち回る彼女の姿を見かけることだろう。","「離火拳」の継承者であり、N-Zバーのアルバイト用心棒。朱々は明るく活発な少女で、ありとあらゆるアルバイトに精を出している。藍湾の街のあちこちで、忙しく立ち回る彼女の姿を見かけることだろう。"},
 {"LAB_CHAR_DEC_1014","传统和伞的革新者，尝试将和伞的灵魂注入现代雨伞的形体中，革新过程中习得的智慧与伪装，都在牌桌上得到了完美的演绎。","傳統和傘的革新者，嘗試將和傘的靈魂注入現代雨傘的形體之中。革新過程中習得的智慧與偽裝，也都在牌桌上得到了完美的演繹。","An innovator who bridges tradition and modernity in umbrella design, Kaoru seeks to breathe the spirit of the traditional wagasa into modern umbrellas. The wisdom she gained—and the talent for artful concealment honed through this process of reinvention—comes alive flawlessly at the poker table.","和傘の魂を、現代の傘に注ぎ込もうと志す、和傘の革新家。革新の過程で身につけた知恵と仮装の技術は、ポーカーテーブルの上で華麗に開花した。","和傘の魂を、現代の傘に注ぎ込もうと志す、和傘の革新家。革新の過程で身につけた知恵と仮装の技術は、ポーカーテーブルの上で華麗に開花した。"},
+{"LAB_CHAR_DEC_1015","从天而降的月兔族少女，将映入眼帘的第一个人——会长，视作了“命中注定之人”。守护与陪伴会长，是沐娜在这个世界唯一的目标。","從天而降的月兔族少女，將映入眼簾的第一個人——會長，視為「命中注定之人」。守護與陪伴會長，是沐娜在這個世界唯一的目標。",[[A girl of the Moon Rabbit clan who plummeted from the sky, Moona designated the first person she saw—President—as her "fated one." To protect and remain by President's side—that is her only purpose in this world.]],"空から降り立った月兎族の少女。彼女は最初に視界に入った人物――会長を「運命の人」と定めた。会長を守り、その傍らに寄り添うこと。それこそが、ムーナがこの世界で抱く唯一にして絶対の目標である。",[[A girl of the Moon Rabbit clan who plummeted from the sky, Moona designated the first person she saw—President—as her "fated one." To protect and remain by President's side—that is her only purpose in this world.]]},
+{"LAB_CHAR_DEC_1016","奥德赛大学现任学生会长，天月财团千金，拥有黄金般耀眼的长发和不输给任何人的自尊心，被敬爱她的学生们称作“完美的学生会长”。","奧德賽大學現任學生會長，天月財團千金。擁有如黃金般耀眼的長髮與不輸任何人的自尊心，被敬仰她的學生們稱為「完美的學生會長」。",[[The current student council president of Odyssey University and the daughter of the Amatsuki Group, she is known for her brilliant golden hair and a pride that yields to no one. She is revered as the "Flawless Student Council President" by her devoted peers.]],"オデッセイ大学現生徒会長、天月財団のお嬢様。黄金のように輝く長い髪と、高いプライドを併せ持つ負けず嫌い。敬愛する生徒たちからは「完璧な生徒会長」と称えられている。",[[The current student council president of Odyssey University and the daughter of the Amatsuki Group, she is known for her brilliant golden hair and a pride that yields to no one. She is revered as the "Flawless Student Council President" by her devoted peers.]]},
+{"LAB_CHAR_DEC_3001","冈田纱佳来到扑克高手云集的蓝湾市，许多势力想要招募她，却没有人理解她真正的追求。直到会长为她指明了一条通往冠军的挑战之路。","冈田纱佳来到扑克高手云集的蓝湾市，许多势力想要招募她，却没有人理解她真正的追求。直到会长为她指明了一条通往冠军的挑战之路。","冈田纱佳来到扑克高手云集的蓝湾市，许多势力想要招募她，却没有人理解她真正的追求。直到会长为她指明了一条通往冠军的挑战之路。","冈田纱佳来到扑克高手云集的蓝湾市，许多势力想要招募她，却没有人理解她真正的追求。直到会长为她指明了一条通往冠军的挑战之路。","冈田纱佳来到扑克高手云集的蓝湾市，许多势力想要招募她，却没有人理解她真正的追求。直到会长为她指明了一条通往冠军的挑战之路。"},
 {"LAB_CHAR_INTRO_1001",[[跟随家人移居至蓝湾市的元气少女，未来的扑克之星（自封）。
 在故乡的时候，星宫加奈便幻想过在蓝湾市生活的日子。而当她真正踏足这座城市的时候才发现，这里的一切远比想象中更加美好。她开始尝试各种新奇的事物，并很快被蓝湾市激烈的扑克氛围所吸引。
 首次坐在牌桌前与对手较量的那一瞬，她感觉到自己的心脏砰砰直跳，眼前的一切仿佛都熠熠生辉。加奈爱上了这种感觉，她当即下定决心要成为一位职业牌手，不论要付出多大的努力。
@@ -3645,6 +4156,93 @@ And all of that wisdom—and artful concealment—comes alive flawlessly at the 
 一族が作ってきた工芸品は時代の流れの中で揺らいでいることを感じ、彼女は「優雅な反抗」を始めた——改革を推し進め、和傘の魂を現代の雨傘のデザインに落とし込んだのだ。当然ながら、この変革は一族の保守派の反対に遭ったが、彼女は激しい言葉で言い争うことはせず、理路整然と反論し具体的で実行可能な計画を示した。
 反対者に反抗し改革を進めるうちに、彼女の心も傘の骨のように硬く、傘の面のように見透かせないものとなっていった。そして、非の打ち所のない優雅な振る舞いで本心を隠し、文学的な言葉で鋭い洞察を秘めた網を紡ぐことを覚えた。こうすることで、しきたりの中で生きつつも、最終的には並外れた成功をつかむことができるのだ。
 そしてその策略と演技は、テーブルの上で余すところなく発揮されることとなる。]]},
+{"LAB_CHAR_INTRO_1015",[[午夜时分，一颗划破长空的流星降临蓝湾。伴随着巨响，神秘的月兔族少女沐娜精准地砸穿了金鵄会长办公室的天花板。散发着微光的少女缓缓睁开双眼，并将映入眼帘的第一个人——会长，视作了“命中注定之人”。
+自此，沐娜便将“守护与陪伴会长”视作了自己唯一的目标，并始终忠诚地执行着。而对于自己的来历、种族以及那对长长的兔耳，沐娜从不提起，也无人知道真相。
+沐娜平日里寡言少语，面容如月亮般静谧清冷，几乎不显露情绪。唯有在会长身边时，她冰封的表情才会短暂融化，展露出仅属于一人、转瞬即逝的微笑。
+沐娜缺乏最基本的常识。自动贩卖机，信号灯，甚至是“礼貌性寒暄”，对她而言都是需要被记录和学习的陌生信息。然而在与会长的接触中，她不知不觉学会了扑克，并快速地成长为了金鵄的顶尖牌手之一。
+在牌桌上，她会展现出与平日截然不同的高傲、强势和冷酷。她将每一次对局都视作必须完成的任务。如果胜利能够为会长带来喜悦，那么她将毫不犹豫地碾压对手。]],[[午夜時分，一顆劃破長空的流星降臨藍灣市。伴隨著一聲巨響，神秘的月兔族少女沐娜精準地砸穿了金鵄會長辦公室的天花板。散發著微光的少女緩緩睜開雙眼，並將映入眼簾的第一個人——會長，視為「命中注定之人」。
+自此，沐娜便將「守護與陪伴會長」視為自己唯一的目標，並始終忠誠地貫徹這一信念。然而，關於她的來歷、種族，以及那對修長的兔耳，沐娜從未提及，也無人知曉其真相。
+沐娜平日寡言少語，面容如月光般靜謐清冷，幾乎不流露任何情緒。唯有在會長身邊時，她冰封的神情才會短暫融化，展露出只屬於一人的、轉瞬即逝的微笑。
+沐娜缺乏最基本的常識。自動販賣機、訊號燈，甚至是「禮貌性寒暄」，對她而言，皆是需要記錄與學習的陌生資訊。然而，在與會長的相處之中，她不知不覺學會了撲克，並迅速成長為金鵄頂尖的牌手之一。
+在牌桌上，她會展現出與平日截然不同的高傲、強勢與冷酷。她將每一場對局都視為必須完成的任務。若勝利能為會長帶來喜悅，那麼她將毫不猶豫地碾壓所有對手。]],[[A shooting star tore through the midnight sky and fell upon Azure Bay. With a thunderous crash, the mysterious Moon Rabbit girl, Moona, plunged straight through the ceiling of Kinshi president's office. The softly glowing girl slowly opened her eyes and designated the first person she saw—President—as her "fated one."
+
+From that day on, Moona made it her sole mission to protect and remain by President's side, carrying it out with unwavering loyalty. As for her origins, her clan, and those long rabbit ears—Moona never speaks of them, and the truth remains known to no one.
+
+Moona is a girl of few words. Her expression is as still and cool as moonlight, and she rarely shows any emotion. Only when she is beside President does that ice-cold facade soften—just for a fleeting moment—into a smile meant for one person, and one person alone.
+
+Moona knew almost nothing about even the most basic common sense of this world. Vending machines, traffic lights—even something as simple as greeting someone out of courtesy—were all unfamiliar concepts to her, data to be observed and learned. Yet through the time she has spent with President, she somehow picked up poker, and before long grew into one of Kinshi's most formidable players.
+
+The moment she sits down at the poker table, she becomes an entirely different person—arrogant, aggressive, and ruthlessly precise. She treats every hand before her as a mission that must be completed without fail. And if victory at that table brings even a hint of joy to President, Moona will crush her opponents without a moment's hesitation.]],[[流星が真夜中の空を切り裂き、藍湾の地へと降り立った。轟音とともに、謎多き月兎族の少女・ムーナは、金鵄会長室の天井を正確に撃ち抜いた。淡く光を纏った少女がゆっくりと瞳を開き、最初に視界に入った人物――会長を、自身の「運命の人」と認識した。
+それ以来、ムーナは「会長を守り、常にその傍らにいること」を唯一にして絶対の目標とし、その使命に忠実であり続けている。自らの来歴や種族、そして長く伸びた兎の耳について、ムーナが語ることはない。真実を知る者も、今のところ存在しない。
+ムーナは普段、寡黙で、月光のように静かで冷ややかな表情を崩さず、ほとんど感情を表に出さない。ただ会長のそばにいる時だけ、氷のように固いその表情が一瞬だけほころび、たった一人にだけ向けられた儚い微笑みを見せる。
+ムーナは、この世界の最も基本的な常識をほとんど知らない。自動販売機、信号機、さらには「礼儀としての挨拶」ですら、彼女にとっては記録し学習すべき未知の情報に他ならない。しかし、会長との触れ合いを重ねるうちに、彼女はいつの間にかポーカーを覚え、瞬く間に金鵄を代表するプレイヤーの一人へと成長した。
+ポーカーテーブルに座ると、普段とは別人のように、高慢で強気、そして冷徹な一面を惜しみなく発揮する。彼女は、目の前の一局一局をすべて「必ず完遂すべき任務」だと考えている。その勝利が会長の喜びにつながるのなら、ムーナは一切の躊躇なく、対戦相手を粉々に打ち砕くだろう。]],[[A shooting star tore through the midnight sky and fell upon Azure Bay. With a thunderous crash, the mysterious Moon Rabbit girl, Moona, plunged straight through the ceiling of Kinshi president's office. The softly glowing girl slowly opened her eyes and designated the first person she saw—President—as her "fated one."
+
+From that day on, Moona made it her sole mission to protect and remain by President's side, carrying it out with unwavering loyalty. As for her origins, her clan, and those long rabbit ears—Moona never speaks of them, and the truth remains known to no one.
+
+Moona is a girl of few words. Her expression is as still and cool as moonlight, and she rarely shows any emotion. Only when she is beside President does that ice-cold facade soften—just for a fleeting moment—into a smile meant for one person, and one person alone.
+
+Moona knew almost nothing about even the most basic common sense of this world. Vending machines, traffic lights—even something as simple as greeting someone out of courtesy—were all unfamiliar concepts to her, data to be observed and learned. Yet through the time she has spent with President, she somehow picked up poker, and before long grew into one of Kinshi's most formidable players.
+
+The moment she sits down at the poker table, she becomes an entirely different person—arrogant, aggressive, and ruthlessly precise. She treats every hand before her as a mission that must be completed without fail. And if victory at that table brings even a hint of joy to President, Moona will crush her opponents without a moment's hesitation.]]},
+{"LAB_CHAR_INTRO_1016",[[奥德赛大学现任学生会长，天月财团千金，拥有黄金般耀眼的长发和不输给任何人的自尊心。
+天月绘里奈在学院里是“完美”的代名词。她成绩优异、行事果断、高贵优雅，仿佛是行走在云端的人物。
+然而，这只是她为了回应他人期待而做出的“假象”。她常为处理学生会事物熬到深夜，也会因为吃到好吃的零食而两眼发光。但遗憾的是，过去她从未拥有过能与她分担或分享这一切的同伴。
+也许是幼时的精英教育养成了她有些别扭的性格。在与会长相识的最初，她依旧高傲、完美，还会用冷漠或刻薄的话语来掩饰内心的真实情感。
+但在相处的过程中，绘里奈的“弱点”逐渐展露了出来。她十分不擅长应对夸奖或直接的情感表达。会长的一点点善意，便会让她害羞的面红耳赤。]],[[奧德賽大學現任學生會長，天月財團千金。擁有如黃金般耀眼的長髮，以及不輸任何人的自尊心。
+天月繪里奈在學院中是「完美」的代名詞。她成績優異、行事果斷、高貴優雅，宛如行走於雲端的人物。
+然而，這一切不過是她為回應他人期待而構築的「假象」。她時常為處理學生會事務熬夜至深夜，也會因為吃到美味的零食而雙眼發亮。但遺憾的是，過去的她，從未擁有能與她分擔或分享這一切的同伴。
+或許是自幼接受的精英教育，使她養成了略顯彆扭的性格。在與會長相識之初，她依舊高傲而完美，甚至會以冷淡或刻薄的言語來掩飾內心真實的情感。
+然而，在相處的過程中，繪里奈的「弱點」逐漸顯露。她並不擅長應對誇獎或直白的情感表達——哪怕只是會長的一點點善意，也足以讓她害羞得面紅耳赤。]],[[The current student council president of Odyssey University and the daughter of the Amatsuki Group, she is known for her brilliant golden hair and a pride that yields to no one.
+
+On campus, the name Amatsuki Erina is synonymous with the word "flawless." She excels academically, acts with decisiveness, and carries herself with unwavering nobility and grace—the very image of someone born into privilege.
+
+Yet all of it is a "facade" she constructed to live up to the expectations placed upon her. Behind closed doors, she often stays up late to finish the student council work, though her eyes still light up at the sight of a simple snack. But until now, she has never had anyone to share those burdens with—or those small, joyful moments.
+
+Perhaps it was her elite upbringing that shaped her somewhat awkward personality. When she first met President, she was as she had always been—haughty and flawless, hiding her true feelings behind cold, cutting words.
+
+But as they spent more time together, Erina's "weak spots" gradually began to surface. It turns out, she is hopeless at handling compliments or direct expressions of emotion; even the smallest act of kindness from President is enough to make her face flush bright red.]],[[オデッセイ大学現生徒会長、天月財団のお嬢様。黄金のように輝く長い髪と、高いプライドを併せ持つ負けず嫌い。
+天月えりなは、学園における「完璧」の代名詞。彼女は成績優秀で決断力があり、常に高貴にして優雅に振る舞う。まさに上流階級のイメージその通りの人物だ。
+しかし、それは他者の期待に応えるために彼女が作り上げた「偽装」にすぎない。生徒会の仕事を深夜まで片付けることもあれば、美味しいお菓子に目を輝かせることもある。だが残念なことに、これまで彼女には、それらの一面を分かち合い、共有できる仲間がいなかった。
+幼少期の英才教育が、彼女の少々ひねくれた性格を形作ったのかもしれない。会長と知り合った当初の彼女は、相変わらず高慢で完璧で、冷たい言葉や辛辣な言葉で内心の本音を隠していた。
+しかし付き合っていくうちに、えりなの「弱点」が少しずつ露わになっていく。褒められたり、直接的な感情表現を向けられたりするのが、とても苦手。会長の親切な振る舞いは、いつも彼女の顔を真っ赤にしてしまう。]],[[The current student council president of Odyssey University and the daughter of the Amatsuki Group, she is known for her brilliant golden hair and a pride that yields to no one.
+
+On campus, the name Amatsuki Erina is synonymous with the word "flawless." She excels academically, acts with decisiveness, and carries herself with unwavering nobility and grace—the very image of someone born into privilege.
+
+Yet all of it is a "facade" she constructed to live up to the expectations placed upon her. Behind closed doors, she often stays up late to finish the student council work, though her eyes still light up at the sight of a simple snack. But until now, she has never had anyone to share those burdens with—or those small, joyful moments.
+
+Perhaps it was her elite upbringing that shaped her somewhat awkward personality. When she first met President, she was as she had always been—haughty and flawless, hiding her true feelings behind cold, cutting words.
+
+But as they spent more time together, Erina's "weak spots" gradually began to surface. It turns out, she is hopeless at handling compliments or direct expressions of emotion; even the smallest act of kindness from President is enough to make her face flush bright red.]]},
+{"LAB_CHAR_INTRO_3001",[[为了追求新的挑战，冈田纱佳来到了扑克高手云集的蓝湾市。
+在这个几乎一切都能通过扑克游戏来决定的城市，牌艺精湛的冈田迅速成为了各方势力争相招募的对象。然而，冈田的来意纯粹，高昂的出场费和对地位的种种许诺都无法让她动摇。因此，她最初只以个人身份参与游戏，而她的最终去向也牵动着各个协会的心。
+
+会长的出现打破了这一局面。
+
+他为冈田指出了以个人身份在蓝湾市活动的局限。与单纯追逐利益不同，会长为冈田规划的，是一条通往荣誉的挑战之路。她将作为金鵄协会的牌手出战各项赛事，而会长则将担任她在蓝湾市期间的分析师。两人的目标纯粹而一致：只为享受与强敌之间酣畅淋漓的对局。]],[[為了追求新的挑戰，岡田紗佳來到了撲克高手雲集的藍灣市。
+
+在這個幾乎一切都能透過撲克遊戲來決定的城市，牌藝精湛的岡田迅速成為了各方勢力爭相招募的對象。然而，岡田的來意純粹，高昂的出場費和對地位的種種許諾都無法讓她動搖。因此，她最初只以個人身份參與遊戲，而她的最終去向也牽動著各個協會的心。
+
+會長的出現打破了這一局面。
+
+他為岡田指出了以個人身份在藍灣市活動的局限。與單純追逐利益不同，會長為岡田規劃的，是一條通往榮譽的挑戰之路。她將作為金鵄協會的牌手出戰各項賽事，而會長則將擔任她在藍灣市期間的分析師。兩人的目標純粹而一致：只為享受與強敵之間酣暢淋漓的對局。]],[[Seeking a new challenge, Okada Sayaka arrived in Azure Bay, a gathering place for elite poker players from all walks of life.
+
+Here, nearly everything is decided through poker. Recognized for her exceptional skill at the table, Sayaka quickly became the center of a fierce recruiting war among the various associations. However, she had not come to Azure Bay for lavish appearance fees or promised status; things of that nature were never enough to sway her. Staying true to her convictions, she continued competing as a lone wolf, turning down every offer that came her way. Consequently, speculation surrounding her eventual allegiance became a major topic across the professional circuit.
+
+That all changed when President entered the picture.
+
+President warned Sayaka that there were limits to how far an independent player could go in Azure Bay. What President offered her was the complete opposite of mere profit-seeking: a pure "path of challenge" leading toward glory. Thus, Sayaka began competing in tournaments as a player of the Kinshi Association, while President took on the role of her dedicated analyst during her stay in Azure Bay. The two share one single goal: to fully enjoy exhilarating matches against the world's most formidable opponents.]],[[新たな挑戦を求めて、岡田紗佳はポーカーの猛者たちが集う藍湾市を訪れた。
+
+ここでは、ほとんどすべてがポーカーゲームによって決まる。紗佳はその見事なポーカーの腕が見込まれ、瞬く間に各勢力から争うようにスカウトの声がかかる存在となった。しかし、紗佳が藍湾に来たのは、高額な出演料や約束された地位のためではない。その程度では、彼女の心を揺らすことはできない。信念を貫くために、彼女はしばらくの間、どの勢力にも属さず個人としてのみゲームに参加し続けており、その最終的な去就は、各協会の注目の的となっていた。
+
+その状況を変えたのが、会長の出現だった。
+
+彼は、個人プレイヤーとして藍湾市で活動することには、いずれ限界が訪れることを紗佳に指摘する。単なる利益追求とは対極にある、会長が紗佳に示したのは──栄誉へと続く、純粋な「挑戦の道」だった。こうして彼女は金鵄協会のプレイヤーとして各大会に出場し、会長は紗佳が藍湾市に滞在している間、専属アナリストを務めることとなる。二人の目標は、ただ一つであり、そして完全に一致していた。強敵との、心躍る痛快な対局を、とことん楽しむためだけに。]],[[为了追求新的挑战，冈田纱佳来到了扑克高手云集的蓝湾市。
+在这个几乎一切都能通过扑克游戏来决定的城市，牌艺精湛的冈田迅速成为了各方势力争相招募的对象。然而，冈田的来意纯粹，高昂的出场费和对地位的种种许诺都无法让她动摇。因此，她最初只以个人身份参与游戏，而她的最终去向也牵动着各个协会的心。
+
+会长的出现打破了这一局面。
+
+他为冈田指出了以个人身份在蓝湾市活动的局限。与单纯追逐利益不同，会长为冈田规划的，是一条通往荣誉的挑战之路。她将作为金鵄协会的牌手出战各项赛事，而会长则将担任她在蓝湾市期间的分析师。两人的目标纯粹而一致：只为享受与强敌之间酣畅淋漓的对局。]]},
 {"LAB_CHAR_001","牌手清单","牌手清單","Characters","キャラリスト","牌手清單"},
 {"LAB_CHAR_002","暂未拥有","尚未擁有","Not Owned","未所有","暫未擁有"},
 {"LAB_CHAR_003","养成","養成","Bond","育成","Bond"},
@@ -3654,7 +4252,7 @@ And all of that wisdom—and artful concealment—comes alive flawlessly at the 
 {"LAB_CHAR_007","已拥有","已擁有","Owned","所持中","Owned"},
 {"LAB_CHAR_008","星标","星標","Star","Starrd","Starrd"},
 {"LAB_CHAR_009","使用中","使用中","In Use","使用中","In use"},
-{"LAB_CHAR_010","队长暂无星标牌手呢！\n点击已招募牌手右上角的星标按钮，即可特别关注该牌手","會長目前還沒有星標牌手呢！\n點擊已招募牌手右上角的星標按鈕，即可特別關注該牌手","You have no starred characters yet!\nTap the star icon at the top-right of a recruited character to mark them as favorite.","推しキャラクターがありません！\nキャラクターアイコンの右上の星マークをクリックすると、該当キャラクターを推しに追加できます。","隊長暫無星標牌手呢！\n點擊已招募牌手左上角的星標按鈕，即可特別關注該牌手"},
+{"LAB_CHAR_010","队长暂无星标牌手呢！\n点击已招募牌手右上角的星标按钮，即可特别关注该牌手","會長目前還沒有星標牌手呢！\n點擊已招募牌手右上角的星標按鈕，即可特別關注該牌手","You have no starred characters yet!\nTap the star icon at the top-right of a recruited character to mark them as favorite.","推しキャラクターがありません！\nキャラクターアイコンの右上の星マークをタップすると、該当キャラクターを推しに追加できます。","隊長暫無星標牌手呢！\n點擊已招募牌手左上角的星標按鈕，即可特別關注該牌手"},
 {"LAB_CHAR_011","牌手衣橱","牌手衣櫥","Wardrobe","キャラクローゼット","牌手造型"},
 {"LAB_CHAR_012","简介","簡介","Introduction","プロフィール","簡介"},
 {"LAB_CHAR_013","语音","語音","Voice","ボイス","語音"},
@@ -3679,7 +4277,7 @@ And all of that wisdom—and artful concealment—comes alive flawlessly at the 
 {"LAB_CHAR_032","未解锁","未解鎖","Locked","未解放","未解鎖"},
 {"LAB_CHAR_033","登录&大厅","登入&大廳","Login & Lobby","ログイン・ロビー","登入&大廳"},
 {"LAB_CHAR_034","养成","養成","Bonding","育成","養成"},
-{"LAB_CHAR_035","对局","對局","In-Game","試合","對局"},
+{"LAB_CHAR_035","对局","對局","In-Game","対局","對局"},
 {"LAB_CHAR_036","牌型","牌型","Hand Rankings","役ボイス","牌型"},
 {"LAB_CHAR_037","登录{p1}","登錄{p1}","Login {p1}","登錄{p1}","登錄{p1}"},
 {"LAB_CHAR_038","大厅互动{p1}","大廳互動{p1}","Lobby Interaction {p1}","大廳互動{p1}","大廳互動{p1}"},
@@ -3689,7 +4287,7 @@ And all of that wisdom—and artful concealment—comes alive flawlessly at the 
 {"LAB_CHAR_042","聊天快捷语{p1}","聊天快捷語{p1}","Chat Quick Phrases {p1}","聊天快捷語{p1}","聊天快捷語{p1}"},
 {"LAB_CHAR_043","牌手改名","牌手改名","Edit Name","キャラクター改名","牌手命名"},
 {"LAB_CHAR_044","更改牌手昵称","編輯牌手暱稱","Change Character Name","キャラクターのニックネームを変更","更改牌手昵稱"},
-{"LAB_CHAR_045","请输入2-16个字符的牌手昵称","請輸入牌手暱稱（1~8個字）","Please enter a name of 2–16 characters","1～8文字のニックネームを入力してください","請輸入2-16個字元的牌手名"},
+{"LAB_CHAR_045","请输入牌手昵称，8文字以内","請輸入牌手暱稱（1~8個字）","Please enter a name of 2–16 characters","1～8文字のニックネームを入力してください","請輸入2-16個字元的牌手名"},
 {"LAB_CHAR_046","名字不符合规范，请重新输入","名字不符合規範，請重新輸入","Invalid name. Please try again","ニックネームが規則に合っていません。再度入力してください","名字不符合規範，請重新輸入"},
 {"LAB_CHAR_047","改名成功","改名成功","Success","ニックネームが変更されました","改名成功"},
 {"LAB_CHAR_048","当前等级","當前等級","Current","現在レベル","현재 레벨"},
@@ -3713,13 +4311,13 @@ And all of that wisdom—and artful concealment—comes alive flawlessly at the 
 {"LAB_CHAR_066","收集以下材料誓约牌手","收集以下材料與牌手誓約","Items Required for Oath","以下の材料を集めて、キャラクターと誓約を結びましょう","收集以下材料誓約牌手"},
 {"LAB_CHAR_067","誓约奖励：","誓約獎勵：","Oath Rewards","誓約報酬：","誓約獎勵："},
 {"LAB_CHAR_068","<color=#DA3838>{p1}</color>/{p2}","<color=#DA3838>{p1}</color>/{p2}","<color=#DA3838>{p1}</color>/{p2}","<color=#DA3838>{p1}</color>/{p2}","<color=#DA3838>{p1}</color>/{p2}"},
-{"LAB_CHAR_069","请先提升好感度到Lv.5哦！","請先將好感度提升至Lv.5喔！","Affinity Lv.5 required!","まずは好感度をLv.5を達成してください！","Affinity Lv.5 required!"},
+{"LAB_CHAR_069","请先提升好感度到Lv.5哦！","請先將好感度提升至Lv.5喔！","Affinity Lv.5 required!","まずは好感度をLv.5まで上げてくださいね！","Affinity Lv.5 required!"},
 {"LAB_CHAR_070","誓约材料不足！","誓約材料不足！","Insufficient Oath items!","誓約の材料が足りません。","誓約材料不足！"},
 {"LAB_CHAR_071","胜利动画","勝利動畫","Win Animation","勝利アニメーション","勝利動畫"},
 {"LAB_CHAR_072","截图成功！","截圖成功！","Screenshot saved!","スクリーンショットが保存されました","截圖成功！"},
 {"LAB_CHAR_073","誓约成功！","誓約成功！","Oath fulfilled!","誓約を結びました！","誓約成功！"},
 {"LAB_CHAR_074","牌手已签署誓约！","已與牌手誓約！","You are already oathbound to this character!","このキャラクターとはすでに誓約済みです","牌手已誓約！"},
-{"LAB_CHAR_075","请先招募牌手","請先招募該牌手","Please recruit the character first","先にキャラクターを募集してください","請先招募牌手"},
+{"LAB_CHAR_075","请先招募牌手","請先招募該牌手","Please recruit the character first","先にこのキャラクターを募集してください","請先招募牌手"},
 {"LAB_CHAR_076","限定","限定","Limited","限定","限定"},
 {"LAB_CHAR_077","常驻","常駐","Permanent","通常","常駐"},
 {"LAB_CHAR_078","限定招募获得","限定招募獲得","Source: Limited Recruitment","限定募集で獲得","限定招募獲得"},
@@ -3783,7 +4381,7 @@ Go to development?]]},
 {"LAB_CHAR_112","·解锁{p1}","·解鎖{p1}","· Unlocks {p1}","·{p1}をアンロック","·Unlocked: {p1}"},
 {"LAB_CHAR_113","已满级","已滿級","Max Level","すでに最大レベル","최대 레벨"},
 {"LAB_CHAR_114","特殊礼物","特殊禮物","Special Gift","スペシャルギフト","Special Gift"},
-{"LAB_CHAR_115","炫彩品质礼物为特殊礼物，不限制赠送次数！是否继续赠送？","炫彩品質的禮物屬於特殊禮物，不限制贈送次數！\n是否繼續贈送？","Iridescent Gifts are special gifts and are not affected by the daily gift limit. Continue?","クロマギフトは贈呈回数無制限のスペシャルギフト。このまま贈呈しますか？","Iridescent Gifts are special gifts and are not affected by the daily gift limit. Continue?"},
+{"LAB_CHAR_115","炫彩品质礼物为特殊礼物，不限制赠送次数！是否继续赠送？","炫彩品質的禮物屬於特殊禮物，不限制贈送次數！\n是否繼續贈送？","Iridescent Gifts are special gifts and are not affected by the daily gift limit. Continue?","クロマギフトは贈呈回数無制限のスペシャルギフトです。このまま贈呈しますか？","Iridescent Gifts are special gifts and are not affected by the daily gift limit. Continue?"},
 {"LAB_CHAR_116","已誓约","已誓約","Oathbound","誓約済み","Oathbound"},
 {"LAB_CHAR_117","限时招募获得","限時招募獲得","Limited Recruitment Offer","限定募集で獲得","限时招募获得"},
 {"LAB_CHAR_118","获得该服饰需要先招募牌手。\n是否立即前往获得？","獲得該服飾前，需先招募牌手。\n是否立即前往招募？","This outfit is available only after you obtain this character. Recruit now?","この衣装を獲得するには、該当のキャラクターを募集する必要があります。今すぐ募集しますか？","獲得該服飾前，需先招募牌手。\n是否立即前往招募？"},
@@ -3797,45 +4395,52 @@ Go to development?]]},
 {"LAB_CHAR_126","奖励进度（{p1}/{p2}）","獎勵進度（{p1}/{p2}）","Overflow Progress（{p1}/{p2}）","報酬進捗（{p1}/{p2}）","奖励进度（{p1}/{p2}）"},
 {"LAB_CHAR_127","好感度已满级","好感度已滿級","Max Affinity Level","好感度MAX","好感度已满级"},
 {"LAB_SKIN_1001_1","默认","預設","Default","デフォルト","角色1001_皮膚1"},
-{"LAB_SKIN_1001_2","誓约服饰","誓約服飾","Oath Outfit","誓約衣装","角色1001_皮膚2"},
+{"LAB_SKIN_1001_2","誓约","誓約","Oath","誓約","角色1001_皮膚2"},
 {"LAB_SKIN_1001_3","必然的相遇","必然的相遇","Fateful Meetup","運命の邂逅","角色1001_校園風"},
 {"LAB_SKIN_1001_6","草莓黛绮丽","草莓黛綺麗","Strawberry Daiquiri","ストロベリー・ダイキリ","角色1001_兔女郎"},
 {"LAB_SKIN_1002_1","默认","預設","Default","デフォルト","角色1002_皮膚1"},
-{"LAB_SKIN_1002_2","誓约服饰","誓約服飾","Oath Outfit","誓約衣装","角色1002_皮膚2"},
+{"LAB_SKIN_1002_2","誓约","誓約","Oath","誓約","角色1002_皮膚2"},
 {"LAB_SKIN_1002_5","月光菲士","月光菲士","Moonlight Fizz","ムーンライト・フィズ","角色1002_兔女郎"},
 {"LAB_SKIN_1003_1","默认","預設","Default","デフォルト","角色1003_皮膚1"},
-{"LAB_SKIN_1003_2","誓约服饰","誓約服飾","Oath Outfit","誓約衣装","角色1003_皮膚2"},
+{"LAB_SKIN_1003_2","誓约","誓約","Oath","誓約","角色1003_皮膚2"},
 {"LAB_SKIN_1003_3","香气的来源","香氣的來源","Source of the Scent","香りの源","角色1003_皮膚3"},
 {"LAB_SKIN_1004_1","默认","預設","Default","デフォルト","角色1004_皮膚1"},
-{"LAB_SKIN_1004_2","誓约服饰","誓約服飾","Oath Outfit","誓約衣装","角色1004_皮膚2"},
+{"LAB_SKIN_1004_2","誓约","誓約","Oath","誓約","角色1004_皮膚2"},
 {"LAB_SKIN_1004_3","最后一层防备","最後一道防備","Last Line of Defense","最後の防備",nil},
 {"LAB_SKIN_1005_1","默认","預設","Default","デフォルト","角色1005_皮膚1"},
-{"LAB_SKIN_1005_2","誓约服饰","誓約服飾","Oath Outfit","誓約衣装","角色1005_皮膚2"},
+{"LAB_SKIN_1005_2","誓约","誓約","Oath","誓約","角色1005_皮膚2"},
 {"LAB_SKIN_1005_3","水温试探","水溫試探","Testing the Water","水温の探索",nil},
 {"LAB_SKIN_1006_1","默认","預設","Default","デフォルト","角色1006_皮膚1"},
-{"LAB_SKIN_1006_2","誓约服饰","誓約服飾","Oath Outfit","誓約衣装","角色1006_皮膚2"},
+{"LAB_SKIN_1006_2","誓约","誓約","Oath","誓約","角色1006_皮膚2"},
 {"LAB_SKIN_1006_5","春意落于掌心","春意落於掌心","Spring in the Palm","掌に落ちる春の息吹","掌に落ちる春の息吹"},
 {"LAB_SKIN_1007_1","默认","預設","Default","デフォルト","角色1007_皮膚1"},
-{"LAB_SKIN_1007_2","誓约服饰","誓約服飾","Oath Outfit","誓約衣装","角色1007_皮膚2"},
+{"LAB_SKIN_1007_2","誓约","誓約","Oath","誓約","角色1007_皮膚2"},
 {"LAB_SKIN_1007_5","后半夜的开始","後半夜的開始","After Midnight","夜更けの始まり","角色1007_皮膚3"},
 {"LAB_SKIN_1008_1","默认","預設","Default","デフォルト","角色1008_皮膚1"},
-{"LAB_SKIN_1008_2","誓约服饰","誓約服飾","Oath Outfit","誓約衣装","角色1008_皮膚2"},
+{"LAB_SKIN_1008_2","誓约","誓約","Oath","誓約","角色1008_皮膚2"},
 {"LAB_SKIN_1008_3","比白雪更耀眼","比白雪更耀眼","Brighter Than Snow","雪よりも輝いて",nil},
 {"LAB_SKIN_1009_1","默认","預設","Default","デフォルト","角色1009_皮膚1"},
-{"LAB_SKIN_1009_4","誓约服饰","誓約服飾","Oath Outfit","誓約衣装","角色1009_皮膚2"},
+{"LAB_SKIN_1009_4","誓约","誓約","Oath","誓約","角色1009_皮膚2"},
 {"LAB_SKIN_1009_5","马车载有繁星","馬車滿載繁星","Starlit Carriage","馬車に星々を乗せて","角色1009_皮膚3"},
+{"LAB_SKIN_1009_6","海风拂过脸颊","海風拂過臉頰","Sea Breeze Caress","頬を撫でる潮風","頬を撫でる潮風"},
 {"LAB_SKIN_1010_1","默认","預設","Default","デフォルト","角色1010_皮膚1"},
-{"LAB_SKIN_1010_4","誓约服饰","誓約服飾","Oath Outfit","誓約衣装","角色1010_皮膚2"},
+{"LAB_SKIN_1010_4","誓约","誓約","Oath","誓約","角色1010_皮膚2"},
 {"LAB_SKIN_1010_5","当月色被染红","當月色被染紅","Crimson Moonlight","月が赤く染まりし時","角色1010_皮膚3"},
 {"LAB_SKIN_1012_1","默认","預設","Default","デフォルト","角色1012_皮膚1"},
-{"LAB_SKIN_1012_4","誓约服饰","誓約服飾","Oath Outfit","誓約衣装","角色1002_皮膚2"},
+{"LAB_SKIN_1012_4","誓约","誓約","Oath","誓約","角色1002_皮膚2"},
 {"LAB_SKIN_1012_5","特殊诊疗方式","特殊診療方式","Special Treatment","特別な診療方法","特別な診療方法"},
 {"LAB_SKIN_1013_1","默认","預設","Default","デフォルト","角色1013_皮膚1"},
-{"LAB_SKIN_1013_4","誓约服饰","誓約服飾","Oath Outfit","誓約衣装","角色1013_皮膚2"},
+{"LAB_SKIN_1013_4","誓约","誓約","Oath","誓約","角色1013_皮膚2"},
 {"LAB_SKIN_1013_5","放学后的约定","放學後的約定","After-School Promise","放課後の約束","角色1013_皮膚3"},
 {"LAB_SKIN_1014_1","默认","預設","Default","デフォルト","角色1014_皮膚1"},
-{"LAB_SKIN_1014_4","誓约服饰","誓約服飾","Oath Outfit","誓約衣装","角色1014_皮膚2"},
+{"LAB_SKIN_1014_4","誓约","誓約","Oath","誓約","角色1014_皮膚2"},
 {"LAB_SKIN_1014_5","清酒马天尼","清酒馬天尼","Saketini","清酒マティーニ","角色1014_兔女郎"},
+{"LAB_SKIN_1015_1","默认","預設","Default","デフォルト","デフォルト"},
+{"LAB_SKIN_1015_4","誓约","誓約","Oath","誓約","誓約衣装"},
+{"LAB_SKIN_1015_5","专属应援频道","專屬應援頻道","Private Frequency","専用応援チャンネル","専用応援チャンネル"},
+{"LAB_SKIN_1016_1","默认","預設","Default","デフォルト","デフォルト"},
+{"LAB_SKIN_1016_4","誓约","誓約","Oath","誓約","誓約衣装"},
+{"LAB_SKIN_1016_5","反锁的心跳声","反鎖的心跳聲","Stifled Heartbeat","鍵のかかった鼓動","鍵のかかった鼓動"},
 {"LAB_GIFT_RULES_1",[[——牌手喜欢的礼物
 收到喜欢的礼物，增加的好感度会是普通礼物的两倍。
 
@@ -3927,6 +4532,9 @@ Each character can receive up to {p1} gifts per day. Special Gifts do not count 
 {"LAB_CHAR_CV_1012","大久保瑠美","大久保瑠美","Okubo Rumi","大久保瑠美","Ōkubo Rumi"},
 {"LAB_CHAR_CV_1013","藤田茜","藤田茜","Fujita Akane","藤田茜","藤田茜"},
 {"LAB_CHAR_CV_1014","藤田茜","藤田茜","Fujita Akane","藤田茜","藤田茜"},
+{"LAB_CHAR_CV_1015","长谷川育美","長谷川育美","Hasegawa Ikumi","長谷川育美","長谷川育美"},
+{"LAB_CHAR_CV_1016","长谷川育美","長谷川育美","Hasegawa Ikumi","長谷川育美","長谷川育美"},
+{"LAB_CHAR_CV_3001","冈田纱佳","岡田紗佳","Okada Sayaka","岡田紗佳","冈田纱佳"},
 {"LAB_CHAR_BIRTH_1001","4月1日","4月1日","Apr. 1","4月1日","04.01"},
 {"LAB_CHAR_BIRTH_1002","12月21日","12月21日","Dec. 21","12月21日","12.21"},
 {"LAB_CHAR_BIRTH_1003","7月17日","7月17日","Jul. 17","7月17日","07.17"},
@@ -3940,6 +4548,9 @@ Each character can receive up to {p1} gifts per day. Special Gifts do not count 
 {"LAB_CHAR_BIRTH_1012","2月26日","2月26日","Feb. 26","2月26日","2月26日"},
 {"LAB_CHAR_BIRTH_1013","8月5日","8月5日","Aug. 5","8月5日","8月5日"},
 {"LAB_CHAR_BIRTH_1014","3月23日","3月23日","Mar. 23","3月23日","3月23日"},
+{"LAB_CHAR_BIRTH_1015","9月6日","9月6日","Sep. 6","9月6日","9月6日"},
+{"LAB_CHAR_BIRTH_1016","6月1日","6月1日","Jun. 1","6月1日","6月1日"},
+{"LAB_CHAR_BIRTH_3001","2月19日","2月19日","Feb. 19","2月19日","2月19日"},
 {"LAB_CHAR_HEIGHT_1001","157cm","157cm","157 cm","157cm","157cm"},
 {"LAB_CHAR_HEIGHT_1002","162cm","162cm","162 cm","162cm","162cm"},
 {"LAB_CHAR_HEIGHT_1003","173cm","173cm","173 cm","173cm","173cm"},
@@ -3953,6 +4564,9 @@ Each character can receive up to {p1} gifts per day. Special Gifts do not count 
 {"LAB_CHAR_HEIGHT_1012","165cm","165cm","165 cm","165cm","165cm"},
 {"LAB_CHAR_HEIGHT_1013","160cm","160cm","160 cm","160cm","160cm"},
 {"LAB_CHAR_HEIGHT_1014","166cm","166cm","166 cm","166cm","166cm"},
+{"LAB_CHAR_HEIGHT_1015","155cm","155cm","155 cm","155cm","155cm"},
+{"LAB_CHAR_HEIGHT_1016","162cm","162cm","162 cm","162cm","162cm"},
+{"LAB_CHAR_HEIGHT_3001","170cm","170cm","170 cm","170cm","170cm"},
 {"LAB_CHAR_BLOOD_1001","O","O","O","O","O"},
 {"LAB_CHAR_BLOOD_1002","AB","AB","AB","AB","AB"},
 {"LAB_CHAR_BLOOD_1003","O","O","O","O","O"},
@@ -3966,6 +4580,9 @@ Each character can receive up to {p1} gifts per day. Special Gifts do not count 
 {"LAB_CHAR_BLOOD_1012","A","A","A","A","A"},
 {"LAB_CHAR_BLOOD_1013","B","B","B","B","B"},
 {"LAB_CHAR_BLOOD_1014","O","O","O","O","O"},
+{"LAB_CHAR_BLOOD_1015","未知","未知","Unknown","未知","未知"},
+{"LAB_CHAR_BLOOD_1016","A","A","A","A","A"},
+{"LAB_CHAR_BLOOD_3001","O","O","O","O","O"},
 {"LAB_CHAR_HOBBY_1001","好吃的东西、扑克、胜利","好吃的東西、撲克、勝利","Tasty food, poker, victory","おいしいもの、ポーカー、勝つこと","맛있는 것, 맑은 날, 포커, 이기는 것"},
 {"LAB_CHAR_HOBBY_1002","甜点、玩偶、夜晚","甜點、玩偶、夜晚","Desserts, stuffed toys, nighttime","スイーツ、ぬいぐるみ、夜","디저트, 인형, 밤, 조용한 곳"},
 {"LAB_CHAR_HOBBY_1003","酒、茶、香味","酒、茶、香味","Sake, tea, fragrances","お酒、お茶、香り","술, 차, 향기"},
@@ -3979,6 +4596,9 @@ Each character can receive up to {p1} gifts per day. Special Gifts do not count 
 {"LAB_CHAR_HOBBY_1012","占卜、命运、酒、夜晚","占卜、命運、酒、夜晚","fortune-telling, fate, alcohol, night","占い、運命、お酒、夜","占い、運命、お酒、夜"},
 {"LAB_CHAR_HOBBY_1013","辣的食物、打工、拳法","辣的食物、打工、拳法","Spicy food, part-time jobs, martial arts","辛い料理、アルバイト、拳法","辛い料理、アルバイト、拳法"},
 {"LAB_CHAR_HOBBY_1014","手工艺品，竹子，粗糙的布料，豆腐","手工藝品、竹子、粗糙的布料、豆腐","Handicrafts, bamboo, coarse fabrics, tofu","工芸品、竹、ざらざらした布、豆腐","工芸品、竹、ざらざらした布、豆腐"},
+{"LAB_CHAR_HOBBY_1015","月亮，自动贩卖机，能量饮料","月亮、自動販賣機、能量飲料","Moon, vending machines, energy drinks","月、自動販売機、エナジードリンク","月、自動販売機、エナジードリンク"},
+{"LAB_CHAR_HOBBY_1016","零食、恋爱小说、电影","零食、戀愛小說、電影","Snacks, romance novels, movies","お菓子、恋愛小説、映画","お菓子、恋愛小説、映画"},
+{"LAB_CHAR_HOBBY_3001","拉面，全力以赴的对手","拉麵，全力以赴的對手","Ramen, opponents who give it their all","ラーメン、全力を尽くす相手","拉面，全力以赴的对手"},
 {"LAB_CHAR_STAR_1001","白羊座","牡羊座","Aries","おひつじ座","염소자리"},
 {"LAB_CHAR_STAR_1002","射手座","射手座","Sagittarius","いて座","궁수자리"},
 {"LAB_CHAR_STAR_1003","巨蟹座","巨蟹座","Cancer","かに座","게자리"},
@@ -3992,6 +4612,9 @@ Each character can receive up to {p1} gifts per day. Special Gifts do not count 
 {"LAB_CHAR_STAR_1012","双鱼座","雙魚座","Pisces","うお座","물고기자리"},
 {"LAB_CHAR_STAR_1013","狮子座","獅子座","Leo","しし座","사자자리"},
 {"LAB_CHAR_STAR_1014","白羊座","牡羊座","Aries","おひつじ座","염소자리"},
+{"LAB_CHAR_STAR_1015","处女座","處女座","Virgo","乙女座","乙女座"},
+{"LAB_CHAR_STAR_1016","双子座","雙子座","Gemini","双子座","双子座"},
+{"LAB_CHAR_STAR_3001","水瓶座","水瓶座","Aquarius","みずがめ座","물병자리"},
 {"LAB_CHAR_STATUS_1001","大学生","大學生","College Student","大学生","대학생"},
 {"LAB_CHAR_STATUS_1002","职业牌手","職業牌手","Pro Poker Player","ポーカープロ","포커 프로"},
 {"LAB_CHAR_STATUS_1003","温泉浴场老板娘","溫泉浴場老闆娘","Onsen Retreat Owner","温泉浴場の女将","온천 욕장 주인"},
@@ -4005,6 +4628,9 @@ Each character can receive up to {p1} gifts per day. Special Gifts do not count 
 {"LAB_CHAR_STATUS_1012","占卜师","占卜師","Fortune Teller","占い師","占い師"},
 {"LAB_CHAR_STATUS_1013","格斗家","格鬥家","Fighter","格闘家","格闘家"},
 {"LAB_CHAR_STATUS_1014","学生/设计师","學生／設計師","Student / Designer","学生/デザイナー","学生/デザイナー"},
+{"LAB_CHAR_STATUS_1015","业余牌手","業餘牌手","Amateur Poker Player","アマチュアプレイヤー","アマチュアプレイヤー"},
+{"LAB_CHAR_STATUS_1016","大学生","大學生","College Student","大学生","大学生"},
+{"LAB_CHAR_STATUS_3001","职业选手","職業雀士","Professional Mahjong Player","麻雀プロ","职业选手"},
 {"LAB_CHAR_PLAYSTYLE_1001","激进大胆，偏好进攻","激進大膽，偏好進攻","Aggressive and daring","アグレッシブで大胆","공격적이고 대담한 플레이 스타일"},
 {"LAB_CHAR_PLAYSTYLE_1002","冷静谨慎","冷靜謹慎","Calm and prudent","冷静慎重","고집이 세지 않으며, 종반 전략에 강하다."},
 {"LAB_CHAR_PLAYSTYLE_1003","风格多变，难以捉摸","風格多變，捉摸不透","Unpredictable and elusive","戦略変幻自在、予測不可能","정해진 스타일 없이 예측 불가능"},
@@ -4018,6 +4644,9 @@ Each character can receive up to {p1} gifts per day. Special Gifts do not count 
 {"LAB_CHAR_PLAYSTYLE_1012","神秘莫测","神秘莫測","Enigmatic and Unpredictable","ミステリアスで予測不能","ミステリアスで予測不能"},
 {"LAB_CHAR_PLAYSTYLE_1013","势如破竹，气吞山河","勢如破竹，氣吞山河","Relentless, overwhelming force","天地を覆す、怒涛の勢い","天地を覆す、怒涛の勢い"},
 {"LAB_CHAR_PLAYSTYLE_1014","设陷","設陷","Deceptive setups","スロープレイ","スロープレイ"},
+{"LAB_CHAR_PLAYSTYLE_1015","冷酷强势","冷酷強勢","Cold and assertive","冷徹で強気","冷徹で強気"},
+{"LAB_CHAR_PLAYSTYLE_1016","高贵优雅","高貴優雅","Noble and graceful","高貴で優雅","高貴で優雅"},
+{"LAB_CHAR_PLAYSTYLE_3001","追求高难度","追求高難度","Striving for even greater heights","さらなる高みへ","追求高难度"},
 {"LAB_CHAR_BIRTHEMAIL_NAME_1001","离未来又近了一步","離未來又近了一步","One Step Closer to the Future","未来へまた一歩近づく","One Step Closer to the Future"},
 {"LAB_CHAR_BIRTHEMAIL_NAME_1002","竟然就在当天","竟然就在當天","It's the Same Day","まさかの当日","It's the Same Day"},
 {"LAB_CHAR_BIRTHEMAIL_NAME_1003","独属于今日的月见酒","獨屬於今日的賞月酒","Moonview Sake for Tonight","今日だけの月見酒","Moonview Sake for Tonight"},
@@ -4029,6 +4658,17 @@ Each character can receive up to {p1} gifts per day. Special Gifts do not count 
 {"LAB_CHAR_BIRTHEMAIL_NAME_1009","今日事故0！","今日事故0！","Today's Accident Count: 0!","本日、事故ゼロ！","Today's Accident Count: 0!"},
 {"LAB_CHAR_BIRTHEMAIL_NAME_1010","不可以忘记的事","不可以忘記的事","Something I Must Not Forget","忘れてはいけないこと","Something I Must Not Forget"},
 {"LAB_CHAR_BIRTHEMAIL_NAME_1011","幸得好运眷顾","幸得好運眷顧","Blessed by Good Fortune","幸運に恵まれて","Blessed by Good Fortune"},
+{"LAB_CHAR_BIRTHEMAIL_NAME_1012","今晚的指引","今晚的指引","Tonight's Reading","今夜の導き","今夜の導き"},
+{"LAB_CHAR_BIRTHEMAIL_NAME_1013","特辣警告！","特辣警告！","Ultra Spicy Warning!","激辛警告！","激辛警告！"},
+{"LAB_CHAR_BIRTHEMAIL_NAME_1014","见信如晤","見信如晤","As If You Were Here","手紙を開いたあなたへ","手紙を開いたあなたへ"},
+{"LAB_CHAR_BIRTHEMAIL_NAME_1015","[同步记录]生日","[同步記錄]生日","[Sync Log] Birthday","[同期記録]誕生日","[同期記録]誕生日"},
+{"LAB_CHAR_BIRTHEMAIL_NAME_1016","分担一下","分擔一下","Help Me Finish This","半分、手伝って","半分、手伝って"},
+{"LAB_CHAR_BIRTHEMAIL_NAME_1017","今日休假","今日休假","Day Off","今日はお休み","今日はお休み"},
+{"LAB_CHAR_BIRTHEMAIL_NAME_1018","取材邀请","取材邀請","Reference Request","取材のお誘い","取材のお誘い"},
+{"LAB_CHAR_BIRTHEMAIL_NAME_1019","身边的奇迹","身邊的奇蹟","Miracles Nearby","身近な奇跡","身近な奇跡"},
+{"LAB_CHAR_BIRTHEMAIL_NAME_1020","缄默法则","緘默法則","The Code of Silence","沈黙の掟","沈黙の掟"},
+{"LAB_CHAR_BIRTHEMAIL_NAME_1021","想要的奖励","想要的獎勵","The Reward I Want","欲しいご褒美","欲しいご褒美"},
+{"LAB_CHAR_BIRTHEMAIL_NAME_3001","不需要特殊的行程","不需要特殊的行程","No Special Plans Needed","特別な予定は要らない","特別な予定は要らない"},
 {"LAB_CHAR_BIRTHEMAIL_1001",[[会长会长，你听我说！
 协会附近的那条美食街上新开了一家鲷鱼烧店哦！虽然馅料听起来有些太过创新，不过我还挺想试试的！
 今天正好是我的生日呢，那我的愿望，就是希望会长能和我一起去那家店，吃所有人都不敢尝试的新口味！
@@ -4230,8 +4870,359 @@ On such a special day, may I invite you to the Arion Association, President, to 
 The way I see life is no longer a single line stretching forward from birth, but something that unfolds outward from the present moment, reaching into both past and future. Still, that is no reason to forget one's birthday. Even if life does not truly begin on the day we are born, this day each year remains a fitting moment to look back on what has been—and ahead to what is yet to come.
 
 On such a special day, may I invite you to the Arion Association, President, to spend a little time with me?]]},
-{"LAB_CHAR_BIRTHEMAIL_1012","薇尔生日邮件内容简中","薇尔生日邮件内容繁中","薇尔生日邮件内容英文","薇尔生日邮件内容日文","薇尔生日邮件内容韩文"},
-{"LAB_CHAR_BIRTHEMAIL_1013","朱朱生日邮件内容简中","朱朱生日邮件内容繁中","朱朱生日邮件内容英文","朱朱生日邮件内容日文","朱朱生日邮件内容韩文"},
+{"LAB_CHAR_BIRTHEMAIL_1012",[[平时都是别人请我喝一杯，我来占卜，但是今天我先打破这个惯例。
+我在酒吧准备了两杯酒，其中一杯是我请会长的，今天我想请会长来为我占卜。
+看不懂水晶球也没关系，倒不如说看不懂更好，当媒介无法提供任何信息时，占卜者就只能根据自己的猜想来叙述了呢。
+我想从会长的占卜结果中，知晓会长与我的未来。
+生日过后，新一年的未来。]],[[平時都是別人請我喝一杯，我來占卜，但是今天我先打破這個慣例。
+
+我在酒吧準備了兩杯酒，其中一杯是我請會長的，今天我想請會長來為我占卜。
+
+看不懂水晶球也沒關係，倒不如說看不懂更好，當媒介無法提供任何資訊時，占卜者就只能根據自己的猜想來敘述了呢。
+
+我想從會長的占卜結果中，知曉會長與我的未來。
+
+生日過後，新一年的未來。]],[[Usually, it's others who buy me a drink in exchange for a reading, but today I'm making an exception.
+
+I've prepared two glasses at the bar. One of them is for you. Today, I'd like you to be the one reading for me. Don't worry if you can't make out anything in the crystal ball—in fact, that's even better. When the medium offers no information, the reader has no choice but to speak from their imagination.
+
+I want to hear what you see. What you imagine our future to be—yours and mine. A new year begins after a birthday, and I'm curious to see what kind of future this one will bring.]],[[普段は誰かに一杯ご馳走になって、私が占ってあげる立場だけど、今日はまずその慣例を破るわね。
+
+バーで2杯のお酒を用意したの。そのうちの1杯は会長にご馳走する分。今日は会長に私を占ってもらいたいの。
+
+水晶玉の導きが分からなくたって構わないわ。むしろ分からない方が好都合なくらい。媒介が何も情報を与えてくれない時、占い師は自分の想像を頼りに語るしかないものね。
+
+会長の占い結果から、会長と私の未来を知りたいの。
+
+誕生日が過ぎて、これからの未来をね。]],[[普段は誰かに一杯ご馳走になって、私が占ってあげる立場だけど、今日はまずその慣例を破るわね。
+
+バーで2杯のお酒を用意したの。そのうちの1杯は会長にご馳走する分。今日は会長に私を占ってもらいたいの。
+
+水晶玉の導きが分からなくたって構わないわ。むしろ分からない方が好都合なくらい。媒介が何も情報を与えてくれない時、占い師は自分の想像を頼りに語るしかないものね。
+
+会長の占い結果から、会長と私の未来を知りたいの。
+
+誕生日が過ぎて、これからの未来をね。]]},
+{"LAB_CHAR_BIRTHEMAIL_1013",[[今天的打工圆满结束，我正打算去吃平时那家餐厅的麻婆豆腐。
+在这个特殊的日子，我决定让老板再多加两勺辣椒，麻婆豆腐的辣度，可不能输给我高涨的情绪！
+不过，再辣也总觉得少了什么，我刚刚才想通，是因为缺少了一起吃辣的人！
+我特意给会长点一份正常辣度的麻婆豆腐，所以会长能来平时的那家店和我一起吃吗？
+如果会长不来，热闹可就要减半了哦。]],[[今天的打工圓滿結束，我正打算去吃平時那家餐廳的麻婆豆腐。
+
+在這個特殊的日子，我決定讓老闆再多加兩勺辣椒，麻婆豆腐的辣度，可不能輸給我高漲的情緒！
+
+不過，再辣也總覺得少了什麼，我剛剛才想通，是因為缺少了一起吃辣的人！
+
+我特意給會長點一份正常辣度的麻婆豆腐，所以會長能來平時的那家店和我一起吃嗎？
+
+如果會長不來，熱鬧可就要減半了哦。]],[[Work's finally done, and I'm heading to my usual spot for mapo tofu. Since it's a special day, I asked the owner to add two extra scoops of chili. The heat of the dish has to match how fired up I'm feeling right now!
+
+But no matter how spicy it gets, something still feels missing—and I just figured out what: someone to share it with! I've already ordered a mild one for you, so can you come meet me at our usual spot? If you don't show up, the fun's cut in half, you know!]],[[今日のバイトは無事終了！これからいつも行ってるお店の麻婆豆腐を食べに行こうと思ってるところ。
+
+この特別な日に、私はオーナーに唐辛子をスプーン2杯分多く入れてもらうって決めたんだ。麻婆豆腐の辛さも、私の高まるテンションに負けてられないからね！
+
+でも、どんなに辛くてもなんだか物足りない気がして……さっきやっと理由が分かったの。一緒に激辛を食べてくれる人がいないからだ！
+
+会長のために、普通の辛さの麻婆豆腐を特別に注文しておいたから、いつものお店で私と一緒に食べてくれない？
+
+もし会長が来てくれなかったら、楽しさも半分になっちゃうよ？]],[[今日のバイトは無事終了！これからいつも行ってるお店の麻婆豆腐を食べに行こうと思ってるところ。
+
+この特別な日に、私はオーナーに唐辛子をスプーン2杯分多く入れてもらうって決めたんだ。麻婆豆腐の辛さも、私の高まるテンションに負けてられないからね！
+
+でも、どんなに辛くてもなんだか物足りない気がして……さっきやっと理由が分かったの。一緒に激辛を食べてくれる人がいないからだ！
+
+会長のために、普通の辛さの麻婆豆腐を特別に注文しておいたから、いつものお店で私と一緒に食べてくれない？
+
+もし会長が来てくれなかったら、楽しさも半分になっちゃうよ？]]},
+{"LAB_CHAR_BIRTHEMAIL_1014",[[像今天这样下着小雨的日子，总能让我感到格外平静。
+我特意去了浮世旅馆，要了间高层客房，站在窗前欣赏街道上流动的伞面。
+今天是我的生日，长辈们早早送来的贺礼我都放在家中，不急着拆封，毕竟里面一定没有我真正想要的东西。
+我想看到的，是一把我熟悉的伞，出现在我的视野中，缩短与我的距离，消失在我脚下浮世旅馆的入口处。
+接着在三百二十三秒之后，让我听见敲门声，对了，我住的房间是……]],[[像今天這樣下著小雨的日子，總能讓我感到格外平靜。
+
+我特意去了浮世旅館，要了間高層客房，站在窗前欣賞街道上流動的傘面。
+
+今天是我的生日，長輩們早早送來的賀禮我都放在家中，不急著拆封，畢竟裡面一定沒有我真正想要的東西。
+
+我想看到的，是一把我熟悉的傘，出現在我的視野中，縮短與我的距離，消失在我腳下浮世旅館的入口處。
+
+接著在三百二十三秒之後，讓我聽見敲門聲，對了，我住的房間是……]],[[Rainy days like today have a way of making everything feel unusually still. I made a point of going to the Ukiyo Retreat and booking a room on one of the upper floors. I'm standing by the window, watching umbrellas drift along the street below.
+
+Today is my birthday. The gifts from my elders arrived early this morning—all of them still sitting untouched at home. There's no rush; whatever's inside, I'm certain none of it is what I truly want. What I want to see is one particular umbrella—a familiar one—moving through my field of view, drawing closer, and finally disappearing through the entrance of the Ukiyo Retreat. Then, three hundred and twenty-three seconds later, a knock at my door. The room number, by the way, is...]],[[今日のように小雨が降る日は、いつも以上に心が穏やかになります。
+
+私はわざわざ浮世旅館へ行き、高層階の客室を取り、窓辺から通りを行き交う傘の波を眺めています。
+
+今日は私の誕生日です。目上の方々から早くに届いたお祝いの品はすべて家に置いてあり、急いで開封するつもりはありません。どうせ、その中には私が本当に欲しいものは入っていないでしょうから。
+
+私が本当に目にしたいのは、見慣れた一本の傘が私の視界に現れ、私との距離を縮め、浮世旅館の入り口へと消えていく姿です。
+
+そしてその三百二十三秒後に、部屋をノックする音が聞こえてくること。ああ、そうでした、私の泊まっている部屋は……]],[[今日のように小雨が降る日は、いつも以上に心が穏やかになります。
+
+私はわざわざ浮世旅館へ行き、高層階の客室を取り、窓辺から通りを行き交う傘の波を眺めています。
+
+今日は私の誕生日です。目上の方々から早くに届いたお祝いの品はすべて家に置いてあり、急いで開封するつもりはありません。どうせ、その中には私が本当に欲しいものは入っていないでしょうから。
+
+私が本当に目にしたいのは、見慣れた一本の傘が私の視界に現れ、私との距離を縮め、浮世旅館の入り口へと消えていく姿です。
+
+そしてその三百二十三秒後に、部屋をノックする音が聞こえてくること。ああ、そうでした、私の泊まっている部屋は……]]},
+{"LAB_CHAR_BIRTHEMAIL_1015",[[根据数据库的记录，今天是有关“沐娜”的重要时间节点。
+我搜索并学习了这个节点的名称与定义，生日，对于不同的人有截然不同的意义。
+对于我来说，我认为这是一个需要与重要之人共度的日子，毕竟数据的重大更新，需要一位记录者、一位见证者。
+另外，关于今日的行动指示，沐娜有一条建议，该条建议可能源于数据更新产生的未知错误：
+仅限今日，请以“我”为最优先主题。]],[[根據資料庫的紀錄，今天是有關“沐娜”的重要時間節點。
+
+我搜索並學習了這個節點的名稱與定義，生日，對於不同的人有截然不同的意義。
+
+對於我來說，我認為這是一個需要與重要之人共度的日子，畢竟資料的重大更新，需要一位記錄者、一位見證者。
+
+另外，關於今日的行動指示，沐娜有一條建議，該條建議可能源於資料更新產生的未知錯誤：
+
+僅限今日，請以“我”為最優先主題。]],[[According to the database, today is a significant timestamp associated with "Moona."
+
+I have searched for the definition of this timestamp: "Birthday"—a date that carries vastly different meanings for different individuals. In my assessment, this is a day meant to be spent with someone important. After all, a major data update requires both a recorder and a witness.
+
+Additionally, regarding today's directive—Moona has one suggestion. This suggestion may have originated from an unknown error generated during the data update: For today only—please make me your highest priority.]],[[データベースの記録によると、今日は「ムーナ」に関する重要な節目。
+
+その名前と定義について検索・学習を行った。誕生日は人によって、意味は大きく異なる。
+
+私は、大切な人と過ごすべき日だと判断した。データの重大なアップデートには、それを記録して、見届けてくれる人が必要だから。
+
+また、今日の行動指示について、ムーナから一つ提案がある。この提案は、データアップデートで起きた未知のエラーのせいかもしれない――今日だけは、「私」を最優先のテーマにして。]],[[データベースの記録によると、今日は「ムーナ」に関する重要な節目。
+
+その名前と定義について検索・学習を行った。誕生日は人によって、意味は大きく異なる。
+
+私は、大切な人と過ごすべき日だと判断した。データの重大なアップデートには、それを記録して、見届けてくれる人が必要だから。
+
+また、今日の行動指示について、ムーナから一つ提案がある。この提案は、データアップデートで起きた未知のエラーのせいかもしれない――今日だけは、「私」を最優先のテーマにして。]]},
+{"LAB_CHAR_BIRTHEMAIL_1016",[[会长，你今天应该没安排什么会议吧？
+有人送了我一份蛋糕，放在了学生会室，味道不错，但这个分量一个人恐怕吃不完。
+如果你能过来分担掉这个麻烦，我就勉为其难让你陪我过个生日吧。
+别误会了！这可不是邀请，纯粹是因为这种时候如果身边坐的是别人我会很困扰！
+以及，不要去查蛋糕店的订购记录。]],[[會長，你今天應該沒安排什麼會議吧？
+
+有人送了我一份蛋糕，放在了學生會室，味道不錯，但這個分量一個人恐怕吃不完。
+
+如果你能過來分擔掉這個麻煩，我就勉為其難讓你陪我過個生日吧。
+
+別誤會了！這可不是邀請，純粹是因為這種時候如果身邊坐的是別人我會很困擾！
+
+以及，不要去查蛋糕店的訂購記錄。]],[[You don't have any meetings today, right, President? Someone left a cake for me in the student council room. It's not bad—but there's no way I'm finishing it all on my own.
+
+If you come help me deal with this problem, I suppose I could allow you to keep me company on my birthday. Don't get the wrong idea! This is not an invitation. It's simply that I would find it highly uncomfortable if someone else were to sit next to me instead! Also—do not go looking up the cake shop's order records.]],[[会長、今日は特に会議の予定とか入ってないわよね？
+
+誰かにケーキをもらったから生徒会室に置いておいたわ。味は悪くないんだけど、このボリュームだと一人じゃ食べきれそうにないの。
+
+もしあなたが来てこの面倒なものを片付けるのを手伝ってくれるなら、仕方がないから一緒に誕生日を過ごしてあげてもいいわよ。
+
+勘違いしないでよね！別に誘ってるわけじゃないんだから！ただ、こういう時に隣に座っているのが他の人だったら困るってだけ！
+
+それから、ケーキ屋の注文履歴を調べたりしないでね。]],[[会長、今日は特に会議の予定とか入ってないわよね？
+
+誰かにケーキをもらったから生徒会室に置いておいたわ。味は悪くないんだけど、このボリュームだと一人じゃ食べきれそうにないの。
+
+もしあなたが来てこの面倒なものを片付けるのを手伝ってくれるなら、仕方がないから一緒に誕生日を過ごしてあげてもいいわよ。
+
+勘違いしないでよね！別に誘ってるわけじゃないんだから！ただ、こういう時に隣に座っているのが他の人だったら困るってだけ！
+
+それから、ケーキ屋の注文履歴を調べたりしないでね。]]},
+{"LAB_CHAR_BIRTHEMAIL_1017",[[今天申请了休假，暂时逃离了蓝湾市的早晚高峰。
+早上起床时还是下意识换上了职业装，清醒过来才想起今天请假的理由。
+今天是我的生日，没有安排直播任务，也暂时没有打算分析先前的对局，我想好好休息一下。
+比起屏幕那头的庆贺，我更希望你能亲口对我说一句辛苦了。如果会长不介意的话，能来我的住处吗？
+我们就像普通人那样，聊聊日常，散散步。]],[[今天申請了休假，暫時逃離了藍灣市的通勤尖峰。
+
+早上起床時還是下意識換上了職業裝，清醒過來才想起今天請假的理由。
+
+今天是我的生日，沒有安排直播任務，也暫時沒有打算分析先前的對局，我想好好休息一下。
+
+比起螢幕那頭的慶賀，我更希望你能親口對我說一句辛苦了。如果會長不介意的話，能來我的住處嗎？
+
+我們就像普通人那樣，聊聊日常，散散步。]],[[I took the day off today—a brief escape from Azure Bay's rush hour.
+
+Out of habit, I still reached for my work clothes when I got up this morning, before remembering why I requested the leave in the first place. It's my birthday. No stream scheduled, no plans to review recent games. I just want to rest.
+
+Compared to messages from people on the other side of a screen, what I really want is to hear you say it in person—that I've worked hard. If you don't mind, would you come over? Nothing special—just talking, the way ordinary people do. Maybe we could take a walk as well.]],[[今日はお休みをいただいて、藍湾市の通勤ラッシュからしばらく逃れることにしました。
+
+朝起きた時は無意識にオフィスウェアに着替えてしまったんですけど、目が覚めてようやく、今日休んだ理由を思い出しました。
+
+今日は私の誕生日です。配信の予定も、これまでの対局を分析する予定もありません。今日はゆっくり休みたいと思っています。
+
+画面の向こう側からの祝福よりも、あなたから直接「お疲れ様」と言ってもらいたいです。もし会長が嫌でなければ、私の家に来てくれませんか？
+
+普通の人みたいに、日常の話をしたり、散歩をしたりしましょう。]],[[今日はお休みをいただいて、藍湾市の通勤ラッシュからしばらく逃れることにしました。
+
+朝起きた時は無意識にオフィスウェアに着替えてしまったんですけど、目が覚めてようやく、今日休んだ理由を思い出しました。
+
+今日は私の誕生日です。配信の予定も、これまでの対局を分析する予定もありません。今日はゆっくり休みたいと思っています。
+
+画面の向こう側からの祝福よりも、あなたから直接「お疲れ様」と言ってもらいたいです。もし会長が嫌でなければ、私の家に来てくれませんか？
+
+普通の人みたいに、日常の話をしたり、散歩をしたりしましょう。]]},
+{"LAB_CHAR_BIRTHEMAIL_1018",[[会长，打扰了……
+漫画接下来的剧情正要画到主角过生日的场景，但是像我这种人，实在难以想象和人一同庆祝生日的场景。
+即使看了许多其他作品，如果缺乏实际体验，画出来的东西还是有可能被识破。
+所以，会长能帮忙协助取材吗？能请会长像对待真正的寿星那样，陪我度过今天吗？
+我会认真记录下每个瞬间，包括……我的心情。]],[[會長，打擾了……
+
+漫畫接下來的劇情正要畫到主角過生日的場景，但是像我這種人，實在難以想像和人一同慶祝生日的場景。
+
+即使看了許多其他作品，如果缺乏實際體驗，畫出來的東西還是有可能被識破。
+
+所以，會長能幫忙協助取材嗎？能請會長像對待真正的壽星那樣，陪我度過今天嗎？
+
+我會認真記錄下每個瞬間，包括……我的心情。]],[[Sorry to bother you, President...
+
+The next arc of my manga includes a scene where the protagonist celebrates his birthday, but someone like me genuinely struggles to imagine what it feels like to celebrate with another person. Even after studying many other works, without real experience to draw from, there's always the risk that the scene will feel hollow.
+
+So, would you be willing to help me with some research? Could you spend the day with me and treat me the way you would treat someone on their birthday? I'll carefully note every moment, including... how I feel.]],[[会長、お邪魔します……
+
+今描いている漫画の次の展開が、ちょうど主人公の誕生日のお祝いシーンなんです。でも、私のような人間には、誰かと一緒に誕生日をお祝いするシチュエーションなんて到底想像できなくて。
+
+他の作品をたくさん読んだとしても、実際の経験が足りないと、描いたものが見破られてしまうかもしれません。
+
+ですから、会長……取材に協力していただけませんか？私のことを本当の主役だと思って、今日一日を一緒に過ごしてほしいんです。
+
+一瞬一瞬を、しっかり記録します。私の気持ちも含めて……]],[[会長、お邪魔します……
+
+今描いている漫画の次の展開が、ちょうど主人公の誕生日のお祝いシーンなんです。でも、私のような人間には、誰かと一緒に誕生日をお祝いするシチュエーションなんて到底想像できなくて。
+
+他の作品をたくさん読んだとしても、実際の経験が足りないと、描いたものが見破られてしまうかもしれません。
+
+ですから、会長……取材に協力していただけませんか？私のことを本当の主役だと思って、今日一日を一緒に過ごしてほしいんです。
+
+一瞬一瞬を、しっかり記録します。私の気持ちも含めて……]]},
+{"LAB_CHAR_BIRTHEMAIL_1019",[[难道今天我真的受到了神明的眷顾吗？
+早上买的那杯热饮温度刚好，去教团的路上欣赏了绝美的枫叶。
+常驻于屋顶的那只白鸽，今天竟然落在了我的肩头。整理旧书籍时，我还发现了先前遗失的漂亮书签。
+这些微小的奇迹围绕在身边，在生日这样一个特殊的日子，让我能够相信自己过去的一年做得很好。
+今天还没有结束，会长，能来到我身边，和我一同分享这些幸运的小奇迹吗？]],[[難道今天我真的受到了神明的眷顧嗎？
+
+早上買的那杯熱飲溫度剛好，去教團的路上欣賞了絕美的楓葉。
+
+常駐於屋頂的那隻白鴿，今天竟然落在了我的肩頭。整理舊書籍時，我還發現了先前遺失的漂亮書籤。
+
+這些微小的奇蹟圍繞在身邊，在生日這樣一個特殊的日子，讓我能夠相信自己過去的一年做得很好。
+
+今天還沒有結束，會長，能來到我身邊，和我一同分享這些幸運的小奇蹟嗎？]],[[Could it be that I'm truly blessed today?
+
+The hot drink I bought this morning was the perfect temperature. On the way to the congregation, the maple leaves were breathtaking. Even the white dove that usually stays on the rooftop landed on my shoulder today. And while sorting through some old books, I found a lovely bookmark I thought I'd lost.
+
+These small miracles have been gathering around me all day—and on a day as special as a birthday, they make me feel as though I must have done something right this past year.
+
+The day isn't over yet, President. Would you come and share these little moments of luck with me?]],[[まさか、今日本当に神様のご加護を受けているのでしょうか？
+
+朝買った温かい飲み物はちょうどいい温度でしたし、教団に向かう道中では、息を飲むほど美しい紅葉を見ることができました。
+
+いつも屋根の上にいるあの白い鳩が、今日はなんと私の肩にとまってくれたんです。古い書籍を整理していたら、前に失くしてしまった綺麗なしおりまで見つかりました。
+
+こんな小さな奇跡たちが身の回りにあふれていて、誕生日という特別な日に、自分がこの一年よく頑張ってきたんだと信じさせてくれます。
+
+今日はまだ終わっていません。会長、私のそばに来て、この小さな奇跡を一緒に分かち合ってくれませんか？]],[[まさか、今日本当に神様のご加護を受けているのでしょうか？
+
+朝買った温かい飲み物はちょうどいい温度でしたし、教団に向かう道中では、息を飲むほど美しい紅葉を見ることができました。
+
+いつも屋根の上にいるあの白い鳩が、今日はなんと私の肩にとまってくれたんです。古い書籍を整理していたら、前に失くしてしまった綺麗なしおりまで見つかりました。
+
+こんな小さな奇跡たちが身の回りにあふれていて、誕生日という特別な日に、自分がこの一年よく頑張ってきたんだと信じさせてくれます。
+
+今日はまだ終わっていません。会長、私のそばに来て、この小さな奇跡を一緒に分かち合ってくれませんか？]]},
+{"LAB_CHAR_BIRTHEMAIL_1020",[[萨摩商会有一条铁律，继承自我的故乡，即缄默法则。
+一般情况下，指的是我们所有人都要对商会的“生意”保持沉默，不泄密，不留证据。
+即使是生日庆典，我们也绝不对外公开，不张扬，不发社交动态，不邀请外人。
+不过我也适度修改了规则，毕竟我不需要像在故乡那样通过生日会来巩固权力。
+我准备了一场只有我们两人的晚宴，请遵循缄默法则，不告诉任何人。]],[[薩摩商會有一條鐵律，繼承自我的故鄉，即緘默法則。
+
+一般情況下，指的是我們所有人都要對商會的“生意”保持沉默，不洩密，不留證據。
+
+即使是生日慶典，我們也絕不對外公開，不張揚，不發社群動態，不邀請外人。
+
+不過我也適度修改了規則，畢竟我不需要像在故鄉那樣透過生日會來鞏固權力。
+
+我準備了一場只有我們兩人的晚宴，請遵循緘默法則，不告訴任何人。]],[[The Satsuma Chamber of Commerce follows an iron rule—one inherited from my homeland—known as the Code of Silence. In general, it means that we must remain silent about the chamber's affairs: no leaks, no evidence left behind. The same applies to birthdays. We never make them public. No announcements, no social posts, and no outside guests.
+
+Of course, I've made a few adjustments to that rule for my own purposes. I have no need to use a birthday gathering as a means of consolidating power, as was done back home.
+
+I've arranged a dinner for just the two of us. Please observe the Code of Silence—don't tell a soul.]],[[薩摩商会には、私の故郷から受け継がれた一つの鉄則があります。すなわち「沈黙の掟」です。
+
+通常、これは私たち全員が商会の「ビジネス」に対して沈黙を守り、秘密を漏らさず、証拠を残さないことを意味します。
+
+誕生日の祝いであっても、私たちは決して公にしたり、派手にお祝いしたりはしません。また、SNSに投稿したり、部外者を招いたりもしません。
+
+ですが、私はその規則を少しだけ書き換えました。故郷にいた頃のように、誕生日会を通じて権力を誇示する必要はありませんからね。
+
+二人だけの晩餐を用意しました。どうぞ沈黙の掟に従い、誰にも言わずに来てください。]],[[薩摩商会には、私の故郷から受け継がれた一つの鉄則があります。すなわち「沈黙の掟」です。
+
+通常、これは私たち全員が商会の「ビジネス」に対して沈黙を守り、秘密を漏らさず、証拠を残さないことを意味します。
+
+誕生日の祝いであっても、私たちは決して公にしたり、派手にお祝いしたりはしません。また、SNSに投稿したり、部外者を招いたりもしません。
+
+ですが、私はその規則を少しだけ書き換えました。故郷にいた頃のように、誕生日会を通じて権力を誇示する必要はありませんからね。
+
+二人だけの晩餐を用意しました。どうぞ沈黙の掟に従い、誰にも言わずに来てください。]]},
+{"LAB_CHAR_BIRTHEMAIL_1021",[[沙罗就直说了，沙罗超级想要会长的夸奖！
+毕竟今天是沙罗的生日，虽然会长平时就有在夸奖我，但是我好想让会长肯定我一整年的努力！
+这也会成为我在新的一年，为了不辜负会长的夸奖，继续努力的动力！
+唔……这样请求夸奖的说辞，是不是有点太直接了呢？
+但是，这也是我唯一想要的生日礼物！还请会长，当面交给我吧！]],[[沙羅就直說了，沙羅超級想要會長的誇獎！
+
+畢竟今天是沙羅的生日，雖然會長平時就有在誇獎我，但是我好想讓會長肯定我一整年的努力！
+
+這也會成為我在新的一年，為了不辜負會長的誇獎，繼續努力的動力！
+
+唔……這樣請求誇獎的說辭，是不是有點太直接了呢？
+
+但是，這也是我唯一想要的生日禮物！還請會長，當面交給我吧！]],[[I'll get straight to the point—I, Sara, really, really want your praise, President!
+
+It's my birthday, after all. You do compliment me from time to time, but what I want today is for you to acknowledge a full year of my hard work! That way, I'll have all the motivation I need to keep going in the year ahead—and prove that your kind words weren't wasted on me!
+
+Hmm... is it a bit too forward to ask for compliments so directly...? But it really is the only birthday present I want! So please, President, deliver it in person!]],[[沙羅はストレートに言っちゃいます！沙羅、会長にめちゃくちゃ褒めてもらいたいです！
+
+だって今日は沙羅の誕生日ですもん。会長は普段から褒めてくれますけど、この一年間の努力を思いっきり認めてほしいんです！
+
+それが、新しい一年も会長の褒め言葉に恥じないように、もっともっと頑張るためのモチベーションになりますから！
+
+うーん……こんなふうに褒めてってお願いするの、ちょっとストレートすぎましたか？
+
+でも、これが沙羅の唯一欲しい誕生日プレゼントなんです！ですから、会長、会って直接、沙羅にくださいね！]],[[沙羅はストレートに言っちゃいます！沙羅、会長にめちゃくちゃ褒めてもらいたいです！
+
+だって今日は沙羅の誕生日ですもん。会長は普段から褒めてくれますけど、この一年間の努力を思いっきり認めてほしいんです！
+
+それが、新しい一年も会長の褒め言葉に恥じないように、もっともっと頑張るためのモチベーションになりますから！
+
+うーん……こんなふうに褒めてってお願いするの、ちょっとストレートすぎましたか？
+
+でも、これが沙羅の唯一欲しい誕生日プレゼントなんです！ですから、会長、会って直接、沙羅にくださいね！]]},
+{"LAB_CHAR_BIRTHEMAIL_3001",[[在蓝湾市的这段时间，我收获了许多从未有过的对局体验。
+会长你为我规划的挑战之路确实有趣，作为我的分析师，你的洞察力总能精准捕捉我忽视的细节。
+今天是我的生日，不过我并不希望和你制定什么特殊的行程。
+在这里的每一场比赛，对我来说都是珍贵的礼物，作为牌手生活在蓝湾市的每一天，也都是如此令人愉悦。
+不过如果可以的话，今天的对局结束后，或许我们能一起去吃顿宵夜？]],[[在藍灣市的這段時間，我收穫了許多從未有過的對局體驗。
+
+會長你為我規劃的挑戰之路確實有趣，作為我的分析師，你的洞察力總能精準捕捉我忽視的細節。
+
+今天是我的生日，不過我並不希望和你制定什麼特殊的行程。
+
+在這裡的每一場比賽，對我來說都是珍貴的禮物，作為牌手生活在藍灣市的每一天，也都是如此令人愉悅。
+
+不過如果可以的話，今天的對局結束後，或許我們能一起去吃頓宵夜？]],[[The competitive games I've experienced during my time in Azure Bay are unlike anything I've encountered before. President, the path of challenges you mapped out for me has been genuinely fascinating. As my analyst, your insight catches every detail I might otherwise overlook. Every match I've played here has felt like a gift in itself. Every day I've spent living in Azure Bay as a player has been the same—truly enjoyable.
+
+Today is my birthday, but I'm not hoping for any special plans. That said, if it's alright with you, maybe after today's games, we could grab a late-night bite together?]],[[藍湾市にいる間、私は今までにない対局体験をたくさん得ることができました。
+
+会長、あなたが私に用意してくれた挑戦の道は確かに面白いです。私のアナリストとして、あなたは鋭い洞察力を持ち、いつも私が見落としていた細部を正確に捉えてくれます。
+
+今日は私の誕生日ですが、あなたと何か特別な予定を立てる必要はないと思っています。
+
+ここでのすべての対局が私にとって大切な贈り物ですし、プレイヤーとして藍湾市で過ごす毎日も、すごく楽しいです。
+
+ただ、もしよければ、今日の対局が終わった後、一緒に夜食でも食べに行きませんか？]],[[藍湾市にいる間、私は今までにない対局体験をたくさん得ることができました。
+
+会長、あなたが私に用意してくれた挑戦の道は確かに面白いです。私のアナリストとして、あなたは鋭い洞察力を持ち、いつも私が見落としていた細部を正確に捉えてくれます。
+
+今日は私の誕生日ですが、あなたと何か特別な予定を立てる必要はないと思っています。
+
+ここでのすべての対局が私にとって大切な贈り物ですし、プレイヤーとして藍湾市で過ごす毎日も、すごく楽しいです。
+
+ただ、もしよければ、今日の対局が終わった後、一緒に夜食でも食べに行きませんか？]]},
 {"LAB_CHAR_AWAKEN_TIP_1001","欢迎光临，会长……不、不对，应该叫主人才对！主人，请来这边坐……感觉有些紧张？那当然啦，毕竟这是我第一次穿这种衣服，感觉好害羞啊——","歡迎光臨，會長……不、不對，應該叫主人才對！主人，請來這邊坐……感覺有些緊張？那當然啦，畢竟這是我第一次穿這種衣服，感覺好害羞啊——","Welcome, President—uh, I mean, Master! Right this way... Nervous? Of course I am! This is my first time wearing something like this, and it's just... super embarrassing...","いらっしゃいませ、会長…じゃなくて、ご主人様！こちらへどうぞ…緊張してるって？当たり前だよ！だって、こんな服着るの初めてだし、何だかすごく恥ずかしいんだもん。","歡迎光臨，會長……不、不對，應該叫主人才對！主人，請來這邊坐……感覺有些緊張？那當然啦，畢竟這是我第一次穿這種衣服，感覺好害羞啊——"},
 {"LAB_CHAR_AWAKEN_TIP_1002","这就是登上王座的感觉……内心的这份躁动，我永远不会忘记。会长，事到如今，我们总算可以暂缓脚步，慢慢欣赏这份仅属于我们二人的美景了，对吧？","這就是登上王座的感覺……內心的這份躁動，我永遠不會忘記。會長，事到如今，我們總算可以暫緩腳步，慢慢欣賞這份僅屬於我們二人的美景了，對吧？","So this is what it feels like to claim the throne... This pounding in my chest—I'll never forget it. President, we've come this far. Isn't it okay if we take a moment... to enjoy the view, just the two of us?","これが、王座を極める感覚……この胸の高鳴り、決して忘れない。会長、ここまで来たんだから、少しくらい…二人だけの景色をゆっくり眺めてもいいわよね？","這就是登上王座的感覺……內心的這份躁動，我永遠不會忘記。會長，事到如今，我們總算可以暫緩腳步，慢慢欣賞這份僅屬於我們二人的美景了，對吧？"},
 {"LAB_CHAR_AWAKEN_TIP_1003","如您所见，这便是小女子真实的样子，孤身守在这阁楼里，整日以酒为伴。不过，现在已经不同了。毕竟……有您能够一直陪在小女子的身旁，对吧？","如您所見，這便是小女子真實的樣子，孤身守在這閣樓裡，整日以酒為伴。不過，現在已經不同了。畢竟……有您能夠一直陪在小女子的身旁，對吧？","As you see, this is my true self-alone in this Sky Pavilion, living with only sake for company. But it's different now, because you're always by my side... aren't you, President?","ご覧の通り、これがわたくしのありのままの姿。この天守閣に独りたたずみ、酒を友として生きてまいりました。ですが今は違いますわ。いつもわたくしの傍らに…会長がいてくださいますもの、ね？","如您所見，這便是小女子真實的樣子，孤身守在這閣樓裏，整日以酒為伴。不過，現在已經不同了。畢竟……有您能夠一直陪在小女子的身旁，對吧？"},
@@ -4245,6 +5236,9 @@ On such a special day, may I invite you to the Arion Association, President, to 
 {"LAB_CHAR_AWAKEN_TIP_1012","会长，你瞧，这漫天星辰是如此的美丽。然而，最令我庆幸的是，在这幅宏大的星象中，能解读到属于你的轨迹。你的存在，就是这片星空赠予我的、最珍贵的礼物。","會長，你瞧，這漫天星辰是如此美麗。然而，最令我慶幸的是，在這幅宏大的星象之中，能夠解讀到屬於你的軌跡。你的存在，正是這片星空贈予我的、最珍貴的禮物。","Look—how beautiful the star-filled sky is. But the greatest happiness of all is being able to read your one-and-only trajectory within this vast universe. Your existence is the most precious gift bestowed by this starry sky.","見て、満天の星がこんなに美しいわ。けれど一番の幸せは、この広大な宇宙であなただけの軌跡を読み解けることよ。あなたという存在は、この星空から贈られた最も大切なプレゼントなの。","見て、満天の星がこんなに美しいわ。けれど一番の幸せは、この広大な宇宙であなただけの軌跡を読み解けることよ。あなたという存在は、この星空から贈られた最も大切なプレゼントなの。"},
 {"LAB_CHAR_AWAKEN_TIP_1013","会长，这支舞我只跳给你一个人看。能感受到吗，旋转时带起的风，都在诉说着我的心意哦~","會長，這支舞我只跳給你一個人看。能感受到嗎？旋轉時帶起的風，都在訴說著我的心意哦～","President, this dance is just for you. Can you feel it? With every turn, the wind rises gently, carrying my feelings to you.","会長、この舞は、あなたのためだけのものです。感じますか？回るたびに起こる風が、そっと、私の想いを運んでいますよ。","会長、この舞は、あなたのためだけのものです。感じますか？回るたびに起こる風が、そっと、私の想いを運んでいますよ。"},
 {"LAB_CHAR_AWAKEN_TIP_1014","如今我已站在了超乎想象的舞台之上，现在轮到我来辅佐会长了，前路将由我来为会长撑伞，不过这次，我们要撑开的是能笼罩整座城市的天幕。毕竟连最顽固的传统都能焕发生机，更何况这座城市的未来呢。","如今，我已站上超乎想像的舞台。接下來，輪到我來輔佐會長了。前路將由我為您撐傘；而這一次，我們要撐起的，是足以籠罩整座城市的天幕。既然連最頑固的傳統都能重煥生機，又何況這座城市的未來呢？","Right now, I stand upon a stage beyond anything I once imagined. This time, it is my turn to support you, President. From now on, I will hold the umbrella for you. However, what I intend to unfurl is a canopy that shelters the entire city—something that can breathe new life into even the most rigid traditions. All for the sake of this city's future.","今、私は想像を超える舞台に立っています。今度は私が会長を補佐する番、これからは私が会長のために傘を差します。しかし、今回開こうとしているのは、街全体を覆う天幕です。どんなに凝り固まった伝統にも新しい命を吹き込むことができるもの。この街の未来ならなおさらです。","今、私は想像を超える舞台に立っています。今度は私が会長を補佐する番、これからは私が会長のために傘を差します。しかし、今回開こうとしているのは、街全体を覆う天幕です。どんなに凝り固まった伝統にも新しい命を吹き込むことができるもの。この街の未来ならなおさらです。"},
+{"LAB_CHAR_AWAKEN_TIP_1015","我曾在月面舞蹈，与我相伴的只有繁星。可就在那时，我感受到了您的视线……那一夜您对月亮的注视，便是我们连结的开始。您偶然的一瞥，对我来说便是“命中注定”。","我曾在月面起舞，與我相伴的唯有繁星。可就在那時，我感受到了您的視線……那一夜您仰望月亮的瞬間，便是我們連結的開始。您偶然的一瞥，對我而言，便是「命中注定」。","I once danced on the moon. The only ones beside me were the stars. Yet in that moment, I felt your gaze... That night, when you looked up at the moon, our paths became one. That single fleeting glance—to me, it was destiny.","月面で舞ったことがある。その時、私のそばにいたのは、星々だけだった。けれどあの瞬間、私は確かにあなたの視線を感じたの……あの夜、あなたが月を見上げたとき、私たちの道が繋がったのだと。その何気ないひと目が、私を「運命」へと導いた。","I once danced on the moon. The only ones beside me were the stars. Yet in that moment, I felt your gaze... That night, when you looked up at the moon, our paths became one. That single fleeting glance—to me, it was destiny."},
+{"LAB_CHAR_AWAKEN_TIP_1016","慢死了！你知道我在这里等了多久吗？哼，看在你今天穿得还算得体的份上，我就原谅你了。呐，这杯奶茶给你……别露出那种恶心的笑容，赶快出发啦！","慢死了！你知道我在這裡等了多久嗎？哼，看在你今天穿得還算得體的份上，我就原諒你了。喏，這杯奶茶給你……別露出那種奇怪的笑容，快點出發啦！","You're late! Do you have any idea how long I've been waiting? Hmph, I'll let it slide since you at least look presentable today. Here—I got you some bubble tea... Stop smiling like that, it's annoying. Let's go already!","遅いわよ！私がどれだけ待ったと思ってるの？ふん、今日の格好がマシだったから、許してあげる。ほら、タピオカミルクティー、…ニヤニヤしてないで、さっさと行くわよ！","遅いわよ！私がどれだけ待ったと思ってるの？ふん、今日の格好がマシだったから、許してあげる。ほら、タピオカミルクティー、…ニヤニヤしてないで、さっさと行くわよ！"},
+{"LAB_CHAR_AWAKEN_TIP_3001","模特的写真与雀士的战绩，展现了我职业生涯的两面，这两面看似没有关系，但勾勒出它们的，是同一支名为“全力以赴”的笔。如今笔锋圆满，此后无论是增添细节，还是另起新章，想必现在的我，都能从容应对。","模特兒的寫真與雀士的戰績，展現了我職業生涯的兩面，這兩面看似沒有關係，但勾勒出它們的，是同一支名為“全力以赴”的筆。如今，我一路勾勒的軌跡漸趨圓滿，此後無論是增添細節，還是另起新章，想必現在的我，都能從容應對。","My achievements as a model and my record as a mahjong pro represent the two faces of my career. They may seem unrelated at a glance, but they've been drawn by the same brush: the conviction to give my absolute all. The lines I've painted until now have finally begun to mature. Whether I'm refining the finer details or opening an entirely new chapter, I feel ready to meet whatever comes—with room to spare.","モデルとしての功績と、雀士としての戦績は、私のキャリアの「二つの顔」を示しています。一見ばらばらに見えるこの二面も、それらを描き出してきた筆は一本──「全力を尽くす」という信念です。今、描いてきた軌跡は、ようやく円熟してきました。これから細部を描き足していくにしても、新しい章を開いていくにしても、今の私はきっと、余裕をもって応えられるでしょう。","模特的写真与雀士的战绩，展现了我职业生涯的两面，这两面看似没有关系，但勾勒出它们的，是同一支名为“全力以赴”的笔。如今笔锋圆满，此后无论是增添细节，还是另起新章，想必现在的我，都能从容应对。"},
 {"LAB_CHAR_ABILITY_100101","潜力","潛力","Potential","潜在力","潛力"},
 {"LAB_CHAR_ABILITY_100102","判断力","判斷力","Judgment","判断力","判斷力"},
 {"LAB_CHAR_ABILITY_100103","食欲","食慾",[[Appe-
@@ -6148,24 +7142,30 @@ At those words, she smiled sweetly and slowly let go, extending her sake cup tow
 {"LAB_GACHA_TAG_3","列车开往奥德赛","列車駛向奧德賽","Train to Odyssey","オデッセイ行きの列車","Train to Odyssey"},
 {"LAB_GACHA_TAG_4","夜与火","夜與火","Night & Flame","夜と炎","Night & Flame"},
 {"LAB_GACHA_TAG_5","雨中闲情","雨中閒情","Rainy Leisure","雨の閑情","Rainy Leisure"},
-{"LAB_GACHA_TAG_1002","望月冰见夜 概率提升","望月冰見夜 UP","Mochizuki Himiya UP","望月氷見夜 UP","모치즈키 히미야"},
-{"LAB_GACHA_TAG_1003","绯宫紫苑 概率提升","緋宮紫苑 UP","Hinomiya Shion UP","緋宮紫苑 UP","히노미야 시온"},
-{"LAB_GACHA_TAG_1004","鸦羽赛菲娅 概率提升","鴉羽賽菲婭 UP","Karasuba Sapphire UP","鴉羽サファイア UP","카라스바 사파이어"},
-{"LAB_GACHA_TAG_1005","天濑千寻 概率提升","天瀨千尋 UP","Amase Chihiro UP","天瀬千尋 UP","아마세 치히로"},
-{"LAB_GACHA_TAG_1006","诺诺 概率提升","諾諾 UP","Nono UP","ノノ UP","노노"},
-{"LAB_GACHA_TAG_1007","雾间琉华 概率提升","霧間琉華 UP","Kirima Ruka UP","霧間るか UP","키리마 루카"},
-{"LAB_GACHA_TAG_1008","早乙女心 概率提升","早乙女心 UP","Saotome Kokoro UP","早乙女こころ UP","사토메 코코로"},
-{"LAB_GACHA_TAG_1009","白石伊莉娜 概率提升","白石伊莉娜 UP","Shiraishi Irina UP","白石イリーナ UP","사토메 코코로"},
-{"LAB_GACHA_TAG_1010","莉莉丝 概率提升","莉莉絲 UP","Lilith UP","リリス UP","사토메 코코로"},
-{"LAB_GACHA_TAG_1012","薇尔 概率提升","薇爾 UP","Veil UP","ヴェール UP","Veil"},
-{"LAB_GACHA_TAG_1013","朱朱 概率提升","朱朱 UP","Syusyu UP","朱々 UP","朱々"},
-{"LAB_GACHA_TAG_1014","凉风薰 概率提升","涼風薰 UP","Suzukaze Kaoru UP","涼風薫 UP","涼風薫"},
+{"LAB_GACHA_TAG_6","月下二重奏","月下二重奏","Moonlit Duet","月下の二重奏","月下の二重奏"},
+{"LAB_GACHA_TAG_7","远道而来的挑战者","遠道而來的挑戰者","Distant Challenger","遠方からの挑戦者","遠方からの挑戦者"},
+{"LAB_GACHA_TAG_1002","望月冰见夜 20%UP","望月冰見夜 20%UP","Mochizuki Himiya 20% Up","望月氷見夜 20%UP","모치즈키 히미야"},
+{"LAB_GACHA_TAG_1003","绯宫紫苑 20%UP","緋宮紫苑 20%UP","Hinomiya Shion 20% Up","緋宮紫苑 20%UP","히노미야 시온"},
+{"LAB_GACHA_TAG_1004","鸦羽赛菲娅 20%UP","鴉羽賽菲婭 20%UP","Karasuba Sapphire 20% Up","鴉羽サファイア 20%UP","카라스바 사파이어"},
+{"LAB_GACHA_TAG_1005","天濑千寻 20%UP","天瀨千尋 20%UP","Amase Chihiro 20% Up","天瀬千尋 20%UP","아마세 치히로"},
+{"LAB_GACHA_TAG_1006","诺诺 20%UP","諾諾 20%UP","Nono 20% Up","ノノ 20%UP","노노"},
+{"LAB_GACHA_TAG_1007","雾间琉华 20%UP","霧間琉華 20%UP","Kirima Ruka 20% Up","霧間るか 20%UP","키리마 루카"},
+{"LAB_GACHA_TAG_1008","早乙女心 20%UP","早乙女心 20%UP","Saotome Kokoro 20% Up","早乙女こころ 20%UP","사토메 코코로"},
+{"LAB_GACHA_TAG_1009","白石伊莉娜 20%UP","白石伊莉娜 20%UP","Shiraishi Irina 20% Up","白石イリーナ 20%UP","사토메 코코로"},
+{"LAB_GACHA_TAG_1010","莉莉丝 20%UP","莉莉絲 20%UP","Lilith 20% Up","リリス 20%UP","사토메 코코로"},
+{"LAB_GACHA_TAG_1012","薇尔 20%UP","薇爾 20%UP","Veil 20% Up","ヴェール 20%UP","Veil"},
+{"LAB_GACHA_TAG_1013","朱朱 20%UP","朱朱 20%UP","Syusyu 20% Up","朱々 20%UP","朱々"},
+{"LAB_GACHA_TAG_1014","凉风薰 20%UP","涼風薰 20%UP","Suzukaze Kaoru 20% Up","涼風薫 20%UP","涼風薫"},
+{"LAB_GACHA_TAG_1015","沐娜 20%UP","沐娜 20%UP","Moona 20% Up","ムーナ 20%UP","Moona"},
+{"LAB_GACHA_TAG_1016","天月绘里奈 20%UP","天月繪里奈 20%UP","Amatsuki Erina 20% Up","天月えりな 20%UP","Amatsuki Erina"},
+{"LAB_GACHA_TAG_1017","冈田纱佳 20%UP","岡田紗佳 20%UP","Okada Sayaka 20% Up","岡田紗佳 20%UP","岡田紗佳 20%UP"},
 {"LAB_GACHA_TITLE_1","活动","活動","Event","イベント","이벤트"},
 {"LAB_GACHA_DES_1","崭露头角的新锐牌手们","嶄露頭角的新銳牌手們","Promising poker talents emerge from Azure Bay.","頭角を現す新鋭プレイヤーたち","두각을 나타낸 포커 신예"},
 {"LAB_GACHA_DES_2","潜在温泉雾气中的酒香","潛藏於溫泉霧氣中的酒香","Aged sake aroma weaves through the mist of springs.","温泉の湯気に漂う酒の香り","온천 안개에 숨겨진 술향"},
 {"LAB_GACHA_DES_3","身居高位的新牌手们","身居高位的新牌手們","High-ranking new players take the stage.","高位に身を置く新たなキャラクターたち","High-ranking new players take the stage."},
 {"LAB_GACHA_DES_4","N-Z酒吧的中流砥柱","N-Z酒吧的中流砥柱","The Pillars of N-Z Bar","N-Zバーの中心的存在","The Pillars of N-Z Bar"},
 {"LAB_GACHA_DES_5","穿过薄雾的革新者","穿越薄霧的革新者","Innovator Across the Haze","霧を払う革新者","Innovator Across the Haze"},
+{"LAB_GACHA_DES_6","月光与金耀的协奏","月光與金耀的協奏","A Concerto of Moonlight and Gold","月光と金耀の協奏曲","A Concerto of Moonlight and Gold"},
 {"LAB_GACHA_003","招募1次","招募1次","Recruit x1","1回募集","1회 모집"},
 {"LAB_GACHA_004","招募10次","招募10次","Recruit x10","10回募集","10회 모집"},
 {"LAB_GACHA_005","跳过招募动画","跳過招募動畫","Skip animation","募集アニメをスキップ","모집영상 건너뛰기"},
@@ -6205,10 +7205,11 @@ At those words, she smiled sweetly and slowly let go, extending her sake cup tow
 {"LAB_GACHA_022","{p1}不足，剩余所需{p1}将消耗{p2}{p3}补齐。","{p1}不足，剩餘所需{p1}將消耗{p2}{p3}補齊。","Insufficient {p1}. The remaining {p1} will be covered with {p2} {p3}.","{p1}が不足しています。不足分の{p1}は、{p2}個の{p3}を消費して補填されます。","{p1} 부족입니다. {p3} {p2}개로 보충됩니다."},
 {"LAB_GACHA_023","{p1}不足，是否前往商城购买？","{p1}不足，是否前往商城購買？","Insufficient {p1}. Purchase in Shop now?","{p1}が不足しています。購入画面に移動しますか？","{p1} 부족입니다. 상점에서 구매하시겠습니까?"},
 {"LAB_GACHA_024","{p1}已结束，招募失败。","{p1}已結束，招募失敗。","Failed. {p1} has already ended","{p1}が終了しました。募集に失敗しました。","{p1} 종료로 모집에 실패했습니다."},
-{"LAB_GACHA_025","获得","獲得","Get","得る","얻다"},
+{"LAB_GACHA_025","获得","獲得","Get","ゲット","얻다"},
 {"LAB_GACHA_026","{p1}已结束","{p1}已結束，招募失敗。","{p1} has already ended","{p1}が終了しました。募集に失敗しました。","{p1}已结束"},
 {"LAB_GACHA_027","{p1}%概率提升","{p1}% UP","{p1}% UP","{p1}% UP","{p1}%概率提升"},
 {"LAB_GACHA_028","限时：{p1}","距離結束：{p1}","Ends in {p1}","終了まで：{p1}","限时：{p1}"},
+{"LAB_GACHA_029","限时出售！","限時出售！","Limited-time!","期間限定販売！","限时出售！"},
 {"LAB_INFO_001","玩家信息","玩家資訊","Profile","プロフィール","플레이어 정보"},
 {"LAB_INFO_002","喜爱牌手","最愛牌手","Favorites","お気に入りキャラ","좋아하는 캐릭터"},
 {"LAB_INFO_003","个人宣言","個人狀態","Bio","ステータスメッセージ","개인 선언"},
@@ -6224,7 +7225,7 @@ At those words, she smiled sweetly and slowly let go, extending her sake cup tow
 {"LAB_INFO_013","需要：","需要：",[[Cost: ]],"コスト：","필요:"},
 {"LAB_INFO_014","持有：","持有：",[[Owned: ]],"所持中：","보유:"},
 {"LAB_INFO_015","点击输入昵称，8文字以内","點擊輸入暱稱（限8字以內）","Enter your nickname (2–16 characters)","ニックネームを入力してください（8文字以内）","클릭하여 닉네임 입력, 8자 이내"},
-{"LAB_INFO_016","长度不符，要求在2-16个字符","長度不符，請輸入1～8個字","Invalid length. Please use 2–16 characters","長さすぎます。8文字以内で入力してください","길이가 맞지 않음, 2~16자 요구"},
+{"LAB_INFO_016","长度不符，8文字以内","長度不符，請輸入1～8個字","Invalid length. Please use 2–16 characters","長さすぎます。8文字以内で入力してください","길이가 맞지 않음, 2~16자 요구"},
 {"LAB_INFO_017","格式不符，不可为纯数字","格式不符，暱稱不可為純數字","Invalid format. Nickname cannot contain only numbers","形式が正しくありません。数字のみのニックネームは使用できません","형식이 맞지 않음, 숫자만 불가"},
 {"LAB_INFO_018","格式不符，不可为邮箱格式","格式不符，暱稱不可為電子郵件格式","Invalid format. Nickname cannot be an email address","形式が正しくありません。メールアドレスは使用できません","형식이 맞지 않음, 이메일 형식 불가"},
 {"LAB_INFO_019","昵称已被占用，请更换新的昵称","暱稱已被使用，請嘗試其他名稱","Nickname already taken. Please try another one","このニックネームは既に使用されています","닉네임이 이미 사용 중입니다, 새 닉네임을 선택하세요"},
@@ -6273,8 +7274,8 @@ At those words, she smiled sweetly and slowly let go, extending her sake cup tow
 {"LAB_INFO_059","最佳获胜牌型","最佳獲勝手牌","Best Hand","ベスト勝利ハンド","最佳获胜牌型"},
 {"LAB_INFO_060","获胜最大奖池牌局","最高獲勝獎池","Biggest Pot","最高勝利賞金総額","获胜最大奖池牌局"},
 {"LAB_INFO_061","月卡专属","月卡專屬","Shark Pass Exclusive","月間パス限定","月卡专属"},
-{"LAB_INFO_062","解锁月卡查看更多数据","解鎖月卡以查看更多數據","Activate Shark Pass to unlock advanced stats","月間パスを解除して、詳細データを閲覧しよう","解锁月卡查看更多数据"},
-{"LAB_INFO_063","立即解锁","立即解鎖","Unlock Now","今すぐ解除","立即解锁"},
+{"LAB_INFO_062","解锁月卡查看更多数据","解鎖月卡以查看更多數據","Activate Shark Pass to unlock advanced stats","月間パスを解放して、詳細データをチェックしよう","解锁月卡查看更多数据"},
+{"LAB_INFO_063","立即解锁","立即解鎖","Unlock Now","今すぐ解放","立即解锁"},
 {"LAB_INFO_064",[[仅展示近30天相关数据统计结果（不包含练习场和SNG练习赛）
 名词说明：
 1.入池率
@@ -6353,6 +7354,9 @@ Short for "Continuation Bet," refers to the frequency of continuing to bet on th
 {"LAB_INFO_066","最近{p1}场","最近{p1}場","Last {p1} SNGs","直近{p1}試合","最近{p1}场"},
 {"LAB_INFO_067","游戏数据","遊戲數據","Statistics","対局データ","游戏数据"},
 {"LAB_INFO_068","数据说明","數據說明","Definition","用語解説","数据说明"},
+{"LAB_INFO_069","最近{p1}场","最近{p1}場","Last {p1} MTTs","直近{p1}試合","最近{p1}场"},
+{"LAB_INFO_070","总场次：","總場次：","MTTs Played:","総回数：","总场次："},
+{"LAB_INFO_071","进入奖圈：","進入獎圈：","ITM：","入賞圏内に入りました：","进入奖圈"},
 {"LAB_COLORGAME_001","彩球机","彩球機","Color Game","カラーゲーム","彩球机"},
 {"LAB_COLORGAME_002","余额","餘額","Balance","残高","잔액"},
 {"LAB_COLORGAME_003","清除","清除","Clear","クリア","초기화"},
@@ -6366,13 +7370,13 @@ Short for "Continuation Bet," refers to the frequency of continuing to bet on th
 {"LAB_COLORGAME_011","·选择筹码数量，点击对应颜色进行下注（单个颜色最大下注上限{p1}）。扭动彩蛋机，展示窗口将会掉落3颗彩球，根据彩球的颜色进行赔率计算。","・選擇籌碼數量，點擊對應顏色進行下注（單個顏色最大下注上限{p1}）。扭動彩蛋機，展示視窗將會掉落3顆彩球，根據彩球的顏色進行賠率計算。","· Select a chip amount, tap a color above to place your bet (max {p1} per color), then twist the knob to roll three random balls.","・チップの数量を選択し、対応する色をタップしてベットします（単色での最大ベット額は{p1}まで）。ガチャマシンを回すと、表示窓からボールが3つ落ち、ボールの色に基づいて配当倍率が計算されます。","·选择筹码数量，点击对应颜色进行下注（单个颜色最大下注上限{p1}）。扭动彩蛋机，展示窗口将会掉落3颗彩球，根据彩球的颜色进行赔率计算。"},
 {"LAB_COLORGAME_012","赔率","賠率","Payouts","配当倍率","배당률"},
 {"LAB_COLORGAME_013","赔率根据各种颜色出现的个数计算。","賠率根據各種顏色出現的個數計算。","Payouts are based on how many balls match each color you bet on:","倍率が各色のボールの数に基づいて決定されます","배당률은 맞춘 색상의 개수에 따라 계산됩니다."},
-{"LAB_COLORGAME_014","·押中任一颜色个数1个，奖励：押注筹码*2。","・押中任一顏色個數1個，獎勵：押注籌碼 * 2。","· 1 match – Pays 2:1","・選択した色のボールが1個出現　報酬：チップ × 2","·선택한 색상이 1개 맞으면 보상: 베팅 코인 × 2"},
-{"LAB_COLORGAME_015","·押中任一颜色个数2个，奖励：押注筹码*3。","・押中任一顏色個數2個，獎勵：押注籌碼 * 3。","· 2 matches – Pays 3:1","・選択した色のボールが2個出現　報酬：チップ × 3","·선택한 색상이 2개 맞으면 보상: 베팅 코인 ×3"},
-{"LAB_COLORGAME_016","·押中任一颜色个数3个，奖励：押注筹码*10。","・押中任一顏色個數3個，獎勵：押注籌碼 * 10。","· 3 matches – Pays 10:1","・選択した色のボールが3個出現　報酬：チップ × 10","·선택한 색상이 3개 맞으면 보상: 베팅 코인 × 10"},
+{"LAB_COLORGAME_014","·押中任一颜色个数1个，奖励：押注筹码*2。","・押中任一顏色個數1個，獎勵：押注籌碼 * 2。","· 1 match – Pays 2:1","・選んだ色のボールが1つ出現した場合、\n報酬：ベット額 × 2","·선택한 색상이 1개 맞으면 보상: 베팅 코인 × 2"},
+{"LAB_COLORGAME_015","·押中任一颜色个数2个，奖励：押注筹码*3。","・押中任一顏色個數2個，獎勵：押注籌碼 * 3。","· 2 matches – Pays 3:1","・選んだ色のボールが2つ出現した場合、\n報酬：ベット額 × 3","·선택한 색상이 2개 맞으면 보상: 베팅 코인 ×3"},
+{"LAB_COLORGAME_016","·押中任一颜色个数3个，奖励：押注筹码*10。","・押中任一顏色個數3個，獎勵：押注籌碼 * 10。","· 3 matches – Pays 10:1","・選んだ色のボールが3つ出現した場合、\n報酬：ベット額 × 10","·선택한 색상이 3개 맞으면 보상: 베팅 코인 × 10"},
 {"LAB_COLORGAME_017","余额不足","餘額不足","Insufficient balance","残高が足りません","잔액이 부족합니다"},
 {"LAB_COLORGAME_018","该区域最大下注上限{p1}","該區域最大下注上限：{p1}","Max betting limit: {p1}","このエリアの最大ベット額：{p1}","해당 구역의 최대 베팅 한도: {p1}"},
 {"LAB_COLORGAME_019","当前不满足按钮限制，操作失败","暫無可執行的操作","No bets or actions to modify","条件を満たしていないため、操作できません","현재 조건을 만족하지 않아 실행할 수 없습니다"},
-{"LAB_COLORGAME_020","请先点击区域进行下注","請先點擊顏色區域進行下注","Tap a color to place a bet first","さきにエリアをクリックしてベットしてください","먼저 구역을 클릭해 베팅하세요"},
+{"LAB_COLORGAME_020","请先点击区域进行下注","請先點擊顏色區域進行下注","Tap a color to place a bet first","さきにエリアをタップしてベットしてください","먼저 구역을 클릭해 베팅하세요"},
 {"LAB_COLORGAME_021","历史记录","歷史記錄","History","履歴","历史记录"},
 {"LAB_COLORGAME_022","游戏说明","遊戲說明","Rules","ゲームについて","게임 설명"},
 {"LAB_COLORGAME_023","历史","歷史","History","履歴","历史"},
@@ -6381,7 +7385,7 @@ Short for "Continuation Bet," refers to the frequency of continuing to bet on th
 {"LAB_COLORGAME_026","区域","區域","Area","エリア","区域"},
 {"LAB_COLORGAME_027","奖励","獎勵","Reward","報酬","奖励"},
 {"LAB_COLORGAME_028","仅展示近{p1}条抽奖记录。","僅顯示最近{p1}筆記錄。","Only the latest {p1} records are displayed.","直近{p1}件までの記録のみ表示します。","仅展示近{p1}条抽奖记录。"},
-{"LAB_COLORGAME_029","点击对应记录可查看各区域下注情况。","點擊對應記錄，可查看各區域的下注詳情。","Tap a record to view its details.","該当記録をクリックすると、各エリアのベット状況を確認できます。","点击对应记录可查看各区域下注情况。"},
+{"LAB_COLORGAME_029","点击对应记录可查看各区域下注情况。","點擊對應記錄，可查看各區域的下注詳情。","Tap a record to view its details.","該当記録をタップすると、各エリアのベット状況を確認できます。","点击对应记录可查看各区域下注情况。"},
 {"LAB_COLORGAME_030","点此可查看历史记录和游戏说明。","點此可查看歷史記錄和遊戲說明。","Tap here to view the rules and history.","タップしてルールと履歴を確認","点此可查看历史记录和游戏说明。"},
 {"LAB_FRIENDS_SYSTEM_NAME","好友","好友","Friends","フレンド","친구"},
 {"LAB_FRIENDS_TAB_1","游戏好友","遊戲好友","Friends","ゲームフレンド","게임 친구"},
@@ -6450,7 +7454,7 @@ Short for "Continuation Bet," refers to the frequency of continuing to bet on th
 {"LAB_FRIROOM_014","创建房间","創建房間","Create Room","ルームを作成","创建房间"},
 {"LAB_FRIROOM_015","输入房号加入房间","輸入房號加入房間","Enter a room ID to join","ルームIDを入力して参加","输入房号加入房间"},
 {"LAB_FRIROOM_016","清空","清空","Clear","クリア","清空"},
-{"LAB_FRIROOM_017","加入房间","加入房間","Join","ルームに参加","加入房间"},
+{"LAB_FRIROOM_017","加入房间","加入房間","Join","ルームに加入","加入房间"},
 {"LAB_FRIROOM_018","房间列表","房間列表","Room List","ルームリスト","房间列表"},
 {"LAB_FRIROOM_019","仅显示未满员","僅顯示未滿員","Hide full tables","空席ありのみ表示","仅显示未满员"},
 {"LAB_FRIROOM_020","{p1}人座","{p1}人桌","{p1}-Max","{p1}-Max","{p1}人座"},
@@ -6475,7 +7479,7 @@ Short for "Continuation Bet," refers to the frequency of continuing to bet on th
 {"LAB_FRIROOM_039","邀请好友","邀請好友","Invite Friends","フレンドを招待","邀请好友"},
 {"LAB_FRIROOM_040","房号：{p1}","房號：{p1}","Room ID: {p1}","ルームID：{p1}","房号：{p1}"},
 {"LAB_FRIROOM_041","复制链接","複製連結","Copy Link","リンクをコピー","复制链接"},
-{"LAB_FRIROOM_042","成功加入{p1}的好友房！","成功加入{p1}的友人房！","Successfully joined {p1}'s Friendly Game!","{p1}さんの友人戦に参加しました！","成功加入{p1}的好友房！"},
+{"LAB_FRIROOM_042","成功加入{p1}的好友房！","成功加入{p1}的友人房！","Successfully joined {p1}'s Friendly Game!","{p1}さんの友人戦ルームに加入しました！","成功加入{p1}的好友房！"},
 {"LAB_FRIROOM_043","好友房说明",nil,nil,nil,nil},
 {"LAB_FRIROOM_044",[[1.好友对局筹码不使用玩家筹码，所选买入仅限当局对战，输赢不影响玩家所持有筹码数量。
 2.好友房目前仅支持德州扑克玩法。
@@ -6511,11 +7515,11 @@ Short for "Continuation Bet," refers to the frequency of continuing to bet on th
 {"LAB_SETTINGS_020","全局音量","全域音量","Master Volume","マスターボリューム","全局音量"},
 {"LAB_SETTINGS_021","音乐&音效","音樂&音效","Music & Sound Effects","音楽＆効果音","音乐&音效"},
 {"LAB_SETTINGS_022","大厅BGM","大廳BGM","Lobby BGM","ロビーBGM","大厅BGM"},
-{"LAB_SETTINGS_023","对局BGM","對戰BGM","Table BGM","対戦BGM","对局BGM"},
+{"LAB_SETTINGS_023","对局BGM","對戰BGM","Table BGM","対局BGM","对局BGM"},
 {"LAB_SETTINGS_024","音效","音效","Sound Effects","効果音","音效"},
 {"LAB_SETTINGS_025","牌手语音","牌手語音","Character Voice","ボイス","牌手语音"},
-{"LAB_SETTINGS_026","对局内语音","對局內語音","At Table","対戦中ボイス","对局内语音"},
-{"LAB_SETTINGS_027","对局外语音","對局外語音","Off Table","対戦以外のボイス","对局外语音"},
+{"LAB_SETTINGS_026","对局内语音","對局內語音","At Table","対局内ボイス","对局内语音"},
+{"LAB_SETTINGS_027","对局外语音","對局外語音","Off Table","対局外ボイス","对局外语音"},
 {"LAB_SETTINGS_028","自定义牌手语音","自訂牌手語音","Custom","カスタムボイス","自定义牌手语音"},
 {"LAB_SETTINGS_029","关闭后，该牌手在所有场景下都将不播放其语音","關閉後，該牌手在所有場景中將不會播放語音","When turned off, the character's voice will be completely muted.","オフにすると、該当キャラクターのボイスはすべて再生されなくなります","关闭后，该牌手在所有场景下都将不播放其语音"},
 {"LAB_SETTINGS_030","退出游戏","退出遊戲","Exit Game","ゲーム終了","退出游戏"},
@@ -6546,7 +7550,7 @@ Short for "Continuation Bet," refers to the frequency of continuing to bet on th
 1.我们将在您提交申请后的1天内以电子邮件的形式告知您结果核查一经通过，您的账号将在<color=#D61473>10天</color>后的更新时间注销。注销后不再能正常登录游戏，也无法撤销申请。
 2.一经注销后，你将无法查看或使用原账号的任何数据，包括游戏内的货币、已购买的虚拟道具、游戏进度和状态、以及其他数据。]]},
 {"LAB_SETTINGS_045","<color=#D61473>若您在注销申请处理期间内，使用本账户登录或进行游戏，则视为您自动撤销注销申请。</color>","<color=#D61473>若您在刪除申請處理期間內使用此帳號登入或進行遊戲，將視同您自動撤回刪除申請。</color>","<color=#D61473>If you log in to the game using this account during the processing period, your deletion request will be considered canceled.</color>","<color=#D61473>削除申請処理期間中に本アカウントでログインまたはプレイした場合、削除申請は自動的に撤回されたものとみなします。</color>","<color=#D61473>若您在注销申请处理期间内，使用本账户登录或进行游戏，则视为您自动撤销注销申请。</color>"},
-{"LAB_SETTINGS_046","我已阅读并同意以上条款","我已閱讀並同意以上條款","I have read and agree to the above terms.","上記の條項を読み、同意しました","我已阅读并同意以上条款"},
+{"LAB_SETTINGS_046","我已阅读并同意以上条款","我已閱讀並同意以上條款","I have read and agree to the above terms.","上記の条項を読み、同意しました","我已阅读并同意以上条款"},
 {"LAB_SETTINGS_047",[[注销账号申请已成功提交。申请通过审核后，账号将于 {p1} 进行注销。
 
 <color=#eb0c89>您现在将被登出。若未撤回删除申请，将无法再次登入游戏。</color>]],[[刪除帳號申請已成功提交。申請通過審核後，帳號將於 {p1} 進行刪除。
@@ -6623,13 +7627,13 @@ Short for "Continuation Bet," refers to the frequency of continuing to bet on th
 <p>*注：为保障您的权益、避免可能的风险，我们的客服有可能会在正式删除账号前，单独与您取得联系，还请您留意相关的邮件。</p>]]},
 {"LAB_SETTINGS_065","3.请输入您的联系Email","3. 輸入您的聯絡信箱","3. Please enter your email:","3.ご連絡先メールアドレスを入力してください","3.请输入您的联系Email"},
 {"LAB_SETTINGS_066","联系邮箱未输入，确认失败","尚未輸入聯絡信箱，確認失敗","Failed. Email cannot be empty","連絡用メールアドレスが未入力のため、送信できませんでした","联系邮箱未输入，确认失败"},
-{"LAB_SETTINGS_067","请勾选同意以上条款","請勾選以同意以上條款","Please check the box to agree to the terms above.","「上記の條項に同意する」にチェックを入れてください","请勾选同意以上条款"},
+{"LAB_SETTINGS_067","请勾选同意以上条款","請勾選以同意以上條款","Please check the box to agree to the terms above.","「上記の条項に同意する」にチェックを入れてください","请勾选同意以上条款"},
 {"LAB_SETTINGS_068","绑定邮件成功","信箱綁定成功","Email linked successfully","メール連携完了","绑定邮件成功"},
 {"LAB_SETTINGS_069","验证码已发送到邮箱","驗證碼已寄送至信箱","A verification code has been sent to your email","認証コードをご記入のメールアドレスに送信しました","验证码已发送到邮箱"},
 {"LAB_SETTINGS_070","https://discord.gg/acrfBjX8xT","https://discord.gg/acrfBjX8xT","https://discord.gg/acrfBjX8xT","https://discord.gg/acrfBjX8xT","https://discord.gg/acrfBjX8xT"},
 {"LAB_SETTINGS_100","礼品码","禮品碼","Gift Code","ギフトコード","礼品码"},
-{"LAB_SETTINGS_101","请输入兑换码","請輸入禮品碼","Enter your gift code","ギフトコードを入力してください","请输入兑换码"},
-{"LAB_SETTINGS_102","兑换码有误，请再次确认","禮品碼錯誤，請再次確認","Invalid code. Please check and try again","ギフトコードが正しくありません。コードを確かめ、もう一度お試しください。","兑换码有误，请再次确认"},
+{"LAB_SETTINGS_101","请输入礼品码","請輸入禮品碼","Enter your gift code","ギフトコードを入力してください","请输入兑换码"},
+{"LAB_SETTINGS_102","礼品码有误，请再次确认","禮品碼錯誤，請再次確認","Invalid code. Please check and try again","ギフトコードが正しくありません。コードを確かめ、もう一度お試しください。","兑换码有误，请再次确认"},
 {"LAB_SETTINGS_103","您的操作过于频繁，请稍后再尝试！","操作過於頻繁，請稍後再試！","Too many attempts. Please try again later",[[操作が頻繁すぎます。
 しばらくしてからお試しください。]],"您的操作过于频繁，请稍后再尝试！"},
 {"LAB_SETTINGS_104","礼品码已过期","禮品碼已過期","Gift code has expired","ギフトコードの有効期限が切れています","礼品码已过期"},
@@ -6644,7 +7648,7 @@ Short for "Continuation Bet," refers to the frequency of continuing to bet on th
 {"LAB_SETTINGS_114","用于保存游戏截图到您的相册。","用於將遊戲截圖儲存至您的相簿。","Used to save game screenshots to your album.","ゲームのスクリーンショットを端末のアルバムに保存するために使用します。","用于保存游戏截图到您的相册。"},
 {"LAB_SETTINGS_115","用于分析广告投放效果，识别安装来源。","用於分析廣告投放效果與識別安裝來源。","Used to analyze ad performance and identify the source of app installs.","広告配信の効果分析およびアプリのインストール元の識別に使用されます。","用于分析广告投放效果，识别安装来源。"},
 {"LAB_SETTINGS_116","GUID：","GUID：","GUID:","GUID：","GUID："},
-{"LAB_SETTINGS_117","账号已申请注销，需撤回申请才能登录。","帳號已申請刪除，需撤回申請後才能登入。","This account is scheduled for deletion. Do you want to cancel the deletion request and log in now?","アカウント削除申請を受け付けました。申請を取り消すにはログインが必要です。","账号已申请删除，需撤回申请才能登录。"},
+{"LAB_SETTINGS_117","账号已申请注销，需撤回申请才能登录。","帳號已申請刪除，需撤回申請後才能登入。","This account is scheduled for deletion. Do you want to cancel the deletion request and log in now?","アカウント削除申請を受け付けました。ログインするには、申請の取り消しが必要です。","账号已申请删除，需撤回申请才能登录。"},
 {"LAB_SETTINGS_118","撤回并重登","撤回並登入","Cancel & Log In","取り消してログイン","撤回并重登"},
 {"LAB_SETTINGS_119","特定商取引法","特定商取引法","特定商取引法","特定商取引法","特定商取引法"},
 {"LAB_SETTINGS_120","資金決済法","資金決済法","資金決済法","資金決済法","資金決済法"},
@@ -6654,6 +7658,7 @@ Short for "Continuation Bet," refers to the frequency of continuing to bet on th
 {"LAB_SETTINGS_124","对局外","對局外","Off Table","対戦外","局外"},
 {"LAB_SETTINGS_125","对局内","對局內","At Table","対戦中","局内"},
 {"LAB_SETTINGS_126","UI","UI","UI","UI","UI"},
+{"LAB_SETTINGS_127","垂直同步","垂直同步","VSync","垂直同期","垂直同步"},
 {"LAB_DAILY_SIGN_IN","7日签到","7日簽到","7-Day Check-In","7日ログイン","7日签到"},
 {"LAB_DAILY_SIGN_IN_1",[[每天签到！
 记录成长历程！]],[[每天簽到！
@@ -6672,10 +7677,10 @@ Daily check-in refreshes at <color=#fb61d0>04:00</color> (UTC+9).]]},
 {"LAB_DAILY_SIGN_IN_6","月卡奖励","月卡獎勵","Shark Pass Rewards","月間パス報酬","月卡奖励"},
 {"LAB_DAILY_SIGN_IN_7","前往开通","前往訂閱","Activate","アンロックする","前往激活"},
 {"LAB_DAILY_SIGN_IN_8","是否使用免费补签？","是否使用免費補簽？","Make up for this missed check-in for free?","無料補填のチャンスを利用しますか？","是否使用免费补签？"},
-{"LAB_DAILY_SIGN_IN_9","剩余次数：{p1}/{p2}","剩餘次數：{p1}/{p2}","Left: {p1}/{p2}","残りの回数：{p1}/{p2}","剩余次数：{p1}/{p2}"},
+{"LAB_DAILY_SIGN_IN_9","剩余次数：{p1}/{p2}","剩餘次數：{p1}/{p2}","Left: {p1}/{p2}","残り回数：{p1}/{p2}","剩余次数：{p1}/{p2}"},
 {"LAB_DAILY_SIGN_IN_10",[[开通 <color=#eb0c89>鲨鱼月卡</color> 后才能进行补签！
 是否前往开通？]],[[訂閱 <color=#eb0c89>鯊魚月卡</color> 後才能進行補簽！
-是否前往訂閱？]],"Make-Up Check-In is only available to <color=#eb0c89>Shark Pass</color> holders! Would you like to activate it now?",[[<color=#eb0c89>シャーク月間パス</color>を購入すると、補填機能が利用可能。
+是否前往訂閱？]],"Make-Up Check-In is only available to <color=#eb0c89>Shark Pass</color> holders! Would you like to activate it now?",[[<color=#eb0c89>シャーク月間パス</color>を購入すると、補填機能が利用可能です。
 購入しますか？]],[[开通 <color=#eb0c89>鲨鱼月卡</color> 后才能进行补签！
 是否前往开通？]]},
 {"LAB_DAILY_SIGN_IN_11","{p1}天","{p1}天","{p1} days","{p1}日","{p1}天"},
@@ -7461,7 +8466,7 @@ Even in defeat, she doesn't dodge the penalty. But the "truths" she reveals, fra
 加奈毫無懸念地輸掉了對局，作為偷吃蛋糕的懲罰，會長提出的要求是——]],[[President rushes to the lounge after wrestling with urgent business, only to overhear Hoshimiya Kana talking to herself just outside the door. Peeking through a crack in the door, President catches her red-handed—sneaking bites of the strawberry cake left there.
 
 Right in the middle of it, President walks in. Flustered and desperate to escape a scolding, Kana scrambles for an excuse. She proposes a special game—and President, half exasperated and half amused, accepts.]],[[緊急の用事を済ませた会長は、急いで約束の場所の休憩室へ向かったが、偶然ドアの外で星宮かなの独り言を耳にする。ドアの隙間から、かなが自分が休憩室に置いたイチゴケーキを盗み食いしているのが見えた。
-彼女が半分ほど食べたところで、会長がドアを開けて入った。慌てた加奈は怒られないように、会長に「特別対局」を持ちかけ、会長はおかしくもあり腹立たしくもありながら、挑戦を受けた。
+彼女が半分ほど食べたところで、会長がドアを開けて入った。慌てたかなは怒られないように、会長に「特別対局」を持ちかけ、会長はおかしくもあり腹立たしくもありながら、挑戦を受けた。
 かなは予想通り対局に負け、ケーキの盗み食いの罰として、会長が提示した要求は…]],[[President rushes to the lounge after wrestling with urgent business, only to overhear Hoshimiya Kana talking to herself just outside the door. Peeking through a crack in the door, President catches her red-handed—sneaking bites of the strawberry cake left there.
 
 Right in the middle of it, President walks in. Flustered and desperate to escape a scolding, Kana scrambles for an excuse. She proposes a special game—and President, half exasperated and half amused, accepts.]]},
@@ -7529,7 +8534,7 @@ After carrying out a punishment that is equal parts humiliating and daring, she 
 {"LAB_STORY_DIALOGUE_S4_2_4","刚走到休息室门口，一阵细碎的自言自语穿过门板，传到了我的耳中。","剛走到休息室門口，一陣細碎的自言自語透過門板傳入我的耳中。","Just as I reach the lounge door, a faint murmur drifts through the wood to my ears.","休憩室のドアの前まで来ると、かすかな独り言がドア越しに耳に届いた。","休憩室のドアの前まで来ると、かすかな独り言がドア越しに耳に届いた。"},
 {"LAB_STORY_DIALOGUE_S4_2_5","出于好奇，我停下了正要推门的手，顺着虚掩的门缝悄悄向里看去。","出於好奇，我停下正要推門的手，順著虛掩的門縫悄悄向裡看去。","Curious, I stop myself from pushing it open and peek through the gap instead.","好奇心から、私はドアを開けようとしていた手を止め、半開きのドアの隙間からこっそり中を覗いた。","好奇心から、私はドアを開けようとしていた手を止め、半開きのドアの隙間からこっそり中を覗いた。"},
 {"LAB_STORY_DIALOGUE_S4_2_6","真是的……会长怎么还不来啊！","真是的……會長怎麼還不來啊！","Ugh... why isn't President here yet!","もう…会長、なんでまだ来ないのよ！","もう…会長、なんでまだ来ないのよ！"},
-{"LAB_STORY_DIALOGUE_S4_2_7","亏人家特意换上这套衣服，还想给他一个惊喜呢。","虧人家特地換上這套衣服，還想給他一個驚喜呢。","I went through all the trouble of changing into this outfit, wanted to surprise President and everything.","折角この服に着替えてきて、サプライズにしようと思ったのに。","折角この服に着替えてきて、サプライズにしようと思ったのに。"},
+{"LAB_STORY_DIALOGUE_S4_2_7","亏人家特意换上这套衣服，还想给他一个惊喜呢。","虧人家特地換上這套衣服，還想給他一個驚喜呢。","I went through all the trouble of changing into this outfit, wanted to surprise President and everything.","せっかくこの服に着替えてきて、サプライズにしようと思ったのに。","折角この服に着替えてきて、サプライズにしようと思ったのに。"},
 {"LAB_STORY_DIALOGUE_S4_2_8","不过，冷静下来一看，这套衣服是不是……有点羞耻啊……啊哇哇哇——","不過，冷靜下來一看，這套衣服是不是……有點羞恥啊……啊哇哇哇——","But now that I think about it... isn't this outfit kind of... embarrassing...? Wahhh—","でも、冷静になって見ると、この服って…ちょっと恥ずかしくない…？あわわわ――","でも、冷静になって見ると、この服って…ちょっと恥ずかしくない…？あわわわ――"},
 {"LAB_STORY_DIALOGUE_S4_2_9","星宫加奈害羞的捂住自己的脸，开始在房间内毫无目的地踱来踱去。","星宮加奈害羞地捂住臉，在房間裡毫無目的地踱來踱去。","Kana buries her face in her hands and starts pacing aimlessly around the room.","星宮かなは恥ずかしそうに顔を覆い、部屋の中を目的もなくうろうろし始めた。","星宮かなは恥ずかしそうに顔を覆い、部屋の中を目的もなくうろうろし始めた。"},
 {"LAB_STORY_DIALOGUE_S4_2_10","突然，她的注意力被角落里的什么东西吸引了过去。","突然，她的注意力被角落裡的某樣東西吸引了過去。","Then something in the corner catches her eye.","突然、彼女の注意は部屋の隅にある何かに引き寄せられた。","突然、彼女の注意は部屋の隅にある何かに引き寄せられた。"},
@@ -7610,14 +8615,14 @@ After carrying out a punishment that is equal parts humiliating and daring, she 
 {"LAB_STORY_DIALOGUE_S4_3_31","冰见夜抬起头，水汽氤氲的绿色眼眸愣愣的看着我。","冰見夜抬起頭，水氣氤氳的綠色眼眸怔怔地望著我。","Himiya lifts her head, her mist-filled green eyes staring blankly at me.","氷見夜は顔を上げ、涙で曇った翠の瞳をぼんやりと私に向けた。","氷見夜は顔を上げ、涙で曇った翠の瞳をぼんやりと私に向けた。"},
 {"LAB_STORY_DIALOGUE_S4_3_32","你从哪拿到这个骰子的？","你從哪裡拿到這顆骰子的？","Where did you get that die?","このサイコロ、どこで手に入れたんだ？","このサイコロ、どこで手に入れたんだ？"},
 {"LAB_STORY_DIALOGUE_S4_3_33","我……我在走廊上听到了星宫小姐和凉风小姐的谈话。星宫小姐说，这是一枚能够战无不胜的骰子……","我……我在走廊上聽到了星宮小姐和涼風小姐的談話。星宮小姐說，這是一顆能夠戰無不勝的骰子……","I... I overheard Miss Hoshimiya and Miss Suzukaze talking in the hallway. Miss Hoshimiya said it was a die that made you invincible whenever you rolled it...","廊下で星宮さんと涼風さんの話を聞いたの。星宮さんが言ってたの、これは必勝のサイコロだって…","廊下で星宮さんと涼風さんの話を聞いたの。星宮さんが言ってたの、これは必勝のサイコロだって…"},
-{"LAB_STORY_DIALOGUE_S4_3_34","趁她把骰子放在桌上的时候，我就……","趁她把骰子放在桌上的時候，我就……","So when she set the die down on the table, I...","彼女が賽を机に置いた時に、私が…","彼女が賽を机に置いた時に、私が…"},
+{"LAB_STORY_DIALOGUE_S4_3_34","趁她把骰子放在桌上的时候，我就……","趁她把骰子放在桌上的時候，我就……","So when she set the die down on the table, I...","彼女がサイコロを机に置いた時に、私が…","彼女が賽を机に置いた時に、私が…"},
 {"LAB_STORY_DIALOGUE_S4_3_35","哈……不愧是你，和我设想的一模一样。","哈……不愧是你，和我設想的一模一樣。","Ha... Just as I expect. Exactly as I had imagined.","はあ…さすがは君だ。思った通りだ。","はあ…さすがは君だ。思った通りだ。"},
 {"LAB_STORY_DIALOGUE_S4_3_36","……什么意思？","……什麼意思？","...What do you mean?","…どういう意味？","…どういう意味？"},
 {"LAB_STORY_DIALOGUE_S4_3_37","你觉得是谁放出了这枚骰子的传闻？","你覺得，是誰放出了這顆骰子的傳聞？","Who do you think started the rumor about this die?","誰がこのサイコロの噂を流したと思う？","誰がこのサイコロの噂を流したと思う？"},
 {"LAB_STORY_DIALOGUE_S4_3_38","又是谁恰巧让你听到了这段对话？","又是誰，恰巧讓你聽見了那段對話？","And who arranged for you to overhear that conversation?","誰がたまたま君にその話を聞かせたんだ？","誰がたまたま君にその話を聞かせたんだ？"},
-{"LAB_STORY_DIALOGUE_S4_3_39","还有，谁知道你一定会拿着它来找我？","還有，是誰知道你一定會拿著它來找我？","And who knew you would come find me with it?","それに、君が必ずそれを持って俺のところに来るって、誰が知ってたと思う？","それに、君が必ずそれを持って俺のところに来るって、誰が知ってたと思う？"},
+{"LAB_STORY_DIALOGUE_S4_3_39","还有，谁知道你一定会拿着它来找我？","還有，是誰知道你一定會拿著它來找我？","And who knew you would come find me with it?","それに、君が必ずそれを持って私のところに来るって、誰が知ってたと思う？","それに、君が必ずそれを持って俺のところに来るって、誰が知ってたと思う？"},
 {"LAB_STORY_DIALOGUE_S4_3_40","冰见夜的身体猛地一僵，她终于反应过来自己落入了怎样的圈套。","冰見夜的身體猛地一僵，終於意識到自己落入了怎樣的圈套。","Himiya's body goes rigid. The full shape of the trap she has walked into finally dawns on her.","氷見夜の体は硬直し、ようやく自分がどんな罠に落ちたのかを理解した。","氷見夜の体は硬直し、ようやく自分がどんな罠に落ちたのかを理解した。"},
-{"LAB_STORY_DIALOGUE_S4_3_41","会长……你这骗子，变态！你做了这么多，就是为了让我出丑吗！","會長……你這個騙子，變態！你做了這麼多，就是為了讓我出醜嗎！","President... you liar! You are awful! Was all of this just to humiliate me?!","会長…この嘘つき、変態！こんなことまでして、私を恥ずかしい目に合わせるつもりだったの？！","会長…この嘘つき、変態！こんなことまでして、私を恥ずかしい目に合わせるつもりだったの？！"},
+{"LAB_STORY_DIALOGUE_S4_3_41","会长……你这骗子，变态！你做了这么多，就是为了让我出丑吗！","會長……你這個騙子，變態！你做了這麼多，就是為了讓我出醜嗎！","President... you liar! You are awful! Was all of this just to humiliate me?!","会長…この嘘つき、変態！こんなことまでして、私を恥ずかしい目に遭わせるつもりだったの？！","会長…この嘘つき、変態！こんなことまでして、私を恥ずかしい目に合わせるつもりだったの？！"},
 {"LAB_STORY_DIALOGUE_S4_3_42","我想提的赌注可不是这个。","我原本想提出的賭注，可不是這個。","That is not the wager I had in mind.","私が提案しようと思っていた賭けは、これじゃなかったんだがな。","私が提案しようと思っていた賭けは、これじゃなかったんだがな。"},
 {"LAB_STORY_DIALOGUE_S4_3_43","那……你原本想提什么？","那……你本來想提什麼？","Then... what were you actually going to propose?","じゃあ…元々何を提案するつもりだったの？","じゃあ…元々何を提案するつもりだったの？"},
 {"LAB_STORY_DIALOGUE_S4_3_44","附近开了家不错的甜品店，本来想约你一起去尝尝的。","附近新開了一家不錯的甜點店，本來是想約你一起去嚐嚐的。","There's a lovely new dessert shop nearby. I was going to ask if you would like to go together.","近くにいい感じのスイーツ店ができてな。一緒に行ってみようと思ってたんだ。","近くにいい感じのスイーツ店ができてな。一緒に行ってみようと思ってたんだ。"},
@@ -7629,6 +8634,248 @@ After carrying out a punishment that is equal parts humiliating and daring, she 
 {"LAB_STORY_DIALOGUE_S4_3_50","冰见夜的眼睛一亮，差点从桌上跳了起来。","冰見夜的眼睛一亮，差點從桌上跳了起來。","Himiya's eyes light up, and she nearly leaps right off the table.","氷見夜の目は輝き、牌卓から飛び上がらんばかりだった。","氷見夜の目は輝き、牌卓から飛び上がらんばかりだった。"},
 {"LAB_STORY_DIALOGUE_S4_3_51","但下一秒，她轻咳了两声，恢复了往日的冷静。","但下一秒，她輕咳了兩聲，又恢復了往日的冷靜。","But a second later, she clears her throat twice and composes herself.","しかし次の瞬間、彼女は軽く咳をして、いつもの冷静さを取り戻した。","しかし次の瞬間、彼女は軽く咳をして、いつもの冷静さを取り戻した。"},
 {"LAB_STORY_DIALOGUE_S4_3_52","既然会长邀请我了，那我就勉为其难的陪你去一趟吧。","既然會長都親自邀請了，那我就勉為其難地陪你走一趟吧。","Since President has invited me, I suppose I can bring myself to accompany you.","会長からのお誘いだし、仕方なく付き合ってあげるわ。","会長からのお誘いだし、仕方なく付き合ってあげるわ。"},
+{"LAB_STORY_DIALOGUE_S5_1009_01","会长，辛苦了。这里是补给站，毛巾、水和能量胶都准备好了。请不要太勉强哦，休息也是运动中非常重要的一环。","會長，辛苦了。這裡是補給站，毛巾、水和能量膠都準備好了。請不要太勉強哦，休息也是運動中非常重要的一環。","President, you've been working hard. This is the Supply Station—towels, water, and energy gels are all ready. Don't push yourself too far. Rest is just as important as training itself.","会長さん、お疲れ様です。こちらが補給ステーションです。タオル、水、エネルギージェルも用意してあります。無理は禁物ですよ。休憩も運動の一部として、非常に重要な要素ですから。","President, you've been working hard. This is the Supply Station—towels, water, and energy gels are all ready. Don't push yourself too far. Rest is just as important as training itself."},
+{"LAB_STORY_DIALOGUE_S5_1009_02","运动会所需的物资，都已经安排雪貂运输的专车按时送达了。嘿嘿，只要有我在，后勤方面请尽管放心吧。","運動會所需的物資，都已經安排雪貂運輸的專車按時送達了。嘿嘿，只要有我在，後勤方面請儘管放心吧。","All the supplies for the sports meet have been arranged for on-time delivery by Ferret Transit. Hehe—as long as I'm on the job, logistics are the last thing you need to worry about!","運動会に必要な物資は、すべてフェレット交通の専用車両で時間通りに届けました。えへへ、私がいれば、サポート面は完璧ですから、どうぞ安心してくださいね。","All the supplies for the sports meet have been arranged for on-time delivery by Ferret Transit. Hehe—as long as I'm on the job, logistics are the last thing you need to worry about!"},
+{"LAB_STORY_DIALOGUE_S5_1009_03","骑行时，海风吹过发梢的感觉，就像坐在老式列车的驾驶室里一样……真是心旷神怡呢——","騎行時，海風吹過髮梢的感覺，就像坐在老式列車的駕駛室裡一樣……真是心曠神怡呢——","The feeling of the sea breeze rushing through your hair when you're cycling... it's just like sitting in the cab of an old train. It's absolutely wonderful!","サイクリングの時、海風が髪をなびかせる感覚は、まるで昔の列車の運転席に座っているようで……本当に心が洗われますね——","The feeling of the sea breeze rushing through your hair when you're cycling... it's just like sitting in the cab of an old train. It's absolutely wonderful!"},
+{"LAB_STORY_DIALOGUE_S5_1016_01","会长，再坚持一下，特训还没有完成呢！别担心，我会一直陪你到最后的。","會長，再堅持一下，特訓還沒有完成呢！別擔心，我會一直陪你到最後的。","Hang in there, President—the special training isn't over yet! Don't worry, I'll be right here by your side until the very end.","会長、もうちょっと頑張って。特訓はまだ終わっていないからね！安心して、最後まで付き合うから。","Hang in there, President—the special training isn't over yet! Don't worry, I'll be right here by your side until the very end."},
+{"LAB_STORY_DIALOGUE_S5_1016_02","这种程度的运动会，对我来说不过小菜一碟啦。会长，你就好好见证本小姐拿到优胜的瞬间吧！","這種程度的運動會，對我來說不過小菜一碟啦。會長，你就好好見證本小姐拿到優勝的瞬間吧！","A sports meet at this level? Easy as pie. Just watch closely, President—you're about to see me take first place!","この程度の運動会、私にとっては朝飯前だよ。会長、私が優勝する瞬間、ちゃんと見届けてね。","A sports meet at this level? Easy as pie. Just watch closely, President—you're about to see me take first place!"},
+{"LAB_STORY_DIALOGUE_S5_1016_03","听好了会长，奥德赛一定会拿下最后的胜利。不过，你可不要放水啊。所有人都要全力以赴，这才是运动会该有的样子！","聽好了會長，奧德賽一定會拿下最後的勝利。不過，你可不要放水啊。所有人都要全力以赴，這才是運動會該有的樣子！","Listen up, President—Odyssey is going to win this. But don't you dare go easy on us. Everyone giving it their all—that's what a sports meet is truly about!","よく聞いて、会長。オデッセイは必ず最後の勝利を掴み取るの。ただし、手加減はなしだからね。全員が全力を尽くしてこそ、運動会なんだから！","Listen up, President—Odyssey is going to win this. But don't you dare go easy on us. Everyone giving it their all—that's what a sports meet is truly about!"},
+{"LAB_STORY_NAME_S5_1","破晓的应援","破曉的應援","A Cheer at Dawn","夜明けの応援","A Cheer at Dawn"},
+{"LAB_STORY_NAME_S5_2","沁凉一刻","沁涼一刻","Chilly Pop","ひんやりとしたひととき","Chilly Pop"},
+{"LAB_STORY_NAME_S5_3","错失的瞬间","錯失的瞬間","The Moment I Miss","失われた瞬間","The Moment I Miss"},
+{"LAB_STORY_OVERVIEW_S5_1",[[运动会当天的清晨，会长独自来到运动场热身，却察觉到一道悄悄跟随的身影。
+穿着啦啦队服的沐娜笨拙地练习着舞蹈，希望能用自己唯一知晓的方式为主人加油。
+晨光泼洒在运动场上，会长将金鵄彩旗送给了沐娜，两人许下了为彼此，也为金鵄的大家应援的约定。]],[[運動會當天的清晨，會長獨自來到運動場熱身，卻察覺到一道悄悄跟隨的身影。
+穿著啦啦隊服的沐娜笨拙地練習著舞蹈，希望能用自己唯一知曉的方式為主人加油。
+晨光潑灑在運動場上，會長將金鵄彩旗送給了沐娜，兩人許下了為彼此，也為金鵄的大家應援的約定。]],[[On the morning of the sports meet, President heads to the field alone to warm up—only to notice a shadow quietly trailing behind.
+
+Moona, dressed in a cheerleading outfit, is clumsily practicing a routine, hoping to support her master in the only way she knows how. As the morning light spills across the field, President entrusts Moona with the Kinshi Cheer Flag, and the two make a promise—to cheer for each other, and for everyone in Kinshi.]],[[運動会当日の早朝。会長は一人で運動場にウォーミングアップに来たが、こっそりとついてくる影に気づいた。
+チアリーダーの衣装を着たムーナが、ぎこちなくダンスの練習をしていた。自分が知る唯一の方法で、ご主人様を応援したいのだ。
+朝日が運動場に降り注ぐ中、会長は金鵄の応援旗をムーナに渡した。二人はお互いのために、そして金鵄のみんなのために応援し合う約束を交わした。]],[[On the morning of the sports meet, President heads to the field alone to warm up—only to notice a shadow quietly trailing behind.
+
+Moona, dressed in a cheerleading outfit, is clumsily practicing a routine, hoping to support her master in the only way she knows how. As the morning light spills across the field, President entrusts Moona with the Kinshi Cheer Flag, and the two make a promise—to cheer for each other, and for everyone in Kinshi.]]},
+{"LAB_STORY_OVERVIEW_S5_2",[[休息时间，绘里奈偷偷买了冰棍，拉着会长到体育仓库内一同分享。不料由于门锁损坏，两人被困在了仓库之中。
+在闷热的环境下，两人的神智逐渐变得模糊。在意外之下，会长绊倒了绘里奈，两人一上一下摔在了体操垫上。
+暧昧的气氛，近在咫尺的距离，意识模糊的二人，在这密室之中，究竟会做出怎样的举动呢……]],[[休息時間，繪里奈偷偷買了冰棍，拉著會長到體育倉庫內一同分享。不料由於門鎖損壞，兩人被困在了倉庫之中。
+在悶熱的環境下，兩人的神智逐漸變得模糊。在意外之下，會長絆倒了繪里奈，兩人一上一下摔在了體操墊上。
+曖昧的氣氛，近在咫尺的距離，意識模糊的二人，在這密室之中，究竟會做出怎樣的舉動呢……]],[[During a break, Erina sneaks off with an ice pop and drags President to the PE equipment room to share it in secret. But with the lock broken, the two of them end up trapped inside.
+
+As the stuffy heat takes its toll, their heads start to swim. Then President accidentally trips, sending them both tumbling onto a gymnastics mat. A charged atmosphere, a very small distance between them, two people in a daze—what happens next in this locked room...?]],[[休憩時間に、えりなはこっそりアイスキャンディーを買い、会長を体育倉庫に連れて行き、一緒に食べようとした。ところが、錠前の故障で二人は倉庫に閉じ込められてしまった。
+蒸し暑い環境の中で、二人の意識は次第に朦朧としていく。ふとしたはずみで、会長がえりなにつまずき、二人は重なり合うように体操マットに倒れ込んだ。
+甘い雰囲気、すぐそこまでの距離、意識が朦朧とした二人。この密室の中で、一体どのような行動に出るのだろうか……]],[[During a break, Erina sneaks off with an ice pop and drags President to the PE equipment room to share it in secret. But with the lock broken, the two of them end up trapped inside.
+
+As the stuffy heat takes its toll, their heads start to swim. Then President accidentally trips, sending them both tumbling onto a gymnastics mat. A charged atmosphere, a very small distance between them, two people in a daze—what happens next in this locked room...?]]},
+{"LAB_STORY_OVERVIEW_S5_3",[[突然抛锚的观众用车，让会长错过了骑行比赛的冲线时刻，在远离终点的地方找到白石伊莉娜时，她正把矿泉水往自己的头上倒。
+对于擅长规划路线的伊莉娜来说，夺冠是理所应当的，正因如此，错失了伊莉娜冲线的瞬间才更显得遗憾。
+为了补偿伊莉娜，会长拿起那张为她准备的毛巾，替她擦拭起湿润的头发，可是伊莉娜似乎并不满足于此……]],[[突然拋錨的觀眾用車，讓會長錯過了騎行比賽的衝線時刻，在遠離終點的地方找到白石伊莉娜時，她正把礦泉水往自己的頭上倒。
+對於擅長規劃路線的伊莉娜來說，奪冠是理所應當的，正因如此，錯失了伊莉娜衝線的瞬間才更顯得遺憾。
+為了補償伊莉娜，會長拿起那張為她準備的毛巾，替她擦拭起濕潤的頭髮，可是伊莉娜似乎並不滿足於此……]],[[A shuttle bus breaking down at the worst possible moment means President misses Shiraishi Irina crossing the finish line. When President finally finds her, away from the finish line, she is pouring a bottle of water over her own head.
+
+For someone as skilled at mapping a course as Irina, winning is never in doubt—which is precisely what makes missing that moment feel like such a pity. To make it up to her, President picks up the towel prepared in advance and begins drying her wet hair. But Irina doesn't seem quite satisfied with that...]],[[突然エンストした観客バスのせいで、会長はサイクリング競技のゴール通過の瞬間を見逃してしまった。ゴールから離れた場所で白石イリーナを見つけた時、彼女はミネラルウォーターを自分の頭からかけていた。
+ルート計画が得意なイリーナにとって、優勝は当然のことだ。だからこそ、イリーナのゴール通過の瞬間を見逃したことはなおさら悔しい。
+イリーナへの埋め合わせに、会長は用意しておいたタオルで、彼女の濡れた髪を拭き始めた。しかしイリーナはそれだけでは満足できないようで……]],[[A shuttle bus breaking down at the worst possible moment means President misses Shiraishi Irina crossing the finish line. When President finally finds her, away from the finish line, she is pouring a bottle of water over her own head.
+
+For someone as skilled at mapping a course as Irina, winning is never in doubt—which is precisely what makes missing that moment feel like such a pity. To make it up to her, President picks up the towel prepared in advance and begins drying her wet hair. But Irina doesn't seem quite satisfied with that...]]},
+{"LAB_STORY_DIALOGUE_S5_1_1",[[运动会当天的清晨，会长独自来到运动场热身，却察觉到一道悄悄跟随的身影。
+穿着啦啦队服的沐娜笨拙地练习着舞蹈，希望能用自己唯一知晓的方式为主人加油。
+晨光泼洒在运动场上，会长将金鵄彩旗送给了沐娜，两人许下了为彼此，也为金鵄的大家应援的约定。]],[[運動會當天的清晨，會長獨自來到運動場熱身，卻察覺到一道悄悄跟隨的身影。
+穿著啦啦隊服的沐娜笨拙地練習著舞蹈，希望能用自己唯一知曉的方式為主人加油。
+晨光潑灑在運動場上，會長將金鵄彩旗送給了沐娜，兩人許下了為彼此，也為金鵄的大家應援的約定。]],[[On the morning of the sports meet, President heads to the field alone to warm up—only to notice a shadow quietly trailing behind.
+
+Moona, dressed in a cheerleading outfit, is clumsily practicing a routine, hoping to support her master in the only way she knows how. As the morning light spills across the field, President entrusts Moona with the Kinshi Cheer Flag, and the two make a promise—to cheer for each other, and for everyone in Kinshi.]],[[運動会当日の早朝。会長は一人で運動場にウォーミングアップに来たが、こっそりとついてくる影に気づいた。
+チアリーダーの衣装を着たムーナが、ぎこちなくダンスの練習をしていた。自分が知る唯一の方法で、ご主人様を応援したいのだ。
+朝日が運動場に降り注ぐ中、会長は金鵄の応援旗をムーナに渡した。二人はお互いのために、そして金鵄のみんなのために応援し合う約束を交わした。]],[[運動会当日の早朝。会長は一人で運動場にウォーミングアップに来たが、こっそりとついてくる影に気づいた。
+チアリーダーの衣装を着たムーナが、ぎこちなくダンスの練習をしていた。自分が知る唯一の方法で、ご主人様を応援したいのだ。
+朝日が運動場に降り注ぐ中、会長は金鵄の応援旗をムーナに渡した。二人はお互いのために、そして金鵄のみんなのために応援し合う約束を交わした。]]},
+{"LAB_STORY_DIALOGUE_S5_1_2","清晨的运动场笼罩在淡蓝色的雾气里，看台上空无一人，只有跑道边的旗帜被风吹得呼呼作响。","清晨的運動場籠罩在淡藍色的霧氣裡，看台上空無一人，只有跑道邊的旗幟被風吹得呼呼作響。","The morning field is wrapped in a pale blue haze. The stands are completely empty, and the flags along the track snap and whip in the wind.","早朝の運動場は薄い青色の霧に包まれ、観客席には誰もおらず、トラック脇の旗だけが風にはためく音を立てていた。","早朝の運動場は薄い青色の霧に包まれ、観客席には誰もおらず、トラック脇の旗だけが風にはためく音を立てていた。"},
+{"LAB_STORY_DIALOGUE_S5_1_3","为了适应运动会的场地，我换上运动服，沿着橡胶跑道慢跑。","為了適應運動會的場地，我換上運動服，沿著橡膠跑道慢跑。","To get a feel for the venue, I change into my athletic wear and jog along the rubber track.","運動会の会場に慣れるため、私は運動着に着替え、トラックに沿ってゆっくりとジョギングを始めた。","運動会の会場に慣れるため、私は運動着に着替え、トラックに沿ってゆっくりとジョギングを始めた。"},
+{"LAB_STORY_DIALOGUE_S5_1_4","突然，身后传来极轻的脚步声，像是刻意压低了存在感。我放慢速度，余光瞥见看台栏杆后一抹白色的身影一闪而过。","突然，身後傳來極輕的腳步聲，像是刻意壓低了存在感。我放慢速度，餘光瞥見看台欄杆後一抹白色的身影一閃而過。","Suddenly, I hear faint footsteps behind me—someone is trying not to be noticed. I slow down and catch a flash of white through the bleacher railing.","突然、背後からかすかな足音が聞こえた。まるでわざと存在感を消しているかのようだ。スピードを落とすと、視界の隅で観客席の手すりの後ろに、白い影が一瞬通り抜けるのが見えた。","突然、背後からかすかな足音が聞こえた。まるでわざと存在感を消しているかのようだ。スピードを落とすと、視界の隅で観客席の手すりの後ろに、白い影が一瞬通り抜けるのが見えた。"},
+{"LAB_STORY_DIALOGUE_S5_1_5","……是错觉吗？","……是錯覺嗎？","...Was that my imagination?","……気のせいか？","……気のせいか？"},
+{"LAB_STORY_DIALOGUE_S5_1_6","我继续向前跑，脚步声却始终保持着固定的距离。不是错觉——有人在跟着我。","我繼續向前跑，腳步聲卻始終保持著固定的距離。不是錯覺——有人在跟著我。","I keep running. The footsteps keep pace—the same distance, never closing, never falling back. It's not my imagination. Someone is following me.","そのまま走り続けると、足音は一定の距離を保ったままだった。気のせいじゃない……誰かが私についてきている。","そのまま走り続けると、足音は一定の距離を保ったままだった。気のせいじゃない……誰かが私についてきている。"},
+{"LAB_STORY_DIALOGUE_S5_1_7","我猛地停下脚步，转身。","我猛地停下腳步，轉身。","I stop dead and turn around.","私は急に立ち止まり、振り返った。","私は急に立ち止まり、振り返った。"},
+{"LAB_STORY_DIALOGUE_S5_1_8","沐娜站在不远处，穿着啦啦队服，手里还攥着两只彩球。她的脸上面无表情，只是淡淡地看着我。","沐娜站在不遠處，穿著啦啦隊服，手裡還攥著兩只彩球。她的臉上面無表情，只是淡淡地看著我。","Moona stands a short distance away, dressed in a cheerleading uniform, gripping two pompoms in her hands. Her face is perfectly expressionless. She looks at me, calm and still.","ムーナが少し離れたところに立っていた。チアリーダーの衣装を着て、両手にポンポンを握りしめている。彼女の顔は無表情で、ただ淡々と私を見つめていた。","ムーナが少し離れたところに立っていた。チアリーダーの衣装を着て、両手にポンポンを握りしめている。彼女の顔は無表情で、ただ淡々と私を見つめていた。"},
+{"LAB_STORY_DIALOGUE_S5_1_9","沐娜，你怎么在这里？","沐娜，你怎麼在這裡？","Moona, what are you doing here?","ムーナ、どうしてここに？","ムーナ、どうしてここに？"},
+{"LAB_STORY_DIALOGUE_S5_1_10","检测到主人的运动轨迹，自动进入跟随模式。","檢測到主人的運動軌迹，自動進入跟隨模式。","Master's movement pattern detected. Auto-follow mode engaged.","ご主人様の移動軌跡を感知、自動的に追従モードに移行。","ご主人様の移動軌跡を感知、自動的に追従モードに移行。"},
+{"LAB_STORY_DIALOGUE_S5_1_11","……什么意思？","……什麼意思？","...What does that mean?","……どういう意味だ？","……どういう意味だ？"},
+{"LAB_STORY_DIALOGUE_S5_1_12","主人，请不要忘记，沐娜是为了守护主人而存在的，所以……必须和主人形影不离才行。","主人，請不要忘記，沐娜是為了守護主人而存在的，所以……必須和主人形影不離才行。","Master, please don't forget—Moona exists to protect you, which means... I must remain by your side at all times.","ご主人様、忘れないで。ムーナはご主人様をお守りするために存在している。だから……ご主人様と行動を共にしなければならない。","ご主人様、忘れないで。ムーナはご主人様をお守りするために存在している。だから……ご主人様と行動を共にしなければならない。"},
+{"LAB_STORY_DIALOGUE_S5_1_13","不过，沐娜不会干扰主人的训练，请继续吧。","不過，沐娜不會干擾主人的訓練，請繼續吧。","That said, Moona will not interfere with your training. Please, continue.","ただし、ムーナはご主人様のトレーニングを妨害したりはしない。どうぞ続けて。","ただし、ムーナはご主人様のトレーニングを妨害したりはしない。どうぞ続けて。"},
+{"LAB_STORY_DIALOGUE_S5_1_14","说着，在我的注视之下，沐娜缓缓地举起了手中的彩球，跳起了用于应援的啦啦队舞。","說著，在我的注視之下，沐娜緩緩地舉起了手中的彩球，跳起了用於應援的啦啦隊舞。","As she says this, under my gaze, Moona slowly raises the pompoms and begins performing a cheerleading routine.","そう言うと、私の視線の下で、ムーナはゆっくりとポンポンを掲げ、応援のためのチアダンスを踊り始めた。","そう言うと、私の視線の下で、ムーナはゆっくりとポンポンを掲げ、応援のためのチアダンスを踊り始めた。"},
+{"LAB_STORY_DIALOGUE_S5_1_15","这是在为我加油？不过……","這是在為我加油？不過……","She's cheering for me? But...","これは……私への応援か？しかし……","これは……私への応援か？しかし……"},
+{"LAB_STORY_DIALOGUE_S5_1_16","沐娜的舞姿十分干练而精准，但动作和节奏却有种说不出的奇怪，像是没有找准节拍一般。","沐娜的舞姿十分幹練而精準，但動作和節奏卻有種說不出的奇怪，像是沒有找準節拍一般。","Moona's movements are precise and efficient, but something feels off about the rhythm—something hard to put into words. It's as if she hasn't found the beat.","ムーナの踊りは無駄がなくとても正確だが、動きとリズムに何とも言えない奇妙さがあった。まるで拍子が合っていないようだ。","ムーナの踊りは無駄がなくとても正確だが、動きとリズムに何とも言えない奇妙さがあった。まるで拍子が合っていないようだ。"},
+{"LAB_STORY_DIALOGUE_S5_1_17","唔……主人的视线，让我有点受伤……","唔……主人的視線，讓我有點受傷……","Mm... The way Master is looking at me... it hurts a little...","うーん……ご主人様の視線、ちょっと傷つく……","うーん……ご主人様の視線、ちょっと傷つく……"},
+{"LAB_STORY_DIALOGUE_S5_1_18","她停下动作，红色的眼睛直直地看着我，语气里难得出现了一丝困惑。","她停下動作，紅色的眼睛直直地看著我，語氣裡難得出現了一絲困惑。","She stops, her red eyes fixed directly on me. There's a rare hint of confusion in her voice.","彼女は動きを止め、赤い瞳でまっすぐに私を見つめた。口調には珍しく戸惑いが混じっていた。","彼女は動きを止め、赤い瞳でまっすぐに私を見つめた。口調には珍しく戸惑いが混じっていた。"},
+{"LAB_STORY_DIALOGUE_S5_1_19","抱歉，我不是在笑话你。只是……有点意外。","抱歉，我不是在笑話你。只是……有點意外。","Sorry, I'm not laughing at you. I just... didn't expect this.","悪い、君を笑ったわけじゃないんだ。ただ……ちょっと意外だった。","悪い、君を笑ったわけじゃないんだ。ただ……ちょっと意外だった。"},
+{"LAB_STORY_DIALOGUE_S5_1_20","沐娜歪了歪头。","沐娜歪了歪頭。","Moona tilts her head slightly.","ムーナは首をかしげた。","ムーナは首をかしげた。"},
+{"LAB_STORY_DIALOGUE_S5_1_21","没想到你会一个人在这里练习。","沒想到你會一個人在這裡練習。","I didn't expect to find you here practicing on your own.","君が一人でここで練習しているとは思わなかった。","君が一人でここで練習しているとは思わなかった。"},
+{"LAB_STORY_DIALOGUE_S5_1_22","这是任务。","這是任務。","This is a mission.","これは任務だよ。","これは任務だよ。"},
+{"LAB_STORY_DIALOGUE_S5_1_23","她低头看了看手中的彩球，白色的长发垂落下来，遮住了半边脸。","她低頭看了看手中的彩球，白色的長髮垂落下來，遮住了半邊臉。","She looks down at the pompoms in her hands. Her long white hair falls forward, hiding half her face.","彼女は手元のポンポンを見下ろし、白くて長い髪が垂れて半分の顔を隠した。","彼女は手元のポンポンを見下ろし、白くて長い髪が垂れて半分の顔を隠した。"},
+{"LAB_STORY_DIALOGUE_S5_1_24","从数据库中检索到“啦啦队”的信息。在运动会上，啦啦队会为参赛者呐喊助威。金鵄的大家今天会参加比赛，所以沐娜需要学习。","從資料庫中檢索到「啦啦隊」的信息。在運動會上，啦啦隊會為參賽者吶喊助威。金鵄的大家今天會參加比賽，所以沐娜需要學習。",[[Querying database for "cheerleading." Logic dictates that cheerleaders provide morale for the competitors. Everyone in Kinshi is competing today, so Moona needs to learn.]],"データベースから「チアリーダー」の情報を検索した。運動会では、チアリーダーが選手に声援を送る。金鵄のみんなは今日試合に出るので、ムーナはそれを学ぶ必要があるの。","データベースから「チアリーダー」の情報を検索した。運動会では、チアリーダーが選手に声援を送る。金鵄のみんなは今日試合に出るので、ムーナはそれを学ぶ必要があるの。"},
+{"LAB_STORY_DIALOGUE_S5_1_25","所以你一直跟着我，是为了练习？","所以你一直跟著我，是為了練習？","So you've been following me this whole time... to practice?","だからずっと私についてくるのは、練習のためなのか？","だからずっと私についてくるのは、練習のためなのか？"},
+{"LAB_STORY_DIALOGUE_S5_1_26","沐娜……想为主人加油。","沐娜……想為主人加油。","Moona... wants to cheer for Master.","ムーナは……ご主人様を応援したいの。","ムーナは……ご主人様を応援したいの。"},
+{"LAB_STORY_DIALOGUE_S5_1_27","但是，我的数据库中没有“应援”的参数，检索不到合适的动作模板。所以，沐娜只能用现有数据进行模拟。","但是，我的資料庫中沒有「應援」的參數，檢索不到合適的動作模板。所以，沐娜只能用現有資料進行模擬。",[[But there is no "cheering" parameter in my database, no suitable movement template to retrieve. So Moona can only simulate one using existing data.]],"しかし、私のデータベースには「応援」のパラメータが存在しないから、適切な動作テンプレートが見つからなかった。だから、ムーナは既存のデータでシミュレーションするしかなかった……","しかし、私のデータベースには「応援」のパラメータが存在しないから、適切な動作テンプレートが見つからなかった。だから、ムーナは既存のデータでシミュレーションするしかなかった……"},
+{"LAB_STORY_DIALOGUE_S5_1_28","节拍……找不到。","節拍……找不到。","The beat... I can't find it.","リズムが……つかめない。","リズムが……つかめない。"},
+{"LAB_STORY_DIALOGUE_S5_1_29","沐娜举起彩球，又放下，像是在确认什么。她的声音很轻，轻到几乎被风吹散。","沐娜舉起彩球，又放下，像是在確認什麼。她的聲音很輕，輕到幾乎被風吹散。","Moona lifts the pompoms, then lowers them again, as if checking something. Her voice is so quiet it almost gets carried away by the wind.","ムーナはポンポンを掲げ、また下ろした。何かを確認しているようだ。彼女の声はとても軽く、風に吹き飛ばされそうだった。","ムーナはポンポンを掲げ、また下ろした。何かを確認しているようだ。彼女の声はとても軽く、風に吹き飛ばされそうだった。"},
+{"LAB_STORY_DIALOGUE_S5_1_30","沐娜。","沐娜。","Moona.","ムーナ。","ムーナ。"},
+{"LAB_STORY_DIALOGUE_S5_1_31","你不需要学习别人，你自己的方式就是最好的。","你不需要學習別人，你自己的方式就是最好的。","You don't need to copy anyone. Your way is the best way.","君は他人のやり方を学ぶ必要はない。自分のやり方が一番いいんだ。","君は他人のやり方を学ぶ必要はない。自分のやり方が一番いいんだ。"},
+{"LAB_STORY_DIALOGUE_S5_1_32","我的方式？","我的方式？","My way?","私のやり方？","私のやり方？"},
+{"LAB_STORY_DIALOGUE_S5_1_33","守护和陪伴，你一直以来都在做的事。那也算是应援的一种。","守護和陪伴，你一直以來都在做的事。那也算是應援的一種。","Protecting and staying close—what you've always done. That counts as cheering too.","守ることと寄り添うこと。君がずっとやってきたことだ。それも応援の一種だよ。","守ることと寄り添うこと。君がずっとやってきたことだ。それも応援の一種だよ。"},
+{"LAB_STORY_DIALOGUE_S5_1_34","我走近她，从口袋里取出了金鵄彩旗——原本打算挂在选手休息区的。","我走近她，從口袋裡取出了金鵄彩旗——原本打算掛在選手休息區的。","I walk toward her and pull out the Kinshi Cheer Flag from my pocket, the one I'd meant to hang in the athletes' rest area.","私は彼女に近づき、ポケットから金鵄の応援旗を取り出した——選手控え室に掛けるつもりだったものだ。","私は彼女に近づき、ポケットから金鵄の応援旗を取り出した——選手控え室に掛けるつもりだったものだ。"},
+{"LAB_STORY_DIALOGUE_S5_1_35","给。","給。","Here.","はい。","はい。"},
+{"LAB_STORY_DIALOGUE_S5_1_36","这是什么？","這是什麼？","What is this?","これ、何？","これ、何？"},
+{"LAB_STORY_DIALOGUE_S5_1_37","金鵄的旗帜。今天运动会，我希望你能拿着它，和金鵄的大家一起努力。","金鵄的旗幟。今天運動會，我希望你能拿著它，和金鵄的大家一起努力。","The Kinshi flag. I want you to hold onto it today—and do your best alongside everyone in Kinshi.","金鵄の旗だ。今日の運動会では、これを持って、金鵄のみんなと一緒に頑張ってほしいんだ。","金鵄の旗だ。今日の運動会では、これを持って、金鵄のみんなと一緒に頑張ってほしいんだ。"},
+{"LAB_STORY_DIALOGUE_S5_1_38","她接过彩旗，指尖轻轻摩挲着旗面上的纹路。","她接過彩旗，指尖輕輕摩挲著旗面上的紋路。","She takes the flag, her fingertips gently tracing the pattern across its surface.","彼女は旗を受け取り、その模様を指先でそっと撫でた。","彼女は旗を受け取り、その模様を指先でそっと撫でた。"},
+{"LAB_STORY_DIALOGUE_S5_1_39","这是……任务指令吗？","這是……任務指令嗎？","Is this... a directive?","これは……任務の指示？","これは……任務の指示？"},
+{"LAB_STORY_DIALOGUE_S5_1_40","不，这是邀请。","不，這是邀請。","No. It's an invitation.","いいや、招待だ。","いいや、招待だ。"},
+{"LAB_STORY_DIALOGUE_S5_1_41","沐娜沉默片刻，然后把彩旗紧紧握在手心，和彩球放在一起。","沐娜沉默片刻，然後把彩旗緊緊握在手心，和彩球放在一起。","Moona is quiet for a moment. Then she closes her hand tightly around the flag and holds it alongside the pompoms.","ムーナはしばらく黙った後、旗をポンポンと一緒に、しっかりと手のひらに握りしめた。","ムーナはしばらく黙った後、旗をポンポンと一緒に、しっかりと手のひらに握りしめた。"},
+{"LAB_STORY_DIALOGUE_S5_1_42","沐娜，会全力执行。","沐娜，會全力執行。","Moona will carry it out, with full effort.","ムーナ、全力で取り組むよ。","ムーナ、全力で取り組むよ。"},
+{"LAB_STORY_DIALOGUE_S5_1_43","晨风忽然大了一些，吹起她的长发和裙摆。她打了个小小的寒颤，身体微微缩了缩。","晨風忽然大了一些，吹起她的長髮和裙擺。她打了個小小的寒顫，身體微微縮了縮。","The morning breeze suddenly picks up, lifting her long hair and the hem of her skirt. She gives a small shiver, her body curling in slightly.","朝の風が突然強まり、彼女の長い髪とスカートの裾を揺らした。彼女は小さく身震いし、体を少し縮めた。","朝の風が突然強まり、彼女の長い髪とスカートの裾を揺らした。彼女は小さく身震いし、体を少し縮めた。"},
+{"LAB_STORY_DIALOGUE_S5_1_44","冷吗？","冷嗎？","Cold?","寒いか？","寒いか？"},
+{"LAB_STORY_DIALOGUE_S5_1_45","环境温度低于舒适阈值。确认：冷。","環境溫度低於舒適閾值。確認：冷。","Ambient temperature below comfort threshold. Confirmed: cold.","環境温度が快適閾値を下回っている。確認：寒い。","環境温度が快適閾値を下回っている。確認：寒い。"},
+{"LAB_STORY_DIALOGUE_S5_1_46","她没有后退，反而向前迈了一步，然后又是一步，直到身体几乎完全贴上我的手臂。","她沒有後退，反而向前邁了一步，然後又是一步，直到身體幾乎完全貼上我的手臂。","She doesn't step back. Instead, she moves closer—once, then again—until she's leaning against my arm.","彼女は後退せず、むしろ一歩前に踏み出し、そしてもう一歩、体がほとんど私の腕に触れるまで近づいてきた。","彼女は後退せず、むしろ一歩前に踏み出し、そしてもう一歩、体がほとんど私の腕に触れるまで近づいてきた。"},
+{"LAB_STORY_DIALOGUE_S5_1_47","主人的体温……能提高我的运行效率。","主人的體溫……能提高我的運行效率。","Master's body heat... improves my operating efficiency.","ご主人様の体温……私の動作効率を向上させる。","ご主人様の体温……私の動作効率を向上させる。"},
+{"LAB_STORY_DIALOGUE_S5_1_48","（明明说冷，却好像比我还暖和一些。）","（明明說冷，卻好像比我還暖和一些。）","(She says she's cold—but somehow she feels warmer than I do.)","（寒いと言いながら、なぜか私より暖かいような気がする。）","（寒いと言いながら、なぜか私より暖かいような気がする。）"},
+{"LAB_STORY_DIALOGUE_S5_1_49","主人。","主人。","Master.","ご主人様。","ご主人様。"},
+{"LAB_STORY_DIALOGUE_S5_1_50","嗯？","嗯？","Mm?","ん？","ん？"},
+{"LAB_STORY_DIALOGUE_S5_1_51","今天，我会为主人，为金鵄的大家……尽全力应援。","今天，我會為主人，為金鵄的大家……盡全力應援。","Today, I will cheer with everything I have—for Master, and for everyone in Kinshi.","今日、私はご主人様のために、そして金鵄のみんなのために……全力で応援するよ。","今日、私はご主人様のために、そして金鵄のみんなのために……全力で応援するよ。"},
+{"LAB_STORY_DIALOGUE_S5_1_52","所以，也请主人注视着我。","所以，也請主人注視著我。","So please... keep your eyes on me too.","だから、どうかご主人様も私を見ていてね。","だから、どうかご主人様も私を見ていてね。"},
+{"LAB_STORY_DIALOGUE_S5_2_1","运动会的喧嚣像浪潮一样拍打着体育场的每一个角落。我刚结束巡视，正想找个地方喘口气，手腕突然被人从侧面拽住了。","運動會的喧囂像浪潮一樣拍打著體育場的每一個角落。我剛結束巡視，正想找個地方喘口氣，手腕突然被人從側面拽住了。","The noise of the sports meet crashes against the stadium like waves. I'm just looking for a place to catch my breath when someone suddenly grabs my wrist.","運動会の喧騒は波のようにグラウンドの隅々に打ち寄せていた。私が巡回を終え、どこかでひと息つこうとした時、不意に手首を横から掴まれた。","運動会の喧騒は波のようにグラウンドの隅々に打ち寄せていた。私が巡回を終え、どこかでひと息つこうとした時、不意に手首を横から掴まれた。"},
+{"LAB_STORY_DIALOGUE_S5_2_2","会长！这边，快跟我来！","會長！這邊，快跟我來！","President! Over here—come on, hurry!","会長！こっちこっち、私についてきて！","会長！こっちこっち、私についてきて！"},
+{"LAB_STORY_DIALOGUE_S5_2_3","绘里奈？等等——","繪里奈？等等——","Erina? Wait—","えりな？ちょっと待って——","えりな？ちょっと待って——"},
+{"LAB_STORY_DIALOGUE_S5_2_4","她没给我说话的机会，拉着我一路小跑，拐进了体育场边缘的体育仓库。","她沒給我說話的機會，拉著我一路小跑，拐進了體育場邊緣的體育倉庫。","She doesn't give me a chance to speak—just pulls me along at a jog and ducks into the equipment room at the edge of the stadium.","彼女は私に話す隙を与えず、手を引いて小走りでグラウンドの端にある体育倉庫へと連れて行った。","彼女は私に話す隙を与えず、手を引いて小走りでグラウンドの端にある体育倉庫へと連れて行った。"},
+{"LAB_STORY_DIALOGUE_S5_2_5","哼，总算找到个安静的地方了。外面吵死了，根本没法休息。","哼，總算找到個安靜的地方了。外面吵死了，根本沒法休息。","Hmph. Finally, somewhere quiet. It's unbearably loud out there—there's no way to rest.","ふんっ、やっと静かな場所を見つけたんだ。外はうるさすぎて、全然休めないわ。","ふんっ、やっと静かな場所を見つけたんだ。外はうるさすぎて、全然休めないわ。"},
+{"LAB_STORY_DIALOGUE_S5_2_6","她松开我的手，从运动服的兜里掏出了冰棍，干脆利落地分成了两半。","她鬆開我的手，從運動服的兜裡掏出了冰棍，乾脆俐落地分成了兩半。","She lets go of my hand, pulls an ice pop from her athletic jacket pocket, and snaps it cleanly in half.","彼女は私の手を離し、運動着のポケットからアイスキャンディーを取り出し、手際よく半分に割った。","彼女は私の手を離し、運動着のポケットからアイスキャンディーを取り出し、手際よく半分に割った。"},
+{"LAB_STORY_DIALOGUE_S5_2_7","给，天气这么热，不抓紧时间的话就全化了。","給，天氣這麼熱，不抓緊時間的話就全化了。","Here. It's this hot—wait any longer and it'll melt.","はい、すごく暑いから、急がないと全部溶けちゃうよ。","はい、すごく暑いから、急がないと全部溶けちゃうよ。"},
+{"LAB_STORY_DIALOGUE_S5_2_8","这是……“沁凉一刻”？","這是……「沁涼一刻」？",[[This is... "Chilly Pop"?]],"これは……「ひんやりとしたひととき」ってやつか？","これは……「ひんやりとしたひととき」ってやつか？"},
+{"LAB_STORY_DIALOGUE_S5_2_9","怎、怎么了嘛……这款比较划算啦，一根冰棍，两份享受。怎么样，不错吧。","怎、怎麼了嘛……這款比較划算啦，一根冰棍，兩份享受。怎麼樣，不錯吧。","Wh-what's the problem... This one's a great deal—one pop, two servings. Pretty clever, right?","な、何よ……こっちのほうがお得なんだから。一本のアイスキャンディーで二人分楽しめちゃうんだよ。どう？いいでしょ？","な、何よ……こっちのほうがお得なんだから。一本のアイスキャンディーで二人分楽しめちゃうんだよ。どう？いいでしょ？"},
+{"LAB_STORY_DIALOGUE_S5_2_10","我明白了，不过为什么要特意来这里？","我明白了，不過為什麼要特意來這裡？","Fair enough. But why come all the way here?","分かった。でも、なんでわざわざここに来たんだ？","分かった。でも、なんでわざわざここに来たんだ？"},
+{"LAB_STORY_DIALOGUE_S5_2_11","唔……","唔……","Mm...","うーん……","うーん……"},
+{"LAB_STORY_DIALOGUE_S5_2_12","刚才有同学想分我冰棍来着，但我为了保持在其他人心中的形象，下意识就说了“不用了，我喝水就可以。”","剛才有同學想分我冰棍來著，但我為了保持在其他人心中的形象，下意識就說了「不用了，我喝水就可以。」",[[Someone offered to share their ice pop with me earlier—but for the sake of my image, I turned them down without thinking and said, "No thanks, water's fine."]],"さっき同級生がアイスキャンディーを分けてくれようとしたんだけど、みんなの前でのイメージを保たなきゃと思って、つい「いいえ、水で十分よ」って言っちゃったの。","さっき同級生がアイスキャンディーを分けてくれようとしたんだけど、みんなの前でのイメージを保たなきゃと思って、つい「いいえ、水で十分よ」って言っちゃったの。"},
+{"LAB_STORY_DIALOGUE_S5_2_13","但是看着别人吃冰棍的样子……啊啊啊——早知道当时就不逞强了。","但是看著別人吃冰棍的樣子……啊啊啊——早知道當時就不逞強了。","But then I watched everyone else eating theirs and—ugh—I should've just said yes when I had the chance.","でも、他の人がアイスキャンディーを食べているのを見ると……あああ——あの時、変に見栄を張るんじゃなかったわ。","でも、他の人がアイスキャンディーを食べているのを見ると……あああ——あの時、変に見栄を張るんじゃなかったわ。"},
+{"LAB_STORY_DIALOGUE_S5_2_14","所以，你就躲起来偷偷吃，还让我当共犯？","所以，你就躲起來偷偷吃，還讓我當共犯？","So your solution is to hide in here and eat one in secret—and drag me in as your accomplice?","だから、隠れてこっそり食べようってわけか。しかも私を共犯者にするのか。","だから、隠れてこっそり食べようってわけか。しかも私を共犯者にするのか。"},
+{"LAB_STORY_DIALOGUE_S5_2_15","少废话！快吃吧你。","少廢話！快吃吧你。","Less talking! Just eat it.","うるさいわね！早く食べなさいよ。","うるさいわね！早く食べなさいよ。"},
+{"LAB_STORY_DIALOGUE_S5_2_16","她把冰棍直接塞进了我的嘴里，冰凉的甜味瞬间在嘴里化开。绘里奈则捧着另一半小口小口地咬着，偶尔舔一下嘴唇，很满足的样子。","她把冰棍直接塞進了我的嘴裡，冰涼的甜味瞬間在嘴裡化開。繪里奈則捧著另一半小口小口地咬著，偶爾舔一下嘴唇，很滿足的樣子。","She shoves the ice pop straight into my mouth. The cold sweetness melts instantly. She cradles her half, taking small bites and licking her lips now and then, looking satisfied.","彼女はアイスキャンディーを私の口に直接押し込んできた。冷たい甘さが瞬時に口の中に広がる。えりなは自分の分を小さくかじりながら、時々唇をぺろりと舐めて、とても満足そうだった。","彼女はアイスキャンディーを私の口に直接押し込んできた。冷たい甘さが瞬時に口の中に広がる。えりなは自分の分を小さくかじりながら、時々唇をぺろりと舐めて、とても満足そうだった。"},
+{"LAB_STORY_DIALOGUE_S5_2_17","怎么样，好吃吗？","怎麼樣，好吃嗎？","So? Is it good?","どう？美味しい？","どう？美味しい？"},
+{"LAB_STORY_DIALOGUE_S5_2_18","嗯，谢谢你，绘里奈。","嗯，謝謝你，繪里奈。","Yeah. Thanks, Erina.","うん、ありがとう、えりな。","うん、ありがとう、えりな。"},
+{"LAB_STORY_DIALOGUE_S5_2_19","哼……哼——你就好好感谢本小姐的大恩大德吧。","哼……哼——你就好好感謝本小姐的大恩大德吧。","Hmph... hmph. You'd better be properly grateful for my extraordinary generosity.","ふふんっ！……この私の大恩、ありがたく思いなさいよ。","ふふんっ！……この私の大恩、ありがたく思いなさいよ。"},
+{"LAB_STORY_DIALOGUE_S5_2_20","嘴上这么说，绘里奈的耳朵却微微泛红。我们安静地吃完了冰棍，她把包装纸揉成一团塞进口袋，然后走到门边。","嘴上這麼說，繪里奈的耳朵卻微微泛紅。我們安靜地吃完了冰棍，她把包裝紙揉成一團塞進口袋，然後走到門邊。","She says that, but the tips of her ears have turned faintly pink. We finish our ice pops in silence. She crumples the wrapper and stuffs it into her pocket, then heads for the door.","口ではそう言うが、えりなの耳はほんのり赤くなっていた。私たちは静かにアイスキャンディーを食べ終えた。彼女は包装紙を丸めてポケットに詰め、ドアのところへ歩いていった。","口ではそう言うが、えりなの耳はほんのり赤くなっていた。私たちは静かにアイスキャンディーを食べ終えた。彼女は包装紙を丸めてポケットに詰め、ドアのところへ歩いていった。"},
+{"LAB_STORY_DIALOGUE_S5_2_21","好了，休息够了，该回去……嗯？","好了，休息夠了，該回去……嗯？","Alright, I've rested enough. Time to head back... Hm?","よし、休憩は十分。戻らなきゃ……ん？","よし、休憩は十分。戻らなきゃ……ん？"},
+{"LAB_STORY_DIALOGUE_S5_2_22","她握住门把手往下按，门没动。她又用力按了按，还是没动。","她握住門把手往下按，門沒動。她又用力按了按，還是沒動。","She pushes down the handle. The door doesn't move. She tries again, harder. Still nothing.","彼女はドアノブを下げようとしたが、ドアはびくともしなかった。もう一度力を込めて試してみたものの、やはり動く気配はない。","彼女はドアノブを下げようとしたが、ドアはびくともしなかった。もう一度力を込めて試してみたものの、やはり動く気配はない。"},
+{"LAB_STORY_DIALOGUE_S5_2_23","怎么了？","怎麼了？","What's wrong?","どうした？","どうした？"},
+{"LAB_STORY_DIALOGUE_S5_2_24","门……好像打不开。","門……好像打不開。","The door... won't open.","ドアが……開かないみたい。","ドアが……開かないみたい。"},
+{"LAB_STORY_DIALOGUE_S5_2_25","她开始用力摇晃门把手，金属碰撞的声音在仓库里回荡，但门纹丝不动。","她開始用力搖晃門把手，金屬碰撞的聲音在倉庫裡回蕩，但門紋絲不動。","She rattles the handle, the metallic clanking echoing through the room, but the door doesn't budge.","彼女はドアノブを激しく揺らし始めた。金属のぶつかる音が倉庫に響くが、ドアはびくともしない。","彼女はドアノブを激しく揺らし始めた。金属のぶつかる音が倉庫に響くが、ドアはびくともしない。"},
+{"LAB_STORY_DIALOGUE_S5_2_26","我来试试。","我來試試。","Let me try.","私がやってみる。","私がやってみる。"},
+{"LAB_STORY_DIALOGUE_S5_2_27","我走过去，使劲推拉了几下，又检查了门锁。锁芯锈迹斑斑，弹簧似乎卡死了。","我走過去，使勁推拉了幾下，又檢查了門鎖。鎖芯鏽跡斑斑，彈簧似乎卡死了。","I step over, push and pull a few times, then check the lock. The cylinder is covered in rust—the spring looks completely jammed.","私は近づき、数回押したり引いたりした上で、錠前もチェックした。鍵穴は錆びており、バネが固着しているようだ。","私は近づき、数回押したり引いたりした上で、錠前もチェックした。鍵穴は錆びており、バネが固着しているようだ。"},
+{"LAB_STORY_DIALOGUE_S5_2_28","锁坏了。","鎖壞了。","The lock is broken.","錠前が壊れている。","錠前が壊れている。"},
+{"LAB_STORY_DIALOGUE_S5_2_29","哈？不会吧……","哈？不會吧……","Huh? You're kidding...","はあ？そんな……","はあ？そんな……"},
+{"LAB_STORY_DIALOGUE_S5_2_30","她掏了掏运动服的口袋，脸色一下子变了。","她掏了掏運動服的口袋，臉色一下子變了。","She checks her pocket. Her expression changes immediately.","彼女は運動着のポケットを探り、顔色が一瞬で変わった。","彼女は運動着のポケットを探り、顔色が一瞬で変わった。"},
+{"LAB_STORY_DIALOGUE_S5_2_31","手机……放在休息区的包里了。","手機……放在休息區的包裡了。","My phone... it's in my bag in the rest area.","携帯……休憩所のバッグの中に置いてきちゃったわ。","携帯……休憩所のバッグの中に置いてきちゃったわ。"},
+{"LAB_STORY_DIALOGUE_S5_2_32","我也没带。","我也沒帶。","I don't have mine either.","私も持っていないんだ。","私も持っていないんだ。"},
+{"LAB_STORY_DIALOGUE_S5_2_33","……","……","......","……","はぁ…"},
+{"LAB_STORY_DIALOGUE_S5_2_34","没关系！喊人就好了！","沒關係！喊人就好了！","It's fine! We just need to call for help!","大丈夫よ！誰かを呼べばいいんだから！","大丈夫よ！誰かを呼べばいいんだから！"},
+{"LAB_STORY_DIALOGUE_S5_2_35","她深吸一口气，对着门缝大喊。","她深吸一口氣，對著門縫大喊。","She takes a deep breath and shouts toward the gap in the door.","彼女は深く息を吸い込み、ドアの隙間に向かって叫んだ。","彼女は深く息を吸い込み、ドアの隙間に向かって叫んだ。"},
+{"LAB_STORY_DIALOGUE_S5_2_36","有——人——吗——！","有——人——嗎——！","IS—ANYONE—THERE—!","だ——れ——か——！","だ——れ——か——！"},
+{"LAB_STORY_DIALOGUE_S5_2_37","声音在仓库里回荡。但门外，运动会的广播、观众的欢呼、赛场的哨声，组成了厚实的声浪，把所有呼救都挡了回来。","聲音在倉庫裡回蕩。但門外，運動會的廣播、觀眾的歡呼、賽場的哨聲，組成了厚實的聲浪，把所有呼救都擋了回來。","Her voice echoes back at us. Outside, the event broadcast, the cheering crowd, the referee's whistle—all of it forms a wall of noise that swallows every cry for help.","声が倉庫に響く。しかしドアの外では、運動会の放送、観客の歓声、競技場の笛の音が厚い壁となって、すべての呼び声を跳ね返してきた。","声が倉庫に響く。しかしドアの外では、運動会の放送、観客の歓声、競技場の笛の音が厚い壁となって、すべての呼び声を跳ね返してきた。"},
+{"LAB_STORY_DIALOGUE_S5_2_38","别喊了，外面听不见的。","別喊了，外面聽不見的。","Don't bother. They can't hear us.","叫ぶのをやめろ。外には聞こえないから。","叫ぶのをやめろ。外には聞こえないから。"},
+{"LAB_STORY_DIALOGUE_S5_2_39","那怎么办！总不能一直待在这里吧！","那怎麼辦！總不能一直待在這裡吧！","Then what are we supposed to do?! We can't just stay in here forever!","じゃあどうするの！まさかずっとここにいるわけにはいかないでしょ！","じゃあどうするの！まさかずっとここにいるわけにはいかないでしょ！"},
+{"LAB_STORY_DIALOGUE_S5_2_40","她开始在仓库里踱步，嘴里嘟囔着什么。我靠在墙上打量着四周。头顶的日光灯忽明忽暗，闷热的空气让人有点喘不过气。","她開始在倉庫裡踱步，嘴裡嘟囔著什麼。我靠在牆上打量著四周。頭頂的日光燈忽明忽暗，悶熱的空氣讓人有點喘不過氣。","She starts pacing, muttering under her breath. I lean against the wall and take in the room. The fluorescent light flickers, and the stuffy heat is starting to get to me.","彼女は倉庫の中を行ったり来たり歩き始め、何かをぶつぶつと呟いた。私は壁にもたれて周囲を見渡した。頭上の古い蛍光灯が明滅し、蒸し暑い空気が少し息苦しい。","彼女は倉庫の中を行ったり来たり歩き始め、何かをぶつぶつと呟いた。私は壁にもたれて周囲を見渡した。頭上の古い蛍光灯が明滅し、蒸し暑い空気が少し息苦しい。"},
+{"LAB_STORY_DIALOGUE_S5_2_41","好热……","好熱……","It's so hot...","暑い……","暑い……"},
+{"LAB_STORY_DIALOGUE_S5_2_42","绘里奈用手扇着风，汗水顺着脖颈流下来，浸湿了领口。","繪里奈用手扇著風，汗水順著脖頸流下來，浸濕了領口。","Erina fans herself with her hand. Sweat runs down her neck, soaking into her collar.","えりなは手であおぎ、汗が首を伝って襟を濡らした。","えりなは手であおぎ、汗が首を伝って襟を濡らした。"},
+{"LAB_STORY_DIALOGUE_S5_2_43","别乱动，省点力气。","別亂動，省點力氣。","Stop moving around. Save your energy.","動くな、体力を温存しろ。","動くな、体力を温存しろ。"},
+{"LAB_STORY_DIALOGUE_S5_2_44","我知道啦……","我知道啦……","Alright...","分かってるよ……","分かってるよ……"},
+{"LAB_STORY_DIALOGUE_S5_2_45","时间一分一秒地过去，仓库里的温度越来越高。日光灯开始不停闪烁，像是在做最后的挣扎。","時間一分一秒地過去，倉庫裡的溫度越來越高。日光燈開始不停閃爍，像是在做最後的掙扎。","Time drags on, second by second. The temperature keeps climbing. The fluorescent light flickers more and more, as if struggling to stay on.","時間は一分一秒と過ぎ、倉庫内の温度はどんどん上がっていく。蛍光灯が絶え間なく明滅し始めた。まるで、最後のあがきのように。","時間は一分一秒と過ぎ、倉庫内の温度はどんどん上がっていく。蛍光灯が絶え間なく明滅し始めた。まるで、最後のあがきのように。"},
+{"LAB_STORY_DIALOGUE_S5_2_46","绘里奈，你还好吗？","繪里奈，你還好嗎？","Erina, are you okay?","えりな、大丈夫か？","えりな、大丈夫か？"},
+{"LAB_STORY_DIALOGUE_S5_2_47","唔……有点……晕……","唔……有點……暈……","Mm... a little... dizzy...","うーん……ちょっと……クラクラする……","うーん……ちょっと……クラクラする……"},
+{"LAB_STORY_DIALOGUE_S5_2_48","她撑着墙站起来，摇摇晃晃地走了两步。我也站起身，想过去扶她，脚下却被一块翘起的垫子绊了一下。","她撐著牆站起來，搖搖晃晃地走了兩步。我也站起身，想過去扶她，腳下卻被一塊翹起的墊子絆了一下。","She leans against the wall and takes a few unsteady steps. I move to steady her—but my foot catches on the edge of a flipped-over mat.","彼女は壁に手をついて立ち上がり、よろよろと二歩歩いた。私も立ち上がり、彼女を支えに行こうとしたが、めくれたマットに足を取られた。","彼女は壁に手をついて立ち上がり、よろよろと二歩歩いた。私も立ち上がり、彼女を支えに行こうとしたが、めくれたマットに足を取られた。"},
+{"LAB_STORY_DIALOGUE_S5_2_49","呀——","呀——","Kya—","きゃっ——","きゃっ——"},
+{"LAB_STORY_DIALOGUE_S5_2_50","绘里奈一声惊呼，被我重重地扑倒在体操垫上。我的双手撑在她的耳侧，两人之间只有不到几厘米的距离，连彼此的心跳声都清晰可见。","繪里奈一聲驚呼，被我重重地撲倒在體操墊上。我的雙手撐在她的耳側，兩人之間只有不到幾厘米的距離，連彼此的心跳聲都清晰可聞。","Erina cries out as I fall on top of her onto the mat. My hands brace on either side of her head, leaving only a few centimeters between us—close enough to hear each other's heartbeats.","えりなが短い悲鳴を上げ、私の下敷きになって体操マットに倒れ込んだ。私の両手は彼女の耳の横につき、二人の距離は数センチもない。互いの鼓動まではっきりと聞こえる。","えりなが短い悲鳴を上げ、私の下敷きになって体操マットに倒れ込んだ。私の両手は彼女の耳の横につき、二人の距離は数センチもない。互いの鼓動まではっきりと聞こえる。"},
+{"LAB_STORY_DIALOGUE_S5_2_51","会长、你……！","會長、你……！","President, you...!","会長、あ、あなた……！","会長、あ、あなた……！"},
+{"LAB_STORY_DIALOGUE_S5_2_52","抱歉，绊了一下。","抱歉，絆了一下。","Sorry, I tripped.","悪い、つまずいた。","悪い、つまずいた。"},
+{"LAB_STORY_DIALOGUE_S5_2_53","笨蛋……快、快起来……","笨蛋……快、快起來……","You fool... Hurry—get up...","バカ……は、早くどいてよ……","バカ……は、早くどいてよ……"},
+{"LAB_STORY_DIALOGUE_S5_2_54","绘里奈的双手无力地抵在我的胸前，蓝色的眼眸里水汽氤氲，满是迷离。","繪里奈的雙手無力地抵在我的胸前，藍色的眼眸裡水汽氤氳，滿是迷離。","Erina presses weakly against my chest. Her blue eyes are glassy and unfocused, hazed with heat.","えりなの両手は力なく私の胸を押していた。青い瞳は潤み、ぼんやりと霞んでいる。","えりなの両手は力なく私の胸を押していた。青い瞳は潤み、ぼんやりと霞んでいる。"},
+{"LAB_STORY_DIALOGUE_S5_2_55","（不行，头太晕了……使不上劲。）","（不行，頭太暈了……使不上勁。）","(I can't—my head's spinning... I can barely move.)","（ダメだ、頭がクラクラする……力が入らない……）","（ダメだ、頭がクラクラする……力が入らない……）"},
+{"LAB_STORY_DIALOGUE_S5_2_56","意识开始涣散。我撑着的手肘一软，两人的脸又凑近了几分，近到我们都能清晰的感受到彼此灼热的喘息。","意識開始渙散。我撐著的手肘一軟，兩人的臉又湊近了幾分，近到我們都能清晰地感受到彼此灼熱的喘息。","My consciousness begins to blur. The arm holding me up trembles, and our faces drift even closer—close enough to feel each other's breath.","意識が遠のき始める。支えていた肘が緩み、二人の顔がさらに近づいた。お互いの熱い息遣いまではっきりと感じられるほどに。","意識が遠のき始める。支えていた肘が緩み、二人の顔がさらに近づいた。お互いの熱い息遣いまではっきりと感じられるほどに。"},
+{"LAB_STORY_DIALOGUE_S5_2_57","会……长……","會……長……","Pre—si—dent...","か……いちょう……","か……いちょう……"},
+{"LAB_STORY_DIALOGUE_S5_2_58","她的声音变得很轻，不再是平时那种强硬的语气。她的手指攥住了我的衣角，没有推开，也没有拉近。","她的聲音變得很輕，不再是平時那種強硬的語氣。她的手指攥住了我的衣角，沒有推開，也沒有拉近。","Her voice softens—no longer the sharp, forceful tone she usually has. Her fingers curl around the hem of my shirt, neither pushing me away nor pulling me closer.","彼女の声はとても小さくなり、普段の強い口調ではなかった。彼女の指は私の服の裾を握りしめた。押しのけるでもなく、引き寄せるでもなく。","彼女の声はとても小さくなり、普段の強い口調ではなかった。彼女の指は私の服の裾を握りしめた。押しのけるでもなく、引き寄せるでもなく。"},
+{"LAB_STORY_DIALOGUE_S5_2_59","日光灯闪了两下，终于彻底熄灭。昏暗的仓库里，只剩下彼此的呼吸声和心跳声。","日光燈閃了兩下，終於徹底熄滅。昏暗的倉庫裡，只剩下彼此的呼吸聲和心跳聲。","The fluorescent light flickers twice—then goes out completely. In the dim room, all that remains is the sound of two sets of breathing... and two heartbeats.","蛍光灯が二度点滅し、ついに完全に消えた。薄暗い倉庫の中には、互いの呼吸と鼓動だけが残された。","蛍光灯が二度点滅し、ついに完全に消えた。薄暗い倉庫の中には、互いの呼吸と鼓動だけが残された。"},
+{"LAB_STORY_DIALOGUE_S5_2_60","缓缓地，绘里奈闭上了双眼，睫毛微微颤动着，像是在等待什么。","緩緩地，繪里奈閉上了雙眼，睫毛微微顫動著，像是在等待什麼。","Slowly, Erina closes her eyes. Her lashes tremble faintly—as if waiting for something.","ゆっくりと、えりなは目を閉じた。まつげが微かに震えていて、何かを待っているようだった。","ゆっくりと、えりなは目を閉じた。まつげが微かに震えていて、何かを待っているようだった。"},
+{"LAB_STORY_DIALOGUE_S5_2_61","绘里奈……","繪里奈……","Erina...","えりな……","えりな……"},
+{"LAB_STORY_DIALOGUE_S5_2_62","我的视线愈发模糊，仅剩的力气也消耗殆尽。支撑着身体的手肘逐渐脱力，我的头也慢慢地低了下去，距离绘里奈越来越近。","我的視線愈發模糊，僅剩的力氣也消耗殆盡。支撐著身體的手肘逐漸脫力，我的頭也慢慢地低了下去，距離繪里奈越來越近。","My vision fades further, and what little strength I have left slips away. The arm holding me up gives out, and I sink closer—closer—","私の視界はますますぼやけ、残った力も消耗し尽くそうとしていた。体を支えていた肘の力が徐々に抜け、私の頭もゆっくりと下がっていき、えりなにどんどん近づいていく。","私の視界はますますぼやけ、残った力も消耗し尽くそうとしていた。体を支えていた肘の力が徐々に抜け、私の頭もゆっくりと下がっていき、えりなにどんどん近づいていく。"},
+{"LAB_STORY_DIALOGUE_S5_2_63","然后——","然後——","And then—","そして——","そして——"},
+{"LAB_STORY_DIALOGUE_S5_2_64","“砰”的一声，仓库门被猛地砸开。","「砰」的一聲，倉庫門被猛地砸開。","With a loud bang, the equipment room door is thrown open.","「バン」という音とともに、倉庫のドアが激しく開けられた。","「バン」という音とともに、倉庫のドアが激しく開けられた。"},
+{"LAB_STORY_DIALOGUE_S5_2_65","我听说有人被锁在仓库里了？你们还好吧？","我聽說有人被鎖在倉庫裡了？你們還好吧？","I heard someone got locked in here! Are you two alright?","誰かが倉庫に閉じ込められているって聞いたんだけど、大丈夫？","誰か倉庫に閉じ込められているって聞いたんですけど、大丈夫ですか？"},
+{"LAB_STORY_DIALOGUE_S5_2_66","……","……","......","……","はぁ…"},
+{"LAB_STORY_DIALOGUE_S5_2_67","会、会长，和天月小姐？！","會、會長，和天月小姐？！","P-President, and Miss Amatsuki?!","か、会長、それに天月さん？！","か、会長、それに天月さん？！"},
+{"LAB_STORY_DIALOGUE_S5_2_68","对……对不起！打扰到你们了！请慢慢享受——！","對……對不起！打擾到你們了！請慢慢享受——！","I-I'm so sorry! I didn't mean to interrupt! Please, go ahead—","ご、ごめん！邪魔しちゃったね！どうぞゆっくり過ごして——！","ご、ごめんなさい！お邪魔しました！どうぞゆっくりお過ごしください——！"},
+{"LAB_STORY_DIALOGUE_S5_2_69","等……等等！这是误会，别走！","等……等等！這是誤會，別走！","Wait—wait! It's not what you think! Don't go!","ま、待って！これは誤解なんだ、行かないでくれ！","ま、待って！これは誤解なんだ、行かないでくれ！"},
+{"LAB_STORY_DIALOGUE_S5_2_70","绘里奈不知哪来的力气，猛地一把将我推开。我的身体在空中划过一道完美的弧线，摔在了一旁的体操垫上。而我两眼一黑，彻底失去了知觉。","繪里奈不知哪來的力氣，猛地一把將我推開。我的身體在空中劃過一道完美的弧線，摔在了一旁的體操墊上。而我兩眼一黑，徹底失去了知覺。","From somewhere, Erina finds the strength to shove me off. My body arcs cleanly through the air before landing on a nearby mat. Everything goes dark, and I lose consciousness.","えりなはどこからか力を振り絞り、私を勢いよく押しのけた。私の体は空中で見事な弧を描き、隣の体操マットに落ちた。そして私は目の前が真っ暗になり、完全に意識を失った。","えりなはどこからか力を振り絞り、私を勢いよく押しのけた。私の体は空中で見事な弧を描き、隣の体操マットに落ちた。そして私は目の前が真っ暗になり、完全に意識を失った。"},
+{"LAB_STORY_DIALOGUE_S5_2_71","……","……","......","……","はぁ…"},
+{"LAB_STORY_DIALOGUE_S5_2_72","之后花了很久才解开了误会。","之後花了很久才解開了誤會。","It takes a very long time after that to clear up the misunderstanding.","その後、誤解を解くのに長い時間がかかった。","その後、誤解を解くのに長い時間がかかった。"},
+{"LAB_STORY_DIALOGUE_S5_3_1","我本该看着她冲过终点的。","我本該看著她衝過終點的。","I should have been there to watch her cross the finish line.","彼女がゴールを通過する瞬間を見届けるべきだった。","彼女がゴールを通過する瞬間を見届けるべきだった。"},
+{"LAB_STORY_DIALOGUE_S5_3_2","海风裹着咸味扑面而来，我站在距离终点还有几百米的地方，身边是一辆冒着青烟的观众接驳车。","海風裹著鹹味撲面而來，我站在距離終點還有幾百米的地方，身邊是一輛冒著青煙的觀眾接駁車。","Salt-tinged sea air hits me in the face. I'm standing a few hundred meters short of the finish line, next to a shuttle bus quietly billowing smoke.","海風が塩気を帯びて顔に当たる。私はゴールまでまだ数百メートルの地点に立ち、隣には青白い煙を上げている観客シャトルバスが停まっていた。","海風が塩気を帯びて顔に当たる。私はゴールまでまだ数百メートルの地点に立ち、隣には青白い煙を上げている観客シャトルバスが停まっていた。"},
+{"LAB_STORY_DIALOGUE_S5_3_3","司机满脸歉意地说着什么，我已经没在听了。","司機滿臉歉意地說著什麼，我已經沒在聽了。","The driver is saying something apologetic. I'm not listening anymore.","運転手が申し訳なさそうに何かを言っていたが、私はもう聞いていなかった。","運転手が申し訳なさそうに何かを言っていたが、私はもう聞いていなかった。"},
+{"LAB_STORY_DIALOGUE_S5_3_4","等我终于步行赶到终点区域时，大部分选手都已经完成了比赛，我一边寻找着那个亚麻色头发的身影，一边继续往前走。","等我終於步行趕到終點區域時，大部分選手都已經完成了比賽，我一邊尋找著那個亞麻色頭髮的身影，一邊繼續往前走。","By the time I finally make it to the finish area on foot, most of the competitors have already finished their races. I keep moving forward, scanning the crowd for a flash of flaxen hair.","やっと歩いてゴールエリアに着いた時には、ほとんどの選手が競技を終えていた。私は亜麻色の髪の姿を探しながら、さらに歩き続けた。","やっと歩いてゴールエリアに着いた時には、ほとんどの選手が競技を終えていた。私は亜麻色の髪の姿を探しながら、さらに歩き続けた。"},
+{"LAB_STORY_DIALOGUE_S5_3_5","终于，在距离终点线稍远的位置，我看到了将自行车停在一旁，背靠大桥护栏的白石伊莉娜。","終於，在距離終點線稍遠的位置，我看到了將自行車停在一旁，背靠大橋護欄的白石伊莉娜。","And there she is—a bit far from the finish line, Irina is leaning against the bridge railing with her bicycle parked beside her.","ようやく、ゴールラインから少し離れた場所で、自転車を脇に止め、橋のガードレールに寄りかかっている白石イリーナを見つけた。","ようやく、ゴールラインから少し離れた場所で、自転車を脇に止め、橋のガードレールに寄りかかっている白石イリーナを見つけた。"},
+{"LAB_STORY_DIALOGUE_S5_3_6","她将从补给站拿的矿泉水从头顶倒下，透明的液体打湿了她的头发、脸颊和胸口，再顺着骑行服流下。","她將從補給站拿的礦泉水從頭頂倒下，透明的液體打濕了她的頭髮、臉頰和胸口，再順著騎行服流下。","She tilts a bottle of water from the Supply Station over her head. The clear liquid soaks through her hair, runs down her cheeks and chest, and traces along her cycling outfit.","彼女は補給ステーションで受け取ったミネラルウォーターを頭から浴びていた。透明な液体が彼女の髪、頬、胸を濡らし、さらにサイクリングウェアを伝って流れ落ちる。","彼女は補給ステーションで受け取ったミネラルウォーターを頭から浴びていた。透明な液体が彼女の髪、頬、胸を濡らし、さらにサイクリングウェアを伝って流れ落ちる。"},
+{"LAB_STORY_DIALOGUE_S5_3_7","身上停留的水痕，让她在阳光下格外耀眼。","身上停留的水痕，讓她在陽光下格外耀眼。","The water clinging to her catches the sunlight, making her shine.","体に残った水滴が、太陽の下で彼女をひときわ輝かせていた。","体に残った水滴が、太陽の下で彼女をひときわ輝かせていた。"},
+{"LAB_STORY_DIALOGUE_S5_3_8","会长？","會長？","President?","会長さん？","会長さん？"},
+{"LAB_STORY_DIALOGUE_S5_3_9","我明明没有发出动静，她却像是感应到了我的到来，睁开眼睛，水珠还挂在睫毛上。","我明明沒有發出動靜，她卻像是感應到了我的到來，睜開眼睛，水珠還掛在睫毛上。","I haven't made a sound, but she seems to sense my approach anyway. She opens her eyes, droplets still clinging to her lashes.","私は物音を立てなかったはずだが、彼女は私の到着を感じ取ったかのように目を開けた。まだまつげに水滴がついている。","私は物音を立てなかったはずだが、彼女は私の到着を感じ取ったかのように目を開けた。まだまつげに水滴がついている。"},
+{"LAB_STORY_DIALOGUE_S5_3_10","你错过了最精彩的部分呢。","你錯過了最精彩的部分呢。","You missed the best part.","一番いいところを逃しましたね。","一番いいところを逃しましたね。"},
+{"LAB_STORY_DIALOGUE_S5_3_11","声音里带着运动后的微喘，却格外清亮，没有带上一丝一毫的埋怨。","聲音裡帶著運動後的微喘，卻格外清亮，沒有帶上一絲一毫的埋怨。","Her voice carries a hint of exertion, but it's clear and bright—not a trace of reproach in it.","声は運動後の少し荒い息遣いを含んでいたが、とても澄んでいて、少しの恨みも感じられなかった。","声は運動後の少し荒い息遣いを含んでいたが、とても澄んでいて、少しの恨みも感じられなかった。"},
+{"LAB_STORY_DIALOGUE_S5_3_12","观众用车在半路抛锚了，抱歉，没有看到你完成比赛的重要时刻。","觀眾用車在半路拋錨了，抱歉，沒有看到你完成比賽的重要時刻。","The shuttle broke down on the way. I'm sorry—I didn't get to see you cross the finish line.","観客バスが途中で故障しちゃったんだ。君のゴールの瞬間を見逃して、本当にごめんね。","観客バスが途中で故障しちゃったんだ。君のゴールの瞬間を見逃して、本当にごめんね。"},
+{"LAB_STORY_DIALOGUE_S5_3_13","观众用车吗……","觀眾用車嗎……","The shuttle bus...","観客バスですか……","観客バスですか……"},
+{"LAB_STORY_DIALOGUE_S5_3_14","她眨了眨眼，将水珠从睫毛上抖落，脸上泛出笑意。","她眨了眨眼，將水珠從睫毛上抖落，臉上泛出笑意。","She blinks, and a droplet falls from her lashes. A smile spreads across her face.","彼女はまばたきをして、まつげの水滴を落とし、顔に笑みを浮かべた。","彼女はまばたきをして、まつげの水滴を落とし、顔に笑みを浮かべた。"},
+{"LAB_STORY_DIALOGUE_S5_3_15","下次运动会相关的接驳车，以及跟随长距离赛事的观众用车，也由雪貂运输来负责吧？","下次運動會相關的接駁車，以及跟隨長距離賽事的觀眾用車，也由雪貂運輸來負責吧？","For the next sports meet, the shuttles—and the spectator buses for long-distance events—shall we have Ferret Transit handle those as well?","次の運動会のシャトルバスも、長距離競技に随行する観客バスも、フェレット交通に任せてもらえますか？","次の運動会のシャトルバスも、長距離競技に随行する観客バスも、フェレット交通に任せてもらえますか？"},
+{"LAB_STORY_DIALOGUE_S5_3_16","这片区域没办法建设地铁，不过雪貂运输在这里本就有三条常规线路，每十五分钟一班，事故率……","這片區域沒辦法建設地鐵，不過雪貂運輸在這裡本就有三條常規線路，每十五分鐘一班，事故率……","A subway line isn't feasible in this area, but Ferret Transit already runs three regular routes through here—every fifteen minutes, and the incident rate is...","この地域には地下鉄を建設できませんが、フェレット交通はここで元々三本の通常路線を運行しています。15分に一本、事故率は……","この地域には地下鉄を建設できませんが、フェレット交通はここで元々三本の通常路線を運行しています。15分に一本、事故率は……"},
+{"LAB_STORY_DIALOGUE_S5_3_17","是零。","是零。","Zero.","ゼロ。","ゼロです。"},
+{"LAB_STORY_DIALOGUE_S5_3_18","没错，自从设立线路以来从来没有发生过事故，这样的话，会长就不用担心错过我明年的比赛了。","沒錯，自從設立線路以來從來沒有發生過事故，這樣的話，會長就不用擔心錯過我明年的比賽了。","That's right—not a single incident since the routes were established. That way, you won't have to worry about missing my race next year either.","そうです。路線開設以来、一度も事故は起こっていません。これなら、会長さんが来年の私の試合を見逃す心配はありませんね。","そうです。路線開設以来、一度も事故は起こっていません。これなら、会長さんが来年の私の試合を見逃す心配はありませんね。"},
+{"LAB_STORY_DIALOGUE_S5_3_19","她的语气里是拥有着毫不掩饰的骄傲，让我隐约已经猜到了她的比赛结果，不过我还是选择询问一个确切的答案。","她的語氣裡是擁有著毫不掩飾的驕傲，讓我隱約已經猜到了她的比賽結果，不過我還是選擇詢問一個確切的答案。","There's an unmistakable note of pride in her voice that already tells me how the race went—but I ask anyway.","彼女の口調には隠しきれない誇りが込められているから、私は彼女の試合結果をほぼ察していた。それでも確かな答えを聞くことにした。","彼女の口調には隠しきれない誇りが込められているから、私は彼女の試合結果をほぼ察していた。それでも確かな答えを聞くことにした。"},
+{"LAB_STORY_DIALOGUE_S5_3_20","那这一场比赛的结果是？","那這一場比賽的結果是？","So what was the result?","で、この試合の結果は？","で、この試合の結果は？"},
+{"LAB_STORY_DIALOGUE_S5_3_21","海风吹拂，水珠从她的发尾滴落，她抬起手，在空中虚画出一条路线。","海風吹拂，水珠從她的髮尾滴落，她抬起手，在空中虛畫出一條路線。","The sea breeze stirs her hair, droplets falling from the tips. She lifts a hand and traces an invisible route through the air.","海風が吹き、彼女の髪の先から水滴が落ちる。彼女は手を挙げ、空中にゆっくりとルートを描いた。","海風が吹き、彼女の髪の先から水滴が落ちる。彼女は手を挙げ、空中にゆっくりとルートを描いた。"},
+{"LAB_STORY_DIALOGUE_S5_3_22","三个陡坡，两个急弯，沿海的横风区……","三個陡坡，兩個急彎，沿海的橫風區……","Three steep climbs, two sharp bends, a crosswind zone along the coast...","三つの急坂、二つの急カーブ、それに海沿いの横風区間……","三つの急坂、二つの急カーブ、それに海沿いの横風区間……"},
+{"LAB_STORY_DIALOGUE_S5_3_23","如果将每个关键点都看作一个站台，把体力的分配看作班次调度，再把坡道和横风看作路面状况。","如果將每個關鍵點都看作一個站台，把體力的分配看作班次調度，再把坡道和橫風看作路面狀況。","If you treat each key point as a station, energy distribution as a timetable, and the slopes and crosswind as road conditions...","各キーポイントを駅に、体力配分をダイヤ調整に、坂道と横風を路面状況に見立てます。","各キーポイントを駅に、体力配分をダイヤ調整に、坂道と横風を路面状況に見立てます。"},
+{"LAB_STORY_DIALOGUE_S5_3_24","只要拥有必要的体力，规划出一条最平稳高效的路线这种事，对我来说已轻车熟路。","只要擁有必要的體力，規劃出一條最平穩高效的路線這種事，對我來說已輕車熟路。","With the right reserve of energy, plotting the smoothest, most efficient route comes naturally to me.","この場合、必要な体力を備えていれば、最も安定して効率的なルートを計画することは、私にとっては朝飯前です。","この場合、必要な体力を備えていれば、最も安定して効率的なルートを計画することは、私にとっては朝飯前です。"},
+{"LAB_STORY_DIALOGUE_S5_3_25","所以——","所以——","So—","つまり——","つまり——"},
+{"LAB_STORY_DIALOGUE_S5_3_26","冠军。","冠軍。","First place.","優勝です。","優勝です。"},
+{"LAB_STORY_DIALOGUE_S5_3_27","她嘴角上扬的弧度比刚才更多了一份笃定，眼中是夺得桂冠的光芒。","她嘴角上揚的弧度比剛才更多了一份篤定，眼中是奪得桂冠的光芒。","The curve of her smile grows more certain, and her eyes carry the quiet glow of a champion.","彼女の口元の上がり具合は先ほどよりも確信に満ち、目には栄冠を掴んだ輝きがあった。","彼女の口元の上がり具合は先ほどよりも確信に満ち、目には栄冠を掴んだ輝きがあった。"},
+{"LAB_STORY_DIALOGUE_S5_3_28","远离终点的此处四下无人，我从包里拿出了为她提前准备的干净毛巾。","遠離終點的此處四下無人，我從包裡拿出了為她提前準備的乾淨毛巾。","We're far from the finish area, and no one else is around. I reach into my bag and take out the clean towel I prepared for her.","ゴールから遠く離れたこの場所は誰もいない。私はバッグから彼女のために用意しておいた清潔なタオルを取り出した。","ゴールから遠く離れたこの場所は誰もいない。私はバッグから彼女のために用意しておいた清潔なタオルを取り出した。"},
+{"LAB_STORY_DIALOGUE_S5_3_29","虽说车辆抛锚不是我的错，但我也想做些什么，补偿没能看到她冲过终点线的遗憾。","雖說車輛拋錨不是我的錯，但我也想做些什麼，補償沒能看到她衝過終點線的遺憾。","The bus breaking down wasn't my fault, but I still want to make up for missing that moment.","車の故障が私のせいではないとはいえ、彼女のゴール通過の瞬間を見逃したことが悔しくて、何とかして埋め合わせたいと思った。","車の故障が私のせいではないとはいえ、彼女のゴール通過の瞬間を見逃したことが悔しくて、何とかして埋め合わせたいと思った。"},
+{"LAB_STORY_DIALOGUE_S5_3_30","于是我展开手里的毛巾。","於是我展開手裡的毛巾。","So I unfold the towel.","そこで私はタオルを広げた。","そこで私はタオルを広げた。"},
+{"LAB_STORY_DIALOGUE_S5_3_31","很了不起呢，伊莉娜。","很了不起呢，伊莉娜。","That's incredible, Irina.","とても素晴らしいよ、イリーナ。","とても素晴らしいよ、イリーナ。"},
+{"LAB_STORY_DIALOGUE_S5_3_32","嗯？","嗯？","Mm?","ん？","ん？"},
+{"LAB_STORY_DIALOGUE_S5_3_33","伊莉娜疑惑地眨了眨眼睛，没有看懂我的行为和言语之间有何种关系。","伊莉娜疑惑地眨了眨眼睛，沒有看懂我的行為和言語之間有何種關係。","Irina blinks, puzzled—she can't quite connect what I'm saying with what I'm doing.","イリーナは疑問そうにまばたきをし、私の行動と言葉の間の関連性を理解できなかった。","イリーナは疑問そうにまばたきをし、私の行動と言葉の間の関連性を理解できなかった。"},
+{"LAB_STORY_DIALOGUE_S5_3_34","直到我将毛巾扣在了她的头顶，搓弄她湿漉漉的长发。","直到我將毛巾扣在了她的頭頂，搓弄她濕漉漉的長發。","Not until I drape the towel over her head and begin gently drying her hair.","私がタオルを彼女の頭の上に乗せ、濡れた長い髪を揉み始めるまで。","私がタオルを彼女の頭の上に乗せ、濡れた長い髪を揉み始めるまで。"},
+{"LAB_STORY_DIALOGUE_S5_3_35","会、会长？！","會、會長？！","P-President?!","会、会長さん……？！","会、会長さん……？！"},
+{"LAB_STORY_DIALOGUE_S5_3_36","她的肩膀微微一颤，因为被遮挡了视线，也不敢贸然伸手把毛巾拿下来。","她的肩膀微微一顫，因為被遮擋了視線，也不敢貿然伸手把毛巾拿下來。","Her shoulders jolt slightly. With her vision covered, she hesitates to reach up and remove it.","彼女の肩が微かに震えた。視界を遮られていたので、むやみに手を伸ばしてタオルを取ることができなかった。","彼女の肩が微かに震えた。視界を遮られていたので、むやみに手を伸ばしてタオルを取ることができなかった。"},
+{"LAB_STORY_DIALOGUE_S5_3_37","我自己来就好啦！","我自己來就好啦！","I can do it myself!","自分でやりますから！","自分でやりますから！"},
+{"LAB_STORY_DIALOGUE_S5_3_38","多少让我补偿一下吧。","多少讓我補償一下吧。","At least let me make it up to you.","少しは埋め合わせをさせてくれ。","少しは埋め合わせをさせてくれ。"},
+{"LAB_STORY_DIALOGUE_S5_3_39","唔……","唔……","Mm...","うーん……","うーん……"},
+{"LAB_STORY_DIALOGUE_S5_3_40","不知道是接受了这种说法，还是暂时想不到别的补偿方案，她最终默许我继续下去。","不知道是接受了這種說法，還是暫時想不到別的補償方案，她最終默許我繼續下去。","Whether she accepts the reasoning or simply doesn't object, she ends up allowing me to continue.","この言葉を受け入れたのか、それとも他に埋め合わせの方法が思いつかなかったのか、彼女は結局私が続けるのを黙認した。","この言葉を受け入れたのか、それとも他に埋め合わせの方法が思いつかなかったのか、彼女は結局私が続けるのを黙認した。"},
+{"LAB_STORY_DIALOGUE_S5_3_41","擦完了头顶，我用毛巾包住她的一缕长发，从发根捋到发尾，挤出多余的水分。","擦完了頭頂，我用毛巾包住她的一縷長髮，從髮根捋到髮尾，擠出多餘的水分。","Once I've dried the top of her head, I wrap a section of her hair in the towel and run it from root to tip, pressing out the remaining moisture.","頭頂を拭き終えると、私はタオルで彼女の長い髪の一房を包み、根元から毛先まで撫でて余分な水を絞り出した。","頭頂を拭き終えると、私はタオルで彼女の長い髪の一房を包み、根元から毛先まで撫でて余分な水を絞り出した。"},
+{"LAB_STORY_DIALOGUE_S5_3_42","海风将湿发的凉意送到我的手中，不再被毛巾阻隔视线的她抬眼看向我。","海風將濕髮的涼意送到我的手中，不再被毛巾阻隔視線的她抬眼看向我。","The sea breeze carries the cool dampness of her hair to my hands. With the towel no longer blocking her view, she looks up at me.","海風が濡れた髪の冷たさを私の手に運ぶ。もはやタオルで視界を遮られなくなった彼女は顔を上げて私を見た。","海風が濡れた髪の冷たさを私の手に運ぶ。もはやタオルで視界を遮られなくなった彼女は顔を上げて私を見た。"},
+{"LAB_STORY_DIALOGUE_S5_3_43","皱起的眉头代表的并不是不开心，而是不知道该做出什么表情的为难。","皺起的眉頭代表的並不是不開心，而是不知道該做出什麼表情的為難。","The faint crease in her brow isn't displeasure—it's the expression of someone unsure what to feel.","しかめた眉は不機嫌ではなく、どんな表情をすればいいのか分からないという戸惑いだった。","しかめた眉は不機嫌ではなく、どんな表情をすればいいのか分からないという戸惑いだった。"},
+{"LAB_STORY_DIALOGUE_S5_3_44","等我快要将头发擦完，她才像是刚想起该说什么一样，支支吾吾道：","等我快要將頭髮擦完，她才像是剛想起該說什麼一樣，支支吾吾道：","By the time I'm nearly done, she seems to remember something she wanted to say and starts, haltingly:","髪を拭き終えそうになった時、彼女はやっと思い出したようにどもりながら言った。","髪を拭き終えそうになった時、彼女はやっと思い出したようにどもりながら言った。"},
+{"LAB_STORY_DIALOGUE_S5_3_45","身为雪貂运输的继承人，应该是我为会长提供……","身為雪貂運輸的繼承人，應該是我為會長提供……","As the heir to Ferret Transit, it should be me providing President with—","フェレット交通の跡取りである私が会長さんに……","フェレット交通の跡取りである私が会長さんに……"},
+{"LAB_STORY_DIALOGUE_S5_3_46","但她的声音越来越小，因为擦完了头发的我将毛巾换了一面，擦拭起她泛红的脸颊。","但她的聲音越來越小，因為擦完了頭髮的我將毛巾換了一面，擦拭起她泛紅的臉頰。","But her voice trails off. As I finish her hair, I turn the towel to a clean side and move to her flushed cheeks.","しかし彼女の声はどんどん小さくなる。髪を拭き終えた私がタオルの面を変え、彼女の赤くなった頬を拭き始めたからだ。","しかし彼女の声はどんどん小さくなる。髪を拭き終えた私がタオルの面を変え、彼女の赤くなった頬を拭き始めたからだ。"},
+{"LAB_STORY_DIALOGUE_S5_3_47","嗯？","嗯？","Mm?","ん？","ん？"},
+{"LAB_STORY_DIALOGUE_S5_3_48","没什么……","沒什麼……","Never mind...","何でもありません……","何でもありません……"},
+{"LAB_STORY_DIALOGUE_S5_3_49","毛巾穿过下颌线时，她缩了缩脖子，但她始终抬着头，虽然目光时不时躲闪，也一直面朝着我。","毛巾穿過下頜線時，她縮了縮脖子，但她始終抬著頭，雖然目光時不時躲閃，也一直面朝著我。","When the towel brushes along her jawline, she instinctively draws her neck in—but keeps her chin lifted. Even as her eyes flicker away, she doesn't pull back.","タオルが彼女の顎のラインを通り過ぎる時、彼女は首をすくめた。しかし彼女はずっと顔を上げており、時々目をそらしながらも、ずっと私の方を向いていた。","タオルが彼女の顎のラインを通り過ぎる時、彼女は首をすくめた。しかし彼女はずっと顔を上げており、時々目をそらしながらも、ずっと私の方を向いていた。"},
+{"LAB_STORY_DIALOGUE_S5_3_50","渐渐的，她的肩膀也不再紧绷。","漸漸地，她的肩膀也不再緊繃。","Gradually, the tension leaves her shoulders.","次第に、緊張が解かれたようで、彼女は肩の力を抜いた。","次第に、緊張が解かれたようで、彼女は肩の力を抜いた。"},
+{"LAB_STORY_DIALOGUE_S5_3_51","擦得差不多了，我将毛巾收回，接着重新递给她。","擦得差不多了，我將毛巾收回，接著重新遞給她。","When I've wiped away most of the moisture, I fold the towel and hold it out to her.","だいたい拭き終えたので、私はタオルを彼女に渡した。","だいたい拭き終えたので、私はタオルを彼女に渡した。"},
+{"LAB_STORY_DIALOGUE_S5_3_52","接下来的部分就自己来吧？","接下來的部分就自己來吧？","You can handle the rest?","残りは自分でやるか？","残りは自分でやるか？"},
+{"LAB_STORY_DIALOGUE_S5_3_53","……","……","......","……","はぁ…"},
+{"LAB_STORY_DIALOGUE_S5_3_54","她没有说话，而是继续仰着脑袋，先前倒下的矿泉水会顺着下巴滴落，因此脖子上还沁着一层薄汗。","她沒有說話，而是繼續仰著腦袋，先前倒下的礦泉水會順著下巴滴落，因此脖子上還沁著一層薄汗。","She doesn't answer. She simply tilts her head back—the water she poured over herself still dripping from her chin, a thin sheen of sweat along her neck.","彼女は黙ったまま、さらに顔を上げ続けた。先ほどかけたミネラルウォーターが顎から滴り落ちるため、首にはまだ薄い汗が滲んでいた。","彼女は黙ったまま、さらに顔を上げ続けた。先ほどかけたミネラルウォーターが顎から滴り落ちるため、首にはまだ薄い汗が滲んでいた。"},
+{"LAB_STORY_DIALOGUE_S5_3_55","不过，脖子以下就不只是汗水了。","不過，脖子以下就不只是汗水了。","It isn't just sweat below her neck, though.","しかし、首より下は汗だけではない。","しかし、首より下は汗だけではない。"},
+{"LAB_STORY_DIALOGUE_S5_3_56","……","……","......","……","はぁ…"},
+{"LAB_STORY_DIALOGUE_S5_3_57","她的意思，我已了然。","她的意思，我已了然。","I understand what she means.","彼女の意味するところは、もう理解していた。","彼女の意味するところは、もう理解していた。"},
+{"LAB_STORY_DIALOGUE_S5_3_58","所以我重新拿好了毛巾，选择了较为干净的一面。","所以我重新拿好了毛巾，選了較為乾淨的一面。","So I take the towel back and find a dry section.","だから私はタオルを改めて持ち直し、より清潔な面を選んだ。","だから私はタオルを改めて持ち直し、より清潔な面を選んだ。"},
+{"LAB_STORY_DIALOGUE_S5_3_59","可能会有点痒哦。","可能會有點癢哦。","This might tickle a little.","ちょっとくすぐったいかもしれないよ。","ちょっとくすぐったいかもしれないよ。"},
+{"LAB_STORY_DIALOGUE_S5_3_60","……","……","......","……","はぁ…"},
+{"LAB_STORY_DIALOGUE_S5_3_61","伊莉娜还是没有说话，只是点了点头。","伊莉娜還是沒有說話，只是點了點頭。","Irina still says nothing. She just gives a small nod.","イリーナはやはり何も言わず、ただうなずいた。","イリーナはやはり何も言わず、ただうなずいた。"},
+{"LAB_STORY_DIALOGUE_S5_3_62","于是我轻叹一口气，朝她靠近了些，一手扶住她的身子，另一只手拿毛巾擦拭她的脖颈。","於是我輕嘆一口氣，朝她靠近了些，一手扶住她的身子，另一隻手拿毛巾擦拭她的脖頸。","I let out a quiet breath, step a little closer, steady her with one hand, and bring the towel to her neck with the other.","私は軽くため息をつき、彼女に近づき、片手で彼女の体を支え、もう片方の手でタオルを持って彼女の首を拭いた。","私は軽くため息をつき、彼女に近づき、片手で彼女の体を支え、もう片方の手でタオルを持って彼女の首を拭いた。"},
+{"LAB_STORY_DIALOGUE_S5_3_63","一刻不停的海风让桥下的海面永远波光粼粼，有它作为参照，才显得时间仍然在正常流动。","一刻不停的海風讓橋下的海面永遠波光粼粼，有它作為參照，才顯得時間仍然在正常流動。","The sea breeze never stops, and the water beneath the bridge keeps shimmering. It's the only thing that makes it feel like time is still moving.","絶え間なく吹く海風を受けて、橋の下の海面は永遠にきらめいている。その揺らぎが、時間がまだ正常に流れていることを教えてくれる。","絶え間なく吹く海風を受けて、橋の下の海面は永遠にきらめいている。その揺らぎが、時間がまだ正常に流れていることを教えてくれる。"},
+{"LAB_STORY_DIALOGUE_S5_3_64","脖颈的薄汗很快便被擦干，但其余地方的水痕，恐怕还需要一点时间来清理干净。","脖頸的薄汗很快便被擦乾，但其餘地方的水痕，恐怕還需要一點時間來清理乾淨。","The moisture on her neck dries quickly, but the rest will take a little longer.","首の薄い汗はすぐに拭き終わったが、他の場所に残る水滴は、もう少し時間がかかりそうだ。","首の薄い汗はすぐに拭き終わったが、他の場所に残る水滴は、もう少し時間がかかりそうだ。"},
+{"LAB_STORY_DIALOGUE_S5_3_65","毕竟是没能见证伊莉娜冲线的补偿，只要她没有感到满足……","畢竟是沒能見證伊莉娜衝線的補償，只要她沒有感到滿足……","After all, this is my way of making up for missing Irina crossing the finish line—and as long as she isn't satisfied yet...","何しろ、イリーナのゴール通過の瞬間を見届けられなかった埋め合わせなのだから、彼女が満足しない限り……","何しろ、イリーナのゴール通過の瞬間を見届けられなかった埋め合わせなのだから、彼女が満足しない限り……"},
+{"LAB_STORY_DIALOGUE_S5_3_66","那我就只能继续下去了。","那我就只能繼續下去了。","I have no choice but to keep going.","私は続けるしかない。","私は続けるしかない。"},
 {"LAB_TASKS_UI_01","每日任务","每日任務","Daily","デイリー","일상적인 임무"},
 {"LAB_TASKS_UI_02","每周任务","每週任務","Weekly","ウィークリー","주상임무"},
 {"LAB_TASKS_UI_03","挑战任务","挑戰任務","Challenges","チャレンジ","Challenges"},
@@ -7636,7 +8883,7 @@ After carrying out a punishment that is equal parts humiliating and daring, she 
 {"LAB_TASKS_UI_06","任务刷新时间：每日03:00（UTC+8）","任務刷新時間：每日03:00（UTC+8）","Missions Refresh: 04:00 daily (UTC+9)","ミッション更新：毎日04:00","작업 새로 고침 시간: 오전 4 시"},
 {"LAB_TASKS_UI_07","礼盒奖励","禮盒獎勵","Gift Reward","ギフトボーナス","선물 상자 보상"},
 {"LAB_TASKS_LIST_01","签到{p1}次","簽到{p1}次","Check in {p1} time(s).","{p1}回ログインする","{p1} 번 로그인"},
-{"LAB_TASKS_LIST_03","在大厅与牌手互动{p1}次","在大廳與牌手互動{p1}次","Interact with characters in Lobby {p1} time(s).","ロビーで他のキャラクターと{p1}回交流する","홀은 캐릭터와 상호 작용합니다 {p1}"},
+{"LAB_TASKS_LIST_03","在大厅与牌手互动{p1}次","在大廳與牌手互動{p1}次","Interact with characters in Lobby {p1} time(s).","ロビーでキャラクターと{p1}回交流する","홀은 캐릭터와 상호 작용합니다 {p1}"},
 {"LAB_TASKS_LIST_05","给牌手送礼{p1}次","向牌手贈送{p1}次禮物","Send gifts to characters {p1} time(s).","キャラクターにギフトを{p1}回贈る","캐릭터에 선물 {p1} 회"},
 {"LAB_TASKS_LIST_06","牌局内使用{p1}次{p2}","牌局內使用{p1}次{p2}","Send {p2} {p1} time(s) at table.","{p2}を使用して{p1}回対戦する","포커 테이블은 바로 가기 언어를 사용합니다."},
 {"LAB_TASKS_LIST_07","玩{p1}次{p2}","玩{p1}次{p2}","Play {p2} {p1} time(s).","{p2}を{p1}回プレイする","玩{p1}次{p2}"},
@@ -8015,7 +9262,7 @@ By the approval of the Chief Analysts, you are hereby appointed as:]]},
 {"LAB_ANSWER_EXP_5_4","A♠A♣（口袋AA）是翻牌前最强的起手牌，对抗随机牌胜率约为85%。同花AK胜率约为67%，虽然较强，但仍落后于AA。","A♠A♣ (口袋 AA) 是翻前最強的起手牌，對抗隨機牌勝率約 85%。同花 AK 勝率約 67%，雖然強但仍次於 AA。","Pocket Aces are the strongest starting hand preflop, with about 85% equity against random hands. AK suited is powerful too (roughly 67% vs random), but still weaker than AA.","プリフロップで最強のハンドは A♠A♣（ポケットAA）です。ランダムなハンドに対する勝率は85％で非常に高く、スーテッドAKは67％で強力ですが、AAには及びません。","Pocket Aces are the strongest starting hand preflop, with about 85% equity against random hands. AK suited is powerful too (roughly 67% vs random), but still weaker than AA."},
 {"LAB_ANSWER_EXP_5_5","All in是德州扑克中最具魅力和风险的时刻，它不仅是筹码的博弈，更是心理和勇气的终极考验。","All in是德州撲克中最具魅力、也最具風險的時刻。它不只是籌碼的博弈，更是心理與勇氣的終極考驗。","Going all-in means the player places all of their remaining chips into the pot—one of the most thrilling and risky moments in Poker.","オールインはテキサスホールデムで最もスリルとリスクに満ちた瞬間であり、単なるチップの勝負にとどまらず、プレイヤーの心理と勇気が試される究極のアクションです。","Going all-in means the player places all of their remaining chips into the pot—one of the most thrilling and risky moments in Poker."},
 {"LAB_ANSWER_EXP_6_1",[[在查看其他玩家的【个人信息】时，点击个人信息面板上的添加好友按钮向该玩家申请好友
-在【好友-寻找好友】功能中能通过昵称或ID查找并添加你的好友。]],"在查看其他玩家的「個人資訊」時，可以點擊新增好友按鈕向該玩家申請好友；也可以在「好友－尋找好友」功能中透過暱稱或 ID 查找並新增好友。",[[You can add a friend either by tapping "Add Friend" from their Profile, or by searching their nickname/ID via Friends → Search.]],"他プレイヤーの「プロフィール」からフレンド追加ボタンを押して申請できます。「フレンド-フレンド検索」機能でニックネームやIDから検索して追加することも可能です。",[[You can add a friend either by tapping "Add Friend" from their Profile, or by searching their nickname/ID via Friends → Search.]]},
+在【好友-寻找好友】功能中能通过昵称或ID查找并添加你的好友。]],"在查看其他玩家的「個人資訊」時，可以點擊新增好友按鈕向該玩家申請好友；也可以在「好友－尋找好友」功能中透過暱稱或 ID 查找並新增好友。",[[You can add a friend either by tapping "Add Friend" from their Profile, or by searching their nickname/ID via Friends → Search.]],"他プレイヤーの「プロフィール」からフレンド追加ボタンをタップして申請できます。「フレンド-フレンド検索」機能でニックネームやIDから検索して追加することも可能です。",[[You can add a friend either by tapping "Add Friend" from their Profile, or by searching their nickname/ID via Friends → Search.]]},
 {"LAB_ANSWER_EXP_6_2","进入【好友房】功能可创建房间或加入好友房间与好友一起进行游戏。","進入「友人房」功能可建立房間或加入好友房間，與好友一起進行遊戲。","Through Friendly Game, you can create a game or join a friend's game to play together.","「友人戦」機能を使用してルームを作成するか、フレンドのルームに参加すれば、一緒にプレイできます。","Through Friendly Game, you can create a game or join a friend's game to play together."},
 {"LAB_ANSWER_EXP_6_3","紧凶（TAG）策略是入门的基础，起手牌应以强牌为主，位置不利时更要收紧范围。","緊凶 (TAG) 策略是入門基石，起手牌應以強牌為主，位置不利時更要收緊範圍。","A tight-aggressive (TAG) strategy is the best foundation for beginners. Strong hands should be prioritized, and in early or bad positions, ranges should be tightened even more.","基本はタイトアグレッシブ（TAG）戦略です。良いスターティングハンドを中心にプレイし、ポジションが不利な場合はさらにハンドを絞ります。","A tight-aggressive (TAG) strategy is the best foundation for beginners. Strong hands should be prioritized, and in early or bad positions, ranges should be tightened even more."},
 {"LAB_ANSWER_EXP_6_4","德州扑克共有10种牌型：皇家同花顺、同花顺、四条、葫芦、同花、顺子、三条、两对、一对、高牌。",[[德州撲克中的牌型共有10種：
@@ -8027,7 +9274,7 @@ By the approval of the Chief Analysts, you are hereby appointed as:]]},
 {"LAB_ANSWER_EXP_7_4","弃牌意味着完全放弃当前底池的争夺权。","棄牌意味著完全放棄目前底池的爭奪權。","Folding means giving up the right to continue competing for the current pot.","フォールドは、その牌局のポットに対する一切の権利を放棄する行為であり、そのハンドが続いているあいだは再参加することはできません。","Folding means giving up the right to continue competing for the current pot."},
 {"LAB_ANSWER_EXP_7_5","葫芦（由三条加一对）大于同花和顺子。","葫蘆（由三條加上一對組成）大於同花與順子。","A Full House (Three of a Kind + One Pair) is stronger than a Flush or a Straight.","フルハウス（スリーカード＋ワンペア）は、フラッシュやストレートよりも強い役です。","A Full House (Three of a Kind + One Pair) is stronger than a Flush or a Straight."},
 {"LAB_GUIDE_1","你的名字","你的名字","Your Name","名前","당신의 이름"},
-{"LAB_GUIDE_2","请输入2-16个字符的昵称","請輸入1～8個字的暱稱","Enter your nickname (2–16 characters)","1～8文字のニックネームを入力してください","2~16자의 닉네임을 입력해 주세요"},
+{"LAB_GUIDE_2","请输入昵称，8字以内","請輸入1～8個字的暱稱","Enter your nickname (2–16 characters)","1～8文字のニックネームを入力してください","2~16자의 닉네임을 입력해 주세요"},
 {"LAB_GUIDE_3","暂无可用昵称，请自行输入。","暫無可用暱稱，請自行輸入。","No nickname available. Please enter one.","使用できるニックネームが見つからないため、ご自身で入力してください","사용 가능한 닉네임이 없습니다. 직접 입력해 주세요."},
 {"LAB_GUIDE_4","点击空白处继续","點擊空白處繼續","Tap anywhere in the blank area to continue","空白をタップして次へ","点击空白处继续"},
 {"LAB_GUIDE_NAME_1","“墨鸦”","「墨鴉」","Crow","クロウ","크로우"},
@@ -8209,6 +9456,36 @@ Your email has not been linked yet. If you uninstall the game or switch devices,
 {"LAB_SYSTEM_GUIDE_16_4","这里可查看各个成就的详细信息。","這裡可查看各個成就的詳細資訊。","You can view detailed requirements for each achievement here.","こちらでは、各実績の詳細情報を確認できます。","这里可查看各个成就的详细信息。"},
 {"LAB_SYSTEM_GUIDE_16_5","关注主题进度，集齐主题下所有成就，即可领取专属主题称号！","關注主題進度，集齊主題下所有成就，即可領取專屬主題稱號！","Complete an entire theme to claim an exclusive title!","テーマの進行状況をチェックして、テーマ内の実績をすべて集めると、そのテーマの専用称号を獲得できます！","关注主题进度，集齐主题下所有成就，即可领取专属主题称号！"},
 {"LAB_SYSTEM_GUIDE_16_6","介绍完毕，会长，即刻开启您的成就挑战之旅吧！","介紹完畢，會長，即刻開啟您的成就挑戰之旅吧！","President, your path to glory begins now!","会長様、ご説明は以上です。さあ、実績集めの旅を始めましょう！","介绍完毕，会长，即刻开启您的成就挑战之旅吧！"},
+{"LAB_SYSTEM_GUIDE_17_1","欢迎会长大人来到<color=#eb0c89>足球竞猜</color>！","歡迎會長大人來到<color=#eb0c89>足球競猜</color>！","Welcome to <color=#eb0c89>Football Predictor</color>, President!","会長様、<color=#eb0c89>サッカー勝敗予想</color>へようこそ！","Welcome to <color=#eb0c89>Football Predictor</color>, President!"},
+{"LAB_SYSTEM_GUIDE_17_2","在这里，会长可参与真实足球比赛竞猜~","在這裡，會長可參與真實足球比賽競猜~","Here, you can predict the outcomes of real-world football matches!","ここでは実際のサッカーの試合予想を楽しめますよ～","Here, you can predict the outcomes of real-world football matches!"},
+{"LAB_SYSTEM_GUIDE_17_3","这里可以查看比赛各个下注项，所有玩家的下注比例~","這裡可以查看比賽各個下注項，所有玩家的下注比例~","You can view the available outcomes and see how players' bets are distributed across each result.","こちらで試合の各ベット項目や、全プレイヤーのベット比率をチェックできますよ～","You can view the available outcomes and see how players' bets are distributed across each result."},
+{"LAB_SYSTEM_GUIDE_17_4","会长可以在这里选择您的下注额度~","會長可以在這裡選擇您的下注額度~","Select your bet amount by choosing your chips here.","会長様、こちらでベット額を選べますよ～","Select your bet amount by choosing your chips here."},
+{"LAB_SYSTEM_GUIDE_17_5","再点击这里的下注区域进行下注。","再點擊這裡的下注區域進行下注。","Then, tap one of the outcomes to make your prediction.","あとは、こちらのベットエリアをタップして、ベットを行ってくださいね！","Then, tap one of the outcomes above to make your prediction."},
+{"LAB_SYSTEM_GUIDE_17_6","下注后，点击这里的<color=#eb0c89>确认下注</color>按钮，即可完成本次下注！","下注後，點擊這裡的<color=#eb0c89>確認下注</color>按鈕，即可完成本次下注！","Tap <color=#eb0c89>Submit</color> to lock in your selections!","最後に、こちらの<color=#eb0c89>ベット確定</color>ボタンをタップすれば、今回のベットが完了します！","Tap <color=#eb0c89>Submit</color> to lock in your selections!"},
+{"LAB_SYSTEM_GUIDE_17_7","会长可以点击这里查看本场比赛的下注详情。","會長可以點擊這裡查看本場比賽的下注詳情。","Tap here to view your Bet Slip and check your potential payout for this match.","こちらから今回の試合のベット詳細をチェックできますよ！","Tap here to view your Bet Slip and check your potential payout for this match."},
+{"LAB_SYSTEM_GUIDE_17_8","这里可以查看最近参与的足球竞猜记录哦！","這裡可以查看最近參與的足球競猜記錄哦！","You can also view your recent betting history right here!","そして、こちらから最近参加した予想の履歴をチェックできますよ！","You can also view your recent betting history right here!"},
+{"LAB_SYSTEM_GUIDE_17_9","比赛结束后，系统将在24小时内确认比赛结果，并通过邮件向猜对玩家发放奖励！","比賽結束後，系統將在24小時內確認比賽結果，並通過郵件向猜對玩家發放獎勵！","Once a match ends, results are confirmed within 24 hours. Winnings are then sent to winners via mail automatically.","試合終了後、24時間以内に結果が確認され、的中した会長様にはメールで報酬が届きます！","Once a match ends, results are confirmed within 24 hours. Winnings are then sent to winners via mail automatically."},
+{"LAB_SYSTEM_GUIDE_17_10","介绍完毕，预祝会长旗开得胜，满载而归！","介紹完畢，預祝會長旗開得勝，滿載而歸！","That's the tour! Here's to making the perfect picks, President!","ご案内は以上です。会長様のご武運を、心からお祈りしていますね！","That's the tour! Here's to making the perfect picks, President!"},
+{"LAB_SYSTEM_GUIDE_18_1",[[恭喜会长获得新牌手！
+进行<color=#eb0c89>双击</color>可更换对局牌手哦！~]],[[恭喜會長獲得新牌手！
+進行<color=#eb0c89>雙擊</color>可更換對局牌手哦！~]],[[Congrats on obtaining a new character!
+<color=#eb0c89>Double-tap</color> to set them as your default character for joining tables!]],[[新しいキャラクターの獲得、おめでとうございます、会長様！
+<color=#eb0c89>ダブルタップ</color>で対局キャラクターを切り替えることができますよ！]],[[Congrats on obtaining a new character!
+<color=#eb0c89>Double-tap</color> to set them as your default character for joining tables!]]},
+{"LAB_SYSTEM_GUIDE_18_2","大厅展示的牌手与对局使用的牌手，都可前往装饰方案进行更换！","大廳展示的牌手與對局使用的牌手，都可前往裝飾方案進行更換！","You can choose which characters to display in Lobby and at the tables via Style Preset!","ロビーに表示されるキャラクターと対局で使用するキャラクターは、どちらもデコレーションプランから変更できますよ！","You can choose which characters to display in Lobby and at the tables via Style Preset!"},
+{"LAB_SYSTEM_GUIDE_19_1","欢迎会长来到<color=#eb0c89>装饰方案</color>！","歡迎會長來到<color=#eb0c89>裝飾方案</color>！","Welcome to <color=#eb0c89>Style Preset</color>, President!","会長様、<color=#eb0c89>デコレーションプラン</color>へようこそ！","Welcome to <color=#eb0c89>Style Preset</color>, President!"},
+{"LAB_SYSTEM_GUIDE_19_2","会长可以在这里自定义您的大厅和对局的装饰展示！","會長可以在這裡自訂您的大廳和對局的裝飾展示！","You can customize the decorations displayed in Lobby and at the tables here!","ここでは、ロビーと対局中のデコレーション表示をカスタマイズできますよ！","You can customize the decorations displayed in Lobby and at the tables here!"},
+{"LAB_SYSTEM_GUIDE_19_3","点击这里即可编辑您的方案内容！","點擊這裡即可編輯您的方案內容！","Tap here to edit your presets.","ここをタップすると、プラン内容を編集できますよ～","Tap here to edit your presets."},
+{"LAB_SYSTEM_GUIDE_19_4",[[我们提供了“指定”和“随机”两种模式给您选择。
+点击这里可以进行切换~]],[[我們提供了「指定」和「隨機」兩種模式給您選擇。
+點擊這裡可以進行切換~]],[[Two modes—Fixed and Random—are available. 
+Tap here to switch.]],[[「指定」と「ランダム」の2つのモードをご用意しました！
+ここをタップして切り替えることができますよ～]],[[Two modes—Fixed and Random—are available. 
+Tap here to switch.]]},
+{"LAB_SYSTEM_GUIDE_19_5","想了解随机模式，只需点击左侧的“?”查看。","想了解隨機模式，只需點擊左側的“?”查看。",[[Simply tap the "?" icon to learn more about Random Mode.]],"ランダムモードの詳細は、左側の「？」をタップして確認してくださいね。",[[Simply tap the "?" icon to learn more about Random Mode.]]},
+{"LAB_SYSTEM_GUIDE_19_6","介绍完毕，快去尝试更多有趣的装饰搭配吧！","介紹完畢，快去嘗試更多有趣的裝飾搭配吧！","Mix and match to discover even more interesting decoration combinations!","案内は以上です！さっそく、色んなデコレーションの組み合わせを試してみましょう！","Mix and match to discover even more interesting decoration combinations!"},
+{"LAB_SYSTEM_GUIDE_20_1","会长可以在<color=#eb0c89>玩家信息</color>这里设置您的对局外头像、头像框和称号！","會長可以在<color=#eb0c89>玩家資訊</color>這裡設定您的對局外頭像、頭像框和稱號！","Set your avatar, avatar frame, and title to display in Lobby via <color=#eb0c89>Profile</color>!","会長様は<color=#eb0c89>プロフィール</color>から、対局外のアバターやフレーム、称号を設定できますよ！","Set your avatar, avatar frame, and title to display in Lobby via <color=#eb0c89>Profile</color>!"},
+{"LAB_SYSTEM_GUIDE_20_2","还可以前往<color=#eb0c89>装饰方案</color>编辑多个您的专属方案哦！","還可以前往<color=#eb0c89>裝飾方案</color>編輯多個您的專屬方案哦！","You can also customize multiple combinations via <color=#eb0c89>Style Preset</color>!","さらに<color=#eb0c89>デコレーションプラン</color>画面へ行けば、会長様だけの専用プランを複数作成・編集することもできますよ！","You can also customize multiple combinations via <color=#eb0c89>Style Preset</color>!"},
 {"LAB_CHARTITLE_1","高牌","高牌","High Card","ハイカード","하이 카드"},
 {"LAB_CHARTITLE_2","一对","一對","One Pair","ワンペア","원 페어"},
 {"LAB_CHARTITLE_3","两对","兩對","Two Pair","ツーペア","투 페어"},
@@ -10033,6 +11310,358 @@ For a long time, I couldn't truly understand what those words meant. But spendin
 {"LAB_CHARVIOCE_1014_112","原来如此，这样的色彩搭配如果应用到我的设计中，说不定能制作出让人眼前一亮的新品呢。","原來如此。這樣的色彩搭配若應用在我的設計上，說不定能做出讓人眼睛一亮的新品呢。","I see. If I apply this kind of color scheme to my designs, I may be able to create a striking new piece.","なるほど、こういう色使いを私のデザインに応用すれば、あっと驚くような新作ができるかもしれません。",nil},
 {"LAB_CHARVIOCE_1014_113","如此大胆的衣服……到底是出于什么目的设计的，啊，看到会长的眼神，我突然明白是怎么回事了呢~","如此大膽的服裝……究竟是出於什麼目的而設計的呢？啊，看見會長的眼神，我突然明白了呢～","Such a bold outfit... For what purpose was it made, I wonder? Ah, one look into your eyes, President, and I understand immediately.","こんなに大胆な衣装……一体どんな目的で作ったのでしょう？ああ、会長の目を見たら、どういうことかすぐに理解できました。",nil},
 {"LAB_CHARVIOCE_1014_114","低沉且有力量的声音，像是心跳，也是会长声音的魅力所在。","低沉而富有力量的聲音，既像心跳，也正是會長聲音的魅力所在。","A low, resonant voice is like the steady beating of a heart. It is one of the charms of your voice, President.","低くて力強い声は、心臓の鼓動のようであり、会長の声の魅力のひとつです。",nil},
+{"LAB_CHARVIOCE_1015_1","弃牌","棄牌","Fold","フォールド",nil},
+{"LAB_CHARVIOCE_1015_2","暂时观望。","暫時觀望。","Observing for now.","しばらく様子を観察する。",nil},
+{"LAB_CHARVIOCE_1015_3","过牌","過牌","Check","チェック",nil},
+{"LAB_CHARVIOCE_1015_4","跟注","跟注","Call","コール",nil},
+{"LAB_CHARVIOCE_1015_5","下注","下注","Bet","ベット",nil},
+{"LAB_CHARVIOCE_1015_6","加注","加注","Raise","レイズ",nil},
+{"LAB_CHARVIOCE_1015_7","底池","底池","Pot","ポット",nil},
+{"LAB_CHARVIOCE_1015_8","小盲","小盲","Small Blind","スモールブラインド",nil},
+{"LAB_CHARVIOCE_1015_9","大盲","大盲","Big Blind","ビッグブラインド",nil},
+{"LAB_CHARVIOCE_1015_10","前注","前注","Ante","アンティ",nil},
+{"LAB_CHARVIOCE_1015_11","再加注。","再加注。","Re-raise.","リレイズ。",nil},
+{"LAB_CHARVIOCE_1015_12","All in！","All in！","All in!","オール・イン！",nil},
+{"LAB_CHARVIOCE_1015_13","为了主人。","為了主人。","For Master.","ご主人様のために。",nil},
+{"LAB_CHARVIOCE_1015_14","在这月光之下——","在這月光之下——","Beneath this moonlight—","この月光の下で――",nil},
+{"LAB_CHARVIOCE_1015_15","任务确认。","任務確認。","Mission confirmed.","任務を確認。",nil},
+{"LAB_CHARVIOCE_1015_16","主人，请注视着我。","主人，請注視我。","Master, please keep your eyes on me.","ご主人様、私だけを見つめていてください。",nil},
+{"LAB_CHARVIOCE_1015_17","对局开始。","對局開始。","Let's begin.","始めましょう。",nil},
+{"LAB_CHARVIOCE_1015_18","Button。","Button。","Button.","ボタン。",nil},
+{"LAB_CHARVIOCE_1015_19","胜率计算：高。","勝率計算：高。","Win probability: high.","勝率計算：高。",nil},
+{"LAB_CHARVIOCE_1015_20","当前局面：不利。","當前局勢：不利。","Current situation: unfavorable.","現在の局面：不利。",nil},
+{"LAB_CHARVIOCE_1015_21","防御机制……失效……","防禦機制……失效……","Defense systems... shutting down...","防御機構……機能停止……",nil},
+{"LAB_CHARVIOCE_1015_22","最终目标锁定。","最終目標鎖定。","Final target locked.","最終目標をロックオン。",nil},
+{"LAB_CHARVIOCE_1015_23","胜利。","勝利。","Victory.","勝利。",nil},
+{"LAB_CHARVIOCE_1015_24","与计算结果一致。","與計算結果一致。","Consistent with calculations.","計算結果と一致。",nil},
+{"LAB_CHARVIOCE_1015_25","毫无威胁。","毫無威脅。","Not a threat.","脅威ではない。",nil},
+{"LAB_CHARVIOCE_1015_26","任务完成。","任務完成。","Mission complete.","任務完了。",nil},
+{"LAB_CHARVIOCE_1015_27","这场胜利属于您，我的主人。","這場勝利屬於您，我的主人。","This victory—I offer it to you, Master.","この勝利は、ご主人様に捧げる。",nil},
+{"LAB_CHARVIOCE_1015_28","目标确认。","目標確認。","Target confirmed.","目標確認。",nil},
+{"LAB_CHARVIOCE_1015_29","计算精准，值得学习。","計算精準，值得參考。","Precise calculation. Worth analyzing.","正確な計算、学習価値あり。",nil},
+{"LAB_CHARVIOCE_1015_30","感谢。","感謝。","My thanks.","感謝する。",nil},
+{"LAB_CHARVIOCE_1015_31","行动出现误差……抱歉。","行動出現誤差……抱歉。","Error in action... My apologies.","行動に誤差が……申し訳ない。",nil},
+{"LAB_CHARVIOCE_1015_32","逻辑溢出，无法理解……","邏輯溢出，無法理解……","Logic overflow. Unable to process...","論理オーバーフロー、理解不能……",nil},
+{"LAB_CHARVIOCE_1015_33","不堪一击。","不堪一擊。","Fragile.","脆い。",nil},
+{"LAB_CHARVIOCE_1015_34","浪费时间。","浪費時間。","A waste of time.","時間の無駄。",nil},
+{"LAB_CHARVIOCE_1015_35","您，就是我的“命中注定之人”？目标确认，沐娜会一直陪伴在您的身旁，我的主人。","您，就是我的「命中注定之人」嗎？目標確認。沐娜將始終陪伴在您的身旁，我的主人。",[[You are my "fated one"? Target confirmed. Moona will always remain by your side—Master.]],"あなたが、私の「運命の人」？目標確認、ムーナはこれから、常にご主人様のそばに。",nil},
+{"LAB_CHARVIOCE_1015_36","系统运行正常。主人，请下达指令。","系統運行正常。主人，請下達指令。","Systems operating normally. Master, please issue your commands.","システム、正常稼働中。ご主人様、ご指示を。",nil},
+{"LAB_CHARVIOCE_1015_37","检测到主人的生命反应，待机模式已解除——欢迎回来，主人。","檢測到主人的生命反應，待機模式已解除——歡迎回來，主人。","Life signature detected. Standby mode disengaged—welcome back, Master.","ご主人様の生命反応を感知、待機モード解除。おかえりなさい、ご主人様。",nil},
+{"LAB_CHARVIOCE_1015_38","守护与陪伴主人，是我存在的最高优先级指令。所以，请不要离开我的身边。","守護與陪伴主人，是我存在的最高優先級指令。因此，請不要離開我的身邊。","To protect you and stay by your side—that is my highest-priority directive. So please... do not leave me.","ご主人様を守り、そばにいること――それが、私にとって最高優先度の指令。どうか……私のそばを離れないでください。",nil},
+{"LAB_CHARVIOCE_1015_39","接触感知……主人的体温，令我感到十分安心。","接觸感知……主人的體溫，令我感到安心。","Contact detected... Your warmth, Master—it puts me at ease.","接触感知……ご主人様の体温が、安心感をもたらす。",nil},
+{"LAB_CHARVIOCE_1015_40","主人想触摸我的耳朵？我的耳部敏感度为其他部位的三倍，请您……温柔一些。","主人想觸摸我的耳朵？耳部敏感度為其他部位的三倍，請您……溫柔一些。","You wish to touch my ears, Master? Ear sensor sensitivity is set to three times that of other areas. Please... be gentle.","ご主人様、私の耳を触りたい？耳部センサーの感度は、他部位の三倍に設定されている。えっと……優しくして。",nil},
+{"LAB_CHARVIOCE_1015_41","我喜欢月亮。在月光的加持下，我能更清晰地听到您的心跳。","我喜歡月亮。在月光的加持下，我能更清晰地聽見您的心跳。","I like the moon. Under its light, I can hear your heartbeat much more clearly.","月が好き。月光の加護があれば、ご主人様の鼓動を、もっと鮮明に聞き取れる。",nil},
+{"LAB_CHARVIOCE_1015_42","礼物？谢谢主人。","禮物？謝謝主人。","A gift? Thank you, Master.","贈り物？ありがとう、ご主人様。",nil},
+{"LAB_CHARVIOCE_1015_43","这件礼物被判定为“极为珍贵”。万分感谢，我会将它加入重点保护列表。","此物已被判定為「極為珍貴」。萬分感謝，我會將其納入重點保護列表。",[[This gift has been rated "extremely precious." My deepest gratitude. Adding to priority protection list.]],"この贈り物は「極めて貴重」と判定。心より感謝。重点保護リストに登録。",nil},
+{"LAB_CHARVIOCE_1015_44","扑克，这是您教会我的第一个事物，也是您的“战斗”方式……为了守护您的笑容，我会将敌人全都击败。","撲克，是您教會我的第一件事，也是您的「戰鬥」方式……為了守護您的笑容，我會擊敗所有敵人。",[[Poker—it was the first thing you taught me. And it is your way of "fighting"... To protect your smile, I will defeat every opponent.]],"ポーカーは、ご主人様が私に最初に教えてくれたこと。そして、ご主人様の「戦い」方……あなたの笑顔を守るため、私は敵を一人残らず倒す。",nil},
+{"LAB_CHARVIOCE_1015_45","耳朵？故乡的大家都是这样的。如果主人希望的话，我可以带您去……不，还是算了。陪伴在您身边的月兔，有我一人就够了。","耳朵？在故鄉，大家都是如此。如果主人希望的話，我可以帶您前往……不，還是算了。能陪伴在您身邊的月兔，有我一人就足夠了。","My ears? Everyone back home is like this. If you ever wished, I could take you there... No, never mind. Having one Moon Rabbit by your side is enough.","耳？故郷のみんなも、こうなの。ご主人様が望むなら、お連れし……いえ、やはりやめておく。あなたのそばにいる月兎は、私一人で十分だから。",nil},
+{"LAB_CHARVIOCE_1015_46","在故乡，我能轻易地跃起三倍的高度。这里的重力……却将我拉向了您。也许，这便是您对我的牵引。","在故鄉，我能輕易躍起三倍的高度。而此地的重力……卻將我牽引至您身旁。也許，這正是您對我的引力。","Back home, I could easily jump three times my height. But the gravity here... keeps pulling me toward you. Maybe that's just the 'pull' you have on me.","故郷では、簡単に自分の身長の三倍の高さまで跳べたのよ。ここの重力が……私を、ご主人様のもとへと引き寄せたの。おそらくこれは、ご主人様が私に与えた「引力」なのでしょう。",nil},
+{"LAB_CHARVIOCE_1015_47","我时常会回想起与主人相遇的那一夜。从故乡坠落而来，即使是我也曾因为未知感到过一丝不安……但此刻，我很确定，能遇见主人，是我此生最幸运的事。","我時常回想起與主人相遇的那一夜。自故鄉墜落而來，即使是我，也曾因未知而產生一絲不安……但此刻，我很確定，能遇見主人，是我此生最幸運的事。","I often find myself thinking back to the night we first met. Falling from my homeland—even I felt a trace of unease at the unknown... But now I know for certain: meeting you, Master, was the greatest stroke of luck in my life.","よく、ご主人様と出会ったあの夜のことを思い出す。故郷から落下してきた時、未知への一抹の不安は確かにあった……でも今ははっきりと分る。ご主人様に出会えたことこそが、私の人生で最大の「幸運」だったと。",nil},
+{"LAB_CHARVIOCE_1015_48","我曾在月面舞蹈，与我相伴的只有繁星。可就在那时，我感受到了您的视线……那一夜您对月亮的注视，便是我们连结的开始。您偶然的一瞥，对我来说便是“命中注定”。","我曾在月面起舞，與我相伴的唯有繁星。可就在那時，我感受到了您的視線……那一夜您仰望月亮的瞬間，便是我們連結的開始。您偶然的一瞥，對我而言，便是「命中注定」。","I once danced on the moon. The only ones beside me were the stars. Yet in that moment, I felt your gaze... That night, when you looked up at the moon, our paths became one. That single fleeting glance—to me, it was destiny.","月面で舞ったことがある。その時、私のそばにいたのは、星々だけだった。けれどあの瞬間、私は確かにあなたの視線を感じたの……あの夜、あなたが月を見上げたとき、私たちの道が繋がったのだと。その何気ないひと目が、私を「運命」へと導いた。",nil},
+{"LAB_CHARVIOCE_1015_49","指令汇总。请主人指示优先执行项。","指令匯總。請主人指示優先執行項。","Compiling directives. Master, please indicate priority.","指令を整理。ご主人様、優先すべき項目をご指示ください。",nil},
+{"LAB_CHARVIOCE_1015_50","主人，部分任务已完成，请记得领取奖励。","主人，部分任務已完成，請記得領取獎勵。","Master, some missions have been completed. Please remember to collect your rewards.","ご主人様、一部の任務が完了した。報酬の受け取りをお忘れなく。",nil},
+{"LAB_CHARVIOCE_1015_51","奖励已确认，资产增加。","獎勵已確認，資產增加。","Rewards confirmed. Assets increased.","報酬を確認、資産が増加。",nil},
+{"LAB_CHARVIOCE_1015_52","待机模式已启动。如需唤醒，请呼叫我的名字。","待機模式已啟動。如需喚醒，請呼喚我的名字。","Standby mode activated. To wake me, call my name.","待機モードに移行。起動が必要な際は、名前を呼んでください。",nil},
+{"LAB_CHARVIOCE_1015_53","检测到主人心率平稳。环境安全系数：高。","檢測到主人心率平穩。環境安全係數：高。","Master's heart rate is stable. Environmental safety coefficient: high.","ご主人様の心拍数が安定していることを感知。環境安全係数：高。",nil},
+{"LAB_CHARVIOCE_1015_54","蓝湾的空气有些潮湿，但是与主人在一起，我很安心。","藍灣的空氣略顯潮濕。但只要與主人在一起，我便能感到安心。","The air in Azure Bay is slightly humid. But as long as I am with you, Master, I feel at ease.","藍湾の空気は少し湿っているが、ご主人様と一緒なら安心。",nil},
+{"LAB_CHARVIOCE_1015_55","能量饮料的糖分与电解质配比精准，是高效的能量补给方式。主人，要来一罐吗？","能量飲料的糖分與電解質比例精準，是高效的能量補給方式。主人，要來一罐嗎？","The sugar and electrolyte ratio in this energy drink is precisely calibrated—an efficient method of replenishment. Would you like one, Master?","エナジードリンクの糖分と電解質の配分は非常に精密で、効率的なエネルギー補給手段だ。ご主人様もいかが？",nil},
+{"LAB_CHARVIOCE_1015_56","主人","主人","Master","ご主人様",nil},
+{"LAB_CHARVIOCE_1015_57","Poker Fate","Poker Fate","Poker Fate","Poker Fate",nil},
+{"LAB_CHARVIOCE_1015_58","Poker Fate周年快乐","Poker Fate週年快樂","Happy anniversary, Poker Fate!","Poker Fateアニバーサリー、おめでとう！",nil},
+{"LAB_CHARVIOCE_1015_59","找到了，我的“命中注定之人”。我是月兔族沐娜，从今以后，我将会一直守护在您的身旁。请多指教，主人。","找到了——我的「命中注定之人」。我是月兔族沐娜。從今以後，我將始終守護在您的身旁。請多指教，主人。",[[Found you—my "fated one." I am Moona of the Moon Rabbit Clan. From this day forward, I will remain by your side to protect you. I look forward to serving you, Master.]],"見つけた、私の「運命の人」。私は月兎族のムーナ。これからずっと、あなたをお守りする。よろしくお願いね、ご主人様。",nil},
+{"LAB_CHARVIOCE_1015_60","初次见面，主人。我是沐娜，守护并陪伴在您的身边，就是我存在的全部意义。所以，请不要离开我的身边。","初次見面，主人。我是沐娜。守護並陪伴在您身邊，是我存在的全部意義。因此，請不要離開我的身邊。","Nice to meet you, Master. I am Moona. To protect you and remain by your side—that is my entire reason for being. So please... do not leave me.","はじめまして、ご主人様。私はムーナ。あなたを守り、あなたのそばにいること――それが、私の存在理由そのもの。どうか……私のそばを離れないでください。",nil},
+{"LAB_CHARVIOCE_1015_61","数据库标记：今日为蓝湾的新年。祝您新年快乐，我的守护任务已自动延长至下一周期。","資料庫標記：今日為藍灣的新年。祝您新年快樂。我的守護任務已自動延長至下一週期。","Database entry updated: today marks the New Year in Azure Bay. Happy New Year. My protection mission has been automatically extended into the next cycle.","データベースにマーク：本日は藍湾の新年。新年おめでとう。私の守護任務は、自動的に次のサイクルまで延長。",nil},
+{"LAB_CHARVIOCE_1015_62","根据调查，今日是向倾心之人赠送巧克力的日子。因此，这是我亲手制作的“月亮”巧克力，请您收下。","根據調查，今日是向傾心之人贈送巧克力的日子。因此，這是我親手製作的「月亮」巧克力，請您收下。",[[Research indicates that today is a day to give chocolate to someone you care for. Therefore—this is the "moon" chocolate I made myself. Please accept it.]],"調査結果：本日は、想いを寄せる相手にチョコレートを贈る日だそうだ。えっと、これは私が手作りした「月」のチョコレート。受け取ってほしい。",nil},
+{"LAB_CHARVIOCE_1015_63","允许欺骗他人的节日？难以理解……沐娜，绝不会欺骗主人。","允許欺騙他人的節日？難以理解……沐娜，絕不會欺騙主人。","A holiday that permits deception? Incomprehensible... Moona will never deceive you, Master.","人を騙すことが許される日？理解不能……ムーナは、マスターを決して騙さない。",nil},
+{"LAB_CHARVIOCE_1015_64","七夕……许愿？我的愿望很简单：希望能够一直留在主人身边。比起将愿望挂在枝头，向您直接陈述效率更高。","七夕……許願？我的願望很簡單：希望能夠一直留在主人身邊。與其將願望掛在枝頭，直接向您陳述的效率更高。","Tanabata... making a wish? My wish is simple: to always remain by your side, Master. Rather than writing it on a branch, telling you directly is far more efficient.","七夕……願い事？願いは一つだけ：これからも、ずっとご主人様のそばにいられるように。願いを枝に掛けるより、直接ご主人様に伝える方が、はるかに効率的。",nil},
+{"LAB_CHARVIOCE_1015_65","今天……是赏月的日子？原来从这里仰望，月亮会是这样的形状……","今天……是賞月的日子？原來從這裡仰望，月亮會呈現這樣的形狀……","Today is... moon-viewing day? So this is how the moon appears from here...","今日は……月見の日？ここから見上げる月は、このような形なのね……",nil},
+{"LAB_CHARVIOCE_1015_66","不给糖就捣蛋……这是威胁通告吗？主人，请放心。任何试图接近您的单位，都会被我提前排除。","不給糖就搗蛋……這是威脅通告嗎？主人，請放心。任何試圖接近您的單位，都會被我提前排除。","Trick or treat... Is that a threat declaration? Master, rest assured. Any entity that attempts to approach you will be eliminated in advance.","お菓子をくれなきゃいたずらしちゃうぞ……これは、脅迫通告でしょうか？ご主人様、ご安心ください。あなたに近づこうとするあらゆる者は、私が事前に排除するから。",nil},
+{"LAB_CHARVIOCE_1015_67","主人，能把我装进这个礼物盒里吗？为什么？因为，这是要送给主人您的圣诞礼物。","主人，可以把我裝進這個禮物盒裡嗎？為什麼？因為——這是要送給您的聖誕禮物。","Master, can you place me inside this gift box? Why? Because I am your Christmas present.","ご主人様、私をこのギフトボックスの中に入れてもいい？なぜかって？それは、この私こそが、ご主人様へのクリスマスプレゼントだから。",nil},
+{"LAB_CHARVIOCE_1015_68","今天被标记为您的“诞生之日”。从我的逻辑角度看，这是宇宙中最重要坐标的初始设定时刻。所以，祝您生日快乐。我很庆幸，此时此刻能够陪伴在您的身旁。","今天被標記為您的「誕生之日」。從我的邏輯判斷來看，這是宇宙中最重要坐標的初始設定時刻。因此，祝您生日快樂。我很慶幸，能在此時此刻陪伴於您身旁。",[[Today is recorded as your "day of birth." In my logic, this corresponds to the initialization point of the most important coordinate in the universe. Therefore—happy birthday. I am truly glad to be by your side at this moment.]],"本日は、あなたの「誕生日」と記録されている。私のロジックでは、それは宇宙における最重要座標の、初期設定時刻に相当する。つまり、お誕生日おめでとう。この瞬間、あなたのそばにいられることを、とても幸せに感じている。",nil},
+{"LAB_CHARVIOCE_1015_69","环境参数确认：温度适宜，适合外出活动。","環境參數確認：溫度適宜，適合外出活動。","Environmental parameters confirmed. Temperature: optimal. Conditions are suitable for outdoor activity.","環境パラメータ確認：気温、適温。外出活動に適している。",nil},
+{"LAB_CHARVIOCE_1015_70","故乡的温度从未像蓝湾的夏天这样炎热……我的散热机制，正在持续超载……","故鄉的溫度從未如藍灣的夏天這般炎熱……我的散熱機制，正在持續超載……","The temperature back home was never this high... nothing like summer in Azure Bay. My heat dissipation systems are in a state of constant overload...","故郷の気温は、藍湾の夏のように暑くはなかった……私の放熱機構、継続的にオーバーロード中……",nil},
+{"LAB_CHARVIOCE_1015_71","检测到主人的“秋乏”现象，已准备好提神的能量饮料，请用。","檢測到主人的「秋乏」現象，已準備提神用的能量飲料，請使用。","Signs of autumn fatigue detected in Master. A revitalizing energy drink has been prepared—please drink.","ご主人様の「秋バテ」傾向を感知。眠気覚ましのエナジードリンクをご用意した、どうぞ。",nil},
+{"LAB_CHARVIOCE_1015_72","正在分析大气降水新形态：六边形晶体，固态。数据库无匹配记录。这就是……“雪”？它的结构，很精密。","正在分析大氣降水的新形態：六邊形晶體，固態。資料庫無匹配記錄。這就是……「雪」嗎？其結構相當精密。",[[Analyzing new form of atmospheric precipitation: hexagonal crystalline solids. No matching record in database. So this is... "snow"? The structure is remarkably intricate.]],"大気中の降水の新形態を分析中：六角形結晶、固体。データベースに一致する記録なし。これが……「雪」？その構造、とても繊細。",nil},
+{"LAB_CHARVIOCE_1015_73","检测到非正常波动，主人，有新的变数出现了。","檢測到異常波動。主人，有新的變數出現了。","Anomalous fluctuation detected. Master, a new variable has emerged.","異常な波動を感知。ご主人様、新たな変数が発生した。",nil},
+{"LAB_CHARVIOCE_1015_74","赛事已开启。请放心，主人。我会轻松地扫清对手。","賽事已開啟。請放心，主人。我會迅速掃清所有對手。","The tournament has begun. Rest easy, Master. I will eliminate all opponents efficiently.","大会が開始した。ご安心ください、マスター。相手を軽く一掃してみせる。",nil},
+{"LAB_CHARVIOCE_1015_75","好评配信中，主人，快来下载吧。","好評配信中，主人，快來下載吧。","It's getting rave reviews. Master—I suggest we begin the download immediately.","好評配信中。ご主人様。至急ダウンロードを推奨。",nil},
+{"LAB_CHARVIOCE_1015_76","星宫加奈小姐，她似乎总是在摄取热量……她的行动，需要消耗如此庞大的能量吗？","星宮加奈小姐，她似乎持續在攝取熱量……她的行動，需要消耗如此龐大的能量嗎？","Miss Hoshimiya Kana... she appears to be constantly replenishing calories... Do her activities truly require that level of energy?","星宮かな様……彼女は常に「熱量」を補給しているようだが……彼女の行動には、本当にあれほどのエネルギーが必要なのでしょうか？",nil},
+{"LAB_CHARVIOCE_1015_77","那个孩子……总是在睡觉。是在处理后台数据吗？","那個孩子……總是在睡覺。是在處理後台資料嗎？","That girl... she is always sleeping. Could she be processing background data?","あの子……いつも寝ているのね。バックグラウンドでデータ処理をしているのでしょうか？",nil},
+{"LAB_CHARVIOCE_1015_78","欢迎。","歡迎。","Welcome.","いらっしゃい。",nil},
+{"LAB_CHARVIOCE_1015_79","谢谢。","謝謝。","Thank you.","ありがとう。",nil},
+{"LAB_CHARVIOCE_1015_80","对不起。","對不起。","Apologies.","ごめんなさい。",nil},
+{"LAB_CHARVIOCE_1015_81","呵呵——","呵呵——","Ahaha.","ふふっ――",nil},
+{"LAB_CHARVIOCE_1015_82","哈哈——","哈哈——","Haha—","ははっ――",nil},
+{"LAB_CHARVIOCE_1015_83","哼哼——","哼哼——","Mm-hm.","ふんふん",nil},
+{"LAB_CHARVIOCE_1015_84","诶？","欸？","Oh?","えっ？",nil},
+{"LAB_CHARVIOCE_1015_85","哈……","哈……","Sigh...","はぁ……",nil},
+{"LAB_CHARVIOCE_1015_86","咦？","咦？","Eh?","えっ？",nil},
+{"LAB_CHARVIOCE_1015_87","唔……","唔……","Hmm...","ふん……",nil},
+{"LAB_CHARVIOCE_1015_88","呜呜……","嗚嗚……","Sob...","ううっ……",nil},
+{"LAB_CHARVIOCE_1015_89","嗯。","嗯。","Yeah.","うん。",nil},
+{"LAB_CHARVIOCE_1015_90","早安。","早安。","Good morning.","おはよう。",nil},
+{"LAB_CHARVIOCE_1015_91","午安。","午安。","Good afternoon.","こんにちは。",nil},
+{"LAB_CHARVIOCE_1015_92","晚上好。","晚上好。","Good evening.","こんばんは。",nil},
+{"LAB_CHARVIOCE_1015_93","晚安。","晚安。","Good night.","おやすみなさい。",nil},
+{"LAB_CHARVIOCE_1015_94","呀——","呀——","Kya—","きゃ——",nil},
+{"LAB_CHARVIOCE_1015_95","嗯嗯~","嗯嗯～","Nnngh.","んんっ",nil},
+{"LAB_CHARVIOCE_1015_96","嗯啊——","嗯啊——","Mm, ah.","ん、あっ",nil},
+{"LAB_CHARVIOCE_1015_97","好痒~","好癢……","That tickles!","くすぐったい。",nil},
+{"LAB_CHARVIOCE_1015_98","Game Clear.","Game Clear.","Game Clear.","ゲームクリア。",nil},
+{"LAB_CHARVIOCE_1015_99","Mission Complete.","Mission Complete.","Mission Complete.","ミッション完了。",nil},
+{"LAB_CHARVIOCE_1015_100","胜利。","勝利。","Victory.","勝利。",nil},
+{"LAB_CHARVIOCE_1015_101","Big Win.","Big Win.","Big Win.","ビッグ・ウィン。",nil},
+{"LAB_CHARVIOCE_1015_102","Mega Win.","Mega Win.","Mega Win.","メガ・ウィン。",nil},
+{"LAB_CHARVIOCE_1015_103","三连胜。","三連勝。","Three consecutive wins.","三連勝。",nil},
+{"LAB_CHARVIOCE_1015_104","五连胜，状态极佳。","五連勝，狀態極佳。","Five consecutive wins—operating at peak performance.","五連勝、絶好調。",nil},
+{"LAB_CHARVIOCE_1015_105","烟花升空的轨迹，就像流星一般——真是美丽。","煙火升空的軌跡，如同流星一般——真是美麗。","The trail of fireworks rising into the sky... just like a shooting star. Truly beautiful.","花火が打ち上がる軌跡は、流れ星のよう……とても美しい。",nil},
+{"LAB_CHARVIOCE_1015_106","如果您被海浪带走，我会启动水下推进模式。请放心，我的游泳速度是海豚的两倍。","如果您被海浪捲走，我將啟動水下推進模式。請放心，我的游泳速度為海豚的兩倍。","If a wave were to carry you away, I would activate underwater propulsion mode. Rest assured—my swimming speed is twice that of a dolphin.","もしご主人様が波にさらわれたら、私は水中推進モードを起動するから。ご安心ください、私の遊泳速度はイルカの二倍。",nil},
+{"LAB_CHARVIOCE_1015_107","温泉的雾气阻碍了视线……为了守护主人，我会紧紧地与您贴在一起。","溫泉的霧氣遮蔽了視線……為了守護主人，我會與您緊緊相貼。","The steam from the hot spring is obscuring my vision... To protect you, Master, I will remain close—very close—to you.","温泉の湯気が視界を遮断している……ご主人様をお守りするため、私はしっかりとあなたに寄り添うので。",nil},
+{"LAB_CHARVIOCE_1015_108","目标设定为：主人的怀抱。沐娜，全力冲刺——","目標設定：主人的懷抱。沐娜，全力衝刺——","Destination set: Master's arms. Moona—full sprint—","目標地点を設定：ご主人様の胸の中。ムーナ、全力で突撃――",nil},
+{"LAB_CHARVIOCE_1015_109","进入低功耗待机模式。主人，请提供一个枕头，或者……您的膝盖。","進入低功耗待機模式。主人，請提供一個枕頭，或者……您的膝蓋。","Entering low-power standby mode. Master, please provide a pillow—or... your lap.","低消費電力待機モードに移行する。ご主人様、枕の提供をお願い。……あなたのひざでも構わない。",nil},
+{"LAB_CHARVIOCE_1015_110","穿上这身衣服，职业就会切换为“女仆”？不是很懂……","穿上這身衣服後，職業會切換為「女僕」？尚未理解……",[[Wearing this outfit changes my class to "Maid"? I do not fully understand...]],"この服を着ると、職業が「メイド」に切り替わる？よく分らないのですが……。",nil},
+{"LAB_CHARVIOCE_1015_111","月光将会见证我们的誓约……亲爱的主人，沐娜此生只属于您一人。","月光將見證我們的誓約……親愛的主人，沐娜此生僅屬於您一人。","The moonlight will bear witness to our oath... My dearest Master—Moona belongs to you, and you alone, for this lifetime.","月光が、私たちの誓いを証明してくれる……愛しいご主人様、ムーナはこの一生を、あなただけに捧げる。",nil},
+{"LAB_CHARVIOCE_1015_112","穿上高跟鞋后，重心有所偏移……主人，我可以拉着你的手吗？","穿上高跟鞋後，重心出現偏移……主人，我可以牽著您的手嗎？","Wearing heels has shifted my center of gravity... Master, may I hold your hand?","ハイヒールを履くと、重心が不安定になる……ご主人様、どうか私に、あなたの手を握らせてください。",nil},
+{"LAB_CHARVIOCE_1015_113","我能感受到，主人的体温正在上升。您……喜欢“兔女郎”？那就好。","我能感知到，主人的體溫正在上升。您……喜歡「兔女郎」嗎？那就好。","I detect an increase in your body temperature, Master. You... like bunny girls? Understood.","マスターの体温上昇を感知。えっと……「バニーガール」がお好きなの？よかった。",nil},
+{"LAB_CHARVIOCE_1015_114","频率共振，心脏的跳动和鼓点重合。这……就是“音乐”？","頻率共振，心跳與鼓點同步。這……就是「音樂」嗎？",[[Frequency resonance—my heartbeat is synchronizing with the rhythm. So this... is what "music" feels like?]],"周波数が共鳴し、心臓の鼓動がビートと重なる。これが……「音楽」なのね？",nil},
+{"LAB_CHARVIOCE_1016_1","弃牌","棄牌","Fold","フォールド",nil},
+{"LAB_CHARVIOCE_1016_2","不行……","不行……","No...","ダメよ…！",nil},
+{"LAB_CHARVIOCE_1016_3","过牌","過牌","Check","チェック",nil},
+{"LAB_CHARVIOCE_1016_4","跟注","跟注","Call","コール",nil},
+{"LAB_CHARVIOCE_1016_5","下注","下注","Bet","ベット",nil},
+{"LAB_CHARVIOCE_1016_6","加注","加注","Raise","レイズ",nil},
+{"LAB_CHARVIOCE_1016_7","底池","底池","Pot","ポット",nil},
+{"LAB_CHARVIOCE_1016_8","小盲","小盲","Small Blind","スモールブラインド",nil},
+{"LAB_CHARVIOCE_1016_9","大盲","大盲","Big Blind","ビッグブラインド",nil},
+{"LAB_CHARVIOCE_1016_10","前注","前注","Ante","アンティ",nil},
+{"LAB_CHARVIOCE_1016_11","再加注！","再加注！","Re-raise!","リレイズ！",nil},
+{"LAB_CHARVIOCE_1016_12","All in！","All in！","All in!","オールインよ！",nil},
+{"LAB_CHARVIOCE_1016_13","看好了！","看好了！","Watch and learn!","よく見てなさいよ！",nil},
+{"LAB_CHARVIOCE_1016_14","我……我才没有害羞呢！","我……我才沒有害羞呢！","I-I'm not embarrassed or anything!","私…別に恥ずかしがってなんかないんだから！",nil},
+{"LAB_CHARVIOCE_1016_15","放马过来吧！","放馬過來吧！","Bring it on!","かかってきなさいよ！",nil},
+{"LAB_CHARVIOCE_1016_16","哼，可别让我太无聊了哦。","哼，可別讓我太無聊哦。","Hmph, don't you dare bore me.","ふん、退屈させないでよね。",nil},
+{"LAB_CHARVIOCE_1016_17","让我看看你们的本事。","讓我看看你們的本事。","Show me what you've got.","あなたたちの腕前、見せてみなさいよ。",nil},
+{"LAB_CHARVIOCE_1016_18","Button！","Button！","Button!","ボタンね！",nil},
+{"LAB_CHARVIOCE_1016_19","不错嘛~","不錯嘛～","Not bad!","なかなかやるじゃない。",nil},
+{"LAB_CHARVIOCE_1016_20","麻烦死了。","麻煩死了。","What a pain...","めんどくさいわ。",nil},
+{"LAB_CHARVIOCE_1016_21","呀！不……不要看我！","呀！不……不要看我！","Kya—! D-don't... don't look at me!","きゃっ！こっち…見ないでよ！",nil},
+{"LAB_CHARVIOCE_1016_22","决战？呵呵，正合我意！","決戰？呵呵，正合我意！","A showdown? Heh, that suits me just fine!","決戦？ふふ、願ったり叶ったりよ！",nil},
+{"LAB_CHARVIOCE_1016_23","你还差得远呢！","你還差得遠呢！","You've still got a long way to go!","あなたはまだまだよ！",nil},
+{"LAB_CHARVIOCE_1016_24","看吧，我都说了。","看吧，我早就說了。","See? Just like I said.","ほら、言った通りでしょ。",nil},
+{"LAB_CHARVIOCE_1016_25","哼哼，败者就赶快退场吧。","哼哼，敗者就該乖乖退場。","Hmph. Losers should hurry up and get off the stage.","ふん、敗者はさっさと消えなさい。",nil},
+{"LAB_CHARVIOCE_1016_26","这种胜利，小菜一碟啦。","這種勝利，不過是小菜一碟。","A win like this? Easy.","こんな勝利、朝飯前よ。",nil},
+{"LAB_CHARVIOCE_1016_27","毫无悬念的胜利！这就是所谓的“降维打击”哦！","毫無懸念的勝利！這就是所謂的「降維打擊」。","It's not even a contest! This is what it looks like to be on a whole different level!","議論の余地なんてないわ！これが「次元が違う」ってやつよ！",nil},
+{"LAB_CHARVIOCE_1016_28","准备好迎接失败了吗？","準備好迎接失敗了嗎？","Are you ready to admit defeat?","負けを認める覚悟はできてる？",nil},
+{"LAB_CHARVIOCE_1016_29","哼，勉强及格吧。","哼，勉強及格。","Hmph... barely a passing grade, I suppose.","ふん、まあ…ギリギリ及第点ってところかしら。",nil},
+{"LAB_CHARVIOCE_1016_30","那个，谢谢……","那個，謝謝你……","Um... thank you...","あの…ありがとう…",nil},
+{"LAB_CHARVIOCE_1016_31","对不起啦，行了吧？","對不起……這樣可以了吧？","I said I'm sorry, okay?","ごめんって…もういいでしょ！",nil},
+{"LAB_CHARVIOCE_1016_32","哈？开玩笑的吧……","哈？開玩笑的吧……","Hah? You're joking... right?","はあ？冗談よね…？",nil},
+{"LAB_CHARVIOCE_1016_33","这就是你的全力？太弱了吧。","這就是你的全力？太弱了吧。","That's your best? How pathetic.","これが全力なの？弱すぎよ。",nil},
+{"LAB_CHARVIOCE_1016_34","慢死了，快给我动起来！","慢死了，快給我動起來！","Too slow—hurry it up!","遅いわよ、早くしなさい！",nil},
+{"LAB_CHARVIOCE_1016_35","你就是其他人一直在说的会长？哼~初次见面，我是天月绘里奈，奥德赛大学的学生会长。就让我看看，你是否配得上我的认可吧。","你就是其他人口中的會長？哼～初次見面，我是天月繪里奈，奧德賽大學的學生會長。就讓我看看，你是否配得上我的認可吧。","So you're the president everyone keeps talking about? Hmph! Nice to meet you. I'm Amatsuki Erina, student council president of Odyssey University. Let's see if you're actually worthy of my acknowledgment.","あなたが、噂の会長？ふん、初めまして。天月えりなよ、オデッセイ大学の生徒会長。私の認める価値があるか、見せてみなさい。",nil},
+{"LAB_CHARVIOCE_1016_36","会长，你总算来了。今天的行程我已经帮你整理好了……别误会，只是顺手而已！","會長，你總算來了。今天的行程我已經幫你整理好了……別誤會，只是順手而已！","You finally showed up, President. I went ahead and organized your schedule for today... D-don't get the wrong idea—it was just convenient!","会長、やっと来たのね。今日のスケジュールは整理しておいたわ…誤解しないで、ついでよ！",nil},
+{"LAB_CHARVIOCE_1016_37","今天去哪里？电影院？水族馆？只要和你在一起，去哪里都无所谓……啊！忘掉刚才那句话！快点出发啦！","今天要去哪裡？電影院？還是水族館？只要和你在一起，去哪裡都無所謂……啊！忘掉剛才那句話！快點出發啦！","Where are we going today? The movies? An aquarium? As long as it's with you, I don't really care... Ah! Forget I said that! Let's just go already!","今日はどこへ行くの？映画館？水族館？あなたと一緒なら、どこでもいいわ…あっ！今のことは忘れて！さっさと行くわよ！",nil},
+{"LAB_CHARVIOCE_1016_38","会长，这周末有空吗？没、没什么特别的事，只是多了一张音乐会的票，不想浪费而已！","會長，這週末有空嗎？沒、沒什麼特別的事，只是剛好多了一張音樂會的票，不想浪費而已！","Are you free this weekend, President? It's—it's nothing special, I just happened to end up with an extra concert ticket and didn't want it to go to waste!","会長、今週末、暇してる？別に特別な用事があるわけじゃない！…コンサートのチケットが余ったから、もったいないと思っただけよ！",nil},
+{"LAB_CHARVIOCE_1016_39","会长，你的领带歪了哦。真是的，这种小事还要别人提醒……别动，我来帮你整理。","會長，你的領帶歪了。真是的，這種小事還要別人提醒……別動，我來幫你整理。","Your tie is crooked, President. Honestly, you can't even notice something like that... Hold still, I'll fix it.","会長、ネクタイ曲がってるわよ。もう、気づかないなんて…動かないで、直してあげる。",nil},
+{"LAB_CHARVIOCE_1016_40","呀！你、你在摸哪里啊！哼，下次想摸的话，要先写申请书……骗你的，笨蛋。只要你想……也不是不可以。","呀！你、你在摸哪裡啊！哼，下次想碰的話，記得先提交申請……騙你的，笨蛋。只要是你……也不是不可以。","Kya—! Wh-where are you touching?! Hmph, if you want to touch me again, submit a written request first... Just kidding, idiot. If it's you... I suppose it's not completely out of the question.","きゃっ！あんた…どこ触ってるの！ふん、次に触りたいなら申請書を書きなさい…冗談よ、バカ。あなたが望むなら…別に構わないわ。",nil},
+{"LAB_CHARVIOCE_1016_41","这饮料很好喝哦，要喝一口吗？间接接吻？我、我才不会在乎这种小事呢……","這飲料很好喝，要喝一口嗎？間接接吻？我、我才不會在意這種小事呢……","This drink is really good—want a sip? An indirect kiss? I—I don't care about something like that!","この飲み物、美味しいわよ。一口どう？間接キス？そんなこと、気にしないんだから！",nil},
+{"LAB_CHARVIOCE_1016_42","会长，你还挺有品味的嘛。","會長，你還挺有品味的嘛。","You've got surprisingly good taste, President.","会長、意外とセンスあるじゃない。",nil},
+{"LAB_CHARVIOCE_1016_43","这是我一直想要的！谢、谢谢你，会长……","這是我一直想要的！謝、謝謝你，會長……","This is exactly what I always wanted! Th-thank you, President...","これ、ずっと欲しかったの！…ありがとうよ、会長。",nil},
+{"LAB_CHARVIOCE_1016_44","今天工作不多，正好可以把之前没时间看的恋爱小说新一卷给补上……呜哇！会长？你什么时候来的！怎么了嘛，我、我就不能有点少女的爱好吗？","今天工作不多，正好可以把之前沒時間看的戀愛小說新一卷補完……嗚哇！會長？你什麼時候來的！怎麼了，我、我就不能有點少女的興趣嗎？","Light workload today—perfect chance to finally catch up on the latest volume of that romance novel I never got around to... Wah! President?! When did you get here?! What's wrong with having a few girly hobbies?!","今日は仕事少ないし、前に読めなかった恋愛小説の新刊を読もう…うわっ！会長？いつから来てたのよ！何よ、私にだって少女趣味くらいあるわ！",nil},
+{"LAB_CHARVIOCE_1016_45","优雅、果断、完美……天月家的人，无论在什么时候都必须是众人的表率。我认同家族的理念，但我偶尔也想像普通的女生那样……不，没什么，就当我自言自语吧。","優雅、果斷、完美……天月家的人，無論何時都必須成為眾人的表率。我認同家族的理念，但偶爾也會想像普通女生那樣……不，沒什麼，就當我自言自語吧。","Elegant, decisive, flawless... An Amatsuki must always set an example for others. I believe in our family's principles, but sometimes... I just want to be like a normal girl... N-no, it's nothing. Just forget you heard that.","優雅、果断、完璧…天月家の者に隙なんてないわよ。家族の理念には賛成だけど、たまには普通の女の子みたいに…い、いや、なんでもない。独り言よ。",nil},
+{"LAB_CHARVIOCE_1016_46","工作总算处理完了……啊，不知不觉都这么晚了，回去洗个澡就睡吧——咦，会长？你怎么会……一直在等我？真是的，都这个时间了，快回去啦！别、别看我，我只是……眼睛里进了沙子……","工作總算處理完了……啊，不知不覺已經這麼晚了，回去洗個澡就睡吧——咦，會長？你怎麼會……一直在等我？真是的，都這個時間了，快回去啦！別、別看我，我只是……眼睛進了沙子而已……","Finally done with work... Oh, is it this late already? I'll just head home, take a shower, and—huh, President? You... you've been waiting this whole time? Honestly, at this hour, you should've just gone home! D-don't look at me, I just... I've got something in my eye...","仕事やっと終わった…あら、こんな時間。帰って寝よ…って、会長？なんで…ずっと待ってたの？もう、こんな時間よ。早く帰りなさい！こっちを見ないで！…目にゴミが入っただけよ。",nil},
+{"LAB_CHARVIOCE_1016_47","今天的工作也好多……会长也是？哼，那我也就没什么好抱怨的了，一起加油吧！那个……能认识会长，真的是太好了……笨蛋，不准用那种眼神看着我！","今天的工作也很多……會長也是？哼，那我也沒什麼好抱怨的了，一起加油吧！那個……能認識會長，真的很好……笨蛋，不准用那種眼神看著我！","So much work again today... You too, President? Hmph, then I guess I can't complain. Let's get through it together! Um... I'm really glad I met you, President... I-idiot, don't look at me like that!","今日も仕事たくさん…会長も？ふん、なら私も文句言えないわね。一緒にやるわよ！えっと…会長と知り合えて、よかったわ…バカ、そんな目で見ないで！",nil},
+{"LAB_CHARVIOCE_1016_48","慢死了！你知道我在这里等了多久吗？哼，看在你今天穿得还算得体的份上，我就原谅你了。呐，这杯奶茶给你……别露出那种恶心的笑容，赶快出发啦！","慢死了！你知道我在這裡等了多久嗎？哼，看在你今天穿得還算得體的份上，我就原諒你了。喏，這杯奶茶給你……別露出那種奇怪的笑容，快點出發啦！","You're late! Do you have any idea how long I've been waiting? Hmph, I'll let it slide since you at least look presentable today. Here—I got you some bubble tea... Stop smiling like that, it's annoying. Let's go already!","遅いわよ！私がどれだけ待ったと思ってるの？ふん、今日の格好がマシだったから、許してあげる。ほら、タピオカミルクティー、…ニヤニヤしてないで、さっさと行くわよ！",nil},
+{"LAB_CHARVIOCE_1016_49","会长，你发什么呆呢？该行动了！","會長，你在發什麼呆？該行動了！","What are you spacing out for, President? Let's move!","会長、何ぼーっとしてるの？行くわよ！",nil},
+{"LAB_CHARVIOCE_1016_50","哦？有奖励可以领了。这可是我们共同努力的成果，会长快收好，别浪费了。","哦？有獎勵可以領了。這可是我們共同努力的成果，會長可要好好收下，別浪費了。","Oh? Looks like there are rewards to claim. This is the result of our combined effort—go collect them, President. Don't let it go to waste.","あら？報酬がもらえるみたいね。これは私たちの努力の成果よ。ちゃんと受け取って、無駄にしないで。",nil},
+{"LAB_CHARVIOCE_1016_51","哼——马马虎虎吧。","哼——還算過得去吧。","Hmph... I suppose that'll do.","ふん…まあまあね。",nil},
+{"LAB_CHARVIOCE_1016_52","结束了——好累……会长，肩膀借我靠一下，就五分钟……","結束了——好累……會長，肩膀借我靠一下，就五分鐘……","Finally done... I'm exhausted... President, let me lean on your shoulder. Just five minutes...","終わった…疲れた…会長、肩貸して。5分だけよ。",nil},
+{"LAB_CHARVIOCE_1016_53","会长，你盯着屏幕太久了，偶尔也看看这边……我是说，看看窗外的绿色植物，对眼睛比较好！","會長，你盯著螢幕太久了，偶爾也看看這邊……我是說，看看窗外的綠色植物，對眼睛比較好！","You've been staring at that screen for too long, President. Look over here once in a while... I mean—look at the plants outside the window! It's better for your eyes!","会長、画面ばっかり見てないで。たまには…違う！窓の緑を見て、目を休めなさい！",nil},
+{"LAB_CHARVIOCE_1016_54","会长，你身上有很好闻的味道……啊！别、别误会！我可不是特意闻的！","會長，你身上有種很好聞的味道……啊！別、別誤會！我可不是特地去聞的！","You smell really nice, President... Ah! D-don't get the wrong idea! I wasn't sniffing you or anything!","会長、いい匂いが…あっ！誤解しないでよ！わざわざ嗅いだわけじゃないんだから！",nil},
+{"LAB_CHARVIOCE_1016_55","任务和计划固然重要，但像现在这样，和会长一起为了同一个目标努力的感觉……也不坏。","任務和計劃固然重要，但像現在這樣，和會長一起為了同一個目標努力的感覺……其實也不壞。","Missions and plans are important, of course. But working toward the same goal together with you like this, President... it's not bad at all.","任務も大事だけど、会長とこうして同じ目標に向かうの…悪くないわ。",nil},
+{"LAB_CHARVIOCE_1016_56","会长","會長","President","会長",nil},
+{"LAB_CHARVIOCE_1016_57","Poker Fate","Poker Fate","Poker Fate","Poker Fate",nil},
+{"LAB_CHARVIOCE_1016_58","Poker Fate周年快乐","Poker Fate週年快樂","Happy anniversary, Poker Fate!","Poker Fate、アニバーサリーおめでとう！",nil},
+{"LAB_CHARVIOCE_1016_59","我是天月绘里奈，奥德赛大学的学生会长。不论是学业还是扑克，我都会做到最好。想要站上巅峰的话，就努力跟上我的步伐吧，会长！","我是天月繪里奈，奧德賽大學的學生會長。不論是學業還是撲克，我都會做到最好。想站上巔峰的話，就努力跟上我的步伐吧，會長！","I'm Amatsuki Erina, student council president of Odyssey University. Whether it's academics or poker, I give it my all. If you want to reach the top, you'd better keep up with me, President!","私は天月えりな、オデッセイ大学の生徒会長よ。学業でもポーカーでも、私は頂点を目指すの。頂点を目指すなら、私の足並みに合わせなさいよ、会長！",nil},
+{"LAB_CHARVIOCE_1016_60","初次见面，会长。我是天月绘里奈，奥德赛大学的学生会长。不论是学业还是扑克，我都会努力做到最好。今后，还请多多指教。","初次見面，會長。我是天月繪里奈，奧德賽大學的學生會長。不論是學業還是撲克，我都會全力做到最好。今後，還請多多指教。","Nice to meet you, President. I'm Amatsuki Erina, student council president of Odyssey University. Whether it's academics or poker, I always strive to be my best. I look forward to working with you.","初めまして、会長。私は天月えりな、オデッセイ大学の生徒会長よ。学業でもポーカーでも、私は努力して最高になるわ。今後とも…よろしくね。",nil},
+{"LAB_CHARVIOCE_1016_61","新年快乐，会长。这是本小姐亲手写的年贺状，心怀感激地收好吧！什么？希望今年也能看到更多绘里奈可爱的表情？新、新年第一天，你在胡说八道什么啊！","新年快樂，會長。這是本小姐親手寫的年賀狀，心懷感激地收下吧！什麼？希望今年也能看到更多繪里奈可愛的表情？新、新年的第一天，你在胡說什麼啊！","Happy New Year, President. This is a New Year's card I wrote myself—you should be grateful! What? You want to see more of my cute faces this year, too? It's the crack of dawn on New Year's Day—what are you even saying?!","新年あけましておめでとう、会長。これ、私が直筆で書いた年賀状よ。ありがたく受け取りなさい！なによ？今年もえりなの可愛い顔が見たい？新年早々、何言ってるの！",nil},
+{"LAB_CHARVIOCE_1016_62","哼哼，会长是不是在期待什么？给你，本命……不、不对！义理，是义理巧克力！","哼哼，會長是不是在期待什麼？給你，本命……不、不對！義理，是義理巧克力！","Fufu, were you expecting something, President? Here—this is how I truly... N-no, wait! It's just courtesy chocolate!","ふふん、会長、期待してるの？はい、本命…ち、違うわ！義理よ、義理チョコ！",nil},
+{"LAB_CHARVIOCE_1016_63","会长，你好烦人啊。你怎么一脸受伤的表情，这是愚人节玩笑啦！我……我怎么可能讨厌你呢……","會長，你真的很煩人耶。你那是什麼受傷的表情啊，這只是愚人節的玩笑啦！我……我怎麼可能討厭你呢……","You're so annoying, President. Why do you look so hurt? It was just an April Fool's joke! I... there's no way I actually hate you...","会長、うるさいわよ。なんでそんな顔してんの。エイプリルフールよ！私…あなたのこと、嫌いなわけないでしょう…",nil},
+{"LAB_CHARVIOCE_1016_64","会长，你七夕许了什么愿？想和绘里奈一直在一起？！这……这种事，就算不特意许愿也会达成的啦……","會長，你七夕許了什麼願？想和繪里奈一直在一起？！這、這種事，就算不特地許願也會實現的啦……","What did you wish for on Tanabata, President? To always be with me?! Th-that kind of thing would happen even if you didn't wish for it...","会長、七夕に何を願ったの？私とずっと一緒にいたい？！そ、そんなこと…願わなくても叶うわよ。",nil},
+{"LAB_CHARVIOCE_1016_65","给，月见团子，我们家厨师做的，快尝尝……很好吃对吧？我也超喜欢的！","給你，月見糰子。我們家廚師做的，快嚐嚐……很好吃吧？我也很喜歡。","Here—tsukimi dango. Our family chef made them. Try some... It's good, right? I absolutely love them!","はい、月見団子。うちの料理人が作ったの。早く食べて…美味しいでしょ？私も大好きよ！",nil},
+{"LAB_CHARVIOCE_1016_66","万圣节派对？哼，这种程度有什么好怕的……呀！那个南瓜灯怎么突然笑了？！会、会长！不准松开我的手！","萬聖節派對？哼，這種程度有什麼好怕的……呀！那個南瓜燈怎麼突然笑了？！會、會長！不准鬆開我的手！","A Halloween party? Hmph, something like this doesn't scare me at all... Kya—! Did that jack-o'-lantern just smile?! P-President! Don't you dare let go of my hand!","ハロウィンパーティー？ふん、このくらい怖くないわ…きゃっ！あのジャックオーランタン、今笑った？！会、会長！手、離さないで！",nil},
+{"LAB_CHARVIOCE_1016_67","会长，圣诞快乐，今天也有很多工作呢。什么？想去逛逛？你的意思是……圣诞约会？我是没意见啦……既然如此，那就快点完成工作吧，我也来帮忙！","會長，聖誕快樂。今天也有不少工作呢。什麼？想去逛逛？你的意思是……聖誕約會？我、我倒是沒意見……既然如此，就先把工作完成吧，我也來幫忙！","Merry Christmas, President. There's still a mountain of work today. What? You want to go out? Does that mean... a Christmas date? I-I don't mind... In that case, let's finish this work quickly—I'll help!","会長、メリークリスマス。今日も仕事が山ほどあるわ。なによ？散歩でもしたいの？それって……クリスマスデートってこと？私は別に構わないけど……だったら、さっさと仕事を片付けましょ。私も手伝ってあげるわ！",nil},
+{"LAB_CHARVIOCE_1016_68","会长，生日快乐！你有什么想做的事吗？什么……工作？真是的，不要这么无趣啦，难得的日子，一起出去逛逛吧。","會長，生日快樂！你有什麼想做的事嗎？什麼……工作？真是的，別這麼無趣嘛，難得的日子，一起出去逛逛吧。","Happy birthday, President! Is there anything you want to do? What... work? Honestly, don't be so boring. It's a special day—let's go out somewhere together.","会長、お誕生日おめでとう！何かしたいこと、ある？なに……仕事？もう、そんなつまらないこと言わないで。せっかくの日なんだから、一緒にどこか行きましょ。",nil},
+{"LAB_CHARVIOCE_1016_69","新学期开始了，樱花也开了，今年的计划表也做好了……完美！会长，你可要跟紧我，别掉队哦。","新學期開始了，櫻花也開了，今年的計劃表也完成了……完美！會長，你可要跟緊我，別掉隊哦。","A new semester, sakura in bloom, and my schedule for the year is already planned out... Perfect! You'd better keep up with me, President. Don't fall behind.","新学期が始まって、桜も咲いて、今年の計画表もできた……完璧！会長、私にちゃんとついていきなさいよね。",nil},
+{"LAB_CHARVIOCE_1016_70","好热，不想出门……今天就在学生会室看看小说，消磨一下时间吧……","好熱……不想出門。今天就在學生會室看看小說，打發一下時間吧……","It's so hot... I don't feel like going anywhere. I'll just spend the day in the student council room reading a novel...","暑い……出かけたくない。今日は生徒会室で小説でも読んで、時間を潰そう……",nil},
+{"LAB_CHARVIOCE_1016_71","栗子蒙布朗，烤红薯，南瓜派……好多好吃的！秋天，真是个好季节呢~","栗子蒙布朗、烤地瓜、南瓜派……好多好吃的！秋天，真是個好季節呢～","Mont Blanc, roasted sweet potatoes, pumpkin pie... so many delicious things! Autumn really is the best season!","マロンモンブラン、焼き芋、パンプキンパイ……美味しいものがいっぱい！秋って、いい季節よね〜",nil},
+{"LAB_CHARVIOCE_1016_72","冬天和热可可最配了。要是能和会长一起窝在暖炉里看电影……呀！会长？！你什么时候来的！刚才的话，你没有听到吧？我、我什么都没说！","冬天果然最適合搭配熱可可了。要是能和會長一起窩在暖爐裡看電影……呀！會長？！你什麼時候來的！剛才的話，你沒有聽到吧？我、我什麼都沒說！","Hot cocoa is absolutely perfect for winter. If I could curl up with you under the kotatsu and watch a movie... Kya—! President?! When did you get here?! You didn't hear what I just said, right? I—I didn't say anything!","冬はホットココアが一番だわ。会長と一緒に、コタツでまったり映画でも観られたら……きゃっ！会長？！いつから来てたのよ！さっきの話、聞いてなかった？私、何も言ってないわ！",nil},
+{"LAB_CHARVIOCE_1016_73","哦？有新活动！会长，我们快去看看吧！有我在，奖励自然是手到擒来。","哦？有新活動！會長，我們快去看看吧！有我在，獎勵自然手到擒來。","Oh? A new event! Let's go check it out, President! With me around, those rewards are as good as ours.","あら？新しいイベントね！会長、早く見に行きましょ！私がいるんだから、報酬はもう約束された同然だわ。",nil},
+{"LAB_CHARVIOCE_1016_74","新的赛事？正好，让所有人都见识一下我的实力！","新的賽事？正好，讓所有人都見識一下我的實力！","A new tournament? Perfect—time to show everyone what I'm capable of!","新しい大会？ちょうどいいわ。みんなに私の実力を見せつけてやる。",nil},
+{"LAB_CHARVIOCE_1016_75","好评配信中，会长，快来下载吧。","好評配信中，會長，快來下載吧。","Now available with rave reviews—hurry up and download it, President.","好評配信中よ、会長。さっさとダウンロードしなさい。",nil},
+{"LAB_CHARVIOCE_1016_76","想要赶上莉莉丝小姐，我还差得远呢……不过，总有一天，我也会变得像她那样强大。","想要追上莉莉絲小姐，我還差得遠呢……不過，總有一天，我也會變得像她那樣強大。","I'm still nowhere near catching up to Miss Lilith... But one day, I'll become just as strong as she is.","リリスさんに追いつくには、まだまだ遠いわ……でも、いつかはあんなふうに強くなる。",nil},
+{"LAB_CHARVIOCE_1016_77","小诺诺也太可爱了吧……上次，她居然拉住我的衣角，用软乎乎的声音叫我“绘里奈姐姐”耶！太……太犯规了！","小諾諾也太可愛了吧……上次，她居然拉住我的衣角，用軟綿綿的聲音叫我「繪里奈姐姐」耶！太、太犯規了！",[[Nono is just too adorable... Last time, she grabbed the hem of my skirt and called me "Erina-oneechan" with that soft little voice of hers! That's... that's completely unfair!]],"ノノちゃんって、可愛すぎるわよね……この前、私の裾を引っ張って、柔らかい声で「えりなお姉ちゃん」って呼んだのよ！そ、それは……反則よ！",nil},
+{"LAB_CHARVIOCE_1016_78","欢迎。","歡迎。","Welcome.","いらっしゃい。",nil},
+{"LAB_CHARVIOCE_1016_79","谢谢。","謝謝。","Thank you.","ありがとう。",nil},
+{"LAB_CHARVIOCE_1016_80","对不起。","對不起。","Apologies.","ごめんね。",nil},
+{"LAB_CHARVIOCE_1016_81","呵呵——","呵呵——","Ahaha.","ふふっ――",nil},
+{"LAB_CHARVIOCE_1016_82","哈哈——","哈哈——","Haha—","ははっ――",nil},
+{"LAB_CHARVIOCE_1016_83","哼哼——","哼哼——","Mm-hm.","ふんふん",nil},
+{"LAB_CHARVIOCE_1016_84","诶？","欸？","Oh?","えっ？",nil},
+{"LAB_CHARVIOCE_1016_85","哈……","哈……","Sigh...","はぁ……",nil},
+{"LAB_CHARVIOCE_1016_86","咦？","咦？","Eh?","えっ？",nil},
+{"LAB_CHARVIOCE_1016_87","唔……","唔……","Hmm...","ふん……",nil},
+{"LAB_CHARVIOCE_1016_88","呜呜……","嗚嗚……","Sob...","ううっ……",nil},
+{"LAB_CHARVIOCE_1016_89","嗯。","嗯。","Yeah.","うん。",nil},
+{"LAB_CHARVIOCE_1016_90","早上好。","早上好！","Good morning.","おはよう。",nil},
+{"LAB_CHARVIOCE_1016_91","中午好。","中午好！","Good afternoon.","こんにちは。",nil},
+{"LAB_CHARVIOCE_1016_92","晚上好。","晚上好。","Good evening.","こんばんは。",nil},
+{"LAB_CHARVIOCE_1016_93","晚安。","晚安。","Good night.","おやすみなさい。",nil},
+{"LAB_CHARVIOCE_1016_94","呀——","呀——","Kya—","きゃ——",nil},
+{"LAB_CHARVIOCE_1016_95","嗯嗯~","嗯嗯～","Nnngh.","んんっ",nil},
+{"LAB_CHARVIOCE_1016_96","嗯啊——","嗯啊——","Mm, ah.","ん、あっ",nil},
+{"LAB_CHARVIOCE_1016_97","好痒~","好癢……","That tickles!","くすぐったい。",nil},
+{"LAB_CHARVIOCE_1016_98","Game Clear.","Game Clear.","Game Clear.","ゲームクリア。",nil},
+{"LAB_CHARVIOCE_1016_99","Mission Complete.","Mission Complete.","Mission Complete.","ミッション完了ね。",nil},
+{"LAB_CHARVIOCE_1016_100","胜利。","勝利。","Victory.","私の勝利。",nil},
+{"LAB_CHARVIOCE_1016_101","Big Win.","Big Win.","Big Win.","ビッグ・ウィンだわ。",nil},
+{"LAB_CHARVIOCE_1016_102","Mega Win.","Mega Win.","Mega Win.","メガ・ウィンだわ。",nil},
+{"LAB_CHARVIOCE_1016_103","三连胜，不错。","三連勝……不錯。","Three wins in a row. Not bad.","三連勝……悪くないわね。",nil},
+{"LAB_CHARVIOCE_1016_104","五连胜……真的假的？","五連勝……真的假的？","Five wins in a row.... Is this real?","五連勝……本当なの？",nil},
+{"LAB_CHARVIOCE_1016_105","浴衣，你觉得怎么样？才……才不是特意穿给你看的！毕竟是祭典，就该这么穿啦！","浴衣，你覺得怎麼樣？才……才不是特地穿給你看的！畢竟是祭典，就該這麼穿啦！","How do I look in this yukata? I—I'm not wearing it for you or anything! It's a festival, and this is just what people wear!","浴衣、どう？似合ってる？べ……別に、あなたに見せるために着たわけじゃないんだから！だってお祭りなんだし、こういうのが普通でしょ！",nil},
+{"LAB_CHARVIOCE_1016_106","呜，防晒霜涂不到后背……那个，会长，快来帮我……先警告你，千万不要乱摸啊！","嗚，防曬乳擦不到後背……那個，會長，快來幫我……先警告你，不准亂摸啊！","Ugh, I can't reach my back with the sunscreen... Hey, President, give me a hand... And don't you dare touch anywhere you shouldn't!","うぅ、日焼け止めが背中に塗れない……あの、会長、早く来て……先に言っとくわよ。絶対に変なところ触らないでね！",nil},
+{"LAB_CHARVIOCE_1016_107","呼……果然泡完温泉后的咖啡牛奶才是精髓。会长要喝吗？这、这可不是间接接吻，不要自作多情！","呼……果然泡完溫泉後的咖啡牛奶才是精髓。會長要喝嗎？這、這可不是什麼間接接吻，不要自作多情！","Phew... nothing beats coffee milk after a hot spring. Want some, President? Th-this isn't an indirect kiss or anything, so don't flatter yourself!","ふぅ……やっぱり、温泉上がりのコーヒー牛乳が一番だわ。会長、飲む？一口どう？こ、これは間接キスじゃないから。勘違いしないでよ！",nil},
+{"LAB_CHARVIOCE_1016_108","接力跑？哼哼，会长，瞧好了，我会让你见识一下什么才是真正的实力！","接力跑？哼哼，會長，看好了，我會讓你見識什麼才是真正的實力！","A relay race? Fufu, watch closely, President—I'll show you what real skill looks like!","リレー？ふんふん、会長、見てなさい。本当の実力ってやつ、見せてあげる！",nil},
+{"LAB_CHARVIOCE_1016_109","哈——怎、怎么了？打哈欠很可爱？你……你这变态！","哈——怎、怎麼了？打哈欠很可愛？你……你這個變態！","Hah— Wh-what? My yawn was cute? Y-you creep!","はあ……な、なによ？あくびが可愛いって？こ……この変態！",nil},
+{"LAB_CHARVIOCE_1016_110","欢迎回来，主人……您想点什么？女仆的微笑？那种东西是要额外收费的！","歡迎回來，主人……您想點什麼？女僕的微笑？那種東西可是要額外收費的！","Welcome home, Master... What would you like? A maid's smile? That'll cost extra!","お帰りなさいませ、ご主人様……ご注文は？メイドの微笑みをご所望？そんなの、別料金よ！",nil},
+{"LAB_CHARVIOCE_1016_111","无论健康还是疾病……我在念什么？！不过，如果是会长的话，倒也不是不能考虑……","無論健康還是疾病……我在念什麼啊？！不過，如果是會長的話……倒也不是不能考慮……","In sickness and in health... Wh-what am I even saying?! But... if it were you, President, I guess it's not completely out of the question...","健やかなるときも、病めるときも……私、何言ってるの？！でも、会長なら……考えられないこともないけど……",nil},
+{"LAB_CHARVIOCE_1016_112","呀！对、对不起，踩到你了……都怪会长你的节奏太奇怪了！……再抱紧我一点，这样就不会出错了……","呀！對、對不起，踩到你了……都怪會長你的節奏太奇怪了！……再抱緊我一點，這樣就不會出錯了……","Kya—! S-sorry, I stepped on you... It's your fault for having such a weird rhythm! ...Hold me a little tighter. That way we won't mess up again...","きゃっ！ご、ごめんなさい、踏んじゃった……会長のリズムがおかしいのが悪いのよ！……もう少し強く抱きしめて。そうすれば、間違えないから……",nil},
+{"LAB_CHARVIOCE_1016_113","这身衣服是怎么回事，布料也太少了吧！会、会长？！你在看哪里啊！变态！","這身衣服是怎麼回事，布料也太少了吧！會、會長？！你在看哪裡啊！變態！","What kind of outfit is this? There's barely any fabric! P-President?! Where exactly are you looking?! Pervert!","この衣装、どういうことよ。布が少なすぎるわ！か、会長……？！どこ見てるのよ！変態！",nil},
+{"LAB_CHARVIOCE_1016_114","会长，我的表现怎么样？最……最棒了？哼——不用你说我也知道！","會長，我的表現怎麼樣？最……最棒了？哼——不用你說我也知道！","How was my performance, President? The... the best? Hmph—well, obviously!","会長、私のパフォーマンス、どうだった？さ……最高？ふん……言われなくても分かってるわ！",nil},
+{"LAB_CHARVIOCE_3001_1","弃牌","棄牌","Fold","フォールド",nil},
+{"LAB_CHARVIOCE_3001_2","暂且保留实力吧。","暫且保留實力吧。","I suppose I should hold back a little here.","ここは少し、手加減しておきましょうか。",nil},
+{"LAB_CHARVIOCE_3001_3","过牌","過牌","Check","チェック",nil},
+{"LAB_CHARVIOCE_3001_4","跟注","跟注","Call","コール",nil},
+{"LAB_CHARVIOCE_3001_5","下注","下注","Bet","ベット",nil},
+{"LAB_CHARVIOCE_3001_6","加注","加注","Raise","レイズ",nil},
+{"LAB_CHARVIOCE_3001_7","底池","底池","Pot","ポット",nil},
+{"LAB_CHARVIOCE_3001_8","小盲","小盲","Small Blind","スモールブラインド",nil},
+{"LAB_CHARVIOCE_3001_9","大盲","大盲","Big Blind","ビッグブラインド",nil},
+{"LAB_CHARVIOCE_3001_10","前注","前注","Ante","アンティ",nil},
+{"LAB_CHARVIOCE_3001_11","再往前推进一些！","再往前推進一些！","One more step forward!","もう一歩、前へ！",nil},
+{"LAB_CHARVIOCE_3001_12","All in！","All in！","All in!","オール・イン！",nil},
+{"LAB_CHARVIOCE_3001_13","押上所有的可能性！","押上所有的可能性！","Betting everything on every possibility.","すべての可能性を賭けて。",nil},
+{"LAB_CHARVIOCE_3001_14","这既是我的——岭上开花。","這即是我的——嶺上開花。","This is my—Rinshan Kaihou.","これが私の――嶺上開花です。",nil},
+{"LAB_CHARVIOCE_3001_15","听到了吗？马群冲向终点的马蹄声。","聽到了嗎？馬群衝向終點的馬蹄聲。","Can you hear it? The sound of hooves as the horses race toward the finish line.","聞こえますか？馬の群れがゴールへと駆ける、蹄の音。",nil},
+{"LAB_CHARVIOCE_3001_16","充分享受对局吧。","充分享受對局吧。","Let's enjoy this game to the fullest.","存分に対局を楽しみましょう。",nil},
+{"LAB_CHARVIOCE_3001_17","我所坐的位置，就是有利的位置。","我所坐的位置，就是有利的位置。","Any seat I take becomes the best seat at the table.","私の座る席が、有利なポジションです。",nil},
+{"LAB_CHARVIOCE_3001_18","名为概率的微风，正在吹向我。","名為機率的風，正在吹向我。","The winds of probability are at my back.","確率という名の風が、私に吹いています。",nil},
+{"LAB_CHARVIOCE_3001_19","海边的大好时光，可不能浪费。","海邊的大好時光，可不能浪費。","We can't let this lovely time by the sea go to waste.","海辺の素敵な時間を、無駄にはできませんね。",nil},
+{"LAB_CHARVIOCE_3001_20","那么，让我们开始吧！","那麼，讓我們開始吧！","Now then, shall we begin?","さあ、始めましょうか。",nil},
+{"LAB_CHARVIOCE_3001_21","这个位置，可以更好地观察。","這個位置，可以更好地觀察。","From here, I can observe everything clearly.","この位置なら、よく観察できます。",nil},
+{"LAB_CHARVIOCE_3001_22","可以称为“宝牌”呢。","可以稱為“寶牌”呢。",[[Makes you want to call it "Dora," doesn't it?]],"「ドラ」と呼びたくなりますね。",nil},
+{"LAB_CHARVIOCE_3001_23","唔……有点棘手。","唔……有點棘手。","Hmm... this is a bit tricky.","うーん…… 少し手強いですね。",nil},
+{"LAB_CHARVIOCE_3001_24","没想到，会在这里……","沒想到，會在這裡……","Here of all places...?","まさか、ここで……？",nil},
+{"LAB_CHARVIOCE_3001_25","接下来是最有趣的部分。","接下來是最有趣的部分。","Now this is where things get really interesting.","ここからが、一番面白いところです。",nil},
+{"LAB_CHARVIOCE_3001_26","看来我的判断是正确的。","看來我的判斷是正確的。","It seems my judgment was correct.","私の判断は、正しかったようです。",nil},
+{"LAB_CHARVIOCE_3001_27","有惊无险，这次是我比较幸运。","有驚無險，這次是我比較幸運。","That was a close call. This time, I was simply a little luckier.","危ないところでした。今回は、私が少しだけ幸運だっただけです。",nil},
+{"LAB_CHARVIOCE_3001_28","精彩的对局，你让我学到很多。","精彩的對局，你讓我學到很多。","What a wonderful game. I've learned a great deal from it.","素晴らしい対局でした。多くを学ばせていただきました。",nil},
+{"LAB_CHARVIOCE_3001_29","能赢到最后，都是托大家的福呢。","能贏到最後，都是託大家的福呢。","I owe this final victory to each and every one of you.","最後まで勝ち切れたのは、皆さんのおかげですよ。",nil},
+{"LAB_CHARVIOCE_3001_30","只有到达顶峰，才能看清全景。","只有到達頂峰，才能看清全景。","Only from the top can one truly see the whole view.","頂点に立ってこそ、全景を見渡せるのです。",nil},
+{"LAB_CHARVIOCE_3001_31","这条通往胜利的轨迹，堪称完美。","這條通往勝利的軌跡，堪稱完美。",[[This road to victory could truly be called "perfect."]],"この勝利への軌跡は、まさに「完璧」と呼べるでしょう。",nil},
+{"LAB_CHARVIOCE_3001_32","一定，能成为重要的回忆呢。","一定，能成為重要的回憶呢。","I'm sure this will become a precious memory.","きっと、大切な思い出になりますね。",nil},
+{"LAB_CHARVIOCE_3001_33","请多指教。","請多指教。","I look forward to working with you.","よろしくお願いします。",nil},
+{"LAB_CHARVIOCE_3001_34","漂亮的打法。","漂亮的打法。","A brilliant move.","素晴らしい一手です。",nil},
+{"LAB_CHARVIOCE_3001_35","太好了呢——","太好了呢——","That's wonderful!","よかったですね――",nil},
+{"LAB_CHARVIOCE_3001_36","是我的疏忽。","是我的疏忽。","That was careless of me.","私の不注意でした。",nil},
+{"LAB_CHARVIOCE_3001_37","还能这样打吗？！","還能這樣打嗎？！","To think there was a move like that!","そんな手も、あったんですね？！",nil},
+{"LAB_CHARVIOCE_3001_38","有点不像你的风格呢。","有點不像你的風格呢。","That move was a little unlike you.","少し、あなたらしくない一手ですね。",nil},
+{"LAB_CHARVIOCE_3001_39","大家都在等你哦。","大家都在等你哦。","Everyone's waiting for you.","みんな、あなたを待っていますよ。",nil},
+{"LAB_CHARVIOCE_3001_40","初次见面，会长，我是冈田纱佳。蓝湾市果然如传闻那样高手云集，想要享受胜负，却被复杂的参赛规则难住了，好在有会长为我指出通往冠军的道路，那么，就让我们一起迎接挑战吧！","初次見面，會長，我是岡田紗佳。藍灣市果然如傳聞那樣高手雲集，想要享受勝負，卻被複雜的參賽規則難住了，好在有會長為我指出通往冠軍的道路，那麼，就讓我們一起迎接挑戰吧！",[[It's a pleasure to meet you, President. My name is Okada Sayaka. Azure Bay truly lives up to its reputation—skilled players are everywhere. I wanted to enjoy the thrill of competition, but the entry requirements were far too complicated to navigate. Then you showed me "the path to victory." Now, let's go meet that challenge together!]],"初めまして、会長。私は岡田紗佳と申します。藍湾市（あいわんし）は噂通り、実力者がひしめいていますね。勝負を楽しみたいのに、あまりに複雑な出場ルールに困っていたところ、会長が「優勝への道筋」を示してくれました。さあ、一緒にその挑戦を迎えに行きましょう！",nil},
+{"LAB_CHARVIOCE_3001_41","会长来了呢，我刚才在脑海里模拟了几种战术，会长，用你的分析数据来验证一下我的直觉吧？","會長來了呢，我剛才在腦海裡模擬了幾種戰術，會長，用你的分析資料來驗證一下我的直覺吧？","President, you're here. I was just simulating a few tactical patterns in my head. Why not use your analytical data to test my intuition?","会長、来てくれましたね。さっきまで頭の中で、いくつか戦術パターンをシミュレーションしていたところなんです。会長の分析データで、私の直感を検証してみませんか？",nil},
+{"LAB_CHARVIOCE_3001_42","会长，茶已沏好，在正式开始今天的扑克游戏之前，先来一杯清醒一下如何？","會長，茶已沏好，在正式開始今天的撲克遊戲之前，先來一杯清醒一下如何？","President, the tea is ready. Before we start today's game, why not have a cup first? Let's clear our minds, then head to the table.","会長、お茶が入りました。今日の対戦を始める前に、まずは一杯どうぞ。頭をすっきりさせてから、テーブルに向かいましょうか。",nil},
+{"LAB_CHARVIOCE_3001_43","会长，今天的“运势气流”格外清澈，请在最佳观赛席上，聆听胜利的欢呼吧。","會長，今天的“運勢氣流”格外清澈，請在最佳觀賽席上，聆聽勝利的歡呼吧。",[[President, the "currents of fortune" are exceptionally clear today. Please, take the finest seat in the house and listen for the roar of victory.]],"会長、今日の「運勢の気流」は、格別に澄んでいるようです。どうか最高の観覧席で、勝利の歓声に耳を澄ませていてください。",nil},
+{"LAB_CHARVIOCE_3001_44","今日海风正好，视野开阔，会长，眼前的取景框，正等待我们将回忆填入其中。","今日海風正好，視野開闊，會長，這裡一定會逐漸被我們新的回憶填滿的。","The sea breeze feels wonderful today, and the view stretches far and wide. President, I'm sure this place will soon be filled with new memories for us.","今日は海風も心地よくて、視界もよく開けています。会長、きっと私たちの新しい思い出で満たされていきますよ。",nil},
+{"LAB_CHARVIOCE_3001_45","会长，你觉得我今天的“气势穿搭”如何呢？衣服的合身程度会改变呼吸的节奏，影响临场发挥，这是我做模特的时候学到的。","會長，你覺得我今天的穿搭如何呢？衣服的合身程度會改變呼吸的節奏，影響臨場發揮，這是我做模特兒的時候學到的。","President, what do you think of my outfit today? The way clothing fits can change your breathing rhythm, and that affects your performance in the moment. It's a sense I developed back when I worked as a model.","会長、今日の私のコーディネート、いかがですか？服のフィット感は呼吸のリズムを変え、その場でのパフォーマンスにも影響します。これは、モデルをしていた頃に身につけた感覚なんです。",nil},
+{"LAB_CHARVIOCE_3001_46","看，昨晚我去的那场演唱会的官方视频！啊抱歉，一激动就只想着分享了，会长，能成为第一个听我讲述这场演唱会感想的人吗？","看，昨晚我去看的那場演唱會的官方影片！啊抱歉，一激動就只想著分享了，會長，能成為第一個聽我講述這場演唱會感想的人嗎？","Look—it's the official footage from the concert I went to yesterday! Oh, I'm sorry, I got a little carried away and couldn't help sharing it. President... would you mind being the first person I tell all about it?","見てください、私が昨日観に行ったライブの公式映像です！あ、すみません、つい興奮して共有したくなってしまって。会長、誰よりも先にこのライブの感想を聞いてくれる人に、……なってくれますか？",nil},
+{"LAB_CHARVIOCE_3001_47","会长，这种程度的干扰对我来说是没用的哦？不论是麻将还是扑克，都需要强大的表情控制能力，我对自己的能力可是很有自信的。","會長，這種程度的干擾對我來說是沒用的哦？不論是麻將還是撲克，在對局中都需要至少維持住表面的鎮定，我對自己的能力可是很有自信的。","President, that kind of disruption doesn't work on me. Whether it's mahjong or poker, maintaining your composure is essential—and I'm quite confident in my ability to do just that.","会長、この程度の妨害は、私には通用しませんよ？麻雀であれポーカーであれ、ゲーム中は平静を装う事が求められます。そして、私は自分のその能力に自信があります。",nil},
+{"LAB_CHARVIOCE_3001_48","运势曲线的高点，拍摄时的最佳机位……越是在不同领域取得成就，越是能理解这些领域在某些方面的共通之处。","運勢曲線的高點，拍攝時的最佳機位……越是在不同領域取得成就，越是能理解這些領域在某些方面的共通之處。",[[The peak of a fortune curve, the perfect angle in a photoshoot... The more you excel in different fields, the more clearly you see the "core" shared between them.]],"運勢曲線の頂点、撮影時のベストアングル……異なる分野で成果を上げれば上げるほど、それぞれの分野のどこかに共通する「核」が見えてくるのです。",nil},
+{"LAB_CHARVIOCE_3001_49","这手牌的获胜概率……让我想起了前段时间分析赛马数据的时候，会长，你觉得这里“爆冷”的可能性有多少？","這手牌的獲勝機率……讓我想起了前段時間預測賽馬的時候，會長，你覺得這裡“爆冷”的可能性有多少？",[[The odds of this hand winning... it reminds me of when I was making horse racing predictions the other day. President, how likely do you think it is for a "dark horse" to appear here?]],"このハンドの勝率……この前、競馬予想していた時のことを思い出します。会長、ここで「ダークホース」が現れる可能性は、どれくらいだと思いますか？",nil},
+{"LAB_CHARVIOCE_3001_50","以前都是带着工作状态来海边拍摄，今天则纯粹是为了放松而来，连海的颜色似乎都变得更加清爽了，会长，要来一起享受这阳光与海水吗？","以前都是因為工作來海邊拍攝，今天則純粹是為了放鬆而來，連海的顏色似乎都變得更加清爽了，會長，要來一起享受這陽光與海水嗎？","I used to come to the seaside for work and photoshoots, but today I came purely to relax. Even the color of the sea looks fresher than usual. President, would you like to enjoy the sunshine and the ocean with me?","以前は仕事で海辺に撮影に来ていましたが、今日は純粋にリラックスのために来ました。海の色さえ、いつもより爽やかに見えます。会長も、この日差しと海を一緒に楽しみませんか？",nil},
+{"LAB_CHARVIOCE_3001_51","谢谢会长，我会好好珍惜的。","謝謝會長，我會好好珍惜的。","Thank you, President. I'll treasure it.","ありがとう、会長。大切に使わせていただきます。",nil},
+{"LAB_CHARVIOCE_3001_52","这是特意为我准备的吗？我好开心，谢谢会长！","這是特意為我準備的嗎？我好開心，謝謝會長！","You went to all this trouble just for me? I'm truly happy. Thank you so much, President!","わざわざ私のために、準備してくれたんですか？本当にうれしいです。ありがとうございます、会長！",nil},
+{"LAB_CHARVIOCE_3001_53","我在蓝湾市收到了许多邀请，他们的话术出奇的一致，丰厚的报酬，显赫的地位……像是在邀请一件兵器。我能做的，就是保持微笑，保持距离，然后转身去寻找真正的对局。","我在藍灣市收到了許多邀請，他們的話術出奇地一致，豐厚的報酬，顯赫的地位……像是在邀請一件兵器。我能做的，就是保持微笑，保持距離，然後轉身去尋找真正的對局。",[[Since arriving in Azure Bay, I've received countless invitations. But the way they spoke was all surprisingly similar—lavish rewards, prestigious positions... every word made it sound as though they were trying to acquire a "weapon." All I could do was keep smiling, maintain a careful distance, turn my back on them, and continue searching for a "true match."]],"藍湾市（あいわんし）では、数えきれないほど多くの招待を受けました。けれど、彼らの口ぶりは驚くほどよく似ていて──高額な報酬、高い地位……まるで「兵器」を迎え入れるみたいな言葉ばかりでした。私にできたのは、微笑みを絶やさず、きちんと距離を保ち、その人々から背を向けて、「本物の対局」を探しに行くことだけです。",nil},
+{"LAB_CHARVIOCE_3001_54","在镜头前，我是模特；在赛场上，我是雀士；在这里，我是牌手。在每个领域都尽全力挑战，是因为我希望人们提起我的时候，会提到一位在所有领域精益求精的我，而不只是一位打牌很厉害的模特。","在鏡頭前，我是模特兒；在賽場上，我是雀士；在這裡，我是牌手。在每個領域都盡全力挑戰，是因為我希望人們提起我的時候，會提到一位在所有領域精益求精的我，而不只是一位打牌很厲害的模特兒。",[[In front of the camera, I'm a model. At the mahjong table, I'm a pro. And here, I'm a poker player. I give everything I have to every field—because I don't want to be known as "a model who's good at poker." I want to be known as someone who pursues perfection in everything she does.]],"カメラの前では、私はモデル。卓上では、私は雀士。そしてここでは、私はポーカープレイヤー。どのフィールドでも全力で挑むのは、人々に「ポーカーが強いモデル」ではなく、「あらゆる分野で完璧を目指す私」として語ってほしいからです。",nil},
+{"LAB_CHARVIOCE_3001_55","会长是整个蓝湾市第一个能理解我的人，我们一起讨论上次比赛弃牌的理由，也一起讨论上周拍摄写真时选择那对耳环的原因，会长能理解一个“完整的我”，这让我感到很踏实。","會長是整個藍灣市第一個能理解我的人，我們一起討論上次比賽棄牌的理由，也一起討論上週拍攝寫真時選擇那對耳環的原因，會長能理解一個“完整的我”，這讓我感到很踏實。","President, you were the first person in Azure Bay to truly understand me. Together, we discussed why I folded in that last game, and even why I chose those earrings for last week's shoot. You see all of me, not just one part. And that gives me a great sense of comfort.","会長は、藍湾市の中で私を理解してくれた最初の人です。私たちは一緒に、前回の対局でフォールドした理由を話し合い、先週の撮影であのイヤリングを選んだ理由についても語り合いました。会長は、「一部分の私」ではなく「丸ごとの私」を見てくれます。そのことが、私をとても安心させてくれるのです。",nil},
+{"LAB_CHARVIOCE_3001_56","最初，我来蓝湾市的目的是找到痛快的对局，现在我的目标里多了一个前缀——和会长一起找到痛快的对局。取得胜利的瞬间，一定和达成国士无双十三面听时一样，是独属于挑战者的巅峰体验。","最初，我來藍灣市的目的是找到痛快的對局，現在我的目標多了一個新的理由——和會長一起找到痛快的對局。取得勝利的瞬間，一定和達成國士無雙十三面聽時一樣，是獨屬於挑戰者的巔峰體驗。","When I first came to Azure Bay, my goal was to find a place where I could experience the greatest battles possible. Now, there's a new reason added to that goal—to find that place together with you, President. The moment we seize victory will surely feel like completing a Thirteen-Sided Kokushi Musou wait: a pinnacle experience reserved only for those bold enough to challenge it.","最初、私が藍湾市（あいわんし）に来た目的は、最高の戦いができる場所を見つけることでした。今、その目標に一つ、新たな理由がつきました。──会長と一緒に、最高の戦いができる場所を見つけることです。勝利を手にする瞬間は、きっと国士無双十三面待ちを成就したときと同じ。挑戦者だけに許された、頂点の経験です。",nil},
+{"LAB_CHARVIOCE_3001_57","模特的写真与雀士的战绩，展现了我职业生涯的两面，这两面看似没有关系，但勾勒出它们的，是同一支名为“全力以赴”的笔。如今笔锋圆满，此后无论是增添细节，还是另起新章，想必现在的我，都能从容应对。","模特兒的寫真與雀士的戰績，展現了我職業生涯的兩面，這兩面看似沒有關係，但勾勒出它們的，是同一支名為“全力以赴”的筆。如今，我一路勾勒的軌跡漸趨圓滿，此後無論是增添細節，還是另起新章，想必現在的我，都能從容應對。","My achievements as a model and my record as a mahjong pro represent the two faces of my career. They may seem unrelated at a glance, but they've been drawn by the same brush: the conviction to give my absolute all. The lines I've painted until now have finally begun to mature. Whether I'm refining the finer details or opening an entirely new chapter, I feel ready to meet whatever comes—with room to spare.","モデルとしての功績と、雀士としての戦績は、私のキャリアの「二つの顔」を示しています。一見ばらばらに見えるこの二面も、それらを描き出してきた筆は一本──「全力を尽くす」という信念です。今、描いてきた軌跡は、ようやく円熟してきました。これから細部を描き足していくにしても、新しい章を開いていくにしても、今の私はきっと、余裕をもって応えられるでしょう。",nil},
+{"LAB_CHARVIOCE_3001_58","我从不尝试强行改变运势，而是选择理解它，与之共鸣，就像骑手对待马匹那样，与之沟通，培养默契，才能真正在赛场上驾驭他，共同迎接胜利。","我從不嘗試強行改變運勢，而是選擇理解它，與之共鳴，就像騎手對待馬匹那樣，與之溝通，培養默契，才能真正激發出那股力量，共同迎接勝利。","I never try to force fortune to bend to my will. Instead, I choose to understand it and resonate with it. It's very much like the relationship between a jockey and their horse. Only by communicating properly and building a bond can you truly draw out that power and race together toward victory.","私は決して、運勢を無理にねじ曲げようとはしません。それを理解し、共鳴することを選びます。それは、騎手と馬の関係によく似ています。きちんと対話し、絆を育んでこそ、初めてその力を引き出し、ともに勝利へ駆けていけるのです。",nil},
+{"LAB_CHARVIOCE_3001_59","用麻将来比喻的话，看似普通的每一步，都是通往和牌的关键进张，我会在这里陪你打完这一局。","用麻將來比喻的話，看似普通的每一步，都是通往和牌的關鍵進張，我會在這裡陪你打完這一局。","If I were to compare it to mahjong, every seemingly insignificant move is an important step toward the winning hand. I'll fight alongside you until the very end, President.","麻雀にたとえるなら、一見何でもないような一手一手が、すべて和了（あがり）へ向かう大切な布石なのです。最後の最後まで、ずっと会長と一緒に戦います。",nil},
+{"LAB_CHARVIOCE_3001_60","“分数面板”更新了呢，确认一下战利品吧？","“分數面板”更新了呢，確認一下戰利品吧？",[[The "scoreboard" has been updated. Shall we take a look at the rewards?]],"「スコアボード」が更新されましたね。戦利品を確認してみましょうか？",nil},
+{"LAB_CHARVIOCE_3001_61","比赛接近尾声的时候，需要的并不是出其不意的新策略，而是冷静的决策。","比賽接近尾聲的時候，需要的並不是出其不意的策略，而是冷靜的判斷能力。","As the match enters its final stages, what matters isn't flashy tactics, but calm judgment.","試合が終盤に差し掛かれば、必要なのは奇抜な戦術ではなく、冷静な判断力です。",nil},
+{"LAB_CHARVIOCE_3001_62","辛苦了会长，接下来就是休息时间了哦，不论今日的胜负如何，都希望会长有好好享受对局的过程。","辛苦了會長，接下來就是休息時間了哦，不論今日的勝負如何，都希望會長有好好享受對局的過程。","Good work today, President. Now it's time to rest. Whatever the result today, as long as you truly enjoyed the experience of the game, that's enough for me.","お疲れさまでした、会長。次は、休息の時間ですよ。今日の勝敗がどうであれ、会長が対局の過程をしっかり楽しんでくれていたなら、私はそれで十分です。",nil},
+{"LAB_CHARVIOCE_3001_63","身兼数职，更能体会到专注力的重要，只有在对局和工作中将事情完成到滴水不漏，才能在玩乐休息时尽情放松。","身兼數職，更能體會到專注力的重要，只有在對局和工作中將事情完成到滴水不漏，才能在玩樂休息時盡情放鬆。","Juggling so many roles has taught me just how vital concentration really is. Whether it's a game or work, only after giving it your all can you fully relax and enjoy your time off.","いくつもの役割を兼ねているからこそ、集中力の重要性を身にしみて感じます。対局でも仕事でも、全力でやり遂げてこそ、遊びや休息の時間には思いきりリラックスできるのです。",nil},
+{"LAB_CHARVIOCE_3001_64","会长最近的日程表密度很可怕呢，有什么我能帮上忙的吗？","會長最近的日程表密度很可怕呢，有什麼我能幫上忙的嗎？","President, your schedule lately... it's been quite packed, hasn't it? If you're open to it, I'd love to help out.","会長の最近のスケジュール表……なかなかの密度ですね。よろしければ、私にお手伝いさせて頂けませんか？",nil},
+{"LAB_CHARVIOCE_3001_65","长时间的拍摄之后，懂得如何放松脸颊肌肉也是模特的职业修养，要我教教你吗，会长？","長時間的拍攝之後，懂得如何放鬆臉頰肌肉也是模特兒的職業修養，要我教教你嗎，會長？","Knowing how to relax your cheek muscles after a long shoot is a trick of the trade for a model. If you'd like, I could show you how it's done, President.","長時間の撮影のあとに、頬の筋肉をほぐす方法を知っているのも、モデルという職業ならではの心得です。よろしければ、会長にも教えましょうか？",nil},
+{"LAB_CHARVIOCE_3001_66","会长。","會長。","President.","会長。",nil},
+{"LAB_CHARVIOCE_3001_67","Poker Fate","Poker Fate","Poker Fate","Poker Fate",nil},
+{"LAB_CHARVIOCE_3001_68","Poker Fate周年快乐","Poker Fate周年快樂","Happy anniversary, Poker Fate!","Poker Fate、アニバーサリーおめでとう！",nil},
+{"LAB_CHARVIOCE_3001_69","我叫冈田纱佳，听说这里有很多扑克游戏的高手，而我恰好又是一位渴望突破自我的牌手，会长，能为我规划一条通往胜利的挑战之路吗？","我叫岡田紗佳，聽說這裡有很多撲克遊戲的高手，而我恰好又是一位渴望突破自我的牌手，會長，能為我規劃一條通往勝利的挑戰之路嗎？","My name is Okada Sayaka. I heard that many poker masters gather here, so I came to see it for myself. Right now, I have a strong desire to push past my own limits. President, would you show me the path of challenge leading toward victory?","私は岡田紗佳と申します。ここにはポーカーゲームの達人が数多く集まっていると聞き、やって来ました。私は今、自分の限界を突破したいと強く願っています。会長、どうか私に「勝利への挑戦」へと続く道を、描いていただけませんか？",nil},
+{"LAB_CHARVIOCE_3001_70","初次见面，会长，我是冈田纱佳。自从来到蓝湾市，许多势力都在尝试招揽我，但他们许给我的报酬都不是我真正想要的东西。会长，你应该能理解我来到这里的真正目的，对吧？","初次見面，會長，我是岡田紗佳。自從來到藍灣市，許多勢力都在嘗試招攬我，但他們許給我的報酬都不是我真正想要的東西。會長，你應該能理解我來到這裡的真正目的，對吧？",[[It's a pleasure to meet you, President. My name is Okada Sayaka. Since arriving in Azure Bay, many associations have tried to recruit me, but the rewards they offered were never what I was truly seeking. You understand the "real reason" I came here, don't you, President?]],"初めまして、会長。私は岡田紗佳と申します。藍湾市（あいわんし）に来てから、多くの勢力が私を勧誘しようとしてきますが、彼らの約束する報酬は、私が本当に求めているものとは違いました。会長なら、私がここに来た「本当の目的」を理解してくれるはずですよね？",nil},
+{"LAB_CHARVIOCE_3001_71","会长新年快乐，牌手每年的牌运不尽相同，我认为和一同迎接新年的人有关，今年和会长一起，想必能赢下不少精彩的对局！","會長新年快樂，牌手每年的牌運不盡相同，我認為和一同迎接新年的人有關，今年和會長一起，想必能贏下不少精彩的對局！","Happy New Year, President. I believe a player's fortune shifts each year, and I think it's deeply connected to the person you welcome the new year with. Since I'm welcoming this one with you, I'm certain it will be a year full of wonderful victories!","会長、新年あけましておめでとうございます。プレイヤーの運勢は、毎年同じではないと思います。私は、それが「一緒に新年を迎える人」と深く関係していると考えています。今年は会長と共に迎える一年ですから、きっとたくさんの素晴らしい勝利をつかめるはずです！",nil},
+{"LAB_CHARVIOCE_3001_72","会长，给，亲手制作的超——大巧克力，根据我平时对会长的观察，这个分量应该轻轻松松吧？","會長，給，親手製作的超——大巧克力，根據我平時對會長的觀察，這個分量應該輕輕鬆鬆吧？","Here you go, President—a handmade jumbo chocolate. Judging from my observations of you, I'm sure you can finish something this size without any trouble, right?","会長、どうぞ。手作りの超特大チョコレートです。いつも会長を観察している私の目から見ると、このボリュームでも、問題なく完食できますよね？",nil},
+{"LAB_CHARVIOCE_3001_73","就在刚才，协会今年的经费被我“ALL IN ”掉了！噗，开个玩笑。诶？在想双倍的经费该如何使用？你对我也太有信心了吧。","就在剛才，協會今年的經費被我“ALL IN ”掉了！噗，開個玩笑。欸？在想雙倍的經費該如何使用？你對我也太有信心了吧。",[[I just went "all in" with this year's association budget! Fufu, I'm kidding. Hm? Were you already thinking about how to spend the doubled budget? President, don't you think you trust me a little too much?]],"さっき、協会の今年の予算を、私が「オールイン」してしまいました！ふふ、冗談ですよ。えっ？もう、倍になった予算をどう使うかを考えていましたか？会長の私への信頼、少し厚すぎるんじゃないでしょうか。",nil},
+{"LAB_CHARVIOCE_3001_74","我在短册上写下了“九莲宝灯”，希望能再和出来一次呢，想了想又写上了“皇家同花顺”，是不是有点太贪心了？","我在短冊上寫下了“九蓮寶燈”，希望能再和出來一次呢，想了想又寫上了“皇家同花順”，是不是有點太貪心了？",[[I wrote "Chuuren Poutou" on my wish strip. I'd love to pull off that hand just one more time. Then, after thinking it over, I added "Royal Flush" to the list as well. Perhaps I'm being a little too greedy?]],"短冊に「九蓮宝燈」と書きました。もう一度、あの和了を決めてみたいと思って。考えた末に「ロイヤルフラッシュ」も書いてしまいました。少し欲張りすぎでしょうか？",nil},
+{"LAB_CHARVIOCE_3001_75","我也想成为一轮令所有人瞩目的圆月，为此，所有涉足的领域，我都会尽量做到自己心中完美的程度。","我也想成為一輪令所有人矚目的圓月，為此，所有涉足的領域，我都會盡量做到自己心中完美的程度。",[[I want to be like the full moon—a presence that draws everyone's eyes. That's why, in every field I step into, I strive to reach as close to "perfection" as I possibly can.]],"私も、すべての人の視線を集める満月のような存在になりたいんです。そのために、足を踏み入れたあらゆる分野で、自分なりにできる限り「完璧」に近いところまで極めたいと思っています。",nil},
+{"LAB_CHARVIOCE_3001_76","要我说最可怕的并非鬼怪，而是对局中无法看透的对手，就像面对一个没有表情的幽灵呢——","我最怕的是對局中無法看透的對手，就像面對一個沒有表情的幽靈呢——","In my experience, the most frightening opponents are the ones whose expressions you can't read during a game. It's like facing a ghost that never reveals a single expression...","私の感覚では、一番怖いのは、「対局中に表情を読み取れない相手」です。まるで、何も表情を見せない幽霊を相手にしているようで――。",nil},
+{"LAB_CHARVIOCE_3001_77","我想要的圣诞礼物？我早就想好了——一场全力以赴，只有我们两个人的对局，如何？","我想要的聖誕禮物？我早就想好了——一場全力以赴，只有我們兩個人的對局，如何？","What do I want for Christmas? I decided that long ago—a game between just the two of us, where we both give it everything we have. What do you think?","私が欲しいクリスマスプレゼント、ですか？とっくに決めていますよ――全力を尽くす、私たち二人だけの対局。いかがでしょう？",nil},
+{"LAB_CHARVIOCE_3001_78","生日快乐，会长！作为你的搭档，祝你今后的运势会一直如此优秀，愿你获得更多人的认可与支持，最后，希望明年的今天，我还能像现在这样，亲口对你说“生日快乐。","生日快樂，會長！作為你的搭檔，祝你今後的運勢更上一層樓，願你獲得更多人的認可與支持，最後，希望明年的今天，我還能像現在這樣，親口對你說“生日快樂。",[[Happy birthday, President. As your partner, I hope the coming year brings you even greater fortune than before, along with recognition and support from even more people. And lastly... I hope that on this very day next year, I'll once again be able to tell you "Happy Birthday" in person, just like I did this year.]],"お誕生日おめでとうございます、会長。あなたのパートナーとして、これからの一年も運勢が今以上に冴えわたり、より多くの人から認められ、支持を得られることを願っています。そして最後に──来年の今日も、今年と同じように、直接「お誕生日おめでとうございます」と伝えられますように。",nil},
+{"LAB_CHARVIOCE_3001_79","花粉症又来了……不想出门，却又想亲眼看看新发的嫩芽和粉白的樱花，真是纠结。","花粉症又來了……不想出門，卻又想親眼看看櫻花盛開的美景，真是糾結。","Hay fever season has come around again... I don't want to go outside, but I still want to see the cherry blossoms in full bloom with my own eyes. It really is a troublesome time of year.","花粉症の季節がまたやってきました……。外に出たくはないけれど、綺麗に咲いた桜をこの目で見たい。本当に、悩ましい季節ですね。",nil},
+{"LAB_CHARVIOCE_3001_80","池中莲花满开，看似各自争艳，实则呈现了自然的秩序与圆满，参透其中规律，便是触摸到“九莲宝灯”的瞬间。","池中蓮花滿開，看似各自爭艷，實則呈現了自然的秩序與圓滿，參透其中規律，便是觸摸到“九蓮寶燈”的瞬間。","The lotus flowers in the pond are in full bloom. They look as if they are competing for beauty, but in truth, their presence is a manifestation of nature's order and harmony. When drawing a Chuuren Poutou, I believe there is always an underlying logic hidden within it, waiting to be seen.","池の蓮の花が満開です。それぞれが美を競い合っているように見えますが、実のところ、その姿は自然の秩序と円満さの表れです。「九蓮宝燈」をツモる時、必ずその中に潜む法則を見極められると、私は思います。",nil},
+{"LAB_CHARVIOCE_3001_81","最近天气转凉，我也终于可以开始设计衣服的层次感了，搭配衣服的乐趣，不亚于组建一手役满牌型呢。","最近天氣轉涼，我也終於可以開始設計衣服的層次感了，搭配衣服的樂趣，不亞於組建一手役滿牌型呢。","It's finally cool enough to think about layered outfits again. The fun of coordinating clothes is every bit as satisfying as building a yakuman hand tile by tile.","最近は涼しくなってきて、ようやく服のレイヤードデザインを考えられるようになりました。服をコーディネートする楽しさは、役満の役を一枚ずつ組み立てていく感覚にも、決して劣りません。",nil},
+{"LAB_CHARVIOCE_3001_82","冬天呼出的白气是言语的实体，小时候在上海，总想看见自己说的中文是什么形状。","冬天呼出的白氣是言語的實體，小時候在上海，總想看見自己說的中文是什麼形狀。","The white breath you exhale in winter feels almost like words taking shape. When I was a child living in Shanghai, I used to wonder what shape the Chinese words I spoke would take as they left my mouth.","冬に吐く白い息は、言葉が形になったもののようです。子どもの頃、上海にいたとき、自分の話す中国語が、どんな形をしているのか見てみたいと、よく思っていました。",nil},
+{"LAB_CHARVIOCE_3001_83","新的活动正式开启了，一起去看看吧，会长。","新的活動正式開啟了，一起去看看吧，會長。","The new event has officially begun. President, shall we go check it out together?","新しいイベントが正式にスタートしました。会長、一緒に見に行きましょう。",nil},
+{"LAB_CHARVIOCE_3001_84","新的赛事开始了，让我们一起去夺取新的胜利吧！","新的賽事開始了，讓我們一起去奪取新的勝利吧！","A new tournament is about to begin as well. Let's go claim another victory together!","新しい大会も始まります。一緒に、新たな勝利をつかみに行きましょう！",nil},
+{"LAB_CHARVIOCE_3001_85","好评配信中，会长，快来下载吧~","好評配信中，會長，快來下載吧~","Poker Fate is now available and receiving great reviews. President, make sure to download it soon!","『Poker Fate』、好評配信中です。会長、早くダウンロードしてくださいね～。",nil},
+{"LAB_CHARVIOCE_3001_86","欢迎。","歡迎。","Welcome.","いらっしゃい。",nil},
+{"LAB_CHARVIOCE_3001_87","谢谢。","謝謝。","Thank you.","ありがとう。",nil},
+{"LAB_CHARVIOCE_3001_88","对不起。","對不起。","Sorry.","ごめんね。",nil},
+{"LAB_CHARVIOCE_3001_89","呵呵——","呵呵——","Fufu—","ふふっ――",nil},
+{"LAB_CHARVIOCE_3001_90","哈哈——","哈哈——","Haha—","ははっ――",nil},
+{"LAB_CHARVIOCE_3001_91","哼哼——","哼哼——","Mm-hm.","ふんふん",nil},
+{"LAB_CHARVIOCE_3001_92","诶？","欸？","Oh?","えっ？",nil},
+{"LAB_CHARVIOCE_3001_93","哈……","哈……","Sigh...","はぁ……",nil},
+{"LAB_CHARVIOCE_3001_94","咦？","咦？","Eh?","えっ？",nil},
+{"LAB_CHARVIOCE_3001_95","唔……","唔……","Hmm...","ふん……",nil},
+{"LAB_CHARVIOCE_3001_96","呜呜……","嗚嗚……","Sob...","ううっ……",nil},
+{"LAB_CHARVIOCE_3001_97","嗯。","嗯。","Yeah.","うん。",nil},
+{"LAB_CHARVIOCE_3001_98","早安。","早安。","Good morning.","おはよう。",nil},
+{"LAB_CHARVIOCE_3001_99","午安。","午安。","Good afternoon.","こんにちは。",nil},
+{"LAB_CHARVIOCE_3001_100","晚上好。","晚上好。","Good evening.","こんばんは。",nil},
+{"LAB_CHARVIOCE_3001_101","晚安。","晚安。","Good night.","おやすみなさい。",nil},
+{"LAB_CHARVIOCE_3001_102","Game Clear.","Game Clear.","Game clear.","ゲームクリアです。",nil},
+{"LAB_CHARVIOCE_3001_103","Mission Complete.","Mission Complete.","Mission complete.","ミッション完了です。",nil},
+{"LAB_CHARVIOCE_3001_104","胜利。","勝利。","Victory.","勝利です。",nil},
+{"LAB_CHARVIOCE_3001_105","Big Win.","Big Win.","Big win.","ビッグ・ウィンです。",nil},
+{"LAB_CHARVIOCE_3001_106","Mega Win.","Mega Win.","Mega win.","メガ・ウィンです。",nil},
+{"LAB_CHARVIOCE_3001_107","三连胜。","三連勝。","Three wins in a row.","三連勝です。",nil},
+{"LAB_CHARVIOCE_3001_108","五连胜，我做到了。","五連勝，我做到了。","Five wins in a row. I did it.","五連勝です。やりました。",nil},
+{"LAB_CHARVIOCE_3001_109",[[各位玩家大家好，我是冈田纱佳，非常开心能和大家一起，庆祝我与《Poker Fate》的联动活动正式开始！
+对于我来说，无论是麻将还是扑克，都充满了“与概率和人心博弈”的快乐，每次决策都是一场小小的冒险，而每次猜对了对手的想法都能感觉到自身的成长，这让我深深着迷。
+《Poker Fate》作为一款能在手机上游玩的德州扑克游戏，在对局的沉浸体验方面做得相当出色，可爱的角色更是为游戏增添了不少乐趣，这也让我感觉到，追求精彩对局的心，无论在哪里都是相通的。
+衷心希望各位玩家也能在《Poker Fate》的世界里，尽情享受扑克游戏展现的策略与魅力，还请大家多多期待这次联动活动！非常感谢！]],[[各位玩家大家好，我是岡田紗佳，非常開心能和大家一起，慶祝我與《Poker Fate》的聯動活動正式開始！
+對於我來說，無論是麻將還是撲克，都充滿了“與機率和人心博弈”的快樂，每次決策都是一場小小的冒險，而每次猜對了對手的想法都能感覺到自身的成長，這讓我深深著迷。
+《Poker Fate》作為一款能在手機上遊玩的德州撲克遊戲，在對局的沉浸體驗方面做得相當出色，可愛的角色更是為遊戲增添了不少樂趣，這也讓我感覺到，追求精彩對局的心，無論在哪裡都是相通的。
+衷心希望各位玩家也能在《Poker Fate》的世界裡，盡情享受撲克遊戲展現的策略與魅力，還請大家多多期待這次聯動活動！非常感謝！]],[[Hello everyone, I'm Okada Sayaka. I'm truly delighted to celebrate the official launch of my collaboration event with Poker Fate together with all of you.
+
+To me, whether it's mahjong or poker, both are games filled with the interplay of probability and human psychology. Every decision is a small adventure, and each time I see through an opponent's strategy, I can feel my own growth. That is the very charm that continues to draw me so deeply into this world.
+
+As a mobile Texas Hold'em poker game, I feel that Poker Fate delivers an exceptional sense of immersion during matches. Its charming and lovable characters add even more color to the experience, reminding me once again that the desire for a truly great match is something people can share no matter where they are.
+
+I sincerely hope all of you will fully enjoy the strategy and appeal of poker in the world of Poker Fate. Please look forward to this collaboration event. Thank you very much!]],[[皆さん、こんにちは。岡田紗佳です。このたび、私と『Poker Fate』のコラボイベントが正式に始まることを、皆さんと一緒にお祝いできてとても嬉しく思います。
+私にとって、麻雀であれポーカーであれ、どちらも「確率と人心の駆け引き」に満ちたゲームです。一度一度の決断は小さな冒険であり、相手の考えを読み切るたびに、自分の成長を実感できます。それこそが、私をこの世界に深く惹きつけてやまない魅力なのです。
+『Poker Fate』は、スマートフォンで遊べるテキサスホールデムポーカーゲームとして、対局の没入感に非常に優れていると感じています。魅力的で可愛いキャラクターたちが、ゲーム体験にいっそうの彩りを添えてくれるおかげで、「素晴らしい対局を求める気持ち」は、どこにいても通じ合えるものだと再認識できました。
+心から、皆さんにも『Poker Fate』の世界で、ポーカーゲームが持つ戦略性と魅力を存分に楽しんでいただきたいと思っています。どうか今回のコラボイベントを、ぜひご期待ください。どうもありがとうございました！]],nil},
 {"LAB_LEVEL_NAME","玩家等级","玩家等級","Player Level","プレイヤーレベル","Player Level"},
 {"LAB_LEVEL_NAME_1","初心","初心","Novice","初心者","초심"},
 {"LAB_LEVEL_NAME_2","见习","見習","Trainee","見習い","견습"},
@@ -10096,6 +11725,7 @@ For a long time, I couldn't truly understand what those words meant. But spendin
 {"LAB_LEVEL_TEXT_15","新功能开启","新功能開啟","New Feature Unlocked","新機能解放","새 기능 오픈"},
 {"LAB_LEVEL_TEXT_16","功能未解锁！","功能尚未解鎖！","Feature Locked!","機能は未解放です！","기능이 잠겨 있습니다!"},
 {"LAB_LEVEL_TEXT_17","每日经验赛事场次：","每日經驗賽事場次：",[[Daily EXP Tournaments: ]],"毎日EXPトーナメント試合回数：","每日经验赛事场次："},
+{"LAB_LEVEL_TEXT_18","对局中无法进行该操作。","對局中無法進行該操作。","Already in a game","対局中はこの操作を行えません。","对局中无法进行该操作。"},
 {"LAB_LEVEL_SYSTEM_NAME_101","德州扑克\n500/1000","德州撲克\n500/1000","Poker\n500/1000","ポーカー\n500/1000","Poker\n500/1000"},
 {"LAB_LEVEL_SYSTEM_NAME_102","德州扑克\n5000/10000","德州撲克\n5000/10000","Poker\n5000/10000","ポーカー\n5000/10000","Poker\n5000/10000"},
 {"LAB_LEVEL_SYSTEM_NAME_103","德州扑克\n25K/50K","德州撲克\n25K/50K","Poker\n25K/50K","ポーカー\n25K/50K","Poker\n25K/50K"},
@@ -10225,7 +11855,7 @@ A testament to all your victories so far!]]},
 {"LAB_THEME_ACTIVITY1_TASK_DEC_5_3","任意玩法赢得{p1}筹码","任意玩法贏得{p1}籌碼","Win {p1} chips in any game.","任意のモードで{p1}チップを獲得する","Win {p1} chips in any game."},
 {"LAB_THEME_ACTIVITY1_TASK_TEXT_1","进行中","進行中","In Progress","進行中","In Progress"},
 {"LAB_THEME_ACTIVITY1_TIPS_1","完成上一章剧情后解锁！","完成上一章劇情後解鎖！","Complete the previous chapter to unlock","前のシナリオをクリアすると解放されます","Complete the previous chapter to unlock"},
-{"LAB_THEME_ACTIVITY1_TIPS_2","{p1}天后解锁！","{p1}天後解鎖！","Unlocks in {p1} day(s)!","{p1}後に解除されます","Unlocks in {p1} day(s)!"},
+{"LAB_THEME_ACTIVITY1_TIPS_2","{p1}天后解锁！","{p1}天後解鎖！","Unlocks in {p1} day(s)!","{p1}日後に解放","Unlocks in {p1} day(s)!"},
 {"LAB_THEME_ACTIVITY1_TIPS_3","使用成功！","使用成功！","Selected successfully!","選択完了","Selected successfully!"},
 {"LAB_THEME_ACTIVITY1_TIPS_4","牌手使用中！","牌手已在使用中！","Already in use!","現在使用中","Already in use!"},
 {"LAB_THEME_ACTIVITY1_TIPS_5","活动已结束！","活動已結束！","Event has ended!","イベントは終了しました！","Event has ended!"},
@@ -10374,7 +12004,7 @@ Moonlit Shadows
 {"LAB_THEME_ACTIVITY2_8","需要{p1}解锁","需要{p1}解鎖","{p1} required","アンロックには{p1}が必要","需要{p1}解锁"},
 {"LAB_THEME_ACTIVITY2_9","此剧情需要{p1}解锁，\n是否前往获得？","此劇情需要{p1}解鎖，\n是否前往獲得？","This story requires {p1} to unlock.\nObtain it now?","このストーリーをアンロックするには、{p1}が必要です。\n購入しますか？","此剧情需要{p1}解锁，\n是否前往获得？"},
 {"LAB_THEME_ACTIVITY2_10","已获得奖励","已獲得獎勵","Rewards obtained","報酬受け取り済み","已获得奖励"},
-{"LAB_THEME_ACTIVITY2_11","点击观看剧情","點擊觀看劇情","View Story","タップしてストーリーを見る","点击观看剧情"},
+{"LAB_THEME_ACTIVITY2_11","点击观看剧情","點擊觀看劇情","View Story","タップでストーリーを見る","点击观看剧情"},
 {"LAB_THEME_ACTIVITY2_TASK_DEC_1_1","打开活动界面{p1}次","查看活動介面{p1}次","Check the event {p1} time(s).","イベント画面を{p1}回開く","Check the event {p1} times."},
 {"LAB_THEME_ACTIVITY2_TASK_DEC_2_1","参与SNG赛事{p1}次","參與SNG賽事{p1}次","Join SNG {p1} time(s).","SNGに{p1}回参加する","参与SNG赛事{p1}次"},
 {"LAB_THEME_ACTIVITY2_TASK_DEC_3_1","获得手工巧克力{p1}个","獲得{p1}個手工巧克力","Obtain Handmade Chocolate x{p1}.","手作りチョコレートを{p1}個獲得する","获得手工巧克力{p1}个"},
@@ -10517,7 +12147,7 @@ SNG赛事
 {"LAB_THEME_ACTIVITY3_8","需要{p1}解锁","需要{p1}解鎖","{p1} required","アンロックには{p1}が必要","需要{p1}解锁"},
 {"LAB_THEME_ACTIVITY3_9","此剧情需要{p1}解锁，\n是否前往获得？","此劇情需要{p1}解鎖，\n是否前往獲得？","This story requires {p1} to unlock.\nObtain it now?","このストーリーをアンロックするには、{p1}が必要です。\n購入しますか？","此剧情需要{p1}解锁，\n是否前往获得？"},
 {"LAB_THEME_ACTIVITY3_10","已获得奖励","已獲得獎勵","Rewards obtained","報酬受け取り済み","已获得奖励"},
-{"LAB_THEME_ACTIVITY3_11","点击观看剧情","點擊觀看劇情","View Story","タップしてストーリーを見る","点击观看剧情"},
+{"LAB_THEME_ACTIVITY3_11","点击观看剧情","點擊觀看劇情","View Story","タップでストーリーを見る","点击观看剧情"},
 {"LAB_THEME_ACTIVITY3_12","剧情奖励","劇情獎勵","Completion Reward","完了報酬","剧情奖励"},
 {"LAB_THEME_ACTIVITY3_TASK_DEC_1_1","查看活动界面{p1}次","查看活動介面{p1}次","Check the event {p1} time(s).","イベント画面を{p1}回開く","Check the event {p1} times."},
 {"LAB_THEME_ACTIVITY3_TASK_DEC_2_1","玩{p1}手{p2}","玩{p1}手{p2}","Play {p1} {p2} hand(s).","{p2}で{p1}ハンドをプレイする","玩{p1}手{p2}"},
@@ -10642,7 +12272,7 @@ Campus Encounters
 {"LAB_THEME_ACTIVITY4_8","需要{p1}解锁","需要{p1}解鎖","{p1} required","アンロックには{p1}が必要","需要{p1}解锁"},
 {"LAB_THEME_ACTIVITY4_9","此剧情需要<color=#9f553c>{p1}</color>解锁，\n是否前往获得？","此劇情需要<color=#9f553c>{p1}</color>解鎖，\n是否前往獲得？","This story requires <color=#9f553c>{p1}</color> to unlock.\nObtain it now?","このストーリーをアンロックするには、<color=#9f553c>{p1}</color>が必要です。\n購入しますか？","此剧情需要<color=#9f553c>{p1}</color>解锁，\n是否前往获得？"},
 {"LAB_THEME_ACTIVITY4_10","已获得奖励","已獲得獎勵","Rewards obtained","報酬受け取り済み","已获得奖励"},
-{"LAB_THEME_ACTIVITY4_11","点击观看剧情","點擊觀看劇情","View Story","タップしてストーリーを見る","点击观看剧情"},
+{"LAB_THEME_ACTIVITY4_11","点击观看剧情","點擊觀看劇情","View Story","タップでストーリーを見る","点击观看剧情"},
 {"LAB_THEME_ACTIVITY4_12","剧情奖励","劇情獎勵","Completion Reward","完了報酬","剧情奖励"},
 {"LAB_THEME_ACTIVITY4_TASK_DEC_1_1","查看活动界面{p1}次","查看活動介面{p1}次","Check the event {p1} time(s).","イベント画面を{p1}回開く","Check the event {p1} times."},
 {"LAB_THEME_ACTIVITY4_TASK_DEC_2_1","玩{p1}手{p2}","玩{p1}手{p2}","Play {p1} {p2} hand(s).","{p2}で{p1}ハンドをプレイする","玩{p1}手{p2}"},
@@ -10659,7 +12289,7 @@ Campus Encounters
 ・2026.04.16 10:00～2026.05.17 03:00（UTC+8）
 
 气泡香槟茶
-・活动期间，玩家可透过「特调配方」、「对局之后」及游戏玩法（德州扑克、奥马哈、SNG赛事）获得「气泡香槟茶」。
+・活动期间，玩家可透过「特调配方」及游戏玩法（德州扑克、奥马哈、SNG赛事）获得「气泡香槟茶」。
 ・使用以下牌手参与上述玩法可获得「气泡香槟茶」奖励加成：
     -「凉风薰」：+100%
     -「星宫加奈」、「望月冰见夜」：+50%
@@ -10678,7 +12308,7 @@ Campus Encounters
 ・2026.04.16 10:00～2026.05.17 03:00（UTC+8）
 
 氣泡香檳茶
-・活動期間，玩家可透過「特調配方」、「對局之後」及遊戲玩法（德州撲克、奧馬哈、SNG賽事）獲得「氣泡香檳茶」。
+・活動期間，玩家可透過「特調配方」及遊戲玩法（德州撲克、奧馬哈、SNG賽事）獲得「氣泡香檳茶」。
 ・使用以下牌手參與上述玩法可獲得「氣泡香檳茶」獎勵加成：
     -「涼風薰」：+100%
     -「星宮加奈」、「望月冰見夜」：+50%
@@ -10697,7 +12327,7 @@ Campus Encounters
 · 2026/04/16 11:00 – 2026/05/17 04:00 (UTC+9)
 
 Champagne Tea
-· During the event, you can earn Champagne Tea through House Specials, After the Game, and by playing Texas Hold'em, Omaha, or SNG tournaments.
+· During the event, you can earn Champagne Tea through House Specials, and by playing Texas Hold'em, Omaha, or SNG tournaments.
 · Using the following characters at the table grants bonus Champagne Tea:
   - Suzukaze Kaoru: +100%
   - Hoshimiya Kana, Mochizuki Himiya: +50%
@@ -10730,28 +12360,653 @@ After the Game
 ・特製レシピクエストは毎日 04:00 に更新されます。
 
 対局の後に
-・イベント期間中、プレイヤーは“対局の後”にからイベントストーリーを視聴できます。
-・イベントストーリーは、バーカウンターで専用アイテムを交換し、アンロックする必要があります。]],[[Event Period
-· 2026/04/16 11:00 – 2026/05/17 04:00 (UTC+9)
+・イベント期間中、プレイヤーは「対局の後に」からイベントストーリーを視聴できます。
+・イベントストーリーは、バーカウンターで専用アイテムを交換し、アンロックする必要があります。]],[[活动时间
+・2026.04.16 10:00～2026.05.17 03:00（UTC+8）
 
-Champagne Tea
-· During the event, you can earn Champagne Tea through House Specials, After the Game, and by playing Texas Hold'em, Omaha, or SNG tournaments.
-· Using the following characters at the table grants bonus Champagne Tea:
-  - Suzukaze Kaoru: +100%
-  - Hoshimiya Kana, Mochizuki Himiya: +50%
-· After the event ends, event access will close. Any unused Champagne Tea will be converted into chips at a 1:1 ratio and sent to your account via mail.
+气泡香槟茶
+・活动期间，玩家可透过「特调配方」及游戏玩法（德州扑克、奥马哈、SNG赛事）获得「气泡香槟茶」。
+・使用以下牌手参与上述玩法可获得「气泡香槟茶」奖励加成：
+    -「凉风薰」：+100%
+    -「星宫加奈」、「望月冰见夜」：+50%
+・活动结束后，活动入口将关闭，未使用的「气泡香槟茶」将按1:1的比例转换为筹码，并通过邮件发放至您的账户。
 
-Bar Counter
-· Exchange Champagne Tea for rewards in the Bar Counter.
+酒保柜台
+・活动期间，玩家可使用获得的「气泡香槟茶」于酒保柜台中兑换奖励。
 
-House Specials
-· Complete daily House Specials tasks to earn rewards.
-· House Specials reset daily at 04:00 (UTC+9).
+特调配方
+・活动期间，玩家可透过每日完成特调配方任务以获得奖励。
+・特调配方任务将于每日03:00（UTC+8）重置刷新。
 
-After the Game
-· View event stories in "After the Game".
-· Event stories require exclusive items obtained from the Bar Counter to unlock.]]},
+对局之后
+・活动期间，玩家可于“对局之后”中观看活动剧情。
+・活动剧情需要通过酒保柜台兑换专属道具进行解锁。]]},
 {"LAB_THEME_ACTIVITY4_TIPS_1","使用以下牌手参与玩法可获得「气泡香槟茶」奖励加成：","使用以下牌手參與玩法可獲得「氣泡香檳茶」獎勵加成：","Using the following characters at the table grants extra Sakura Bookmark:","以下のキャラクターで参加すると、追加のシャンパンティー報酬が獲得できます：","Using the following characters at the table grants extra Sakura Bookmark:"},
+{"LAB_THEME_ACTIVITY5_END_TIME","2026.06.21 03:00（UTC+8）结束","2026.06.21 03:00（UTC+8）結束","Ends on 2026.06.21 04:00 (UTC+9)","2026.06.21 04:00 まで","2026.06.21 03:00（UTC+8）结束"},
+{"LAB_THEME_ACTIVITY5_NAME_1","蓝湾跃动","藍灣躍動","Azure Bay in Motion","藍湾の躍動","蓝湾跃动"},
+{"LAB_THEME_ACTIVITY5_NAME_2","牌手招募","牌手招募","Recruit","キャラ募集","牌手招募"},
+{"LAB_THEME_ACTIVITY5_NAME_3","补给站","補給站","Supply Station","補給ステーション","补给站"},
+{"LAB_THEME_ACTIVITY5_NAME_4","特训清单","特訓清單","Training Checklist","特訓リスト","特训清单"},
+{"LAB_THEME_ACTIVITY5_NAME_5","应援时光","應援時光","Cheer Memories","応援タイム","应援时光"},
+{"LAB_THEME_ACTIVITY5_NAME_6","跃动好礼","躍動好禮","Motion Gifts","躍動ギフト","跃动好礼"},
+{"LAB_THEME_ACTIVITY5_1","服饰加成","服飾加成","Outfit Boost","衣装ボーナス","服饰加成"},
+{"LAB_THEME_ACTIVITY5_2","{p1}+{p2}%","{p1}+{p2}%","{p1}+{p2}%","{p1}+{p2}%","{p1}+{p2}%"},
+{"LAB_THEME_ACTIVITY5_3","返回","返回","Back","戻る","Back"},
+{"LAB_THEME_ACTIVITY5_4","选择服饰","選擇服飾","Select Outfit","衣装選択","选择服饰"},
+{"LAB_THEME_ACTIVITY5_5","活动规则","活動規則","Event Rules","イベントルール","Event Rules"},
+{"LAB_THEME_ACTIVITY5_6","奖励加成","獎勵加成","Reward Bonus","報酬ボーナス","Reward Bonus"},
+{"LAB_THEME_ACTIVITY5_7","<color=#316fbc>{p1}</color>专属剧情已解锁！是否前往观看？","<color=#316fbc>{p1}</color>專屬劇情已解鎖！是否前往觀看？","<color=#316fbc>{p1}</color> exclusive story unlocked! Watch it now?","<color=#316fbc>{p1}</color>専用ストーリーがアンロックされました！視聴しますか？","<color=#316fbc>{p1}</color>专属剧情已解锁！是否前往观看？"},
+{"LAB_THEME_ACTIVITY5_8","需要{p1}解锁","需要{p1}解鎖","{p1} required","アンロックには{p1}が必要","需要{p1}解锁"},
+{"LAB_THEME_ACTIVITY5_9","此剧情需要<color=#316fbc>{p1}</color>解锁，\n是否前往获得？","此劇情需要<color=#316fbc>{p1}</color>解鎖，\n是否前往獲得？","This story requires <color=#316fbc>{p1}</color> to unlock.\nObtain it now?","このストーリーをアンロックするには、<color=#316fbc>{p1}</color>が必要です。\n購入しますか？","此剧情需要<color=#316fbc>{p1}</color>解锁，\n是否前往获得？"},
+{"LAB_THEME_ACTIVITY5_10","已获得奖励","已獲得獎勵","Rewards obtained","報酬受け取り済み","已获得奖励"},
+{"LAB_THEME_ACTIVITY5_11","点击观看剧情","點擊觀看劇情","View Story","タップでストーリーを見る","点击观看剧情"},
+{"LAB_THEME_ACTIVITY5_12","剧情奖励","劇情獎勵","Completion Reward","完了報酬","剧情奖励"},
+{"LAB_THEME_ACTIVITY5_TASK_DEC_1_1","查看活动界面{p1}次","查看活動介面{p1}次","Check the event {p1} time(s).","イベント画面を{p1}回開く","Check the event {p1} times."},
+{"LAB_THEME_ACTIVITY5_TASK_DEC_2_1","查看{p2}{p1}次","查看{p2}{p1}次","Check {p2} {p1} time(s).","{p2}を{p1}回閲覧する","Check {p2} {p1} times."},
+{"LAB_THEME_ACTIVITY5_TASK_DEC_3_1","查看{p2}{p1}次","查看{p2}{p1}次","Check {p2} {p1} time(s).","{p2}を{p1}回閲覧する","Check {p2} {p1} times."},
+{"LAB_THEME_ACTIVITY5_TASK_DEC_4_1","在补给站兑换{p1}次奖励","在補給站兌換{p1}次獎勵","Exchange for rewards {p1} time(s) in Supply Station.","補給ステーションで報酬と{p1}回交換する","在补给站兑换{p1}次奖励"},
+{"LAB_THEME_ACTIVITY5_TASK_DEC_5_1","玩{p1}手{p2}","玩{p1}手{p2}","Play {p1} {p2} hand(s).","{p2}で{p1}ハンドをプレイする","玩{p1}手{p2}"},
+{"LAB_THEME_ACTIVITY5_TASK_DEC_5_2","在{p2}玩法赢得{p1}次","在{p2}玩法贏得{p1}次","Win {p1} time(s) in {p2}.","{p2}モードで{p1}回勝利する","Win {p1} times in {p2}."},
+{"LAB_THEME_ACTIVITY5_TASK_DEC_6_1","玩{p1}手{p2}","玩{p1}手{p2}","Play {p1} {p2} hand(s).","{p2}で{p1}ハンドをプレイする","玩{p1}手{p2}"},
+{"LAB_THEME_ACTIVITY5_TASK_DEC_7_1","玩{p1}次{p2}","玩{p1}次{p2}","Play {p2} {p1} time(s).","{p2}を{p1}回プレイする","玩{p1}次{p2}"},
+{"LAB_THEME_ACTIVITY5_TASK_DEC_7_2","在{p2}玩法赢得{p1}次","在{p2}玩法贏得{p1}次","Win {p1} time(s) in {p2}.","{p2}モードで{p1}回勝利する","Win {p1} times in {p2}."},
+{"LAB_THEME_ACTIVITY5_TASK_DEC_8_1","玩{p1}次{p2}","玩{p1}次{p2}","Play {p2} {p1} time(s).","{p2}を{p1}回プレイする","玩{p1}次{p2}"},
+{"LAB_THEME_ACTIVITY5_TASK_DEC_8_2","在{p2}玩法赢得{p1}次","在{p2}玩法贏得{p1}次","Win {p1} time(s) in {p2}.","{p2}モードで{p1}回勝利する","Win {p1} times in {p2}."},
+{"LAB_THEME_ACTIVITY5_TASK_DEC_9_1","参与SNG赛事{p1}次","參與SNG賽事{p1}次","Join SNG {p1} time(s).","SNGに{p1}回参加する","参与SNG赛事{p1}次"},
+{"LAB_THEME_ACTIVITY5_RULES_1",[[<size=36>活动时间</size>
+・2026.05.21 10:00～2026.06.21 03:00（UTC+8）
+
+<size=36>应援彩球</size>
+・活动期间，玩家可通过「特训清单」及游戏玩法（德州扑克、奥马哈、SNG赛事）获得「应援彩球」。
+・穿戴指定牌手服饰参与玩法，可获得额外的「应援彩球」奖励加成+100%：
+
+ 「白石伊莉娜 - 海风拂过脸颊」
+ 「沐娜 - 专属应援频道」
+ 「沐娜 - 誓约」
+ 「沐娜 - 默认」
+ 「天月绘里奈 - 反锁的心跳声」
+ 「天月绘里奈 - 誓约」
+ 「天月绘里奈 - 默认」
+
+・活动结束后，活动入口将关闭，未使用的「应援彩球」将按1:1的比例转换为筹码，并通过邮件发放至您的账户。
+
+<size=36>补给站</size>
+・活动期间，玩家可使用获得的「应援彩球」于「补给站」中兑换奖励。
+
+<size=36>特训清单</size>
+・活动期间，玩家可透过每日完成「特训清单」任务以获得奖励。
+・「特训清单」任务将于每日03:00（UTC+8）重置刷新。
+
+<size=36>应援时光</size>
+・活动期间，玩家可于「应援时光」中观看活动剧情。
+・活动剧情需要通过「补给站」兑换专属道具进行解锁。]],[[<size=36>活動時間</size>
+・2026.05.21 10:00～2026.06.21 03:00（UTC+8）
+
+<size=36>應援彩球</size>
+・活動期間，玩家可透過「特訓清單」及遊戲玩法（德州撲克、奧馬哈、SNG賽事）獲得「應援彩球」。
+・穿戴指定牌手服飾參與玩法，可獲得「應援彩球」獎勵加成+100%：
+
+ 「白石伊莉娜 - 海風拂過臉頰」
+ 「沐娜 - 專屬應援頻道」
+ 「沐娜 - 誓約」
+ 「沐娜 - 預設」
+ 「天月繪里奈 - 反鎖的心跳聲」
+ 「天月繪里奈 - 誓約」
+ 「天月繪里奈 - 預設」
+
+・活動結束後，活動入口將關閉，未使用的「應援彩球」將按1:1的比例轉換為籌碼，並透過郵件發放至您的帳戶。
+
+<size=36>補給站</size>
+・活動期間，玩家可使用獲得的「應援彩球」於「補給站」中兌換獎勵。
+
+<size=36>特訓清單</size>
+・活動期間，玩家可透過每日完成「特訓清單」任務以獲得獎勵。
+・「特訓清單」任務將於每日03:00（UTC+8）重置。
+
+<size=36>應援時光</size>
+・活動期間，玩家可於「應援時光」中觀看活動劇情。
+・活動劇情需要透過「補給站」兌換專屬道具進行解鎖。]],[[<size=36>Event Period</size>
+· 2026/05/21 11:00 – 2026/06/21 04:00 (UTC+9)
+
+<size=36>Cheer Pompoms</size>
+· During the event, you can earn Cheer Pompoms through Training Checklist and by playing Texas Hold'em, Omaha, or SNG tournaments.
+· Using any of the following characters and outfits grants a 100% Cheer Pompom bonus:
+
+Shiraishi Irina - Sea Breeze Caress
+Moona - Private Frequency
+Moona - Oath Outfit
+Moona - Default
+Amatsuki Erina - Stifled Heartbeat
+Amatsuki Erina - Oath Outfit
+Amatsuki Erina - Default
+
+· After the event ends, event access will close. Any unused Cheer Pompoms will be converted into chips at a 1:1 ratio and sent to your account via mail.
+
+<size=36>Supply Station</size>
+· Exchange Cheer Pompoms for rewards in the Supply Station.
+
+<size=36>Training Checklist</size>
+· Complete daily Training Checklist tasks to earn rewards.
+· Training Checklist resets daily at 04:00 (UTC+9).
+
+<size=36>Cheer Memories</size>
+· View event stories in Cheer Memories.
+· Event stories require exclusive items obtained from the Supply Station to unlock.]],[[<size=36>イベント期間</size>
+・2026.05.21 11:00～2026.06.21 04:00
+
+<size=36>応援ポンポン</size>
+・イベント期間中、プレイヤーは「特訓リスト」および各種ゲームプレイ（テキサスホールデム、オマハ、SNGトーナメント）を通じて「応援ポンポン」を獲得できます。
+・指定のキャラクター衣装を着用して対局に参加すると、「応援ポンポン」の獲得量に100%のボーナスが付与されます。
+
+ 「白石イリーナ - 頬を撫でる潮風」
+ 「ムーナ - 専用応援チャンネル」
+ 「ムーナ - 誓約」
+ 「ムーナ - デフォルト」
+ 「天月えりな - 鍵のかかった鼓動」
+ 「天月えりな - 誓約」
+ 「天月えりな - デフォルト」
+
+・イベント終了後、イベント入口は閉鎖され、未使用の「応援ポンポン」は1:1の比率でチップに変換され、メールでアカウントに配布されます。
+
+<size=36>補給ステーション</size>
+・イベント期間中、プレイヤーは獲得した「応援ポンポン」を使用して、「補給ステーション」で報酬と交換できます。
+
+<size=36>特訓リスト</size>
+・イベント期間中、プレイヤーは毎日の「特訓リスト」クエストを達成することで報酬を獲得できます。
+・「特訓リスト」クエストは毎日 04:00 に更新されます。
+
+<size=36>応援タイム</size>
+・イベント期間中、プレイヤーは「応援タイム」からイベントストーリーを視聴できます。
+・イベントストーリーは、「補給ステーション」で専用アイテムと交換し、アンロックする必要があります。]],[[<size=36>Event Period</size>
+· 2026/05/21 11:00 – 2026/06/21 04:00 (UTC+9)
+
+<size=36>Cheer Pompoms</size>
+· During the event, you can earn Cheer Pompoms through Training Checklist and by playing Texas Hold'em, Omaha, or SNG tournaments.
+· Using any of the following characters and outfits grants a 100% Cheer Pompom bonus:
+
+Shiraishi Irina - Sea Breeze Caress
+Moona - Private Frequency
+Moona - Oath Outfit
+Moona - Default
+Amatsuki Erina - Stifled Heartbeat
+Amatsuki Erina - Oath Outfit
+Amatsuki Erina - Default
+
+· After the event ends, event access will close. Any unused Cheer Pompoms will be converted into chips at a 1:1 ratio and sent to your account via mail.
+
+<size=36>Supply Station</size>
+· Exchange Cheer Pompoms for rewards in the Supply Station.
+
+<size=36>Training Checklist</size>
+· Complete daily Training Checklist tasks to earn rewards.
+· Training Checklist resets daily at 04:00 (UTC+9).
+
+<size=36>Cheer Memories</size>
+· View event stories in Cheer Memories.
+· Event stories require exclusive items obtained from the Supply Station to unlock.]]},
+{"LAB_THEME_ACTIVITY5_RULES_2",[[<size=36>活动时间</size>
+・2026.05.21 10:00～2026.06.21 03:00（UTC+8）
+
+<size=36>应援彩球</size>
+・活动期间，玩家可通过「特训清单」及游戏玩法（德州扑克、奥马哈、SNG赛事）获得「应援彩球」。
+・穿戴指定牌手服饰参与玩法，可获得额外的「应援彩球」奖励加成+100%：
+
+ 「白石伊莉娜 - 海风拂过脸颊」
+ 「白石伊莉娜 - 马车载有繁星」
+ 「沐娜 - 专属应援频道」
+ 「沐娜 - 誓约」
+ 「沐娜 - 默认」
+ 「天月绘里奈 - 反锁的心跳声」
+ 「天月绘里奈 - 誓约」
+ 「天月绘里奈 - 默认」
+ 「莉莉丝 - 当月色被染红」
+ 「雾间琉华 - 后半夜的开始」
+
+・活动结束后，活动入口将关闭，未使用的「应援彩球」将按1:1的比例转换为筹码，并通过邮件发放至您的账户。
+
+<size=36>补给站</size>
+・活动期间，玩家可使用获得的「应援彩球」于「补给站」中兑换奖励。
+
+<size=36>特训清单</size>
+・活动期间，玩家可透过每日完成「特训清单」任务以获得奖励。
+・「特训清单」任务将于每日03:00（UTC+8）重置刷新。
+
+<size=36>应援时光</size>
+・活动期间，玩家可于「应援时光」中观看活动剧情。
+・活动剧情需要通过「补给站」兑换专属道具进行解锁。]],[[<size=36>活動時間</size>
+・2026.05.21 10:00～2026.06.21 03:00（UTC+8）
+
+<size=36>應援彩球</size>
+・活動期間，玩家可透過「特訓清單」及遊戲玩法（德州撲克、奧馬哈、SNG賽事）獲得「應援彩球」。
+・穿戴指定牌手服飾參與玩法，可獲得「應援彩球」獎勵加成+100%：
+
+ 「白石伊莉娜 - 海風拂過臉頰」
+ 「白石伊莉娜 - 馬車滿載繁星」
+ 「沐娜 - 專屬應援頻道」
+ 「沐娜 - 誓約」
+ 「沐娜 - 預設」
+ 「天月繪里奈 - 反鎖的心跳聲」
+ 「天月繪里奈 - 誓約」
+ 「天月繪里奈 - 預設」
+ 「莉莉絲 - 當月色被染紅」
+ 「霧間琉華 - 後半夜的開始」
+
+・活動結束後，活動入口將關閉，未使用的「應援彩球」將按1:1的比例轉換為籌碼，並透過郵件發放至您的帳戶。
+
+<size=36>補給站</size>
+・活動期間，玩家可使用獲得的「應援彩球」於「補給站」中兌換獎勵。
+
+<size=36>特訓清單</size>
+・活動期間，玩家可透過每日完成「特訓清單」任務以獲得獎勵。
+・「特訓清單」任務將於每日03:00（UTC+8）重置。
+
+<size=36>應援時光</size>
+・活動期間，玩家可於「應援時光」中觀看活動劇情。
+・活動劇情需要透過「補給站」兌換專屬道具進行解鎖。]],[[<size=36>Event Period</size>
+· 2026/05/21 11:00 – 2026/06/21 04:00 (UTC+9)
+
+<size=36>Cheer Pompoms</size>
+· During the event, you can earn Cheer Pompoms through Training Checklist and by playing Texas Hold'em, Omaha, or SNG tournaments.
+· Using any of the following characters and outfits grants a 100% Cheer Pompom bonus:
+
+Shiraishi Irina - Sea Breeze Caress
+Shiraishi Irina - Starlit Carriage
+Moona - Private Frequency
+Moona - Oath Outfit
+Moona - Default
+Amatsuki Erina - Stifled Heartbeat
+Amatsuki Erina - Oath Outfit
+Amatsuki Erina - Default
+Lilith - Crimson Moonlight
+Kirima Ruka - After Midnight
+
+· After the event ends, event access will close. Any unused Cheer Pompoms will be converted into chips at a 1:1 ratio and sent to your account via mail.
+
+<size=36>Supply Station</size>
+· Exchange Cheer Pompoms for rewards in the Supply Station.
+
+<size=36>Training Checklist</size>
+· Complete daily Training Checklist tasks to earn rewards.
+· Training Checklist resets daily at 04:00 (UTC+9).
+
+<size=36>Cheer Memories</size>
+· View event stories in Cheer Memories.
+· Event stories require exclusive items obtained from the Supply Station to unlock.]],[[<size=36>イベント期間</size>
+・2026.05.21 11:00～2026.06.21 04:00
+
+<size=36>応援ポンポン</size>
+・イベント期間中、プレイヤーは「特訓リスト」および各種ゲームプレイ（テキサスホールデム、オマハ、SNGトーナメント）を通じて「応援ポンポン」を獲得できます。
+・指定のキャラクター衣装を着用して対局に参加すると、「応援ポンポン」の獲得量に100%のボーナスが付与されます。
+
+ 「白石イリーナ - 頬を撫でる潮風」
+ 「白石イリーナ - 馬車に星々を乗せて」
+ 「ムーナ - 専用応援チャンネル」
+ 「ムーナ - 誓約」
+ 「ムーナ - デフォルト」
+ 「天月えりな - 鍵のかかった鼓動」
+ 「天月えりな - 誓約」
+ 「天月えりな - デフォルト」
+ 「リリス - 月が赤く染まりし時」
+ 「霧間るか - 夜更けの始まり」
+
+・イベント終了後、イベント入口は閉鎖され、未使用の「応援ポンポン」は1:1の比率でチップに変換され、メールでアカウントに配布されます。
+
+<size=36>補給ステーション</size>
+・イベント期間中、プレイヤーは獲得した「応援ポンポン」を使用して、「補給ステーション」で報酬と交換できます。
+
+<size=36>特訓リスト</size>
+・イベント期間中、プレイヤーは毎日の「特訓リスト」クエストを達成することで報酬を獲得できます。
+・「特訓リスト」クエストは毎日 04:00 に更新されます。
+
+<size=36>応援タイム</size>
+・イベント期間中、プレイヤーは「応援タイム」からイベントストーリーを視聴できます。
+・イベントストーリーは、「補給ステーション」で専用アイテムと交換し、アンロックする必要があります。]],[[<size=36>Event Period</size>
+· 2026/05/21 11:00 – 2026/06/21 04:00 (UTC+9)
+
+<size=36>Cheer Pompoms</size>
+· During the event, you can earn Cheer Pompoms through Training Checklist and by playing Texas Hold'em, Omaha, or SNG tournaments.
+· Using any of the following characters and outfits grants a 100% Cheer Pompom bonus:
+
+Shiraishi Irina - Sea Breeze Caress
+Shiraishi Irina - Starlit Carriage
+Moona - Private Frequency
+Moona - Oath Outfit
+Moona - Default
+Amatsuki Erina - Stifled Heartbeat
+Amatsuki Erina - Oath Outfit
+Amatsuki Erina - Default
+Lilith - Crimson Moonlight
+Kirima Ruka - After Midnight
+
+· After the event ends, event access will close. Any unused Cheer Pompoms will be converted into chips at a 1:1 ratio and sent to your account via mail.
+
+<size=36>Supply Station</size>
+· Exchange Cheer Pompoms for rewards in the Supply Station.
+
+<size=36>Training Checklist</size>
+· Complete daily Training Checklist tasks to earn rewards.
+· Training Checklist resets daily at 04:00 (UTC+9).
+
+<size=36>Cheer Memories</size>
+· View event stories in Cheer Memories.
+· Event stories require exclusive items obtained from the Supply Station to unlock.]]},
+{"LAB_THEME_ACTIVITY5_TIPS_1","使用以下牌手服饰参与玩法，可获得「应援彩球」奖励加成：","使用以下牌手服飾參與玩法，可獲得「應援彩球」獎勵加成：","Using the following outfits at the table grants a Cheer Pompom bonus:","以下の衣装を使用して対局に参加すると、「応援ポンポン」の獲得量にボーナスが付与されます。","使用以下牌手服饰参与玩法，可获得「应援彩球」奖励加成："},
+{"LAB_THEME_ACTIVITY6_END_TIME","2026.07.26 03:00（UTC+8）结束","2026.07.26 03:00（UTC+8）結束","Ends on 2026.07.26 04:00 (UTC+9)","2026.07.26 04:00 まで","2026.07.26 03:00（UTC+8）结束"},
+{"LAB_THEME_ACTIVITY6_NAME_1","湛蓝假日","湛藍假日","Azure Holiday","サマー・バカンス","サマー・バカンス"},
+{"LAB_THEME_ACTIVITY6_NAME_2","牌手招募","牌手招募","Recruit","キャラ募集","牌手招募"},
+{"LAB_THEME_ACTIVITY6_NAME_3","蓝天之家","藍天之家","Blue-Sky Boutique","青空ハウス","青空ハウス"},
+{"LAB_THEME_ACTIVITY6_NAME_4","玩乐计划","玩樂計劃","Fun-Packed Plan","お楽しみ計画","お楽しみ計画"},
+{"LAB_THEME_ACTIVITY6_NAME_5","盛夏时光","盛夏時光","Midsummer Moments","真夏のひととき","真夏のひととき"},
+{"LAB_THEME_ACTIVITY6_NAME_6","解暑特惠","解暑特惠","Refreshing Deals","納涼セール","納涼セール"},
+{"LAB_THEME_ACTIVITY6_1","服饰加成","服飾加成","Outfit Boost","衣装ボーナス","服饰加成"},
+{"LAB_THEME_ACTIVITY6_2","{p1}+{p2}%","{p1}+{p2}%","{p1}+{p2}%","{p1}+{p2}%","{p1}+{p2}%"},
+{"LAB_THEME_ACTIVITY6_3","返回","返回","Back","戻る","Back"},
+{"LAB_THEME_ACTIVITY6_4","选择服饰","選擇服飾","Select Outfit","衣装選択","选择服饰"},
+{"LAB_THEME_ACTIVITY6_5","活动规则","活動規則","Event Rules","イベントルール","Event Rules"},
+{"LAB_THEME_ACTIVITY6_6","奖励加成","獎勵加成","Reward Bonus","報酬ボーナス","Reward Bonus"},
+{"LAB_THEME_ACTIVITY6_10","已获得奖励","已獲得獎勵","Rewards obtained","報酬受け取り済み","已获得奖励"},
+{"LAB_THEME_ACTIVITY6_11","点击观看剧情","點擊觀看劇情","View Story","タップでストーリーを見る","点击观看剧情"},
+{"LAB_THEME_ACTIVITY6_12","剧情奖励","劇情獎勵","Completion Reward","完了報酬","剧情奖励"},
+{"LAB_THEME_ACTIVITY6_TASK_DEC_1_1","查看活动界面{p1}次","查看活動介面{p1}次","Check the event {p1} time(s).","イベント画面を{p1}回開く","Check the event {p1} times."},
+{"LAB_THEME_ACTIVITY6_TASK_DEC_2_1","查看{p2}{p1}次","查看{p2}{p1}次","Check {p2} {p1} time(s).","{p2}を{p1}回閲覧する","Check {p2} {p1} times."},
+{"LAB_THEME_ACTIVITY6_TASK_DEC_3_1","查看{p2}{p1}次","查看{p2}{p1}次","Check {p2} {p1} time(s).","{p2}を{p1}回閲覧する","Check {p2} {p1} times."},
+{"LAB_THEME_ACTIVITY6_TASK_DEC_4_1","在补给站兑换{p1}次奖励","在補給站兌換{p1}次獎勵","Exchange for rewards {p1} time(s) in Supply Station.","補給ステーションで報酬と{p1}回交換する","在补给站兑换{p1}次奖励"},
+{"LAB_THEME_ACTIVITY6_TASK_DEC_5_1","玩{p1}手{p2}","玩{p1}手{p2}","Play {p1} {p2} hand(s).","{p2}で{p1}ハンドをプレイする","玩{p1}手{p2}"},
+{"LAB_THEME_ACTIVITY6_TASK_DEC_5_2","在{p2}玩法赢得{p1}次","在{p2}玩法贏得{p1}次","Win {p1} time(s) in {p2}.","{p2}モードで{p1}回勝利する","Win {p1} times in {p2}."},
+{"LAB_THEME_ACTIVITY6_TASK_DEC_6_1","玩{p1}手{p2}","玩{p1}手{p2}","Play {p1} {p2} hand(s).","{p2}で{p1}ハンドをプレイする","玩{p1}手{p2}"},
+{"LAB_THEME_ACTIVITY6_TASK_DEC_7_1","玩{p1}次{p2}","玩{p1}次{p2}","Play {p2} {p1} time(s).","{p2}を{p1}回プレイする","玩{p1}次{p2}"},
+{"LAB_THEME_ACTIVITY6_TASK_DEC_7_2","在{p2}玩法赢得{p1}次","在{p2}玩法贏得{p1}次","Win {p1} time(s) in {p2}.","{p2}モードで{p1}回勝利する","Win {p1} times in {p2}."},
+{"LAB_THEME_ACTIVITY6_TASK_DEC_8_1","玩{p1}次{p2}","玩{p1}次{p2}","Play {p2} {p1} time(s).","{p2}を{p1}回プレイする","玩{p1}次{p2}"},
+{"LAB_THEME_ACTIVITY6_TASK_DEC_8_2","在{p2}玩法赢得{p1}次","在{p2}玩法贏得{p1}次","Win {p1} time(s) in {p2}.","{p2}モードで{p1}回勝利する","Win {p1} times in {p2}."},
+{"LAB_THEME_ACTIVITY6_TASK_DEC_9_1","参与SNG赛事{p1}次","參與SNG賽事{p1}次","Join SNG {p1} time(s).","SNGに{p1}回参加する","参与SNG赛事{p1}次"},
+{"LAB_THEME_ACTIVITY6_RULES_1",[[<size=36>活动时间</size>
+・2026.06.25 10:00～2026.07.26 03:00（UTC+8）
+
+<size=36>果味棒冰</size>
+・活动期间，玩家可通过「玩乐计划」及游戏玩法（德州扑克、奥马哈、SNG赛事、MTT赛事）获得「果味棒冰」。
+・穿戴指定牌手服饰参与玩法，可获得额外的「果味棒冰」奖励加成+100%：
+
+ 「白石伊莉娜 - 海风拂过脸颊」
+ 「沐娜 - 专属应援频道」
+ 「沐娜 - 誓约」
+ 「沐娜 - 默认」
+ 「天月绘里奈 - 反锁的心跳声」
+ 「天月绘里奈 - 誓约」
+ 「天月绘里奈 - 默认」
+
+・活动结束后，活动入口将关闭，未使用的「果味棒冰」将按1:1的比例转换为筹码，并通过邮件发放至您的账户。
+
+<size=36>蓝天之家</size>
+・活动期间，玩家可使用获得的「果味棒冰」于「蓝天之家」中兑换奖励。
+
+<size=36>玩乐计划</size>
+・活动期间，玩家可透过每日完成「玩乐计划」任务以获得奖励。
+・「玩乐计划」任务将于每日03:00（UTC+8）重置刷新。
+
+<size=36>盛夏时光</size>
+・活动期间，玩家可于「盛夏时光」中观看活动剧情。
+・活动剧情将依照活动时间分阶段开放。
+・剧情章节的解锁状态于每日03:00（UTC+8）刷新。]],[[<size=36>活動時間</size>
+・2026.06.25 10:00～2026.07.26 03:00（UTC+8）
+
+<size=36>果味冰棒</size>
+・活動期間，玩家可透過「玩樂計劃」及遊戲玩法（德州撲克、奧馬哈、SNG賽事、MTT賽事）獲得「果味冰棒」。
+・穿戴指定牌手服飾參與玩法，可獲得「果味冰棒」獎勵加成+100%：
+
+ 「白石伊莉娜 - 海風拂過臉頰」
+ 「沐娜 - 專屬應援頻道」
+ 「沐娜 - 誓約」
+ 「沐娜 - 預設」
+ 「天月繪里奈 - 反鎖的心跳聲」
+ 「天月繪里奈 - 誓約」
+ 「天月繪里奈 - 預設」
+
+・活動結束後，活動入口將關閉，未使用的「果味冰棒」將按1:1的比例轉換為籌碼，並透過郵件發放至您的帳戶。
+
+<size=36>藍天之家</size>
+・活動期間，玩家可使用獲得的「果味冰棒」於「藍天之家」中兌換獎勵。
+
+<size=36>玩樂計劃</size>
+・活動期間，玩家可透過每日完成「玩樂計劃」任務以獲得獎勵。
+・「玩樂計劃」任務將於每日03:00（UTC+8）重置。
+
+<size=36>盛夏時光</size>
+・活動期間，玩家可於「盛夏時光」中觀看活動劇情。
+・活動劇情將依照活動時間分階段開放。
+・劇情章節的解鎖狀態於每日03:00（UTC+8）刷新。]],[[<size=36>Event Period</size>
+· 2026/06/25 11:00 – 2026/07/26 04:00 (UTC+9)
+
+<size=36>Fruity Ice Pop</size>
+· During the event, you can earn Fruity Ice Pop through Fun-Packed Plan and by playing Texas Hold'em, Omaha, SNG tournaments, or MTT tournaments.
+· Using any of the following characters and outfits grants a 100% Cheer Pompom bonus:
+
+Shiraishi Irina - Sea Breeze Caress
+Moona - Private Frequency
+Moona - Oath Outfit
+Moona - Default
+Amatsuki Erina - Stifled Heartbeat
+Amatsuki Erina - Oath Outfit
+Amatsuki Erina - Default
+
+· After the event ends, event access will close. Any unused Fruity Ice Pop will be converted into chips at a 1:1 ratio and sent to your account via mail.
+
+<size=36>Blue-Sky Boutique</size>
+· Exchange Fruity Ice Pop for rewards in the Blue-Sky Boutique.
+
+<size=36>Fun-Packed Plan</size>
+· Complete daily Fun-Packed Plan tasks to earn rewards.
+· Fun-Packed Plan resets daily at 04:00 (UTC+9).
+
+<size=36>Midsummer Moments</size>
+· View event stories in Midsummer Moments.
+· Story chapters unlock in stages as the event progresses.
+· Chapter unlock status refreshes daily at 04:00 (UTC+9).]],[[<size=36>イベント期間</size>
+・2026.06.25 11:00～2026.07.26 04:00
+
+<size=36>フルーツアイスバー</size>
+・イベント期間中、プレイヤーは「お楽しみ計画」および各種ゲームプレイ（テキサスホールデム、オマハ、SNGトーナメント、MTTトーナメント）を通じて「フルーツアイスバー」を獲得できます。
+・指定のキャラクター衣装を着用して対局に参加すると、「フルーツアイスバー」の獲得量に100%のボーナスが付与されます。
+
+ 「白石イリーナ - 頬を撫でる潮風」
+ 「ムーナ - 専用応援チャンネル」
+ 「ムーナ - 誓約」
+ 「ムーナ - デフォルト」
+ 「天月えりな - 鍵のかかった鼓動」
+ 「天月えりな - 誓約」
+ 「天月えりな - デフォルト」
+
+・イベント終了後、イベント入口は閉鎖され、未使用の「フルーツアイスバー」は1:1の比率でチップに変換され、メールでアカウントに配布されます。
+
+<size=36>青空ハウス</size>
+・イベント期間中、プレイヤーは獲得した「フルーツアイスバー」を使用して、「青空ハウス」で報酬と交換できます。
+
+<size=36>お楽しみ計画</size>
+・イベント期間中、プレイヤーは毎日の「お楽しみ計画」クエストを達成することで報酬を獲得できます。
+・「お楽しみ計画」クエストは毎日 04:00 に更新されます。
+
+<size=36>真夏のひととき</size>
+・イベント期間中、プレイヤーは「真夏のひととき」からイベントストーリーを視聴できます。
+・イベントストーリーはイベント期間に応じて段階的に開放されます。
+・ストーリーの解放状態は毎日4:00にリセットされます。]],[[<size=36>イベント期間</size>
+・2026.06.25 11:00～2026.07.26 04:00
+
+<size=36>フルーツアイスバー</size>
+・イベント期間中、プレイヤーは「お楽しみ計画」および各種ゲームプレイ（テキサスホールデム、オマハ、SNGトーナメント、MTTトーナメント）を通じて「フルーツアイスバー」を獲得できます。
+・指定のキャラクター衣装を着用して対局に参加すると、「フルーツアイスバー」の獲得量に100%のボーナスが付与されます。
+
+ 「白石イリーナ - 頬を撫でる潮風」
+ 「ムーナ - 専用応援チャンネル」
+ 「ムーナ - 誓約」
+ 「ムーナ - デフォルト」
+ 「天月えりな - 鍵のかかった鼓動」
+ 「天月えりな - 誓約」
+ 「天月えりな - デフォルト」
+
+・イベント終了後、イベント入口は閉鎖され、未使用の「フルーツアイスバー」は1:1の比率でチップに変換され、メールでアカウントに配布されます。
+
+<size=36>青空ハウス</size>
+・イベント期間中、プレイヤーは獲得した「フルーツアイスバー」を使用して、「青空ハウス」で報酬と交換できます。
+
+<size=36>お楽しみ計画</size>
+・イベント期間中、プレイヤーは毎日の「お楽しみ計画」クエストを達成することで報酬を獲得できます。
+・「お楽しみ計画」クエストは毎日 04:00 に更新されます。
+
+<size=36>真夏のひととき</size>
+・イベント期間中、プレイヤーは「真夏のひととき」からイベントストーリーを視聴できます。
+・イベントストーリーはイベント期間に応じて段階的に開放されます。
+・ストーリーの解放状態は毎日4:00にリセットされます。]]},
+{"LAB_THEME_ACTIVITY6_RULES_2",[[<size=36>活动时间</size>
+・2026.06.25 10:00～2026.07.26 03:00（UTC+8）
+
+<size=36>果味棒冰</size>
+・活动期间，玩家可通过「玩乐计划」及游戏玩法（德州扑克、奥马哈、SNG赛事、MTT赛事）获得「果味棒冰」。
+・穿戴指定牌手服饰参与玩法，可获得额外的「果味棒冰」奖励加成+100%：
+
+ 「白石伊莉娜 - 海风拂过脸颊」
+ 「白石伊莉娜 - 马车载有繁星」
+ 「沐娜 - 专属应援频道」
+ 「沐娜 - 誓约」
+ 「沐娜 - 默认」
+ 「天月绘里奈 - 反锁的心跳声」
+ 「天月绘里奈 - 誓约」
+ 「天月绘里奈 - 默认」
+ 「莉莉丝 - 当月色被染红」
+ 「雾间琉华 - 后半夜的开始」
+
+・活动结束后，活动入口将关闭，未使用的「果味棒冰」将按1:1的比例转换为筹码，并通过邮件发放至您的账户。
+
+<size=36>蓝天之家</size>
+・活动期间，玩家可使用获得的「果味棒冰」于「蓝天之家」中兑换奖励。
+
+<size=36>玩乐计划</size>
+・活动期间，玩家可透过每日完成「玩乐计划」任务以获得奖励。
+・「玩乐计划」任务将于每日03:00（UTC+8）重置刷新。
+
+<size=36>盛夏时光</size>
+・活动期间，玩家可于「盛夏时光」中观看活动剧情。
+・活动剧情将依照活动时间分阶段开放。
+・剧情章节的解锁状态于每日03:00（UTC+8）刷新。]],[[<size=36>活動時間</size>
+・2026.06.25 10:00～2026.07.26 03:00（UTC+8）
+
+<size=36>果味冰棒</size>
+・活動期間，玩家可透過「玩樂計劃」及遊戲玩法（德州撲克、奧馬哈、SNG賽事、MTT賽事）獲得「果味冰棒」。
+・穿戴指定牌手服飾參與玩法，可獲得「果味冰棒」獎勵加成+100%：
+
+ 「白石伊莉娜 - 海風拂過臉頰」
+ 「白石伊莉娜 - 馬車滿載繁星」
+ 「沐娜 - 專屬應援頻道」
+ 「沐娜 - 誓約」
+ 「沐娜 - 預設」
+ 「天月繪里奈 - 反鎖的心跳聲」
+ 「天月繪里奈 - 誓約」
+ 「天月繪里奈 - 預設」
+ 「莉莉絲 - 當月色被染紅」
+ 「霧間琉華 - 後半夜的開始」
+
+・活動結束後，活動入口將關閉，未使用的「果味冰棒」將按1:1的比例轉換為籌碼，並透過郵件發放至您的帳戶。
+
+<size=36>藍天之家</size>
+・活動期間，玩家可使用獲得的「果味冰棒」於「藍天之家」中兌換獎勵。
+
+<size=36>玩樂計劃</size>
+・活動期間，玩家可透過每日完成「玩樂計劃」任務以獲得獎勵。
+・「玩樂計劃」任務將於每日03:00（UTC+8）重置。
+
+<size=36>盛夏時光</size>
+・活動期間，玩家可於「盛夏時光」中觀看活動劇情。
+・活動劇情將依照活動時間分階段開放。
+・劇情章節的解鎖狀態於每日03:00（UTC+8）刷新。]],[[<size=36>Event Period</size>
+· 2026/06/25 11:00 – 2026/07/26 04:00 (UTC+9)
+
+<size=36>Fruity Ice Pop</size>
+· During the event, you can earn Fruity Ice Pop through Fun-Packed Plan and by playing Texas Hold'em, Omaha, SNG tournaments, or MTT tournaments.
+· Using any of the following characters and outfits grants a 100% Cheer Pompom bonus:
+
+Shiraishi Irina - Sea Breeze Caress
+Shiraishi Irina - Starlit Carriage
+Moona - Private Frequency
+Moona - Oath Outfit
+Moona - Default
+Amatsuki Erina - Stifled Heartbeat
+Amatsuki Erina - Oath Outfit
+Amatsuki Erina - Default
+Lilith - Crimson Moonlight
+Kirima Ruka - After Midnight
+
+· After the event ends, event access will close. Any unused Fruity Ice Pop will be converted into chips at a 1:1 ratio and sent to your account via mail.
+
+<size=36>Blue-Sky Boutique</size>
+· Exchange Fruity Ice Pop for rewards in the Blue-Sky Boutique.
+
+<size=36>Fun-Packed Plan</size>
+· Complete daily Fun-Packed Plan tasks to earn rewards.
+· Fun-Packed Plan resets daily at 04:00 (UTC+9).
+
+<size=36>Midsummer Moments</size>
+· View event stories in Midsummer Moments.
+· Story chapters unlock in stages as the event progresses.
+· Chapter unlock status refreshes daily at 04:00 (UTC+9).]],[[<size=36>イベント期間</size>
+・2026.06.25 11:00～2026.07.26 04:00
+
+<size=36>フルーツアイスバー</size>
+・イベント期間中、プレイヤーは「お楽しみ計画」および各種ゲームプレイ（テキサスホールデム、オマハ、SNGトーナメント、MTTトーナメント）を通じて「フルーツアイスバー」を獲得できます。
+・指定のキャラクター衣装を着用して対局に参加すると、「フルーツアイスバー」の獲得量に100%のボーナスが付与されます。
+
+ 「白石イリーナ - 頬を撫でる潮風」
+ 「白石イリーナ - 馬車に星々を乗せて」
+ 「ムーナ - 専用応援チャンネル」
+ 「ムーナ - 誓約」
+ 「ムーナ - デフォルト」
+ 「天月えりな - 鍵のかかった鼓動」
+ 「天月えりな - 誓約」
+ 「天月えりな - デフォルト」
+ 「リリス - 月が赤く染まりし時」
+ 「霧間るか - 夜更けの始まり」
+
+・イベント終了後、イベント入口は閉鎖され、未使用の「フルーツアイスバー」は1:1の比率でチップに変換され、メールでアカウントに配布されます。
+
+<size=36>青空ハウス</size>
+・イベント期間中、プレイヤーは獲得した「フルーツアイスバー」を使用して、「青空ハウス」で報酬と交換できます。
+
+<size=36>お楽しみ計画</size>
+・イベント期間中、プレイヤーは毎日の「お楽しみ計画」クエストを達成することで報酬を獲得できます。
+・「お楽しみ計画」クエストは毎日 04:00 に更新されます。
+
+<size=36>真夏のひととき</size>
+・イベント期間中、プレイヤーは「真夏のひととき」からイベントストーリーを視聴できます。
+・イベントストーリーはイベント期間に応じて段階的に開放されます。
+・ストーリーの解放状態は毎日4:00にリセットされます。]],[[<size=36>イベント期間</size>
+・2026.06.25 11:00～2026.07.26 04:00
+
+<size=36>フルーツアイスバー</size>
+・イベント期間中、プレイヤーは「お楽しみ計画」および各種ゲームプレイ（テキサスホールデム、オマハ、SNGトーナメント、MTTトーナメント）を通じて「フルーツアイスバー」を獲得できます。
+・指定のキャラクター衣装を着用して対局に参加すると、「フルーツアイスバー」の獲得量に100%のボーナスが付与されます。
+
+ 「白石イリーナ - 頬を撫でる潮風」
+ 「白石イリーナ - 馬車に星々を乗せて」
+ 「ムーナ - 専用応援チャンネル」
+ 「ムーナ - 誓約」
+ 「ムーナ - デフォルト」
+ 「天月えりな - 鍵のかかった鼓動」
+ 「天月えりな - 誓約」
+ 「天月えりな - デフォルト」
+ 「リリス - 月が赤く染まりし時」
+ 「霧間るか - 夜更けの始まり」
+
+・イベント終了後、イベント入口は閉鎖され、未使用の「フルーツアイスバー」は1:1の比率でチップに変換され、メールでアカウントに配布されます。
+
+<size=36>青空ハウス</size>
+・イベント期間中、プレイヤーは獲得した「フルーツアイスバー」を使用して、「青空ハウス」で報酬と交換できます。
+
+<size=36>お楽しみ計画</size>
+・イベント期間中、プレイヤーは毎日の「お楽しみ計画」クエストを達成することで報酬を獲得できます。
+・「お楽しみ計画」クエストは毎日 04:00 に更新されます。
+
+<size=36>真夏のひととき</size>
+・イベント期間中、プレイヤーは「真夏のひととき」からイベントストーリーを視聴できます。
+・イベントストーリーはイベント期間に応じて段階的に開放されます。
+・ストーリーの解放状態は毎日4:00にリセットされます。]]},
+{"LAB_THEME_ACTIVITY6_TIPS_1","使用以下牌手服饰参与玩法，可获得「果味棒冰」奖励加成：","使用以下牌手服飾參與玩法，可獲得「果味冰棒」獎勵加成：","Using the following outfits at the table grants a Cheer Pompom bonus:","以下の衣装を使用して対局に参加すると、「フルーツアイスバー」の獲得量にボーナスが付与されます。","以下の衣装を使用して対局に参加すると、「フルーツアイスバー」の獲得量にボーナスが付与されます。"},
 {"LAB_EVENT_MEDIA","关注社媒","官方社群","Official Communities","SNSをフォロー","소셜 미디어에서 팔로우하세요"},
 {"LAB_EVENT_LINKEMAIL","绑定邮箱","綁定信箱","Link Email","連携メール","이메일 주소를 입력하세요"},
 {"LAB_EVENT_LITTLEKANA","小加奈的社群邀请","小加奈的社群邀請","Kana's Invitation","かなちゃんのコミュニティ招待","카나의 소셜 미디어 초대"},
@@ -11277,6 +13532,9 @@ Tourney Points Tracking
 {"LAB_TOURNAMENT_19","等级","級別","Level","レベル","等级"},
 {"LAB_TOURNAMENT_20","仅展示近30天赛事数据","僅顯示近30天的賽事數據","Displays only the past 30 days of tournament data.","直近30日間のトーナメントデータのみ表示しています","仅展示近30天赛事数据"},
 {"LAB_TOURNAMENT_21","当前排名","目前排名","Current ranking","ランキング","Current ranking"},
+{"LAB_TOURNAMENT_22","返回围观","返回圍觀","Spectate","観戦に戻る","返回围观"},
+{"LAB_TOURNAMENT_23","进入围观","進入圍觀","Spectate","観戦する","进入围观"},
+{"LAB_TOURNAMENT_24","当前级别","目前級別",[[Current Level]],"現在のレベル","当前级别"},
 {"LAB_TOURNAMENT_SNG_NAME1","{p1}筹码赛-{p2}","{p1}籌碼賽 - {p2}","{p1} Chips - {p2}","{p1}チップマッチ - {p2}","{p1}筹码赛-{p2}"},
 {"LAB_TOURNAMENT_SNG_RULE1",[[SNG锦标赛的玩法规则与德州扑克一致，但是节奏更快，同时也更加刺激。
 
@@ -11393,9 +13651,18 @@ Tourney Points Tracking
 {"LAB_TOURNAMENT_SNG_INFO42","三级联赛","三級聯賽","Division 3","3級リーグ","三级联赛"},
 {"LAB_TOURNAMENT_SNG_INFO43","四级联赛","四級聯賽","Division 4","4級リーグ","四级联赛"},
 {"LAB_TOURNAMENT_SNG_INFO44","五级联赛","五級聯賽","Division 5","5級リーグ","五级联赛"},
+{"LAB_TOURNAMENT_SNG_INFO45","返回大厅","返回大廳","Lobby","ロビーに戻る","返回大厅"},
+{"LAB_TOURNAMENT_SNG_INFO46","SNG匹配中（{p1}/{p2}）","SNG匹配中（{p1}/{p2}）","Finding SNG opponents ({p1}/{p2})","SNGマッチング中（{p1}/{p2}）","SNG匹配中（{p1}/{p2}）"},
+{"LAB_TOURNAMENT_SNG_INFO47","返回比赛","返回比賽","Enter","試合に戻る","返回比赛"},
+{"LAB_TOURNAMENT_SNG_INFO48","开赛了！","開賽了！","Starts Soon!","まもなく開始！","开赛了！"},
+{"LAB_TOURNAMENT_SNG_INFO49","您报名的{p1}赛事已经匹配完参赛选手，是否立即前往比赛。确认前往将退出当前牌桌并放弃当前手牌。","您報名的{p1}賽事已經匹配完參賽選手，是否立即前往比賽？確認前往將退出當前牌桌並放棄當前手牌。",[[The tournament "{p1}" is about to begin. Leave this table and take your seat now?]],"エントリーされた{p1}トーナメントの参加者が揃いました。今すぐ着席しますか？着席すると現在のテーブルから退出となり、現在のハンドはフォールドされます。","您报名的{p1}赛事已经匹配完参赛选手，是否立即前往比赛。确认前往将退出当前牌桌并放弃当前手牌。"},
+{"LAB_TOURNAMENT_SNG_INFO50","确认前往","確認前往","Take Seat","着席","确认前往"},
+{"LAB_TOURNAMENT_SNG_INFO51","返回大厅不会取消报名，请留意系统弹窗提示，开赛后及时返回比赛。","返回大廳不會取消報名，請留意系統彈出視窗提示，開賽後及時返回比賽。","Returning to the Lobby won't cancel your registration. You will be notified once the tournament begins.","ロビーに戻ってもエントリーはキャンセルされません。システム通知にご注意いただき、試合開始後は速やかに試合へお戻りください。","返回大厅不会取消报名，请留意系统弹窗提示，开赛后及时返回比赛。"},
+{"LAB_TOURNAMENT_SNG_INFO52","您已报名{p1}赛事，无法报名新赛事","您已報名{p1}賽事，無法報名新賽事","Failed. You've already registered for {p1}","すでに{p1}トーナメントにエントリー済みです。新しいトーナメントにはエントリーできません。","您已报名{p1}赛事，无法报名新赛事"},
+{"LAB_TOURNAMENT_SNG_INFO53","您报名的{p1}赛事已经匹配完参赛选手，是否立即前往比赛。","您報名的{p1}賽事已經匹配完參賽選手，是否立即前往比賽？",[[The tournament "{p1}" is about to begin. Take your seat now?]],"エントリーされた{p1}トーナメントの参加者が揃いました。今すぐ着席しますか？","您报名的{p1}赛事已经匹配完参赛选手，是否立即前往比赛。"},
 {"LAB_TOURNAMENT_MTT_INFO1","已淘汰","已淘汰","Eliminated","敗退","已淘汰"},
 {"LAB_TOURNAMENT_MTT_INFO2","已报名","已報名","Registered","エントリー済み","已报名"},
-{"LAB_TOURNAMENT_MTT_INFO3","{p1}分钟内截止报名","{p1}分鐘內截止報名","Registration closes in {p1} min","残り{p1}分でエントリー締切","{p1}分钟内截止报名"},
+{"LAB_TOURNAMENT_MTT_INFO3","距离报名截止还有{p1}分钟","距離報名截止還有{p1}分鐘","Registration ends in {p1}m","エントリー締め切りまであと{p1}分","{p1}分钟内截止报名"},
 {"LAB_TOURNAMENT_MTT_INFO4","比赛开始时间","比賽開始時間","Start Time","開始時刻","比赛开始时间"},
 {"LAB_TOURNAMENT_MTT_INFO5","已截止报名","報名已截止","Registration Closed","エントリー締切","已截止报名"},
 {"LAB_TOURNAMENT_MTT_INFO6","{p1}赛事报名费用退还","{p1}賽事報名費退還","{p1} Buy-in Refunded","{p1} バイイン返還","{p1}赛事报名费用退还"},
@@ -11484,7 +13751,7 @@ Azure Bay Poker Association]],[[親愛なる会長様：
 {"LAB_TOURNAMENT_MTT_INFO11","报名人数已达上限","報名人數已達上限","Registration Full","エントリー人数が上限に達しました","报名人数已达上限"},
 {"LAB_TOURNAMENT_MTT_INFO12","保底奖池分配表","保底獎池分配表","Gtd. Payout Structure","保証賞金配分表","保底奖池分配表"},
 {"LAB_TOURNAMENT_MTT_INFO13","玩家排名/参赛人次","玩家排名／參賽人數","Ranking / Entries","プレイヤー順位／参加者数","玩家排名/参赛人次"},
-{"LAB_TOURNAMENT_MTT_INFO14","正在分配牌桌请稍等","正在分配牌桌，請稍候","Balancing tables...","テーブルを割り当てています。しばらくお待ちください","正在分配牌桌请稍等"},
+{"LAB_TOURNAMENT_MTT_INFO14","正在分配牌桌请稍等","正在分配牌桌，請稍候","Tournament starts soon...","テーブルを割り当てています。しばらくお待ちください","正在分配牌桌请稍等"},
 {"LAB_TOURNAMENT_MTT_INFO15","已成功匹配新牌桌","已成功匹配至新牌桌","Moved to a new table","新テーブルへ移動しました","已成功匹配新牌桌"},
 {"LAB_TOURNAMENT_MTT_INFO16","即将进入休息","即將進入休息","Upcoming Break","間もなく休憩時間に入ります","即将进入休息"},
 {"LAB_TOURNAMENT_MTT_INFO17","1分钟后进入休息时间，本次休息时间{p1}分钟。","1分鐘後進入休息時間，本次休息時間為{p1}分鐘。","Starts in 1 minute. Duration: {p1} minutes.","1 分後に休憩時間に入ります。今回の休憩時間は {p1} 分です。","1分钟后进入休息时间，本次休息时间{p1}分钟。"},
@@ -11492,39 +13759,39 @@ Azure Bay Poker Association]],[[親愛なる会長様：
 {"LAB_TOURNAMENT_MTT_INFO19","当前处于赛事休息时间，休息时间结束后将继续开始比赛。","目前處於賽事休息階段，休息結束後將繼續進行比賽。","The tournament is on a scheduled break. Play will resume when the break ends.","現在はトーナメントの休憩時間です。休憩時間終了後、試合を再開します。","当前处于赛事休息时间，休息时间结束后将继续开始比赛。"},
 {"LAB_TOURNAMENT_MTT_INFO20","休息时间结束，继续比赛。","休息時間結束，比賽繼續","Break over. Resuming play...","休憩時間終了。まもなく再開します","休息时间结束，继续比赛。"},
 {"LAB_TOURNAMENT_MTT_INFO21","泡沫警告","泡沫警告","The Bubble","バブル警告","泡沫警告"},
-{"LAB_TOURNAMENT_MTT_INFO22","剩余{p1}人，{p2}人拿奖！淘汰1人即进入奖圈！","剩餘{p1}人，{p2}人可獲獎！再淘汰1人即進入獎圈！","{p1} Players / {p2} Paid. One more out to get ITM!","残り {p1} 名、{p2} 名が入賞圏内！あと 1 名敗退で入賞圏内確定！","剩余{p1}人，{p2}人拿奖！淘汰1人即进入奖圈！"},
+{"LAB_TOURNAMENT_MTT_INFO22","剩余{p1}人，{p2}人拿奖！淘汰1人即进入奖圈！","剩餘{p1}人，{p2}人可獲獎！再淘汰1人即進入獎圈！","{p1} Players Remain / {p2} Paid. One more elimination until ITM!","残り {p1} 名、{p2} 名が入賞圏内！あと 1 名敗退で入賞圏内確定！","剩余{p1}人，{p2}人拿奖！淘汰1人即进入奖圈！"},
 {"LAB_TOURNAMENT_MTT_INFO23","泡沫期-同步发牌进行中","泡沫期－同步發牌進行中","Bubble Phase — Hand-for-Hand Play","バブル突入：ハンド・フォー・ハンド","泡沫期-同步发牌进行中"},
 {"LAB_TOURNAMENT_MTT_INFO24","请稍候。由于处于泡沫期同步阶段，本手牌尚未开始。系统将在所有牌桌就绪后自动发牌。","請稍候。由於目前處於泡沫期同步階段，本手牌尚未開始。系統將在所有牌桌就緒後自動發牌。","Synchronizing tables. Dealing will resume shortly.","テーブル同期中。全卓のハンド終了までお待ちください。","请稍候。由于处于泡沫期同步阶段，本手牌尚未开始。系统将在所有牌桌就绪后自动发牌。"},
-{"LAB_TOURNAMENT_MTT_INFO25","成功进入奖圈","成功進入獎圈","In the Money!","入賞圏内に入りました","成功进入奖圈"},
+{"LAB_TOURNAMENT_MTT_INFO25","成功进入奖圈","成功進入獎圈","ITM","入賞圏内に入りました","成功进入奖圈"},
 {"LAB_TOURNAMENT_MTT_INFO26","恭喜！您已成功进入奖金圈！当前排名：{p1}","恭喜！您已成功進入獎金圈！目前排名：{p1}","Congrats! You're ITM! Current rank: #{p1}","おめでとうございます！入賞圏内に入りました！現在の順位：{p1} 位","恭喜！您已成功进入奖金圈！当前排名：{p1}"},
 {"LAB_TOURNAMENT_MTT_INFO27","终局对决","終局對決","Final Table","決勝戦","终局对决"},
-{"LAB_TOURNAMENT_MTT_INFO28","喜！经过激烈的角逐，您已进入决赛桌！","喜！經過激烈角逐，您已晉級決賽桌！","Congrats! You've advanced to the final table!","おめでとうございます！激戦の末、ファイナルテーブルへの進出を果たしました！","喜！经过激烈的角逐，您已进入决赛桌！"},
+{"LAB_TOURNAMENT_MTT_INFO28","恭喜！经过激烈的角逐，您已进入决赛桌！","恭喜！經過激烈角逐，您已晉級決賽桌！","Congrats! You've advanced to the final table!","おめでとうございます！激戦の末、ファイナルテーブルへの進出を果たしました！","喜！经过激烈的角逐，您已进入决赛桌！"},
 {"LAB_TOURNAMENT_MTT_INFO29","开始！","開始！","Start!","スタート！","开始！"},
-{"LAB_TOURNAMENT_MTT_INFO30","延迟报名：","延遲報名：","Late Reg.:","レイトエントリー：","延迟报名："},
+{"LAB_TOURNAMENT_MTT_INFO30","延迟报名：","延遲報名：",[[Late Reg.: ]],"レイトエントリー：","延迟报名："},
 {"LAB_TOURNAMENT_MTT_INFO31","平均筹码","平均籌碼","Avg. Stack","平均チップ数","平均筹码"},
 {"LAB_TOURNAMENT_MTT_INFO32","最大筹码","最大籌碼","Largest Stack","最大チップ数","最大筹码"},
 {"LAB_TOURNAMENT_MTT_INFO33","最小筹码","最小籌碼","Smallest Stack","最小チップ数","最小筹码"},
 {"LAB_TOURNAMENT_MTT_INFO34","已进行：{p1}","已進行：{p1}","Running: {p1}","経過時間：{p1}","已进行：{p1}"},
-{"LAB_TOURNAMENT_MTT_INFO35","休息：{p1}/{p2}(mins)","休息：{p1}/{p2}（分鐘）","Break: {p1}/{p2} mins","休憩：{p1}/{p2}（分）","休息：{p1}/{p2}(mins)"},
+{"LAB_TOURNAMENT_MTT_INFO35","休息：{p1}分钟/{p2}分钟","休息：{p1}分鐘/{p2}分鐘","Break: {p1} mins/{p2} mins","休憩：{p1}分/{p2}分","休息：{p1}/{p2}(mins)"},
 {"LAB_TOURNAMENT_MTT_INFO36","无缘奖圈","無緣獎圈","So Close!","入賞圏外","无缘奖圈"},
 {"LAB_TOURNAMENT_MTT_INFO37","排名已更新至{p1}位","排名已更新至第{p1}位","You finished in #{p1} place.","順位が {p1} 位に更新されました","排名已更新至{p1}位"},
 {"LAB_TOURNAMENT_MTT_INFO38","查看排名","查看排名","View Rankings","順位を見る","查看排名"},
-{"LAB_TOURNAMENT_MTT_INFO39","进入奖圈","進入獎圈","In the Money","入賞圏内に入りました","进入奖圈"},
+{"LAB_TOURNAMENT_MTT_INFO39","进入奖圈","進入獎圈","ITM","入賞圏内に入りました","进入奖圈"},
 {"LAB_TOURNAMENT_MTT_INFO40","排名：{p1}","排名：{p1}","Rank: #{p1}","順位：{p1} 位","排名：{p1}"},
 {"LAB_TOURNAMENT_MTT_INFO41","比赛时间","比賽時間","Start Time","開始時間","比赛时间"},
 {"LAB_TOURNAMENT_MTT_INFO42","延迟报名","延遲報名","Late Reg.","レイトエントリー","延迟报名"},
-{"LAB_TOURNAMENT_MTT_INFO43","休息时间","休息时间","休息时间","休息时间","休息时间"},
-{"LAB_TOURNAMENT_MTT_INFO44","当前奖池","当前奖池","当前奖池","当前奖池","当前奖池"},
-{"LAB_TOURNAMENT_MTT_INFO45","人数上限","人数上限","人数上限","人数上限","人数上限"},
+{"LAB_TOURNAMENT_MTT_INFO43","休息时间","休息時間","Break","休憩時間","休息时间"},
+{"LAB_TOURNAMENT_MTT_INFO44","当前奖池","目前獎池","Current Prize Pool","現在の賞金総額","当前奖池"},
+{"LAB_TOURNAMENT_MTT_INFO45","人数上限","人數上限","Max Players","人数上限","人数上限"},
 {"LAB_TOURNAMENT_MTT_INFO46",[[1. 报名与延迟报名：
 报名：在规定时间内报名并支付报名费。
 延迟报名：在比赛正式开始后的但不超过一定盲注级别时未报名的玩家可以报名加入比赛。在延迟报名期间新加入的玩家，将获得与其他玩家等量的初始筹码，并从当前盲注级别开始游戏。
 
 2.开赛与分配牌桌：开赛后系统将为每位参赛玩家发放相同数额的比赛专用筹码，比赛结束后会由系统回收。开赛前最后五分钟将禁止报名玩家取消报名，此时将进行首次牌桌分配，届时可进入牌桌等待比赛开始。
 
-3.盲注、升盲与Ante
+3.盲注、升盲与前注
 盲注&升盲：比赛设有固定的盲注级别与上涨时间。盲注将按预设的时间间隔自动提升。
-Ante：比赛后期通常会引入Ante（前注），每手牌大盲玩家支付前注，其余玩家不需要支付。
+前注：比赛后期通常会引入Ante（前注），每手牌大盲玩家支付前注，其余玩家不需要支付。
 
 4.淘汰与拆桌合桌
 淘汰：当玩家的筹码全部输光时，即被淘汰出局。
@@ -11534,61 +13801,73 @@ Ante：比赛后期通常会引入Ante（前注），每手牌大盲玩家支付
 
 6.奖励：根据参赛人次确定奖圈人数，只要玩家最终排名进入奖圈即可获得对应排名奖励。
 
-*无论是否获胜，每位参与的玩家均可获得参与奖励。]],[[1. 报名与延迟报名：
-报名：在规定时间内报名并支付报名费。
-延迟报名：在比赛正式开始后的但不超过一定盲注级别时未报名的玩家可以报名加入比赛。在延迟报名期间新加入的玩家，将获得与其他玩家等量的初始筹码，并从当前盲注级别开始游戏。
+*无论是否获胜，每位参与的玩家均可获得参与奖励。]],[[1、報名與延遲報名：
+報名：於規定時間內完成報名並支付報名費。
+延遲報名：比賽正式開始後，未超過指定盲注級別前仍可報名加入。於延遲報名期間加入的玩家，將獲得與其他玩家等量的初始籌碼，並從當前盲注級別開始遊戲。
 
-2.开赛与分配牌桌：开赛后系统将为每位参赛玩家发放相同数额的比赛专用筹码，比赛结束后会由系统回收。开赛前最后五分钟将禁止报名玩家取消报名，此时将进行首次牌桌分配，届时可进入牌桌等待比赛开始。
+2、開賽與牌桌分配：
+開賽後，系統將為每位參賽玩家發放相同數額的比賽專用籌碼，並於比賽結束後統一回收。
+開賽前最後 5 分鐘將禁止取消報名，並於此時進行首次牌桌分配，玩家可進入牌桌等待比賽開始。
 
-3.盲注、升盲与Ante
-盲注&升盲：比赛设有固定的盲注级别与上涨时间。盲注将按预设的时间间隔自动提升。
-Ante：比赛后期通常会引入Ante（前注），每手牌大盲玩家支付前注，其余玩家不需要支付。
+3、盲注、升盲與前注：
+盲注與升盲：比賽設有固定的盲注級別與升盲時間，盲注將依預設時間間隔自動提升。
+前注：比賽後期通常會引入前注（Ante），由大盲玩家支付前注，其餘玩家無需支付。
 
-4.淘汰与拆桌合桌
-淘汰：当玩家的筹码全部输光时，即被淘汰出局。
-拆桌合桌：随着参赛人数的变动，系统将根据各牌桌的实时人数进行动态调整，平均分配每桌人数。直至所有选手汇聚于唯一的决赛桌。
+4、淘汰與拆桌／合桌：
+淘汰：當玩家籌碼歸零時，即被淘汰出局。
+拆桌／合桌：隨著參賽人數變動，系統將依各牌桌即時人數進行動態調整，平均分配各桌玩家，直至所有玩家匯聚至最終決賽桌。
 
-5.休息：赛事每进行一定时间后触发固定休息时间，此时将暂停升盲倒计时。玩家结束当前手牌立即进入休息状态，休息时间结束后，系统将自动开启新一轮发牌并继续升盲倒计时。
+5、休息：
+賽事進行一段時間後將進入固定休息時間，期間暫停升盲倒數計時。
+玩家完成當前手牌後即進入休息狀態；休息結束後，系統將自動開始新一輪發牌，並恢復升盲倒數計時。
 
-6.奖励：根据参赛人次确定奖圈人数，只要玩家最终排名进入奖圈即可获得对应排名奖励。
+6、獎勵：
+依據參賽人次決定獎勵名次（獎圈）範圍，玩家最終排名進入獎圈即可獲得對應名次獎勵。
 
-*无论是否获胜，每位参与的玩家均可获得参与奖励。]],[[1. 报名与延迟报名：
-报名：在规定时间内报名并支付报名费。
-延迟报名：在比赛正式开始后的但不超过一定盲注级别时未报名的玩家可以报名加入比赛。在延迟报名期间新加入的玩家，将获得与其他玩家等量的初始筹码，并从当前盲注级别开始游戏。
+*無論是否獲勝，所有參與玩家皆可獲得參與獎勵。]],[[1. Registration & Late Registration
+Standard Registration: Players register and pay the buy-in within the designated registration period.
+Late Registration: Players may enter after the tournament has started, up to the announced late registration cutoff blind level. Late registrants receive the full starting stack and begin play at the current blind level.
 
-2.开赛与分配牌桌：开赛后系统将为每位参赛玩家发放相同数额的比赛专用筹码，比赛结束后会由系统回收。开赛前最后五分钟将禁止报名玩家取消报名，此时将进行首次牌桌分配，届时可进入牌桌等待比赛开始。
+2. Tournament Start & Table Assignment
+Start: At the start of the tournament, each player receives an equal starting stack of tournament chips, which are reclaimed at the end of the tournament. Players may not unregister within five minutes prior to the start time.
+Seating: Players are randomly assigned to tables and may take their seats before the first hand is dealt.
 
-3.盲注、升盲与Ante
-盲注&升盲：比赛设有固定的盲注级别与上涨时间。盲注将按预设的时间间隔自动提升。
-Ante：比赛后期通常会引入Ante（前注），每手牌大盲玩家支付前注，其余玩家不需要支付。
+3. Blind Structure & Ante
+Blind Increases: The tournament follows a predetermined blind structure, with blinds increasing automatically at fixed time intervals.
+Ante: At later stages of the tournament, an ante will be introduced. To streamline gameplay, the player in the Big Blind position posts the ante on behalf of the entire table.
 
-4.淘汰与拆桌合桌
-淘汰：当玩家的筹码全部输光时，即被淘汰出局。
-拆桌合桌：随着参赛人数的变动，系统将根据各牌桌的实时人数进行动态调整，平均分配每桌人数。直至所有选手汇聚于唯一的决赛桌。
+4. Elimination & Table Balancing
+Elimination: A player is eliminated from the tournament once they lose all of their chips.
+Table Balancing: As players are eliminated, tables will be rebalanced automatically to maintain an even number of players at each table. This process continues until the remaining players form the Final Table.
 
-5.休息：赛事每进行一定时间后触发固定休息时间，此时将暂停升盲倒计时。玩家结束当前手牌立即进入休息状态，休息时间结束后，系统将自动开启新一轮发牌并继续升盲倒计时。
+5. Breaks
+Scheduled Breaks: Breaks occur at fixed intervals according to the tournament schedule. During breaks, the blind timer is paused.
+Break Procedure: Players complete the current hand before the break begins. Once the break ends, play resumes automatically with the next hand, and the blind timer continues.
 
-6.奖励：根据参赛人次确定奖圈人数，只要玩家最终排名进入奖圈即可获得对应排名奖励。
+6. Prizes & Rewards
+Payout: The number of paid places is determined by the total number of tournament entries. Prize distribution is based on final finishing position.
+Participation Reward: All players receive a participation reward, regardless of final placement.]],[[1.エントリーとレイトエントリー
+エントリー：規定時間内にエントリーし、エントリー料を支払います。
+レイトエントリー：試合開始以降、一定のブラインドレベルに達するまでは、エントリーしていないプレイヤーはエントリーして試合に参加できます。レイトエントリー期間中に新たに参加したプレイヤーは、他のプレイヤーと同額のスタートチップを獲得し、現在のブラインドレベルからゲームを開始します。
 
-*无论是否获胜，每位参与的玩家均可获得参与奖励。]],[[1. 报名与延迟报名：
-报名：在规定时间内报名并支付报名费。
-延迟报名：在比赛正式开始后的但不超过一定盲注级别时未报名的玩家可以报名加入比赛。在延迟报名期间新加入的玩家，将获得与其他玩家等量的初始筹码，并从当前盲注级别开始游戏。
+2.試合開始とテーブル割り当て
+試合開始後、参加プレイヤー全員には同額の試合専用チップが配布されます。試合終了後、試合専用チップが回収されます。試合開始までの5分間は、エントリー済みのプレイヤーがエントリーをキャンセルできなくなります。この時点で最初のテーブル割り当てが行われ、テーブルに着席して試合開始を待つことができます。
 
-2.开赛与分配牌桌：开赛后系统将为每位参赛玩家发放相同数额的比赛专用筹码，比赛结束后会由系统回收。开赛前最后五分钟将禁止报名玩家取消报名，此时将进行首次牌桌分配，届时可进入牌桌等待比赛开始。
+3.ブラインド、ブラインドアップ、アンティ
+ブラインドとブラインドアップ：試合には固定のブラインドレベルとブラインドアップ時間が設定されています。ブラインドは事前に設定された時間間隔で自動的にアップします。
+アンティ：試合後半では通常アンティが導入されます。各ハンドでビッグブラインドのプレイヤーがアンティを支払い、その他のプレイヤーは支払う必要はありません。
 
-3.盲注、升盲与Ante
-盲注&升盲：比赛设有固定的盲注级别与上涨时间。盲注将按预设的时间间隔自动提升。
-Ante：比赛后期通常会引入Ante（前注），每手牌大盲玩家支付前注，其余玩家不需要支付。
+4.敗退とテーブル解散・統合
+敗退：プレイヤーのチップがすべて失われた時点で、敗退となります。
+テーブル解散・統合：参加者数の変動に応じて、システムは各テーブルの参加者数が均等になるように、リアルタイムで人数が調整されます。すべての選手が唯一の決勝テーブルに集まるまで、この調整は続きます。
 
-4.淘汰与拆桌合桌
-淘汰：当玩家的筹码全部输光时，即被淘汰出局。
-拆桌合桌：随着参赛人数的变动，系统将根据各牌桌的实时人数进行动态调整，平均分配每桌人数。直至所有选手汇聚于唯一的决赛桌。
+5.休憩
+トーナメント進行中、一定時間ごとに休憩が設けられます。この間、ブラインドアップのカウントダウンは一時停止します。プレイヤーは現在のハンドが終了次第、直ちに休憩状態に入ります。休憩時間終了後、システムは自動的に次のハンドの配布を開始し、ブラインドアップのカウントダウンを再開します。
 
-5.休息：赛事每进行一定时间后触发固定休息时间，此时将暂停升盲倒计时。玩家结束当前手牌立即进入休息状态，休息时间结束后，系统将自动开启新一轮发牌并继续升盲倒计时。
+6.報酬
+参加者数に応じて入賞圏内の人数が決定されます。プレイヤーの最終順位が入賞圏内に入れば、対応する順位報酬を獲得できます。
 
-6.奖励：根据参赛人次确定奖圈人数，只要玩家最终排名进入奖圈即可获得对应排名奖励。
-
-*无论是否获胜，每位参与的玩家均可获得参与奖励。]],[[1. 报名与延迟报名：
+*勝敗に関わらず、すべての参加プレイヤーは参加報酬を獲得できます。]],[[1. 报名与延迟报名：
 报名：在规定时间内报名并支付报名费。
 延迟报名：在比赛正式开始后的但不超过一定盲注级别时未报名的玩家可以报名加入比赛。在延迟报名期间新加入的玩家，将获得与其他玩家等量的初始筹码，并从当前盲注级别开始游戏。
 
@@ -11607,8 +13886,8 @@ Ante：比赛后期通常会引入Ante（前注），每手牌大盲玩家支付
 6.奖励：根据参赛人次确定奖圈人数，只要玩家最终排名进入奖圈即可获得对应排名奖励。
 
 *无论是否获胜，每位参与的玩家均可获得参与奖励。]]},
-{"LAB_TOURNAMENT_MTT_INFO47","MTT赛事说明","MTT赛事说明","MTT赛事说明","MTT赛事说明","MTT赛事说明"},
-{"LAB_TOURNAMENT_MTT_INFO48","同步发牌规则说明","同步发牌规则说明","同步发牌规则说明","同步发牌规则说明","同步发牌规则说明"},
+{"LAB_TOURNAMENT_MTT_INFO47","MTT赛事说明","MTT賽事說明","MTT Rules","MTTトーナメントについて","MTT赛事说明"},
+{"LAB_TOURNAMENT_MTT_INFO48","同步发牌规则说明","同步發牌規則說明","Hand-for-Hand Play Rules","同時カード配布ルールについて","同步发牌规则说明"},
 {"LAB_TOURNAMENT_MTT_INFO49",[[触发时机：
 泡沫期：当场上剩余选手人数等于奖励名额加一时触发（即再淘汰一人，所有剩余选手均进入奖励圈）。
 决赛桌前夕：当场上剩余选手人数等于单桌满员人数加一时触发（即再淘汰一人，剩余选手将刚好坐满决赛桌）。
@@ -11617,31 +13896,31 @@ Ante：比赛后期通常会引入Ante（前注），每手牌大盲玩家支付
 消除因牌桌进度差异导致的信息不对称。在关键阶段，确保所有选手在相同的信息环境下竞技，防止部分选手因牌桌进度较快而获得不公平优势。
 
 同步发牌机制说明:
-系统会强制全场所有牌桌保持进度一致。即使您所在的牌桌已经完成了当前牌局，系统也会暂停发牌，直到场上所有其他牌桌都结束当前牌局后，才会统一发出下一手牌。]],[[触发时机：
-泡沫期：当场上剩余选手人数等于奖励名额加一时触发（即再淘汰一人，所有剩余选手均进入奖励圈）。
-决赛桌前夕：当场上剩余选手人数等于单桌满员人数加一时触发（即再淘汰一人，剩余选手将刚好坐满决赛桌）。
+系统会强制全场所有牌桌保持进度一致。即使您所在的牌桌已经完成了当前牌局，系统也会暂停发牌，直到场上所有其他牌桌都结束当前牌局后，才会统一发出下一手牌。]],[[觸發時機：
+泡沫期：當場上剩餘選手人數等於獎勵名額加1時觸發（即再淘汰1人，所有剩餘選手皆進入獎勵圈）。
+決賽桌前夕：當場上剩餘選手人數等於單桌滿員人數加1時觸發（即再淘汰1人，剩餘選手將剛好坐滿決賽桌）。
 
 核心目的：
-消除因牌桌进度差异导致的信息不对称。在关键阶段，确保所有选手在相同的信息环境下竞技，防止部分选手因牌桌进度较快而获得不公平优势。
+消除因牌桌進度差異所導致的資訊不對稱。在關鍵階段，確保所有選手於相同的資訊環境下競技，避免部分選手因牌桌進度較快而獲得不公平優勢。
 
-同步发牌机制说明:
-系统会强制全场所有牌桌保持进度一致。即使您所在的牌桌已经完成了当前牌局，系统也会暂停发牌，直到场上所有其他牌桌都结束当前牌局后，才会统一发出下一手牌。]],[[触发时机：
-泡沫期：当场上剩余选手人数等于奖励名额加一时触发（即再淘汰一人，所有剩余选手均进入奖励圈）。
-决赛桌前夕：当场上剩余选手人数等于单桌满员人数加一时触发（即再淘汰一人，剩余选手将刚好坐满决赛桌）。
+同步發牌機制說明：
+系統將強制全場所有牌桌保持進度一致。即使您所在的牌桌已完成當前牌局，系統仍會暫停發牌，直到場上所有其他牌桌皆結束當前牌局後，才會統一發出下一手牌。]],[[When It Triggers
+The Bubble: Hand-for-hand play begins when the number of remaining players equals the number of paid places plus one. The next player eliminated will be the last to finish without a prize.
+Final Table Bubble: Hand-for-hand play may also be activated when the number of remaining players equals the maximum seats at a single table plus one. The next elimination determines the composition of the Final Table.
 
-核心目的：
-消除因牌桌进度差异导致的信息不对称。在关键阶段，确保所有选手在相同的信息环境下竞技，防止部分选手因牌桌进度较快而获得不公平优势。
+Core Purpose
+Hand-for-hand play ensures fairness during critical stages of the tournament. It prevents players at faster tables from gaining an advantage by stalling, ensuring all tables progress at the same pace during key elimination moments.
 
-同步发牌机制说明:
-系统会强制全场所有牌桌保持进度一致。即使您所在的牌桌已经完成了当前牌局，系统也会暂停发牌，直到场上所有其他牌桌都结束当前牌局后，才会统一发出下一手牌。]],[[触发时机：
-泡沫期：当场上剩余选手人数等于奖励名额加一时触发（即再淘汰一人，所有剩余选手均进入奖励圈）。
-决赛桌前夕：当场上剩余选手人数等于单桌满员人数加一时触发（即再淘汰一人，剩余选手将刚好坐满决赛桌）。
+How It Works
+All active tables are synchronized and play one hand at a time. Once a table completes its hand, it must wait until all other tables have finished before the next hand is dealt. Play resumes simultaneously across all tables.]],[[発動条件：
+バブル期：残りプレイヤー数が賞金圏人数＋1 名になった時（つまり、あと1名敗退すれば残りの全プレイヤーが賞金圏内に入る状態）。
+決勝直前：残りプレイヤー数が単一テーブルの満員人数＋1名になった時（つまり、あと1名敗退すれば残りのプレイヤーがちょうど決勝テーブルに収まる状態）
 
-核心目的：
-消除因牌桌进度差异导致的信息不对称。在关键阶段，确保所有选手在相同的信息环境下竞技，防止部分选手因牌桌进度较快而获得不公平优势。
+主要な目的：
+テーブル間の進行度の違いによる情報の非対称性を解消すること。重要な局面において、すべてのプレイヤーが同じ情報を所持して対戦できるようにし、一部のプレイヤーがテーブルの進行が速いことによる不当な優位性を得ることを防ぎます。
 
-同步发牌机制说明:
-系统会强制全场所有牌桌保持进度一致。即使您所在的牌桌已经完成了当前牌局，系统也会暂停发牌，直到场上所有其他牌桌都结束当前牌局后，才会统一发出下一手牌。]],[[触发时机：
+同時カード配布メカニズムについて：
+システムはすべてのテーブルの進行度を強制的に同期させます。あなたのいるテーブルが現在のハンドを終了しても、他のすべてのテーブルの進行中のハンドが終了するまで、システムは次のハンドの配布を一時停止します。すべてのテーブルの終了を確認後、一斉に次のハンドが配布されます。]],[[触发时机：
 泡沫期：当场上剩余选手人数等于奖励名额加一时触发（即再淘汰一人，所有剩余选手均进入奖励圈）。
 决赛桌前夕：当场上剩余选手人数等于单桌满员人数加一时触发（即再淘汰一人，剩余选手将刚好坐满决赛桌）。
 
@@ -11650,22 +13929,31 @@ Ante：比赛后期通常会引入Ante（前注），每手牌大盲玩家支付
 
 同步发牌机制说明:
 系统会强制全场所有牌桌保持进度一致。即使您所在的牌桌已经完成了当前牌局，系统也会暂停发牌，直到场上所有其他牌桌都结束当前牌局后，才会统一发出下一手牌。]]},
-{"LAB_TOURNAMENT_MTT_INFO50","级别{p1}","级别{p1}","级别{p1}","级别{p1}","级别{p1}"},
-{"LAB_TOURNAMENT_MTT_INFO51","进入比赛","进入比赛","进入比赛","进入比赛","进入比赛"},
+{"LAB_TOURNAMENT_MTT_INFO50","级别{p1}","級別{p1}","Level {p1}","レベル {p1}","级别{p1}"},
+{"LAB_TOURNAMENT_MTT_INFO51","进入比赛","進入比賽","Enter","試合に参加","进入比赛"},
 {"LAB_TOURNAMENT_MTT_INFO52",[[1.保底獎池遵循優先獎勵排名靠前的玩家的原則。若出現獎池無法滿足獎勵分配表的比例进行分配时，會優先獎勵排名靠前的玩家。
 
-2.若按獎勵結構表進行獎勵分配時，出現不足一手買入的獎勵，會将该名次獎勵取消，並将其獎勵按比例分配給前面所有玩家。]],[[1.保底獎池遵循優先獎勵排名靠前的玩家的原則。若出現獎池無法滿足獎勵分配表的比例进行分配时，會優先獎勵排名靠前的玩家。
+2.若按獎勵結構表進行獎勵分配時，出現不足一手買入的獎勵，會将该名次獎勵取消，並将其獎勵按比例分配給前面所有玩家。]],[[1、保底獎池遵循優先獎勵排名靠前的玩家的原則。若出現獎池無法滿足獎勵分配表的比例進行分配時，會優先獎勵排名靠前的玩家。
 
-2.若按獎勵結構表進行獎勵分配時，出現不足一手買入的獎勵，會将该名次獎勵取消，並将其獎勵按比例分配給前面所有玩家。]],[[1.保底獎池遵循優先獎勵排名靠前的玩家的原則。若出現獎池無法滿足獎勵分配表的比例进行分配时，會優先獎勵排名靠前的玩家。
+2、若按獎勵結構表進行獎勵分配時，出現不足一手買入的獎勵，會將該名次獎勵取消，並將其獎勵按比例分配給前面所有玩家。]],[[1. The guaranteed prize pool is distributed according to the payout structure. If the total prize pool is insufficient to cover the full payout structure, prizes are allocated in descending order, starting from the highest-ranking positions, until the prize pool is exhausted.
 
-2.若按獎勵結構表進行獎勵分配時，出現不足一手買入的獎勵，會将该名次獎勵取消，並将其獎勵按比例分配給前面所有玩家。]],[[1.保底獎池遵循優先獎勵排名靠前的玩家的原則。若出現獎池無法滿足獎勵分配表的比例进行分配时，會優先獎勵排名靠前的玩家。
+2. If the calculated prize for any finishing position is less than one buy-in, that position is removed from the payout structure, and its allocated amount is redistributed proportionally among all higher-ranking positions.]],[[1.保証賞金は、上位ランキングのプレイヤーを優先して報酬が配分される仕組みとなっております。保証賞金配分表に定められた割合での配分が難しい場合には、ランキング上位のプレイヤーから順に報酬が付与されます。
 
-2.若按獎勵結構表進行獎勵分配時，出現不足一手買入的獎勵，會将该名次獎勵取消，並将其獎勵按比例分配給前面所有玩家。]],[[1.保底獎池遵循優先獎勵排名靠前的玩家的原則。若出現獎池無法滿足獎勵分配表的比例进行分配时，會優先獎勵排名靠前的玩家。
+2.保証賞金配分表に従い報酬を配分する際、当該順位の報酬が最小バイインに満たない場合、その順位の報酬は取り消され、当該報酬額は上位の全プレイヤーに対して所定の割合で再分配されます。]],[[1.保底獎池遵循優先獎勵排名靠前的玩家的原則。若出現獎池無法滿足獎勵分配表的比例进行分配时，會優先獎勵排名靠前的玩家。
 
 2.若按獎勵結構表進行獎勵分配時，出現不足一手買入的獎勵，會将该名次獎勵取消，並将其獎勵按比例分配給前面所有玩家。]]},
 {"LAB_TOURNAMENT_MTT_INFO53","当前排名：{p1}","目前排名：{p1}","Current rank: #{p1}","現在の順位：{p1} 位","当前排名：{p1}"},
-{"LAB_TOURNAMENT_MTT_INFO54","即将进入决赛桌-同步发牌进行中","即将进入决赛桌-同步发牌进行中","即将进入决赛桌-同步发牌进行中","即将进入决赛桌-同步发牌进行中","即将进入决赛桌-同步发牌进行中"},
-{"LAB_TOURNAMENT_MTT_INFO55","请稍候。系统将在所有牌桌就绪后自动发牌。","請稍候。系統將在所有牌桌就緒後自動發牌。","Synchronizing tables. Dealing will resume shortly.","テーブル同期中。全卓のハンド終了までお待ちください。","请稍候。系统将在所有牌桌就绪后自动发牌。"},
+{"LAB_TOURNAMENT_MTT_INFO54","即将进入决赛桌-同步发牌进行中","即將進入決賽桌-同步發牌進行中","Final Table Bubble — Hand-for-Hand Play","間もなくファイナルテーブル - ディール中","即将进入决赛桌-同步发牌进行中"},
+{"LAB_TOURNAMENT_MTT_INFO55","请稍候。系统将在所有牌桌就绪后自动发牌。","請稍後，由於即將進入決賽桌，公平起見，系統將在所有牌桌就緒後自動發牌。","Please wait while hand-for-hand play is active. To ensure fairness, hands resume simultaneously across all tables.","しばらくお待ちください。間もなくファイナルテーブルへ移行するため、公平性を期して全テーブルの準備が整い次第、自動的にディーリングが開始されます。","请稍候。系统将在所有牌桌就绪后自动发牌。"},
+{"LAB_TOURNAMENT_MTT_INFO56","牌桌","牌桌","Tables","テーブル",nil},
+{"LAB_TOURNAMENT_MTT_INFO57","围观","圍觀","Spectate","観戦",nil},
+{"LAB_TOURNAMENT_MTT_INFO58","剩余桌数：{p1}","剩餘桌數：{p1}","Remaining tables: {p1}","残りテーブル数：{p1}",nil},
+{"LAB_TOURNAMENT_MTT_INFO59","距离报名截止","距離報名截止","Reg. ends in","エントリー締め切りまであと","距离报名截止"},
+{"LAB_TOURNAMENT_MTT_INFO60","比赛时间（已结束）","比賽時間（已結束）","Start (Completed)","トーナメント時間（終了）","比赛时间（已结束）"},
+{"LAB_TOURNAMENT_MTT_INFO61","参赛人数","參賽人數","Entrants","参加人数","参赛人数"},
+{"LAB_TOURNAMENT_MTT_INFO62","为保证游戏公平，重新分配牌桌，平衡每桌人数。","為保證遊戲公平，重新分配牌桌，平衡每桌人數。","Seat reassigned to balance tables for fairness","ゲームの公平性を保つため、テーブルを再編成し、各テーブルの人数を均等にします。","为保证游戏公平，重新分配牌桌，平衡每桌人数。"},
+{"LAB_TOURNAMENT_MTT_INFO63","您报名的{p1}赛事已经开赛了，是否前往参加？","您報名的{p1}賽事已經開賽了，是否前往參加？",[[The tournament "{p1}" you registered for has started. Join now?]],"エントリー済みのトーナメント「{p1}」が開始されました。今すぐ参加しますか？","您报名的{p1}赛事已经开赛了，是否前往参加？"},
+{"LAB_TOURNAMENT_MTT_INFO64","级别","級別","Level","レベル","级别"},
 {"LAB_FESTIVAL_ACTIVITY_RULES_TITLE","活动规则","活動規則","Event Rules","イベントルール","Event Rules"},
 {"LAB_FESTIVAL_ACTIVITY1_NAME_1","蓝湾新春礼","藍灣新春禮","Azure Bay New Year Gifts","藍湾新春礼","Azure Bay New Year Gifts"},
 {"LAB_FESTIVAL_ACTIVITY1_NAME_2","新春福袋","新春福袋","Lucky Bag Shop","新春福袋","Lucky Bag Shop"},
@@ -11763,9 +14051,9 @@ Ante：比赛后期通常会引入Ante（前注），每手牌大盲玩家支付
 ・點擊【球數】數值框，向上滑動選擇本次下注的球數。
 ・選擇好下注金額與本次的下注球數後，點擊中間的開始按鈕，即可開始本局遊戲。]],[[· Select the bet amount per ball from the "Bet" dropdown menu.
 · Select the number of balls per round from the "Balls" dropdown menu.
-· Tap the center button to start the game.]],[[・【ベット】の数値ボックスをクリックし、上方向へスライドしてボール1個あたりのベット額を選択します。
-・【ボール数】の数値ボックスをクリックし、上方向へスライドして1回のベットで使用するボール数を選択します。
-・ベットチップと今回のベットボール数を選択し、中央の抽選ボタンをクリックすると、ゲームが開始されます。]],[[·点击【下注】数值框上拉选择单颗球下注的额度.
+· Tap the center button to start the game.]],[[・【ベット】の数値ボックスをタップし、上方向へスライドしてボール1個あたりのベット額を選択します。
+・【ボール数】の数値ボックスをタップし、上方向へスライドして1回のベットで使用するボール数を選択します。
+・ベットチップと今回のベットボール数を選択し、中央の抽選ボタンをタップすると、ゲームが開始されます。]],[[·点击【下注】数值框上拉选择单颗球下注的额度.
 ·点击【球数】数值框上拉选择单次下注的额度.
 ·选择好下注筹码和本次的下注球数，点击中间的摇奖按钮即可启动本次游戏。]]},
 {"LAB_PINBALL_9","余额","餘額","Balance","残高","余额"},
@@ -11783,10 +14071,14 @@ Ante：比赛后期通常会引入Ante（前注），每手牌大盲玩家支付
 ゲーム]],"休闲游戏"},
 {"LAB_EVENT_CHECK_IN_NAME_1","新市民七日签到","新市民七日簽到","New Citizens 7-Day Check-in","新市民7日間ログイン","New Citizens 7-Day Check-in"},
 {"LAB_EVENT_CHECK_IN_NAME_2","宴会邀约","宴會邀約","Banquet Invitation","パーティーへの招待","Banquet Invitation"},
-{"LAB_EVENT_CHECK_IN_NAME_3","登校之约","登校之約","School-Day Promise","登校の約束","登校之约"},
+{"LAB_EVENT_CHECK_IN_NAME_3","登校之约","登校之約","School-Day Promise","登校の約束","School-Day Promise"},
 {"LAB_EVENT_CHECK_IN_NAME_4","微醺前夜","微醺前夜","Eve of a Gentle Buzz","ほろ酔いの前夜","Eve of a Gentle Buzz"},
+{"LAB_EVENT_CHECK_IN_NAME_5","破风启程","破風啟程","Against the Wind","風に乗って出発","Against the Wind"},
+{"LAB_EVENT_CHECK_IN_NAME_6","盛夏将至","盛夏將至","Summer Is Coming","真夏の足音","真夏の足音"},
 {"LAB_EVENT_CHECK_IN_1","活动已结束！","活動已結束！","Event has ended!","イベントは終了しました！","Event has ended!"},
-{"LAB_EVENT_CHECK_IN_START_4","新活动开始时间：2026/04/16（UTC+8）","新活動開始時間：2026/04/16（UTC+8）","New event start time: 2026/04/16 (UTC+9)","新イベント開始時間：2026/04/16","新活动开始时间：2026/04/16（UTC+8）"},
+{"LAB_EVENT_CHECK_IN_START_4","新活动开始时间：2026/04/16（UTC+8）","新活動開始時間：2026/04/16（UTC+8）","New event start time: 2026/04/16 (UTC+9)","新イベント開始時間：2026/04/16","New event start time: 2026/04/16 (UTC+9)"},
+{"LAB_EVENT_CHECK_IN_START_5","新活动开始时间：2026/05/21（UTC+8）","新活動開始時間：2026/05/21（UTC+8）","New event start time: 2026/05/21 (UTC+9)","新イベント開始時間：2026/05/21","New event start time: 2026/05/21 (UTC+9)"},
+{"LAB_EVENT_CHECK_IN_START_6","新活动开始时间：2026/06/25（UTC+8）","新活動開始時間：2026/06/25（UTC+8）","New event start time: 2026/06/25 (UTC+9)","新イベント開始時間：2026/06/25","New event start time: 2026/06/25 (UTC+9)"},
 {"LAB_PLAY_REBATE_1","发展基金","發展基金","Development Fund","発展基金","发展基金"},
 {"LAB_PLAY_REBATE_2","蓝湾发展基金","藍灣發展基金","Azure Bay Development Fund","藍湾発展基金","蓝湾发展基金"},
 {"LAB_PLAY_REBATE_3","基金等级：Level{p1}","基金等級：Level {p1}","Fund Level: Level {p1}","基金レベル：Level {p1}","基金等级：Level{p1}"},
@@ -12110,6 +14402,13 @@ Your final share of the fund is determined by your <color=#eb0c89>personal contr
 {"LAB_ACH_NAME_101_30_5","荣誉之证V","榮譽之證V","Seal of Glory V","栄誉の証V","荣誉之证V"},
 {"LAB_ACH_NAME_101_30_6","荣誉之证VI","榮譽之證VI","Seal of Glory VI","栄誉の証VI","荣誉之证VI"},
 {"LAB_ACH_NAME_101_30_7","荣誉之证VII","榮譽之證VII","Seal of Glory VII","栄誉の証VII","荣誉之证VII"},
+{"LAB_ACH_NAME_101_31_1","胜券在握I","勝券在握I","In the Bag I","勝利を我が手にI","胜券在握I"},
+{"LAB_ACH_NAME_101_31_2","胜券在握II","勝券在握II","In the Bag II","勝利を我が手にII","胜券在握II"},
+{"LAB_ACH_NAME_101_31_3","胜券在握III","勝券在握III","In the Bag III","勝利を我が手にIII","胜券在握III"},
+{"LAB_ACH_NAME_101_31_4","胜券在握IV","勝券在握IV","In the Bag IV","勝利を我が手にIV","胜券在握IV"},
+{"LAB_ACH_NAME_101_31_5","胜券在握V","勝券在握V","In the Bag V","勝利を我が手にV","胜券在握V"},
+{"LAB_ACH_NAME_101_31_6","胜券在握VI","勝券在握VI","In the Bag VI","勝利を我が手にVI","胜券在握VI"},
+{"LAB_ACH_NAME_101_31_7","胜券在握VII","勝券在握VII","In the Bag VII","勝利を我が手にVII","胜券在握VII"},
 {"LAB_ACH_NAME_201_1_1","德州扑克玩家I","德州撲克玩家I","NLH Specialist I","NLHのプレイヤーI","德州扑克玩家I"},
 {"LAB_ACH_NAME_201_1_2","德州扑克玩家II","德州撲克玩家II","NLH Specialist II","NLHのプレイヤーII","德州扑克玩家II"},
 {"LAB_ACH_NAME_201_1_3","德州扑克玩家III","德州撲克玩家III","NLH Specialist III","NLHのプレイヤーIII","德州扑克玩家III"},
@@ -12195,6 +14494,13 @@ Your final share of the fund is determined by your <color=#eb0c89>personal contr
 {"LAB_ACH_NAME_201_13_5","球如雨下V","球如雨下V","Gravity's Toll V","ボール・シャワーV","球如雨下V"},
 {"LAB_ACH_NAME_201_13_6","球如雨下VI","球如雨下VI","Gravity's Toll VI","ボール・シャワーVI","球如雨下VI"},
 {"LAB_ACH_NAME_201_13_7","球如雨下VII","球如雨下VII","Gravity's Toll VII","ボール・シャワーVII","球如雨下VII"},
+{"LAB_ACH_NAME_201_14_1","MTT玩家I","MTT玩家I","MTT Specialist I","MTTプレイヤーI","MTT玩家I"},
+{"LAB_ACH_NAME_201_14_2","MTT玩家II","MTT玩家II","MTT Specialist II","MTTプレイヤーII","MTT玩家II"},
+{"LAB_ACH_NAME_201_14_3","MTT玩家III","MTT玩家III","MTT Specialist III","MTTプレイヤーIII","MTT玩家III"},
+{"LAB_ACH_NAME_201_14_4","MTT玩家IV","MTT玩家IV","MTT Specialist IV","MTTプレイヤーIV","MTT玩家IV"},
+{"LAB_ACH_NAME_201_14_5","MTT玩家V","MTT玩家V","MTT Specialist V","MTTプレイヤーV","MTT玩家V"},
+{"LAB_ACH_NAME_201_14_6","MTT玩家VI","MTT玩家VI","MTT Specialist VI","MTTプレイヤーVI","MTT玩家VI"},
+{"LAB_ACH_NAME_201_14_7","MTT玩家VII","MTT玩家VII","MTT Specialist VII","MTTプレイヤーVII","MTT玩家VII"},
 {"LAB_ACH_NAME_301_1_1","命运轮盘I","命運輪盤I","Wheel of Fate I","運命の歯車I","命运轮盘I"},
 {"LAB_ACH_NAME_301_1_2","命运轮盘II","命運輪盤II","Wheel of Fate II","運命の歯車II","命运轮盘II"},
 {"LAB_ACH_NAME_301_1_3","命运轮盘III","命運輪盤III","Wheel of Fate III","運命の歯車III","命运轮盘III"},
@@ -12281,24 +14587,35 @@ Your final share of the fund is determined by your <color=#eb0c89>personal contr
 {"LAB_ACH_NAME_501_1_3","命运集结III","命運集結III","The A-List III","運命の集結III","命运集结III"},
 {"LAB_ACH_NAME_501_1_4","命运集结IV","命運集結IV","The A-List IV","運命の集結IV","命运集结IV"},
 {"LAB_ACH_NAME_501_1_5","命运集结V","命運集結V","The A-List V","運命の集結V","命运集结V"},
+{"LAB_ACH_NAME_501_1_6","命运集结VI","命運集結VI","The A-List VI","運命の集結VI","命运集结VI"},
 {"LAB_ACH_NAME_501_2_1","命运誓约I","命運誓約I","Sacred Pact I","運命の誓約I","命运誓约I"},
 {"LAB_ACH_NAME_501_2_2","命运誓约II","命運誓約II","Sacred Pact II","運命の誓約II","命运誓约II"},
 {"LAB_ACH_NAME_501_2_3","命运誓约III","命運誓約III","Sacred Pact III","運命の誓約III","命运誓约III"},
 {"LAB_ACH_NAME_501_2_4","命运誓约IV","命運誓約IV","Sacred Pact IV","運命の誓約IV","命运誓约IV"},
 {"LAB_ACH_NAME_501_2_5","命运誓约V","命運誓約V","Sacred Pact V","運命の誓約V","命运誓约V"},
-{"LAB_ACH_NAME_501_3_1","好礼相赠I","好禮相贈I","Generous Gver I","最高の贈り物I","好礼相赠I"},
-{"LAB_ACH_NAME_501_3_2","好礼相赠II","好禮相贈II","Generous Gver II","最高の贈り物II","好礼相赠II"},
-{"LAB_ACH_NAME_501_3_3","好礼相赠III","好禮相贈III","Generous Gver III","最高の贈り物III","好礼相赠III"},
-{"LAB_ACH_NAME_501_3_4","好礼相赠IV","好禮相贈IV","Generous Gver IV","最高の贈り物IV","好礼相赠IV"},
-{"LAB_ACH_NAME_501_3_5","好礼相赠V","好禮相贈V","Generous Gver V","最高の贈り物V","好礼相赠V"},
-{"LAB_ACH_NAME_501_3_6","好礼相赠VI","好禮相贈VI","Generous Gver VI","最高の贈り物VI","好礼相赠VI"},
-{"LAB_ACH_NAME_501_3_7","好礼相赠VII","好禮相贈VII","Generous Gver VII","最高の贈り物VII","好礼相赠VII"},
+{"LAB_ACH_NAME_501_2_6","命运誓约VI","命運誓約VI","Sacred Pact VI","運命の誓約VI","命运誓约VI"},
+{"LAB_ACH_NAME_501_3_1","好礼相赠I","好禮相贈I","Generous Giver I","最高の贈り物I","好礼相赠I"},
+{"LAB_ACH_NAME_501_3_2","好礼相赠II","好禮相贈II","Generous Giver II","最高の贈り物II","好礼相赠II"},
+{"LAB_ACH_NAME_501_3_3","好礼相赠III","好禮相贈III","Generous Giver III","最高の贈り物III","好礼相赠III"},
+{"LAB_ACH_NAME_501_3_4","好礼相赠IV","好禮相贈IV","Generous Giver IV","最高の贈り物IV","好礼相赠IV"},
+{"LAB_ACH_NAME_501_3_5","好礼相赠V","好禮相贈V","Generous Giver V","最高の贈り物V","好礼相赠V"},
+{"LAB_ACH_NAME_501_3_6","好礼相赠VI","好禮相贈VI","Generous Giver VI","最高の贈り物VI","好礼相赠VI"},
+{"LAB_ACH_NAME_501_3_7","好礼相赠VII","好禮相贈VII","Generous Giver VII","最高の贈り物VII","好礼相赠VII"},
 {"LAB_ACH_NAME_501_4_1","金鵄领导者I","金鵄領導者I","Kinshi Leader I","金鵄のリーダーI","金鵄领导者I"},
 {"LAB_ACH_NAME_501_4_2","金鵄领导者II","金鵄領導者II","Kinshi Leader II","金鵄のリーダーII","金鵄领导者II"},
+{"LAB_ACH_NAME_501_4_3","金鵄领导者III","金鵄領導者III","Kinshi Leader III","金鵄のリーダーIII","金鵄领导者III"},
 {"LAB_ACH_NAME_501_5_1","月兔领导者I","月兔領導者I","Moon Rabbit Leader I","月兎のリーダーI","月兔领导者I"},
+{"LAB_ACH_NAME_501_5_2","月兔领导者II","月兔領導者II","Moon Rabbit Leader II","月兎のリーダーII","月兔领导者II"},
+{"LAB_ACH_NAME_501_5_3","月兔领导者III","月兔領導者III","Moon Rabbit Leader III","月兎のリーダーIII","月兔领导者III"},
 {"LAB_ACH_NAME_501_6_1","蜜熊领导者I","蜜熊領導者I","Honey Bear Leader I","蜜熊のリーダーI","蜜熊领导者I"},
+{"LAB_ACH_NAME_501_6_2","蜜熊领导者II","蜜熊領導者II","Honey Bear Leader II","蜜熊のリーダーII","蜜熊领导者II"},
+{"LAB_ACH_NAME_501_6_3","蜜熊领导者III","蜜熊領導者III","Honey Bear Leader III","蜜熊のリーダーIII","蜜熊领导者III"},
 {"LAB_ACH_NAME_501_7_1","阿里翁领导者I","阿里翁領導者I","Arion Leader I","アリオンのリーダーI","阿里翁领导者I"},
+{"LAB_ACH_NAME_501_7_2","阿里翁领导者II","阿里翁領導者II","Arion Leader II","アリオンのリーダーII","阿里翁领导者II"},
+{"LAB_ACH_NAME_501_7_3","阿里翁领导者III","阿里翁領導者III","Arion Leader III","アリオンのリーダーIII","阿里翁领导者III"},
 {"LAB_ACH_NAME_501_8_1","冥犬领导者I","冥犬領導者I","Hellhound Leader I","冥犬のリーダーI","冥犬领导者I"},
+{"LAB_ACH_NAME_501_8_2","冥犬领导者II","冥犬領導者II","Hellhound Leader II","冥犬のリーダーII","冥犬领导者II"},
+{"LAB_ACH_NAME_501_8_3","冥犬领导者III","冥犬領導者III","Hellhound Leader III","冥犬のリーダーIII","冥犬领导者III"},
 {"LAB_ACH_NAME_501_9_1","加奈的牌局I","加奈的牌局I","Kana's Game I","かなの対局I","加奈的牌局I"},
 {"LAB_ACH_NAME_501_9_2","加奈的牌局II","加奈的牌局II","Kana's Game II","かなの対局II","加奈的牌局II"},
 {"LAB_ACH_NAME_501_9_3","加奈的牌局III","加奈的牌局III","Kana's Game III","かなの対局III","加奈的牌局III"},
@@ -12390,6 +14707,20 @@ Your final share of the fund is determined by your <color=#eb0c89>personal contr
 {"LAB_ACH_NAME_501_21_5","薰的牌局V","薰的牌局V","Kaoru's Game V","薫の対局V","薰的牌局V"},
 {"LAB_ACH_NAME_501_21_6","薰的牌局VI","薰的牌局VI","Kaoru's Game VI","薫の対局VI","薰的牌局VI"},
 {"LAB_ACH_NAME_501_21_7","薰的牌局VII","薰的牌局VII","Kaoru's Game VII","薫の対局VII","薰的牌局VII"},
+{"LAB_ACH_NAME_501_61_1","沐娜的牌局I","沐娜的牌局I","Moona's Game I","ムーナの対局I","沐娜的牌局I"},
+{"LAB_ACH_NAME_501_61_2","沐娜的牌局II","沐娜的牌局II","Moona's Game II","ムーナの対局II","沐娜的牌局II"},
+{"LAB_ACH_NAME_501_61_3","沐娜的牌局III","沐娜的牌局III","Moona's Game III","ムーナの対局III","沐娜的牌局III"},
+{"LAB_ACH_NAME_501_61_4","沐娜的牌局IV","沐娜的牌局IV","Moona's Game IV","ムーナの対局IV","沐娜的牌局IV"},
+{"LAB_ACH_NAME_501_61_5","沐娜的牌局V","沐娜的牌局V","Moona's Game V","ムーナの対局V","沐娜的牌局V"},
+{"LAB_ACH_NAME_501_61_6","沐娜的牌局VI","沐娜的牌局VI","Moona's Game VI","ムーナの対局VI","沐娜的牌局VI"},
+{"LAB_ACH_NAME_501_61_7","沐娜的牌局VII","沐娜的牌局VII","Moona's Game VII","ムーナの対局VII","沐娜的牌局VII"},
+{"LAB_ACH_NAME_501_62_1","绘里奈的牌局I","繪里奈的牌局I","Erina's Game I","えりなの対局I","绘里奈的牌局I"},
+{"LAB_ACH_NAME_501_62_2","绘里奈的牌局II","繪里奈的牌局II","Erina's Game II","えりなの対局II","绘里奈的牌局II"},
+{"LAB_ACH_NAME_501_62_3","绘里奈的牌局III","繪里奈的牌局III","Erina's Game III","えりなの対局III","绘里奈的牌局III"},
+{"LAB_ACH_NAME_501_62_4","绘里奈的牌局IV","繪里奈的牌局IV","Erina's Game IV","えりなの対局IV","绘里奈的牌局IV"},
+{"LAB_ACH_NAME_501_62_5","绘里奈的牌局V","繪里奈的牌局V","Erina's Game V","えりなの対局V","绘里奈的牌局V"},
+{"LAB_ACH_NAME_501_62_6","绘里奈的牌局VI","繪里奈的牌局VI","Erina's Game VI","えりなの対局VI","绘里奈的牌局VI"},
+{"LAB_ACH_NAME_501_62_7","绘里奈的牌局VII","繪里奈的牌局VII","Erina's Game VII","えりなの対局VII","绘里奈的牌局VII"},
 {"LAB_ACH_NAME_501_22_1","加奈的赛事I","加奈的賽事I","Kana's Tourney I","かなの大会I","加奈的赛事I"},
 {"LAB_ACH_NAME_501_22_2","加奈的赛事II","加奈的賽事II","Kana's Tourney II","かなの大会II","加奈的赛事II"},
 {"LAB_ACH_NAME_501_22_3","加奈的赛事III","加奈的賽事III","Kana's Tourney III","かなの大会III","加奈的赛事III"},
@@ -12481,6 +14812,20 @@ Your final share of the fund is determined by your <color=#eb0c89>personal contr
 {"LAB_ACH_NAME_501_34_5","薰的赛事V","薰的賽事V","Kaoru's Tourney V","薫の大会V","薰的赛事V"},
 {"LAB_ACH_NAME_501_34_6","薰的赛事VI","薰的賽事VI","Kaoru's Tourney VI","薫の大会VI","薰的赛事VI"},
 {"LAB_ACH_NAME_501_34_7","薰的赛事VII","薰的賽事VII","Kaoru's Tourney VII","薫の大会VII","薰的赛事VII"},
+{"LAB_ACH_NAME_501_63_1","沐娜的赛事I","沐娜的賽事I","Moona's Tourney I","ムーナの大会I","沐娜的赛事I"},
+{"LAB_ACH_NAME_501_63_2","沐娜的赛事II","沐娜的賽事II","Moona's Tourney II","ムーナの大会II","沐娜的赛事II"},
+{"LAB_ACH_NAME_501_63_3","沐娜的赛事III","沐娜的賽事III","Moona's Tourney III","ムーナの大会III","沐娜的赛事III"},
+{"LAB_ACH_NAME_501_63_4","沐娜的赛事IV","沐娜的賽事IV","Moona's Tourney IV","ムーナの大会IV","沐娜的赛事IV"},
+{"LAB_ACH_NAME_501_63_5","沐娜的赛事V","沐娜的賽事V","Moona's Tourney V","ムーナの大会V","沐娜的赛事V"},
+{"LAB_ACH_NAME_501_63_6","沐娜的赛事VI","沐娜的賽事VI","Moona's Tourney VI","ムーナの大会VI","沐娜的赛事VI"},
+{"LAB_ACH_NAME_501_63_7","沐娜的赛事VII","沐娜的賽事VII","Moona's Tourney VII","ムーナの大会VII","沐娜的赛事VII"},
+{"LAB_ACH_NAME_501_64_1","绘里奈的赛事I","繪里奈的賽事I","Erina's Tourney I","えりなの大会I","绘里奈的赛事I"},
+{"LAB_ACH_NAME_501_64_2","绘里奈的赛事II","繪里奈的賽事II","Erina's Tourney II","えりなの大会II","绘里奈的赛事II"},
+{"LAB_ACH_NAME_501_64_3","绘里奈的赛事III","繪里奈的賽事III","Erina's Tourney III","えりなの大会III","绘里奈的赛事III"},
+{"LAB_ACH_NAME_501_64_4","绘里奈的赛事IV","繪里奈的賽事IV","Erina's Tourney IV","えりなの大会IV","绘里奈的赛事IV"},
+{"LAB_ACH_NAME_501_64_5","绘里奈的赛事V","繪里奈的賽事V","Erina's Tourney V","えりなの大会V","绘里奈的赛事V"},
+{"LAB_ACH_NAME_501_64_6","绘里奈的赛事VI","繪里奈的賽事VI","Erina's Tourney VI","えりなの大会VI","绘里奈的赛事VI"},
+{"LAB_ACH_NAME_501_64_7","绘里奈的赛事VII","繪里奈的賽事VII","Erina's Tourney VII","えりなの大会VII","绘里奈的赛事VII"},
 {"LAB_ACH_NAME_501_35_1","与加奈的羁绊I","與加奈的羈絆I","Soul-Bound Kana I","かなとの絆I","与加奈的羁绊I"},
 {"LAB_ACH_NAME_501_35_2","与加奈的羁绊II","與加奈的羈絆II","Soul-Bound Kana II","かなとの絆II","与加奈的羁绊II"},
 {"LAB_ACH_NAME_501_35_3","与加奈的羁绊III","與加奈的羈絆III","Soul-Bound Kana III","かなとの絆III","与加奈的羁绊III"},
@@ -12572,6 +14917,20 @@ Your final share of the fund is determined by your <color=#eb0c89>personal contr
 {"LAB_ACH_NAME_501_47_5","与薰的羁绊V","與薰的羈絆V","Soul-Bound Kaoru V","薫との絆V","与薰的羁绊V"},
 {"LAB_ACH_NAME_501_47_6","与薰的羁绊VI","與薰的羈絆VI","Soul-Bound Kaoru VI","薫との絆VI","与薰的羁绊VI"},
 {"LAB_ACH_NAME_501_47_7","与薰的羁绊VII","與薰的羈絆VII","Soul-Bound Kaoru VII","薫との絆VII","与薰的羁绊VII"},
+{"LAB_ACH_NAME_501_65_1","与沐娜的羁绊I","與沐娜的羈絆I","Soul-Bound Moona I","ムーナとの絆I","与沐娜的羁绊I"},
+{"LAB_ACH_NAME_501_65_2","与沐娜的羁绊II","與沐娜的羈絆II","Soul-Bound Moona II","ムーナとの絆II","与沐娜的羁绊II"},
+{"LAB_ACH_NAME_501_65_3","与沐娜的羁绊III","與沐娜的羈絆III","Soul-Bound Moona III","ムーナとの絆III","与沐娜的羁绊III"},
+{"LAB_ACH_NAME_501_65_4","与沐娜的羁绊IV","與沐娜的羈絆IV","Soul-Bound Moona IV","ムーナとの絆IV","与沐娜的羁绊IV"},
+{"LAB_ACH_NAME_501_65_5","与沐娜的羁绊V","與沐娜的羈絆V","Soul-Bound Moona V","ムーナとの絆V","与沐娜的羁绊V"},
+{"LAB_ACH_NAME_501_65_6","与沐娜的羁绊VI","與沐娜的羈絆VI","Soul-Bound Moona VI","ムーナとの絆VI","与沐娜的羁绊VI"},
+{"LAB_ACH_NAME_501_65_7","与沐娜的羁绊VII","與沐娜的羈絆VII","Soul-Bound Moona VII","ムーナとの絆VII","与沐娜的羁绊VII"},
+{"LAB_ACH_NAME_501_66_1","与绘里奈的羁绊I","與繪里奈的羈絆I","Soul-Bound Erina I","えりなとの絆I","与绘里奈的羁绊I"},
+{"LAB_ACH_NAME_501_66_2","与绘里奈的羁绊II","與繪里奈的羈絆II","Soul-Bound Erina II","えりなとの絆II","与绘里奈的羁绊II"},
+{"LAB_ACH_NAME_501_66_3","与绘里奈的羁绊III","與繪里奈的羈絆III","Soul-Bound Erina III","えりなとの絆III","与绘里奈的羁绊III"},
+{"LAB_ACH_NAME_501_66_4","与绘里奈的羁绊IV","與繪里奈的羈絆IV","Soul-Bound Erina IV","えりなとの絆IV","与绘里奈的羁绊IV"},
+{"LAB_ACH_NAME_501_66_5","与绘里奈的羁绊V","與繪里奈的羈絆V","Soul-Bound Erina V","えりなとの絆V","与绘里奈的羁绊V"},
+{"LAB_ACH_NAME_501_66_6","与绘里奈的羁绊VI","與繪里奈的羈絆VI","Soul-Bound Erina VI","えりなとの絆VI","与绘里奈的羁绊VI"},
+{"LAB_ACH_NAME_501_66_7","与绘里奈的羁绊VII","與繪里奈的羈絆VII","Soul-Bound Erina VII","えりなとの絆VII","与绘里奈的羁绊VII"},
 {"LAB_ACH_NAME_501_48_1","加奈的主人","加奈的主人","Kana's Master","かなのご主人様","加奈的主人"},
 {"LAB_ACH_NAME_501_49_1","诺诺的抱枕","諾諾的抱枕","Nono's Pillow","ノノの抱き枕","诺诺的抱枕"},
 {"LAB_ACH_NAME_501_50_1","琉华的幼驯染","琉華的幼馴染","Ruka's Sweetheart","るかの幼馴染","琉华的幼驯染"},
@@ -12585,6 +14944,8 @@ Your final share of the fund is determined by your <color=#eb0c89>personal contr
 {"LAB_ACH_NAME_501_58_1","朱朱的保护对象","朱朱的保護對象","Syusyu's Protected One","朱々の護衛対象","朱朱的保护对象"},
 {"LAB_ACH_NAME_501_59_1","薇尔的命中注定","薇爾的命中注定","Veil's Chosen One","ヴェールの運命の人","薇尔的命中注定"},
 {"LAB_ACH_NAME_501_60_1","薰的伞下客","薰的傘下客","Kaoru's Umbrella Guest","薫の傘を共に","薰的伞下客"},
+{"LAB_ACH_NAME_501_67_1","沐娜的舞伴","沐娜的舞伴","Moona's Dance Partner","ムーナの踊り相手","沐娜的舞伴"},
+{"LAB_ACH_NAME_501_68_1","绘里奈的约会对象","繪里奈的約會對象","Erina's Date","えりなのデート相手","绘里奈的约会对象"},
 {"TAB_ACHIEVEMENT_DEC_1","All In且获胜{p1}次","All In並獲勝{p1}次","Win {p1} time(s) after going all-in","オールインで{p1}回勝利","All In且获胜{p1}次"},
 {"TAB_ACHIEVEMENT_DEC_2_1","AA起手获胜{p1}次","以起手牌AA獲勝{p1}次","Win {p1} time(s) with AA","AAのハンドで{p1}回勝利","AA起手获胜{p1}次"},
 {"TAB_ACHIEVEMENT_DEC_2_2","KK起手获胜{p1}次","以起手牌KK獲勝{p1}次","Win {p1} time(s) with KK","KKのハンドで{p1}回勝利","KK起手获胜{p1}次"},
@@ -12642,6 +15003,8 @@ Your final share of the fund is determined by your <color=#eb0c89>personal contr
 {"TAB_ACHIEVEMENT_DEC_35_11","使用朱朱打{p1}手牌","使用朱朱打{p1}手牌","Play {p1} hands using Syusyu","朱々で{p1}ハンドプレイ","使用朱朱打{p1}手牌"},
 {"TAB_ACHIEVEMENT_DEC_35_12","使用薇尔打{p1}手牌","使用薇爾打{p1}手牌","Play {p1} hands using Veil","ヴェールで{p1}ハンドプレイ","使用薇尔打{p1}手牌"},
 {"TAB_ACHIEVEMENT_DEC_35_13","使用凉风薰打{p1}手牌","使用涼風薰打{p1}手牌","Play {p1} hands using Suzukaze Kaoru","涼風薫で{p1}ハンドプレイ","使用凉风薰打{p1}手牌"},
+{"TAB_ACHIEVEMENT_DEC_35_14","使用沐娜打{p1}手牌","使用沐娜打{p1}手牌","Play {p1} hands using Moona","ムーナで{p1}ハンドプレイ","使用沐娜打{p1}手牌"},
+{"TAB_ACHIEVEMENT_DEC_35_15","使用绘里奈打{p1}手牌","使用繪里奈打{p1}手牌","Play {p1} hands using Erina","えりなで{p1}ハンドプレイ","使用绘里奈打{p1}手牌"},
 {"TAB_ACHIEVEMENT_DEC_36_1","使用星宫加奈参与{p1}场赛事","使用星宮加奈參與{p1}場賽事","Join {p1} tournament(s) using Hoshimiya Kana","星宮かなでトーナメントに{p1}回参加","使用星宫加奈参与{p1}场赛事"},
 {"TAB_ACHIEVEMENT_DEC_36_2","使用诺诺参与{p1}场赛事","使用諾諾參與{p1}場賽事","Join {p1} tournament(s) using Nono","ノノでトーナメントに{p1}回参加","使用诺诺参与{p1}场赛事"},
 {"TAB_ACHIEVEMENT_DEC_36_3","使用雾间琉华参与{p1}场赛事","使用霧間琉華參與{p1}場賽事","Join {p1} tournament(s) using Kirima Ruka","霧間るかでトーナメントに{p1}回参加","使用雾间琉华参与{p1}场赛事"},
@@ -12655,6 +15018,8 @@ Your final share of the fund is determined by your <color=#eb0c89>personal contr
 {"TAB_ACHIEVEMENT_DEC_36_11","使用朱朱参与{p1}场赛事","使用朱朱參與{p1}場賽事","Join {p1} tournament(s) using Syusyu","朱々でトーナメントに{p1}回参加","使用朱朱参与{p1}场赛事"},
 {"TAB_ACHIEVEMENT_DEC_36_12","使用薇尔参与{p1}场赛事","使用薇爾參與{p1}場賽事","Join {p1} tournament(s) using Veil","ヴェールでトーナメントに{p1}回参加","使用薇尔参与{p1}场赛事"},
 {"TAB_ACHIEVEMENT_DEC_36_13","使用凉风薰参与{p1}场赛事","使用涼風薰參與{p1}場賽事","Join {p1} tournament(s) using Suzukaze Kaoru","涼風薫でトーナメントに{p1}回参加","使用凉风薰参与{p1}场赛事"},
+{"TAB_ACHIEVEMENT_DEC_36_14","使用沐娜参与{p1}场赛事","使用沐娜參與{p1}場賽事","Join {p1} tournament(s) using Moona","ムーナでトーナメントに{p1}回参加","使用沐娜参与{p1}场赛事"},
+{"TAB_ACHIEVEMENT_DEC_36_15","使用绘里奈参与{p1}场赛事","使用繪里奈參與{p1}場賽事","Join {p1} tournament(s) using Erina","えりなでトーナメントに{p1}回参加","使用绘里奈参与{p1}场赛事"},
 {"TAB_ACHIEVEMENT_DEC_37_1","使用星宫加奈打牌获得{p1}好感度","使用星宮加奈進行對局並獲得{p1}點好感度","Earn {p1} Affinity using Hoshimiya Kana","星宮かなの好感度を{p1}獲得","使用星宫加奈打牌获得{p1}好感度"},
 {"TAB_ACHIEVEMENT_DEC_37_2","使用诺诺打牌获得{p1}好感度","使用諾諾進行對局並獲得{p1}點好感度","Earn {p1} Affinity using Nono","ノノの好感度を{p1}獲得","使用诺诺打牌获得{p1}好感度"},
 {"TAB_ACHIEVEMENT_DEC_37_3","使用雾间琉华打牌获得{p1}好感度","使用霧間琉華進行對局並獲得{p1}點好感度","Earn {p1} Affinity using Kirima Ruka","霧間るかの好感度を{p1}獲得","使用雾间琉华打牌获得{p1}好感度"},
@@ -12668,6 +15033,8 @@ Your final share of the fund is determined by your <color=#eb0c89>personal contr
 {"TAB_ACHIEVEMENT_DEC_37_11","使用朱朱打牌获得{p1}好感度","使用朱朱進行對局並獲得{p1}點好感度","Earn {p1} Affinity using Syusyu","朱々の好感度を{p1}獲得","使用朱朱打牌获得{p1}好感度"},
 {"TAB_ACHIEVEMENT_DEC_37_12","使用薇尔打牌获得{p1}好感度","使用薇爾進行對局並獲得{p1}點好感度","Earn {p1} Affinity using Veil","ヴェールの好感度を{p1}獲得","使用薇尔打牌获得{p1}好感度"},
 {"TAB_ACHIEVEMENT_DEC_37_13","使用凉风薰打牌获得{p1}好感度","使用涼風薰進行對局並獲得{p1}點好感度","Earn {p1} Affinity using Suzukaze Kaoru","涼風薫の好感度を{p1}獲得","使用凉风薰打牌获得{p1}好感度"},
+{"TAB_ACHIEVEMENT_DEC_37_14","使用沐娜打牌获得{p1}好感度","使用沐娜進行對局並獲得{p1}點好感度","Earn {p1} Affinity using Moona","ムーナの好感度を{p1}獲得","使用沐娜打牌获得{p1}好感度"},
+{"TAB_ACHIEVEMENT_DEC_37_15","使用绘里奈打牌获得{p1}好感度","使用繪里奈進行對局並獲得{p1}點好感度","Earn {p1} Affinity using Erina","えりなの好感度を{p1}獲得","使用绘里奈打牌获得{p1}好感度"},
 {"TAB_ACHIEVEMENT_DEC_38","与{p1}完成誓约","與{p1}完成誓約","Form an Oath with {p1}","{p1}との誓約を完了","与{p1}完成誓约"},
 {"TAB_ACHIEVEMENT_DEC_39_1","累计获得{p1}王座积分","累計獲得{p1}王座積分","Obtain a total of {p1} Throne Points","累計{p1}王座ポイントを獲得","累计获得{p1}王座积分"},
 {"TAB_ACHIEVEMENT_DEC_39_2","累计获得{p1}荣誉积分","累計獲得{p1}榮譽積分","Obtain a total of {p1} Honor Points","累計{p1}名誉ポイントを獲得","累计获得{p1}荣誉积分"},
@@ -12681,7 +15048,249 @@ Your final share of the fund is determined by your <color=#eb0c89>personal contr
 {"TAB_ACHIEVEMENT_DEC_40_8","获得两对{p1}次","擊中{p1}次兩對","Hit Two Pair {p1} time(s)","ツーペアを{p1}回達成","获得两对{p1}次"},
 {"TAB_ACHIEVEMENT_DEC_40_9","获得一对{p1}次","擊中{p1}次一對","Hit One Pair {p1} time(s)","ワンペアを{p1}回達成","获得一对{p1}次"},
 {"TAB_ACHIEVEMENT_DEC_40_10","获得高牌{p1}次","擊中{p1}次高牌","Hit High Card {p1} time(s)","ハイカードを{p1}回達成","获得高牌{p1}次"},
-{"TAB_ACHIEVEMENT_DEC_41","誓约{p1}位牌手","誓約{p1}位牌手","Form an Oath with {p1} characters","{p1}人のキャラと誓約を結ぶ","誓约{p1}位牌手"}
+{"TAB_ACHIEVEMENT_DEC_41","誓约{p1}位牌手","誓約{p1}位牌手","Form an Oath with {p1} characters","{p1}人のキャラと誓約を結ぶ","誓约{p1}位牌手"},
+{"TAB_ACHIEVEMENT_DEC_42","MTT赛事进入奖励圈{p1}次","MTT賽事進入獎勵圈{p1}次","Get ITM in {p1} MTT(s)","MTTでインザマネーを{p1}回達成","MTT赛事进入奖励圈{p1}次"},
+{"TAB_ACHIEVEMENT_DEC_43","累计参与{p2}场MTT","累計參與{p2}場MTT","Participate in {p2} MTTs","MTTに累計{p2}回参加","累计参与{p2}场MTT"},
+{"LAB_FOOTBALL_NAME_1","足球竞猜","足球競猜","Football Predictor","サッカー勝敗予想","Football Predictor"},
+{"LAB_FOOTBALL_1","未开始","未開始","Upcoming","未開始","Upcoming"},
+{"LAB_FOOTBALL_2","进行中","進行中","Live","進行中","Live"},
+{"LAB_FOOTBALL_3","已结束","已結束","Finished","終了","Finished"},
+{"LAB_FOOTBALL_4","平局","平局","Draw","引き分け","Draw"},
+{"LAB_FOOTBALL_5","下注详情","下注詳情","Bet Slip","ベット詳細","Bet Slip"},
+{"LAB_FOOTBALL_6","清空","清空","Reset","クリア","Reset"},
+{"LAB_FOOTBALL_7","确认下注","確認下注","Submit","ベット確定","Submit"},
+{"LAB_FOOTBALL_8","下注对象","下注對象","Selection","ベット対象","Selection"},
+{"LAB_FOOTBALL_9","您的下注额","您的下注額","Bet Amount","会長のベット額","Bet Amount"},
+{"LAB_FOOTBALL_10","预计可获得","預計可獲得","Est. Payout","獲得予定額","Est. Payout"},
+{"LAB_FOOTBALL_11","我的下注","我的下注","My Bets","マイベット","My Bets"},
+{"LAB_FOOTBALL_12","{p1} - {p2} VS {p3} ({p4})","{p1} - {p2} VS {p3} ({p4})","{p1} - {p2} vs {p3} ({p4})","{p1} - {p2} VS {p3} ({p4})","{p1} - {p2} vs {p3} ({p4})"},
+{"LAB_FOOTBALL_13","下注额","下注額","Bet Amount","ベット額","Bet Amount"},
+{"LAB_FOOTBALL_14","奖励","獎勵","Payout","報酬","Payout"},
+{"LAB_FOOTBALL_15","前往下注","前往下注","Bet Now","今すぐベット","Bet Now"},
+{"LAB_FOOTBALL_16","奖励将在比赛结算后通过邮件发放！","獎勵將在比賽結算後通過郵件發放！","Winnings will be sent via mail after the result is confirmed.","報酬は試合結果が出た後、メールにて配布されます。","Winnings will be sent via mail after the result is confirmed."},
+{"LAB_FOOTBALL_17","比赛因故取消，您的下注金额将会通过邮件全额返还！","比賽因故取消，您的下注金額將會通過郵件全額返還！","This match has been canceled. Your bet will be refunded in full by mail!","試合が中止された場合、ベット額はメールにて全額返還されます。","This match has been canceled. Your bet will be refunded in full by mail!"},
+{"LAB_FOOTBALL_18","仅展示近50场比赛记录","僅展示近50場比賽記錄","Only the latest 50 records are displayed.","直近50試合の記録のみ表示されます","Only the latest 50 records are displayed."},
+{"LAB_FOOTBALL_19","暂无比赛记录","暫無比賽記錄","No betting history","試合記録がありません","No betting history"},
+{"LAB_FOOTBALL_20","{p1}({p2})","{p1}({p2})","{p1}({p2})","{p1}({p2})","{p1}({p2})"},
+{"LAB_FOOTBALL_21","已取消","已取消","Canceled","試合中止","Canceled"},
+{"LAB_FOOTBALL_TIPS_1","下注成功！","下注成功！","Bets placed!","ベット完了！","Bets placed!"},
+{"LAB_FOOTBALL_TIPS_2","请点击上方区域进行下注！","請點擊上方區域進行下注！","Select a result above to start betting!","上のエリアをタップしてベットしてください！","Select a result above to start betting!"},
+{"LAB_FOOTBALL_TIPS_3","下注失败，请稍后再尝试！","下注失敗，請稍後再嘗試！","Bet failed. Please try again later!","ベットに失敗しました。しばらくしてからお試しください。","Bet failed. Please try again later!"},
+{"LAB_FOOTBALL_TIPS_4","下注已锁定！","下注已鎖定！","Betting closed","ベット受付は終了しました！","Betting closed"},
+{"LAB_FOOTBALL_TIPS_5","比赛已下架！","比賽已下架！","This match is no longer available!","この試合の掲載は終了しました！","This match is no longer available!"},
+{"LAB_FOOTBALL_TIPS_6","比赛准备中，敬请期待！","比賽準備中，敬請期待！","Matches coming soon—stay tuned!","試合準備中につき、公開まで今しばらくお待ちください。","Matches coming soon—stay tuned!"},
+{"LAB_FOOTBALL_RULES",[[活动概述
+活动期间，会长可参与足球比赛竞猜。
+ · 竞猜机制：猜对玩家将根据下注比例，瓜分由猜错玩家构成的奖池奖金。
+ · 下注方式：支持对同一场比赛的不同结果进行多次下注。
+※一旦下注成功，下注金额将无法撤回。
+
+比赛类型与玩法
+足球比赛分为非淘汰赛与淘汰赛两种类型，具体规则如下：
+ · 非淘汰赛
+ - 下注选项：队伍1胜、平、队伍2胜（3项）。
+ - 结算方式：比赛结算后，根据猜对玩家在猜对选项的总下注比例，瓜分另外2个猜错选项的奖池金额。      
+ · 淘汰赛
+ - 下注选项：队伍1胜、队伍2胜（2项）。
+ - 结算方式：比赛结算后，根据猜对玩家在猜对选项的总下注比例，瓜分另外一个猜错选项的奖池金额。
+ - 最终结果：比赛在常规时间与加时赛均未分出胜负时，将以点球大战的胜方作为比赛最终结算结果。
+
+费用与结算
+服务费：每场比赛竞猜会收取猜错方奖池金额10%的服务费。
+结果确认：所有比赛结果将在比赛结束后的24小时内确认。
+奖励发放：竞猜奖励确认无误后，将通过邮件形式发放。
+
+异常处理（比赛取消）
+若比赛因天气、事故等不可抗力因素被取消：
+ · 该场比赛的所有相关下注将被视为无效。
+ · 系统将自动通过邮件退还下注金额。]],[[活動概述
+活動期間，會長可參與足球比賽競猜。
+ · 競猜機制：猜對玩家將根據下注比例，瓜分由猜錯玩家構成的獎池獎金。
+ · 下注方式：支持對同一場比賽的不同結果進行多次下注。
+※一旦下注成功，下注金額將無法撤回。
+
+比賽類型與玩法
+足球比賽分為非淘汰賽與淘汰賽兩種類型，具體規則如下：
+ · 非淘汰賽
+ - 下注選項：隊伍1勝、平、隊伍2勝（3項）。
+ - 結算方式：比賽結算後，根據猜對玩家在猜對選項的總下注比例，瓜分另外2個猜錯選項的獎池金額。 
+ · 淘汰賽
+ - 下注選項：隊伍1勝、隊伍2勝（2項）。
+ - 結算方式：比賽結算後，根據猜對玩家在猜對選項的總下注比例，瓜分另外一個猜錯選項的獎池金額。 
+ - 最終結果：比賽在常規時間與加時賽均未分出勝負時，將以點球大戰的勝方作為比賽最終結算結果。
+
+費用與結算
+服務費：每場比賽競猜會收取猜錯方獎池金額10%的服務費。
+結果確認：所有比賽結果將在比賽結束後的24小時內確認。
+獎勵發放：競猜獎勵確認無誤後，將通過郵件形式發放。
+
+異常處理（比賽取消）
+若比賽因天氣、事故等不可抗力因素被取消：
+ · 該場比賽的所有相關下注將被視為無效。
+ · 系統將自動通過郵件退還下注金額。]],[[Overview
+During the event, you can place bets on featured football matches.
+· How It Works: Players who correctly predict the match outcome share the prize pool generated by losing bets. Each winner's share is proportional to the amount of chips they bet on the winning outcome.
+· Betting: You may place multiple bets on different outcomes of the same match.
+※ Note: Once a bet is placed, it cannot be canceled or modified.
+
+Match Types & Settlement
+Matches are divided into two types, each with its own settlement rules:
+1. Group Stage
+- Outcomes: Team 1 Wins, Draw, Team 2 Wins (3 options)
+- Settlement: Players who bet on the correct outcome share the combined pool of the two losing outcomes, proportional to their share of the total winning bets.
+
+2. Knockout Stage
+- Outcomes: Team 1 Wins, Team 2 Wins (2 options)
+- Settlement: Players who bet on the correct outcome share the pool of the losing outcome, proportional to their share of the total winning bets.
+- Tiebreaker: If a match remains tied after regular time and extra time, the penalty shootout result will determine the final settlement.
+
+Fees & Payouts Service
+Fee: A 10% fee is deducted from the pool generated by losing bets for each match.
+Result Confirmation: Match results are confirmed within 24 hours after the final whistle.
+Winnings Distribution: Once the result is confirmed, winnings are automatically sent via mail.
+
+Match Cancellations
+If a match is canceled due to force majeure (such as extreme weather or unforeseen incidents):
+· All bets on the affected match will be declared void.
+· All bets will be automatically refunded via mail.]],[[イベント概要
+期間中、会長はサッカーの試合結果を予想してベットすることが可能です。
+・予想の仕組み：予想的中者は、不的中者のベット額で構成された賞金プールを、自身のベット比率に応じて山分けします。
+・ベット方法：同一の試合に対し、異なる結果へ複数回ベットすることが可能です。
+※ベット成立後、ベット額の払い戻しはいたしかねます。
+
+試合形式とルール
+サッカーの試合は「非ノックアウト戦」と「ノックアウト戦」の2つの形式があり、それぞれルールが異なります。
+ ・ 非ノックアウト戦
+ - ベット項目：チーム1 勝利、引き分け、チーム2 勝利（3項目）
+ - 精算方法：試合終了後、的中した項目の総ベット額に対する自身のベット比率に応じて、不的中だった2項目の賞金プールを山分けします。
+ ・ ノックアウト戦
+ - ベット項目：チーム1 勝利、チーム2 勝利（2項目）
+ - 精算方法：試合終了後、的中した項目の総ベット額に対する自身のベット比率に応じて、不的中だった項目の賞金プールを山分けします。
+ - 最終結果：規定の時間・延長戦で勝敗が決まらない場合、PK戦の勝者が最終的な結果となります。
+
+手数料と精算
+サービス料：各試合において、不的中側の賞金プールの10%をサービス料として徴収します。
+結果確認：すべての試合結果は、試合終了後24時間以内に確認されます。
+報酬配布：予想報酬の確認が取れ次第、報酬はメールにて順次配布されます。
+
+異常時の対応（試合中止など）
+天候や事故などの不可抗力により試合が中止された場合：
+ ・該当する試合の全ベットは無効となります。
+ ・ベット額はシステムにより自動的にメールで全額返還されます。]],[[Overview
+During the event, you can place bets on featured football matches.
+· How It Works: Players who correctly predict the match outcome share the prize pool generated by losing bets. Each winner's share is proportional to the amount of chips they bet on the winning outcome.
+· Betting: You may place multiple bets on different outcomes of the same match.
+※ Note: Once a bet is placed, it cannot be canceled or modified.
+
+Match Types & Settlement
+Matches are divided into two types, each with its own settlement rules:
+1. Group Stage
+- Outcomes: Team 1 Wins, Draw, Team 2 Wins (3 options)
+- Settlement: Players who bet on the correct outcome share the combined pool of the two losing outcomes, proportional to their share of the total winning bets.
+
+2. Knockout Stage
+- Outcomes: Team 1 Wins, Team 2 Wins (2 options)
+- Settlement: Players who bet on the correct outcome share the pool of the losing outcome, proportional to their share of the total winning bets.
+- Tiebreaker: If a match remains tied after regular time and extra time, the penalty shootout result will determine the final settlement.
+
+Fees & Payouts Service
+Fee: A 10% fee is deducted from the pool generated by losing bets for each match.
+Result Confirmation: Match results are confirmed within 24 hours after the final whistle.
+Winnings Distribution: Once the result is confirmed, winnings are automatically sent via mail.
+
+Match Cancellations
+If a match is canceled due to force majeure (such as extreme weather or unforeseen incidents):
+· All bets on the affected match will be declared void.
+· All bets will be automatically refunded via mail.]]},
+{"LAB_COUNTRY_1","奥地利","奧地利","Austria","オーストリア","Austria"},
+{"LAB_COUNTRY_2","比利时","比利時","Belgium","ベルギー","Belgium"},
+{"LAB_COUNTRY_3","波黑","波赫","Bosnia and Herzegovina","ボスニア・ヘルツェゴビナ","Bosnia and Herzegovina"},
+{"LAB_COUNTRY_4","克罗地亚","克羅埃西亞","Croatia","クロアチア","Croatia"},
+{"LAB_COUNTRY_5","捷克","捷克","Czechia","チェコ","Czechia"},
+{"LAB_COUNTRY_6","英格兰","英格蘭","England","イングランド","England"},
+{"LAB_COUNTRY_7","法国","法國","France","フランス","France"},
+{"LAB_COUNTRY_8","德国","德國","Germany","ドイツ","Germany"},
+{"LAB_COUNTRY_9","荷兰","荷蘭","Netherlands","オランダ","Netherlands"},
+{"LAB_COUNTRY_10","挪威","挪威","Norway","ノルウェー","Norway"},
+{"LAB_COUNTRY_11","葡萄牙","葡萄牙","Portugal","ポルトガル","Portugal"},
+{"LAB_COUNTRY_12","苏格兰","蘇格蘭","Scotland","スコットランド","Scotland"},
+{"LAB_COUNTRY_13","西班牙","西班牙","Spain","スペイン","Spain"},
+{"LAB_COUNTRY_14","瑞典","瑞典","Sweden","スウェーデン","Sweden"},
+{"LAB_COUNTRY_15","瑞士","瑞士","Switzerland","スイス","Switzerland"},
+{"LAB_COUNTRY_16","土耳其","土耳其","Türkiye","トルコ","Türkiye"},
+{"LAB_COUNTRY_17","澳大利亚","澳洲","Australia","オーストラリア","Australia"},
+{"LAB_COUNTRY_18","伊朗","伊朗","IR Iran","イラン","IR Iran"},
+{"LAB_COUNTRY_19","伊拉克","伊拉克","Iraq","イラク","Iraq"},
+{"LAB_COUNTRY_20","日本","日本","Japan","日本","Japan"},
+{"LAB_COUNTRY_21","约旦","約旦","Jordan","ヨルダン","Jordan"},
+{"LAB_COUNTRY_22","卡塔尔","卡達","Qatar","カタール","Qatar"},
+{"LAB_COUNTRY_23","沙特阿拉伯","沙烏地阿拉伯","Saudi Arabia","サウジアラビア","Saudi Arabia"},
+{"LAB_COUNTRY_24","韩国","南韓","South Korea","韓国","South Korea"},
+{"LAB_COUNTRY_25","乌兹别克斯坦","烏茲別克","Uzbekistan","ウズベキスタン","Uzbekistan"},
+{"LAB_COUNTRY_26","阿尔及利亚","阿爾及利亞","Algeria","アルジェリア","Algeria"},
+{"LAB_COUNTRY_27","佛得角","維德角","Cabo Verde","カーボベルデ","Cabo Verde"},
+{"LAB_COUNTRY_28","刚果民主共和国","剛果民主共和國","Congo DR","コンゴ","Congo DR"},
+{"LAB_COUNTRY_29","埃及","埃及","Egypt","エジプト","Egypt"},
+{"LAB_COUNTRY_30","加纳","迦納","Ghana","ガーナ","Ghana"},
+{"LAB_COUNTRY_31","科特迪瓦","象牙海岸","Côte d'Ivoire","コートジボワール","Côte d'Ivoire"},
+{"LAB_COUNTRY_32","摩洛哥","摩洛哥","Morocco","モロッコ","Morocco"},
+{"LAB_COUNTRY_33","塞内加尔","塞內加爾","Senegal","セネガル","Senegal"},
+{"LAB_COUNTRY_34","南非","南非","South Africa","南アフリカ","South Africa"},
+{"LAB_COUNTRY_35","突尼斯","突尼西亞","Tunisia","チュニジア","Tunisia"},
+{"LAB_COUNTRY_36","阿根廷","阿根廷","Argentina","アルゼンチン","Argentina"},
+{"LAB_COUNTRY_37","巴西","巴西","Brazil","ブラジル","Brazil"},
+{"LAB_COUNTRY_38","哥伦比亚","哥倫比亞","Colombia","コロンビア","Colombia"},
+{"LAB_COUNTRY_39","厄瓜多尔","厄瓜多","Ecuador","エクアドル","Ecuador"},
+{"LAB_COUNTRY_40","巴拉圭","巴拉圭","Paraguay","パラグアイ","Paraguay"},
+{"LAB_COUNTRY_41","乌拉圭","烏拉圭","Uruguay","ウルグアイ","Uruguay"},
+{"LAB_COUNTRY_42","加拿大","加拿大","Canada","カナダ","Canada"},
+{"LAB_COUNTRY_43","库拉索","庫拉索","Curaçao","キュラソー","Curaçao"},
+{"LAB_COUNTRY_44","海地","海地","Haiti","ハイチ","Haiti"},
+{"LAB_COUNTRY_45","墨西哥","墨西哥","Mexico","メキシコ","Mexico"},
+{"LAB_COUNTRY_46","巴拿马","巴拿馬","Panama","パナマ","Panama"},
+{"LAB_COUNTRY_47","美国","美國","USA","アメリカ","USA"},
+{"LAB_COUNTRY_48","新西兰","紐西蘭","New Zealand","ニュージーランド","New Zealand"},
+{"LAB_DECOR_PLAN_1","装饰方案","裝飾方案","Style Preset","デコプラン","Style Preset"},
+{"LAB_DECOR_PLAN_2","大厅（{p1}/{p2}）","大廳（{p1}/{p2}）","Lobby ({p1}/{p2})","ロビー（{p1}/{p2}）","Lobby ({p1}/{p2})"},
+{"LAB_DECOR_PLAN_3","对局（{p1}/{p2}）","對局（{p1}/{p2}）","In-Game ({p1}/{p2})","対局（{p1}/{p2}）","In-Game ({p1}/{p2})"},
+{"LAB_DECOR_PLAN_4","指定","指定","Fixed","指定","Fixed"},
+{"LAB_DECOR_PLAN_5","随机","隨機","Random","ランダム","Random"},
+{"LAB_DECOR_PLAN_6","取消随机","取消隨機","Disable Random","ランダム解除","Disable Random"},
+{"LAB_DECOR_PLAN_7","加入随机","加入隨機","Enable Random","ランダム追加","Enable Random"},
+{"LAB_DECOR_PLAN_8","对局方案{p1}","對局方案{p1}","In-Game Preset {p1}","対局プラン{p1}","In-Game Preset {p1}"},
+{"LAB_DECOR_PLAN_9","方案名称修改","修改方案名稱","Rename Preset","プラン名変更","Rename Preset"},
+{"LAB_DECOR_PLAN_10","请输入修改的方案名称","請輸入要修改的方案名稱","Enter a new name for this preset","変更するプラン名を入力してください","Enter a new name for this preset"},
+{"LAB_DECOR_PLAN_11","点击输入方案名称，8文字以内","點擊輸入方案名稱（1-8個字）","Enter preset name (2–16 characters)","タップしてプラン名を入力（2〜16文字）","Enter preset name (2–16 characters)"},
+{"LAB_DECOR_PLAN_12","旋转","旋轉","Rotation","回転","Rotation"},
+{"LAB_DECOR_PLAN_13","选择音乐","選擇音樂","Select BGM","BGM選択","Select BGM"},
+{"LAB_DECOR_PLAN_14","全选","全選","Select All","全選択","Select All"},
+{"LAB_DECOR_PLAN_15","自定义表情（{p1}/{p2}）","自訂表情（{p1}/{p2}）","Custom Emotes ({p1}/{p2})","カスタムエモート（{p1}/{p2}）","Custom Emotes ({p1}/{p2})"},
+{"LAB_DECOR_PLAN_16","自定义表情可在局内使用，若有与局内使用牌手表情重复时，对应表情设定无效！","自訂表情可在局內使用，若與局內使用的牌手表情重複時，該表情設定將會失效！","Custom emotes can be used at the table. If a custom emote overlaps with a character's default emote, that duplicate slot will be disabled.","カスタムエモートは対局中に使用できます。対局中に使用するキャラクターエモートと重複した場合、該当のエモート設定は無効になります！","Custom emotes can be used at the table. If a custom emote overlaps with a character's default emote, that duplicate slot will be disabled."},
+{"LAB_DECOR_PLAN_17","前往修改","前往修改","Edit","変更画面へ","Edit"},
+{"LAB_DECOR_PLAN_18","随机中","隨機中","Random","ランダム設定中","Random"},
+{"LAB_DECOR_PLAN_19","确认删除此对局装饰方案吗？","確認刪除此對局裝飾方案嗎？","Delete this preset?","この対局デコレーションプランを削除しますか？","Delete this preset?"},
+{"LAB_DECOR_PLAN_20","选择头像","選擇頭像","Select Avatar","アバター選択","Select Avatar"},
+{"LAB_DECOR_PLAN_21","选择头像框","選擇頭像框","Select Avatar Frame","フレーム選択","Select Avatar Frame"},
+{"LAB_DECOR_PLAN_22","选择称号","選擇稱號","Select Title","称号選択","Select Title"},
+{"LAB_DECOR_PLAN_23","已切换所选{p1}！","已切換所選{p1}！","Switched to the selected {p1}!","選択した{p1}に切り替えました！","Switched to the selected {p1}!"},
+{"LAB_DECOR_PLAN_24","对局内修改","對局內修改","Edit In-Game","対局内変更","Edit In-Game"},
+{"LAB_DECOR_PLAN_25","列表循环","清單循環","Loop","全曲リピート","Loop"},
+{"LAB_DECOR_PLAN_26","列表随机","清單隨機","Shuffle","シャッフル再生","Shuffle"},
+{"LAB_DECOR_PLAN_27","暂无称号","暫無稱號","No Title","称号無し","No Title"},
+{"LAB_DECOR_PLAN_28","{p1}・{p2}","{p1}・{p2}","{p1} · {p2}","{p1}・{p2}","{p1}・{p2}"},
+{"LAB_DECOR_PLAN_TIPS_1","随机模式下，会长可设置多个方案，每次登录将随机展示。","隨機模式下，會長可設定多個方案，每次登入將隨機展示。","Enable Random for multiple presets to display a random look each time you log in.","ランダムモードでは、会長は複数のプランを設定でき、ログインするたびにランダムに表示されます。","Enable Random for multiple presets to display a random look each time you log in."},
+{"LAB_DECOR_PLAN_TIPS_2","随机模式下，会长可设置多个方案，每次从大厅进入牌桌将随机展示。","隨機模式下，會長可設置多個方案，每次從大廳進入牌桌將隨機展示。","When Random is enabled, a random preset will be applied each time you join a table from the Lobby.","ランダムモードでは、会長が複数のプランを設定でき、ロビーからテーブルに入るたびにランダムで表示されます。","When Random is enabled, a random preset will be applied each time you join a table from the Lobby."},
+{"LAB_DECOR_PLAN_TIPS_3","已切换为指定方案！","已切換為指定方案！","Switched to Fixed preset!","指定プランに切り替えました！","Switched to Fixed preset!"},
+{"LAB_DECOR_PLAN_TIPS_4","已切换为随机方案！","已切換為隨機方案！","Switched to Random mode!","ランダムプランに切り替えました！","Switched to Random mode!"},
+{"LAB_DECOR_PLAN_TIPS_5","至少选择1个方案！","請至少選擇1個方案！","Please keep at least 1 preset with Random mode enabled!","プランを1つ以上選択してください！","Please keep at least 1 preset with Random mode enabled!"},
+{"LAB_DECOR_PLAN_TIPS_6","方案名称已恢复！","方案名稱已恢復！","Preset name restored!","プラン名が元に戻りました！","Preset name restored!"},
+{"LAB_DECOR_PLAN_TIPS_7","修改成功！","修改成功！","Name updated!","変更しました！","Name updated!"},
+{"LAB_DECOR_PLAN_TIPS_8","方案已使用中！","方案使用中！","This preset is already in use!","プランは既に使用中です！","This preset is already in use!"},
+{"LAB_DECOR_PLAN_TIPS_9","保存成功！","儲存成功！","Saved!","保存しました！","Saved!"},
+{"LAB_DECOR_PLAN_TIPS_10","最多只能设置{p1}个自定义表情！","最多只能設定{p1}個自訂表情！","You can equip up to {p1} custom emotes!","カスタムエモートは最大{p1}個までしか設定できません！","You can equip up to {p1} custom emotes!"},
+{"LAB_DECOR_PLAN_TIPS_11","请前往装饰方案修改！","請前往裝飾方案進行修改！","Please edit this in Style Presets!","デコプラン画面から変更を行ってください！","Please edit this in Style Presets!"},
+{"LAB_DECOR_PLAN_TIPS_12","更换局外称号成功！","更換局外稱號成功！","Lobby title updated!","対局外称号を変更しました！","Lobby title updated!"},
+{"LAB_DECOR_PLAN_TIPS_13","更换局内牌手成功！","更換局內牌手成功！","In-game character updated!","対局内キャラクターを変更しました！","In-game character updated!"}
 }
     for _, v in pairs(bodys) do
         local m = {}

@@ -57,7 +57,7 @@ function P:onShow()
                     end
                 end
             end
-            if not isShowUse then
+            if not isShowUse and ItemModel:isCanJump(v, d.id) then
                 table.insert(datas, {id = v, __kind = 1})
             end
         end

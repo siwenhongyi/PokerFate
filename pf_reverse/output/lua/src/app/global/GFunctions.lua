@@ -44,22 +44,28 @@ function M.getCardInfoDict(code)
 	return {n = n, s = s}
 end
 
-function M.getCardImageByCode(code, itemId)
+function M.getCardImageByCode(code, scheme)
 	if code == Config.JOKER_CARD then
 		return Config.IMAGE.CARD_JOKER
 	elseif 0 == code or not code then
 		-- return "Card[card_back]"
-		return PlayerModel:getCurCardBackImage()
+		if GameModel.data then
+			return DecorationModel:getCurCardBackImage(GameModel.data:getIngameScheme())
+		end
+		return DecorationModel:getCurCardBackImage(scheme)
 	end
 	local number, color = M.getCardNumberSuit(code)
-	return M.getCardImage(number, color, itemId)
+	return M.getCardImage(number, color, scheme)
 end
 
-function M.getCardImage(number, color, itemId)
-	if not itemId then
-		itemId = PlayerModel:getCardFace()
+function M.getCardImage(number, color, scheme)
+	local faceId = 0
+	if GameModel.data then
+		faceId = DecorationModel:getCurCardFace(GameModel.data:getIngameScheme())
+	else
+		faceId = DecorationModel:getCurCardFace(scheme)
 	end
-	local cfg = tpl_card[tpl_props[itemId].mapId]
+	local cfg = tpl_card[faceId]
 	return string.format("Card[" .. cfg.image .."_%s_%s]", color, number)
 end
 
@@ -97,6 +103,10 @@ end
 
 function M.isMTT(gameType)
 	return gameType == GAME_GAME_TYPE.MTT_HOLDEM_GAME or gameType == GAME_GAME_TYPE.MTT_OMAHA_GAME
+end
+
+function M.isTournament(gameType)
+	return M.isSNG(gameType) or M.isMTT(gameType)
 end
 
 function M.isTrainingGame(gameType)
@@ -554,6 +564,84 @@ function M.setFrameImage(ImageFrame, frame, nativeSize)
 		bee.setIcon(ImageFrame, d.icon, nativeSize)
 	else
 		ImageFrame:SetActive(false)
+	end
+end
+
+function M.setItemIcon(parent, itemId, titleWithScale)
+	if not parent then return end
+
+	local ImageIcon = bee.find("Icon", parent)
+	local TextCount = bee.find("TextCount", parent) or bee.find("CountText", parent)
+
+	if not ImageIcon then return end
+
+	local d = tpl_props[itemId]
+	if d then
+		ImageIcon:SetActive(true)
+		bee.setIcon(ImageIcon, d.icon)
+		if d.type == GPropKind.Title then
+			local s = ImageIcon.transform.sizeDelta
+			titleWithScale = titleWithScale or 2
+			s.x = s.x * titleWithScale
+			s.y = s.x * 60 / 340
+			ImageIcon.transform.sizeDelta = s
+			if not bee.isNull(TextCount) then
+				TextCount:SetActive(false)
+			end
+		else
+			if not bee.isNull(TextCount) then
+				TextCount:SetActive(true)
+			end
+		end
+	else
+		ImageIcon:SetActive(false)
+		if not bee.isNull(TextCount) then
+			TextCount:SetActive(false)
+		end
+	end
+end
+
+function M.addItemsToParent(parent, itemNode, items, atuoScrollData)
+	if not parent or not items then return end
+	for _, v in ipairs(items) do
+		local item = CU.GameObject.Instantiate(itemNode, parent.transform, false)
+		item:SetActive(true)
+		local prop = PropItem:create(item, v)
+        v._tween = nil
+		if not atuoScrollData then
+			prop: bindTips()
+		else
+            bee.addClick(item, function()
+                if atuoScrollData and atuoScrollData.__tween then
+                    atuoScrollData.__tween:pause()
+                end
+                UiManager:showUI("CommonItemTip", {data = v, target = bee.find("Icon", item), hideCb = function()
+                    if atuoScrollData and atuoScrollData.__tween then
+                        atuoScrollData.__tween:resume()
+                    end
+                end})
+            end, true)
+		end
+	end
+
+	if atuoScrollData then
+		bee.Tween.killByTarget(parent)
+		CS.Utils.ForceRebuildLayoutImmediate(parent)
+		local s1, s2 = parent.transform.sizeDelta, parent.transform.parent.parent.sizeDelta
+		local pos = parent.transform.localPosition
+		pos.x = 0
+		parent.transform.localPosition = pos
+		if s1.x > s2.x then
+			atuoScrollData.__tween = bee.tween(parent)
+			: to(5, {position = bee.v3(s2.x - s1.x, pos.y)})
+			: delay(1)
+			: call(function()
+				parent.transform.localPosition = pos
+			end)
+			: loop(-1)
+			: ease(DT.Ease.Linear)
+			: link(parent)
+		end
 	end
 end
 

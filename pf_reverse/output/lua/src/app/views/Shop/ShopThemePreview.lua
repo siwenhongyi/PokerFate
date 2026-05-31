@@ -129,6 +129,7 @@ end
 function P:onStart()
 	Game:pauseBGM()
 	
+    self._scheme = DecorationModel:getInGameCurScheme()
 	self.data = self._params.data
 	self._curPreviewType = PreviewType.Lobby
 	self._isPlaying = true
@@ -166,6 +167,7 @@ function P:initLobbyCont()
     self.CharacterImage.transform.localScale = bee.v3(s, s, s)
 
 	bee.invoke(self.CharacterImage, "setRole", CharacterModel:getUsingRole(), false)
+	bee.invoke(self.CharacterImage, "setSkinRotate")
 end
 
 function P:initTableCont()
@@ -183,7 +185,7 @@ end
 -- 公共牌显示
 function P:initBgPublic()
     local card = self:find("PreviewImg", self.BgPublic)
-    local cfg = tpl_card[tpl_props[PlayerModel:getCardFace()].mapId]
+    local cfg = tpl_card[tpl_props[self._scheme.card_front].mapId]
     bee.setIcon(card, "backpackpreview_" .. cfg.image, "BackpackPreview")
 end
 
@@ -192,7 +194,7 @@ function P:initTableCard()
     for i = 1, 6 do
         self:find("ImageButton", self.TableCardList[i]):SetActive(false)
 
-        local cardBackId = PlayerModel:getCurCardBack()
+        local cardBackId = DecorationModel:getCurCardBack(self._scheme)
         local cardBack = self:find("BgCard", self.TableCardList[i])
         if i == 3 then
             cardBack:SetActive(false)
@@ -220,8 +222,7 @@ end
 
 -- 角色显示
 function P:initPlayerInfo()
-    local curRole = CharacterModel:getCurRole()
-    local showRoleSkin = curRole:getSkinData() or get_tpl_subKey(tpl_character_skin_list, "role", tpl_constdata.DefaultCharacter)[1]
+    local showRoleSkin = tpl_character_skin[self._scheme.skin_id]
 
     for i = 1, 6 do
         if i == 3 then
@@ -244,7 +245,7 @@ function P:setPlayerInfo(playerItem, showRoleSkin, index)
     self:find("BgChat", playerItem):SetActive(false)
     self:find("Eff_Countdown", playerItem):SetActive(false)
     self:find("BgStatus", playerItem):SetActive(false)
-    self:find("BgRole/BgName/ImageUserType", playerItem):SetActive(false)
+    self:find("ImageUserType", playerItem):SetActive(false)
     self:find("BgRole/Eff_poker_role_sg", playerItem):SetActive(false)
     self:find("ImageTag", playerItem):SetActive(false)
 
@@ -253,14 +254,14 @@ function P:setPlayerInfo(playerItem, showRoleSkin, index)
     local ImageLevel = self:find("BgRole/BgName/ImageLevel", playerItem)
     local TextName = self:find("BgRole/BgName/TextName", playerItem)
     local ImageTitle = self:find("BgRole/ImageTitle", playerItem)
-    local ImageUerType = self:find("BgRole/BgName/ImageUserType", playerItem)
+    local ImageUerType = self:find("ImageUserType", playerItem)
     local ImageFg = self:find("BgRole/ImageFg", playerItem)
     local TextChip = self:find("BgRole/BgChip/TextChip", playerItem)
     local TextChipPurple = self:find("BgRole/BgChip/TextChipPurple", playerItem)
     local TextChipGreen = self:find("BgRole/BgChip/TextChipGreen", playerItem)
     local TextChipBlue = self:find("BgRole/BgChip/TextChipBlue", playerItem)
 
-    self:setRoleImg(ImageRole, showRoleSkin, isMe)
+    self:setRoleImg(ImageRole, showRoleSkin, isMe, index)
     if isMe then
         bee.setTextCut(TextName, PlayerModel:getName(), 460)
     else
@@ -273,10 +274,10 @@ function P:setPlayerInfo(playerItem, showRoleSkin, index)
         ImageTitle:SetActive(true)
         bee.setIconInAtlas(ImageTitle, self._cfg.icon, true)
     else
-        GF.setTitleImage(ImageTitle, PlayerModel:getTitle(), true, true)
+        GF.setTitleImage(ImageTitle, self._scheme.title or 0, true, true)
     end
 
-    local nameplateEffId = PlayerModel:getNameplateEff()
+    local nameplateEffId = self._scheme.show_card
     if self._cfg and self._cfg.type == GPropKind.NameplateEff then
         nameplateEffId = self._cfg.id
     end
@@ -295,6 +296,9 @@ function P:setPlayerInfo(playerItem, showRoleSkin, index)
     elseif index == 1 then
         -- 开发者
         ImageUerType:SetActive(true)
+        local pos = ImageUerType.transform.localPosition
+        pos.x = -pos.x
+        ImageUerType.transform.localPosition = pos
         bee.setIcon(ImageUerType, "InGame[ingame_player_other03_developer]")
         bee.setIcon(ImageFg, "InGame[ingame_player_other_fg_01]")
         bee.setTextCut(TextName, _T("LAB_BACKPACK_DES_39"), 460)
@@ -320,17 +324,39 @@ function P:setPlayerInfo(playerItem, showRoleSkin, index)
     end
 end
 
-function P:setRoleImg(ImageRole, showRoleSkin, isMe)
+function P:setRoleImg(ImageRole, showRoleSkin, isMe, index)
     local table_avatar = showRoleSkin.table_avatar or showRoleSkin.table_avatar_pic
     if string.find(table_avatar, "/") then
         self._roleSpine = bee.createObj(table_avatar)
         self._roleSpine.transform:SetParent(ImageRole.transform, false)
+        local Mask = self:find("Mask", self._roleSpine)
         ImageRole:GetComponent("Image").enabled = false
         if not isMe then
             self._roleSpine.transform.localScale = Config.ROLE_OTHER_SCALE
+			Mask.transform.sizeDelta = bee.v2(1800, 480)
+		else
+			Mask:GetComponent("Mask").enabled = false
+			Mask:GetComponent("Image").enabled = false
         end
         local sp = self:find("Mask", self._roleSpine).transform:GetChild(0).gameObject
         bee.invoke(sp, "setHideAttachments", showRoleSkin.id)
+
+		local d = tpl_character_ingame[showRoleSkin.id]
+		if d then
+			if d.flip_index6 and table.indexof(d.flip_index6, index) > 0 then
+				self._roleSpine.transform.localScale = bee.v3(-1, 1, 1)
+			else
+				self._roleSpine.transform.localScale = bee.v3one
+			end
+			if d.my_offset and 3 == index then
+				self._roleSpine.transform.anchoredPosition = bee.v2(d.my_offset[1], d.my_offset[2])
+			else
+				self._roleSpine.transform.anchoredPosition = bee.v2zero
+			end
+		else
+			self._roleSpine.transform.localScale = bee.v3one
+            self._roleSpine.transform.anchoredPosition = bee.v2zero
+		end
     else
         bee.setIcon(ImageRole, table_avatar)
         ImageRole:GetComponent("Image").enabled = true

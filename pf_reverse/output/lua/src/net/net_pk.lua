@@ -16,6 +16,7 @@ function net:DealerInfoRSP(msg)
 	GameModel.data:setDelayRebyChips(0)
 	GameModel.data:setShowCardInfo()
 	GameModel.data:setTableGameOver(false)
+	GameModel.data:resetHistoryInfo()
 end
 
 -- 发手牌
@@ -51,24 +52,7 @@ end
 function net:ActionBRC(msg)
 	if not GameModel.data then return end
 
-	GameModel.data:refreshLastPotNum()
-	
-	local player = GameModel.data:getPlayer(msg.seatid + 1)
-	player.action_type = msg.action_type
-	player.bet_change = msg.chips
-	player.bet_chip = player.bet_chip + msg.chips
-	player.chips = msg.hand_chips
-	
-	if GF.isFoldAction(msg.action_type) then
-		player.is_fold = true
-	end
-
-	if msg.chips and GameModel.data.updateMaxBetValue then
-		GameModel.data:updateMaxBetValue(msg.chips)
-	end
-	if GameModel.data:getActionIndex() == msg.seatid + 1 then
-		GameModel.data:setActionIndex(-1)
-	end
+	GameModel.data:onActionBRC(msg)
 end
 
 -- 下注圈开始
@@ -82,12 +66,15 @@ function net:RoundStartBRC(msg)
 	if msg.board then
 		GameModel.data:addBoardInfo(msg.board)
 	end
+
+	GameModel.data:addHistoryRound(msg)
 end
 
 -- 下注圈结束
 function net:RoundOverBRC(msg)
 	if not GameModel.data then return end
 	GameModel.data:setPotInfo(msg.pool)
+	GameModel.data:setHistoryPot(msg)
 end
 
 -- 手牌结算
@@ -117,6 +104,7 @@ function net:ShowHandRSP(msg)
 			end
 		end
 		-- GameModel.data:setRoundStage(POKER_ROUND.FINISH)
+		GameModel.data:addHistoryShowRound(msg)
 	end
 end
 
@@ -141,6 +129,7 @@ function net:ShowMyCardBRC(msg)
 				player.hand_cards = v.hand_cards
 			end
 		end
+		GameModel.data:addHistoryShowCardRound(msg)
 	end
 end
 

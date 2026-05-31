@@ -29,6 +29,8 @@ function P:ctor(index)
 
     self.seat_reserve = false   -- setting out
 
+    self.equally_rate = 0   -- 平局率，百分比表示
+    self.last_equally_rate = 0
     self.win_rate = 0 -- 胜率，百分比表示
     self.last_win_rate = 0
 
@@ -42,6 +44,8 @@ function P:resetInfo(info, data)
 	self.seat_reserve = info.seat_reserve or false
 
 	self.bet_chip = info.destop_chips or 0
+    self.equally_rate = 0
+    self.last_equally_rate = 0
     self.win_rate = 0
     self.last_win_rate = 0
     self.begin_chips = info.begin_chips or self.chips

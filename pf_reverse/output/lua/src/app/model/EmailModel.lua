@@ -127,6 +127,19 @@ function P:getEamilContent(data)
                         p3 = _T(d2.name)
                     end
                     ret = _F(d.main_text, p1, p2, p3)
+                elseif data.system_mail_id == 6001 or data.system_mail_id == 6002 then
+                    local p1 = os.date("%Y".."/".."%m".."/".."%d %H"..":".."%M", args[1])
+                    local p2 = json.decode(args[2])
+                    local p3 = json.decode(args[3])
+                    local team1 = p2[LanguageManager:getLanguage()]
+                    if not team1 then
+                        team1 = p2["en"]
+                    end
+                    local team2 = p3[LanguageManager:getLanguage()]
+                    if not team2 then
+                        team2 = p3["en"]
+                    end
+                    ret = _F(d.main_text, p1, team1, team2)
                 else
                     for k, v in ipairs(args) do
                         if string.sub(v, 1, 1) == "{" then

@@ -31,6 +31,13 @@ function P:onShow()
             end
         end
     end)
+
+    bee.emit(EventDef.evt_loading_show)
+end
+
+function P:onDestroy()
+    P.super.onDestroy(self)
+    bee.emit(EventDef.evt_loading_hide)
 end
 
 function P:setDownloadText(text)

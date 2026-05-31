@@ -87,6 +87,10 @@ class TestBotBridgeReconnectRestore:
         def __init__(self):
             self.hole_cards = []
             self.requests = []
+            self.hands = []
+
+        def new_hand(self, **kwargs):
+            self.hands.append(kwargs)
 
         def deal_hole_cards(self, cards):
             self.hole_cards.append(cards)
@@ -122,6 +126,8 @@ class TestBotBridgeReconnectRestore:
                 "game_type": 10010101,
                 "room_info": {"bb": "10", "sb": "5"},
                 "table_status": {
+                    "is_playing": True,
+                    "action_idx": 0,
                     "stage": 1,
                     "gameid": "game-1",
                     "seat": [
@@ -172,6 +178,8 @@ class TestBotBridgeReconnectRestore:
                 "game_type": 10010101,
                 "room_info": {"bb": "10", "sb": "5"},
                 "table_status": {
+                    "is_playing": True,
+                    "action_idx": 0,
                     "stage": 1,
                     "seat": [
                         {
@@ -220,6 +228,8 @@ class TestBotBridgeReconnectRestore:
                 "game_type": 10010101,
                 "room_info": {"bb": "10", "sb": "5"},
                 "table_status": {
+                    "is_playing": True,
+                    "action_idx": 0,
                     "stage": 4,
                     "gameid": "game-dup",
                     "pool": ["150000"],
@@ -253,6 +263,113 @@ class TestBotBridgeReconnectRestore:
         assert first[0] == "pb.ActionREQ"
         assert second is None
         assert len(fake.requests) == 1
+
+    def test_enter_room_rsp_ignores_stale_playing_status_after_hand_end(self) -> None:
+        b, fake = self._bridge()
+        b._current_gameid = "old-hand"
+
+        out = b.handle(
+            "pb.EnterRoomRSP",
+            {
+                "code": 0,
+                "roomid": 123,
+                "game_type": 10010101,
+                "room_info": {"bb": "10", "sb": "5"},
+                "table_status": {
+                    "action_idx": -1,
+                    "gameid": "old-hand",
+                    "seat": [
+                        {
+                            "seatid": 0,
+                            "action_type": 5,
+                            "player": {"uid": "99", "name": "Hero"},
+                            "hand_chips": "1747862",
+                        }
+                    ],
+                },
+                "playing_status": {
+                    "card1": 1034,
+                    "card2": 259,
+                    "action_seatid": 0,
+                    "call_need_chips": "41620",
+                    "max_chipin": "1789482",
+                },
+            },
+        )
+
+        assert out is None
+        assert fake.hole_cards == []
+        assert fake.requests == []
+
+    def test_enter_room_rsp_rebuilds_hand_when_gameid_changed_before_restore(self) -> None:
+        b, fake = self._bridge()
+        b._current_gameid = "old-hand"
+        b._hole_cards_count = 2
+
+        out = b.handle(
+            "pb.EnterRoomRSP",
+            {
+                "code": 0,
+                "roomid": 123,
+                "game_type": 10010101,
+                "room_info": {"bb": "10", "sb": "5"},
+                "table_status": {
+                    "is_playing": True,
+                    "action_idx": 0,
+                    "d_idx": 2,
+                    "stage": 1,
+                    "gameid": "new-hand",
+                    "seat": [
+                        {
+                            "seatid": 0,
+                            "action_type": 5,
+                            "player": {"uid": "99", "name": "Hero"},
+                            "hand_chips": "1000",
+                        },
+                        {
+                            "seatid": 1,
+                            "action_type": 0,
+                            "player": {"uid": "-1"},
+                            "hand_chips": "0",
+                        },
+                        {
+                            "seatid": 2,
+                            "action_type": 5,
+                            "player": {"uid": "100", "name": "Villain"},
+                            "hand_chips": "1000",
+                        },
+                    ],
+                },
+                "playing_status": {
+                    "card1": 782,
+                    "card2": 1037,
+                    "action_seatid": 0,
+                    "call_need_chips": "10",
+                    "min_chipin": "20",
+                    "max_chipin": "1000",
+                    "action_time": 3,
+                },
+            },
+        )
+
+        assert out[0] == "pb.ActionREQ"
+        assert fake.hands
+        assert len(fake.hands[0]["players"]) == 2
+        assert fake.hole_cards == [["Ah", "Ks"]]
+        assert fake.requests[0]["to_call"] == 10
+
+    def test_action_inject_guard_rejects_stale_hand(self) -> None:
+        b, _fake = self._bridge()
+        b._current_gameid = "game-1"
+        b._hand_seq = 7
+
+        guard = b.injection_guard_for(("pb.ActionREQ", {"action_type": 2}, 1.0))
+
+        assert guard == ("game-1", 7)
+        assert b.injection_guard_is_current(guard)
+        b._current_gameid = "game-2"
+        assert not b.injection_guard_is_current(guard)
+        assert b.injection_guard_for(("pb.ShowMyCardREQ", {"pos": 1}, 0.0)) is None
 
 
 def test_dealer_info_passes_positions_to_api(monkeypatch) -> None:
@@ -803,8 +920,8 @@ class TestProfitLockDisplayPnL:
         )
 
 
-def test_enter_room_syncs_hand_start_chips_from_table() -> None:
-    """重进房后必须用 table_status.hand_chips 覆盖 DealerInfo 留下的 _hand_start_chips。"""
+def test_enter_room_syncs_current_and_start_chips_from_table() -> None:
+    """重进房后 hand_chips 是当前筹码，begin_chips 是 WinnerRSP.profit 结算基准。"""
     b = BotBridge(max_auto_rebuy=3)
     b._my_uid = "10086"
     b._table_room_id = 1
@@ -823,13 +940,14 @@ def test_enter_room_syncs_hand_start_chips_from_table() -> None:
                         "seatid": 5,
                         "player": {"uid": "10086", "name": "me"},
                         "hand_chips": "100000",
+                        "begin_chips": "120000",
                     },
                 ],
             },
         },
     )
     assert b._my_seat == 5
-    assert b._hand_start_chips[5] == 100000
+    assert b._hand_start_chips[5] == 120000
     assert b._seat_chips[5] == 100000
 
 

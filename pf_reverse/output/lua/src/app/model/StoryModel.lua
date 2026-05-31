@@ -11,6 +11,7 @@ function P:ctor()
     self._roles = {}
     self._curData = nil
     self._curIndex = 1
+    self._selectData = {}
 end
 
 function P:afterInit()
@@ -26,6 +27,7 @@ end
 function P:setStoryData(data)
     self._curData = data
     self._curIndex = 1
+    self._selectData = {}
 end
 
 function P:getCurIndex()
@@ -34,6 +36,14 @@ end
 
 function P:setCurIndex(index)
     self._curIndex = index
+end
+
+function P:getSelectData()
+    return self._selectData
+end
+
+function P:setSelectData(tab)
+    table.insert(self._selectData, tab)
 end
 
 function P:getTalkName(data)

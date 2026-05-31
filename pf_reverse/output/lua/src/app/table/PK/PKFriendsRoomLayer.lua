@@ -2,6 +2,7 @@ local P = class("PKFriendsRoomLayer", require("app.table.PK.PKUILayer"))
 
 function P:onAwake()
     P.super.onAwake(self)
+    self.RoomNumber = self:find("RoomNumber", self.RightTop)
     self.TextRoomType = self:find("RoomType/TextRoomType", self.LeftTop)
     self.TextNumber = self:find("RoomNumber/TextNumber", self.RightTop)
     
@@ -18,7 +19,16 @@ function P:onShow()
     P.super.onShow(self)
 
     self:refreshFriendRoomInfo()
-    self.ChatButton:SetActive(not GameModel.data.friend_room_info.is_forbid_chat)
+    
+    if GameModel.data and GameModel.data:isInObserve() then
+        self.ChatButton:SetActive(false)
+        self:find("InviteButton", self.RightTop):SetActive(false)
+        if GameModel.data.friend_room_info.is_private then
+            self.RoomNumber:SetActive(false)
+        end
+    else
+        self.ChatButton:SetActive(not GameModel.data.friend_room_info.is_forbid_chat)
+    end
 end
 
 function P:refreshFriendRoomInfo()

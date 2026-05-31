@@ -6,6 +6,8 @@ function P:ctor(params, scene)
 	self.user_num = 0
 	self.play_num = 0
 	self:initRoomInfo(params)
+
+	self._ingame_scheme = params.scheme
 end
 
 function P:initRoomInfo(params)
@@ -16,7 +18,8 @@ function P:initRoomInfo(params)
 		self.table_status = params.table_status
 	end
 	self:updateRoomInfo()
-	self.friend_room_info = params.friend_room_info
+	self.friend_room_info = params.friend_room_info or {}
+	self.seatid_being_observed = params.seatid_being_observed or -1
 end
 
 function P:assignRoomInfo(params)
@@ -86,7 +89,7 @@ function P:isRegular()
 end
 
 function P:isMTT()
-	return self:getRoomSubType() == GAME_SUB_TYPE.NORMAL_MTT
+	return GF.isMTT(self:getGameType())
 end
 
 function P:isTournament()
@@ -115,13 +118,13 @@ function P:getGameName()
 end
 
 function P:getChipIcon()
-	if self:isSNG() then
+	if self:isSNG() or self:isMTT() then
 		return tpl_props[GPropId.SNGChip].icon
 	end
 end
 
 function P:getChipEft()
-	if self:isSNG() then
+	if self:isSNG() or self:isMTT() then
 		return "Prefab/PKTable/Eff_poker_ingame_chouma_sng"
 	end
 	return "Prefab/PKTable/Eff_poker_ingame_chouma"
@@ -318,6 +321,9 @@ function P:getVisitor(uid)
 end
 
 function P:getMyPosition()
+	if self:isInObserve() then
+		return self:getObserveSeatid()
+	end
 	return self.my_position
 end
 
@@ -357,7 +363,7 @@ function P:updateOtherInfo(info)
 	local index = info.seatid + 1
 	local player = self:getPlayer(index)
 	if not player then return end
-	if index == self:getMyPosition() then
+	if index == self:getMyPosition() and index ~= self:getObserveSeatid() then
 		return player
 	end
 	self:updateUserInfo(player, info.player)
@@ -427,6 +433,14 @@ function P:isMePlaying()
 		local me = self:getMyPlayerInfo()
 		return me and me.playing
 	end
+end
+
+function P:isInObserve()
+	return self.seatid_being_observed and self.seatid_being_observed >= 0
+end
+
+function P:getObserveSeatid()
+	return self.seatid_being_observed + 1
 end
 
 function P:getRoomDuration()
@@ -764,6 +778,13 @@ function P:setShowCardInfo(pos, flag)
 		self.playing_status.show_card_info = {0,0,0,0}
 	end
 	self.playing_status.show_card_info[pos] = flag
+end
+
+function P:getIngameScheme()
+	if self._ingame_scheme and self._ingame_scheme.table ~= 0 then
+		return self._ingame_scheme
+	end
+	return DecorationModel:getDefaultInGameCurScheme()
 end
 
 return P

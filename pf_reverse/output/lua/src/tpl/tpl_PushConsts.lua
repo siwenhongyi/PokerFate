@@ -24,10 +24,14 @@ local function _initData()
 {"THEME_ACTIVITY_START",10080,nil},
 {"FESTIVAL_ACTIVITY_START",10081,nil},
 {"GAME_REBATE_SETTLE",10082,nil},
+{"FOOTBALL_BET_START",10083,nil},
 {"PAYPAL_BUY_SUC",10091,nil},
 {"XSOLLA_BUY_SUC",10092,nil},
 {"STEAM_BUY_SUC",10093,nil},
-{"AIRWALLEX_BUY_SUC",10094,nil}
+{"AIRWALLEX_BUY_SUC",10094,nil},
+{"BACKEND_PRICE_CONFIG_UPDATED",10095,nil},
+{"MTT_START",10110,nil},
+{"MTT_CANCEL",10111,nil}
 }
     for _, v in pairs(bodys) do
         local m = {}

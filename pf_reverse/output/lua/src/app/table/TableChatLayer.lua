@@ -37,6 +37,7 @@ function P:onAwake()
 end
 
 function P:onShow()
+    self._scheme = GameModel.data:getIngameScheme()
     if 0 == LocalStore:getIntegerForKey("table_chat_index", 0) then
         bee.setCheck(self.EmojiToggle)
         self:showEmoji()
@@ -46,6 +47,19 @@ function P:onShow()
     end
 end
 
+function P:getRoleId()
+    local skin_id = GameModel.data:getIngameScheme().skin_id
+    if tpl_character_skin[skin_id] then
+        return tpl_character_skin[skin_id].role
+    end
+    local role = CharacterModel:getUsingRoleId()
+    local player = GameModel.data and GameModel.data:getMyPlayerInfo()
+    if player and player.role_id and player.role_id > 0 then
+        role = player.role_id
+    end
+    return role
+end
+
 function P:showEmoji()
     self.EmojiList:SetActive(true)
     self.FastList:SetActive(false)
@@ -53,11 +67,28 @@ function P:showEmoji()
     if not self.ListEmoji then
         self.ListEmoji = self:find("Viewport/Content", self.EmojiList)
 
-        local emojis = get_tpl_subKey(tpl_emoji_list, "role", CharacterModel:getUsingRoleId())
-        local datas, r = {}, CharacterModel:getCurRole()
+        local role_id = self:getRoleId()
+        local emojis = get_tpl_subKey(tpl_emoji_list, "role", role_id)
+        local datas, r = {}, CharacterModel:getRole(role_id)
         for k, v in ipairs(emojis) do
             if not r or (v.unlock and r:getBondLevel() >= v.unlock) then
                 table.insert(datas, v)
+            end
+        end
+
+        if self._scheme.emojis then
+            for _, v in ipairs(self._scheme.emojis) do
+                local id = v
+                local flag = true
+                for _, vv in ipairs(datas) do
+                    if vv.id == id then
+                        flag = false
+                        break
+                    end
+                end
+                if flag then
+                    table.insert(datas, tpl_emoji[id])
+                end
             end
         end
         
@@ -87,7 +118,7 @@ function P:showChat()
     if not self.ListChat then
         self.ListChat = self:find("Viewport/Content", self.FastList)
 
-        local chats = get_tpl_subKey(tpl_chat_list, "role", CharacterModel:getUsingRoleId())
+        local chats = get_tpl_subKey(tpl_chat_list, "role", self:getRoleId())
         local datas, r = {}, CharacterModel:getCurRole()
         for k, v in ipairs(chats) do
             if v.kind == CHAT_VOICE_TYPE.Chat and (not r or r:getBondLevel() >= v.unlock) then

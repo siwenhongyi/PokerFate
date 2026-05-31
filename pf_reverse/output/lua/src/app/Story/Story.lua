@@ -183,6 +183,9 @@ function P:onBtNextTalk()
     elseif self._params and self._params.StoryRecord == "GalaSeasonLog" then
         bee.logEvent("galaseason-plot_skip_single", StoryModel.storyData.id, StoryModel.storyData.group, self._curNode._data._index or 1)
     end
+    if self._params and self._params.themeStory then
+        bee.logEvent("activity-theme-plot-skip-single", ThemeModel:getConfId(), StoryModel.storyData.id, StoryModel.storyData.group, self._curNode._data._index)
+    end
     if GuideManager:isInGuide() then
         bee.logEvent("guide-id-skip", GuideManager.curGuide.id, self._curNode._data._index or 1)
     end
@@ -252,6 +255,11 @@ end
 
 function P:onStoryOver()
     bee.emit("evt_stageEnd")
+    if self._params and self._params.themeStory then
+        local isfirst = ThemeModel:isPlotRewarded(StoryModel.storyData.id) and 0 or 1
+        bee.logEvent("activity-theme-plot-finish", ThemeModel:getConfId(), StoryModel.storyData.id, StoryModel.storyData.group, isfirst)
+    end
+    
     if not self._inEdit then
         self:hideUI()
         GuideManager:doGuideEnd()
@@ -716,6 +724,7 @@ function P:showOptions(data)
             self:removeAllChildren(self.BgOptions)
             if not v.storyId or v.storyId <= 0 then
                 self:playNextNode()
+                StoryModel:setSelectData(v.option)
             elseif not self._inEdit then
                 local data = StoryModel:loadStageData(v.storyId)
                 if data then

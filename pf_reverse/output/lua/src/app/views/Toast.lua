@@ -13,6 +13,16 @@ end
 function P:onStart()
     if self._params and self._params.text then
         bee.setText(self.Text, self._params.text)
+        local text = self.Text:GetComponent("Text")
+        local gameWidth = UiManager:getUiRoot():GetComponent("RectTransform").sizeDelta.x
+        local fixWidth = gameWidth - 200
+
+        if text.preferredWidth > fixWidth then
+            local horGroup = self.ImageBg:GetComponent("HorizontalLayoutGroup")
+            horGroup.childControlWidth = false
+            horGroup.childControlHeight = true
+            text.rectTransform.sizeDelta = bee.v2(fixWidth, 0)
+        end
     end
     if not bee.isNull(self.ImageBg) then
         bee.tween(self.ImageBg)

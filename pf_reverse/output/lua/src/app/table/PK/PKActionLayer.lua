@@ -21,6 +21,9 @@ function P:setParams(params)
 end
 
 function P:onAwake()
+	self.Mask = self:find("Mask")
+	self.Mask:SetActive(false)
+	
     self.ImageBg = self:find("ImageBg")
 	self.BgAction = self:find("BgAction", self.ImageBg)
 	self.BgActionPre = self:find("BgActionPre", self.ImageBg)
@@ -37,6 +40,8 @@ function P:onAwake()
 	self.PlusButton = self:find("PlusButton", self.BgRaise)
 	self.MinusButton = self:find("MinusButton", self.BgRaise)
 	self.AllinButton = self:find("AllinButton", self.BgRaise)
+	self.GuideFinger = self:find("GuideFinger", self.BgRaise)
+	self.GuideFinger:SetActive(false)
 
 	self.AllinEffect = self:find("Eff_PKtable_allin_fire", self.AllinCallButton)
 	self.SliderEffect = self:find("Eff_PKtable_allin_jdt", self.RaiseSlider)
@@ -99,11 +104,13 @@ function P:onAwake()
 			})
 			self._foldDialog:schedule(1, function()
 				local dt = math.floor(self.data:getLeftActionTime())
-				self._foldDialog:setSureText(_T("LAB_CHECK") .. "(" .. dt .. ")")
-				if dt <= 0 then
-					Net:sendReq("pb.ActionREQ", {action_type = POKER_ACTION.CHECK})
-					self._foldDialog:hideUI()
-					self._foldDialog = nil
+				if self._foldDialog then
+					self._foldDialog:setSureText(_T("LAB_CHECK") .. "(" .. dt .. ")")
+					if dt <= 0 then
+						Net:sendReq("pb.ActionREQ", {action_type = POKER_ACTION.CHECK})
+						self._foldDialog:hideUI()
+						self._foldDialog = nil
+					end
 				end
 			end)
 		else
@@ -252,6 +259,10 @@ function P:onAwake()
 			end
 			self:setBetValueWithChip(chips, true)
 		end
+		if self._isInGuideFinger then
+			self._isInGuideFinger = nil
+			self.GuideFinger:SetActive(false)
+		end
     end)
     bee.addClick(self.MinusButton, function()
     	Game:playSound("ui_button_confirm")
@@ -263,6 +274,10 @@ function P:onAwake()
 			end
 			self:setBetValueWithChip(chips, true)
 		end
+		if self._isInGuideFinger then
+			self._isInGuideFinger = nil
+			self.GuideFinger:SetActive(false)
+		end
     end)
 
 	self.BlindSlider = UiSliderEx:create(self.RaiseSlider)
@@ -273,6 +288,11 @@ function P:onAwake()
 		end
     	self:setBetValueWithChip(val)
 		Game:playSound("slider")
+		
+		if self._isInGuideFinger then
+			self._isInGuideFinger = nil
+			self.GuideFinger:SetActive(false)
+		end
     end)
 
     bee.addClick(self.ButtonCheckFold, function()
@@ -305,6 +325,12 @@ function P:onAwake()
         	bee.logEvent("ingame-pre-btn", GameModel.data:getGameType(), GameModel.data:getRoomId(), 3)
 		end
     end)
+
+	bee.addClick(self.Mask, function()
+		self.Mask:SetActive(false)
+		self.BgRaise:SetActive(false)
+		self:refreshUI()
+	end)
 end
 
 function P:onShow()
@@ -337,6 +363,7 @@ function P:refreshUI()
 	self:hideFoldDialog()
 
 	if self.data:isMeOnSeat() and self.data:isMePlaying() and not self.data:isMeSittingOut() and not self.data:isMeFold() and not self.data:isMeSittingOut() then
+		self.Mask:SetActive(false)
 		self.BgRaise:SetActive(false)
 		if self.data:getActionIndex() == self.data:getMyPosition() then
 			self:refreshContent()
@@ -356,6 +383,7 @@ function P:show(fast)
 end
 
 function P:hide(fast, force)
+	self.Mask:SetActive(false)
     self.ImageBg:SetActive(false)
 end
 
@@ -425,8 +453,10 @@ function P:refreshContent(fast)
 		bee.setText(self.TextRaise, _T(lab))
 	end
 	if can_bet or can_raise then
+		self.Mask:SetActive(false)
 		self.BgRaise:SetActive(false)
 	else
+		self.Mask:SetActive(false)
 		self.BgRaise:SetActive(false)
 	end
 end
@@ -519,6 +549,8 @@ function P:refreshBetList()
 		self.SliderEffect:SetActive(false)
 	end
 	self.BgRaise:SetActive(true)
+	self.Mask:SetActive(true)
+	self.GuideFinger:SetActive(false)
 
 	local my_info = self.data:getMyPlayerInfo()
 	local min_chip_in, max_chip_in = self.data:getMinChipIn(), self.data:getMyMaxChipIn()
@@ -539,39 +571,27 @@ function P:refreshBetList()
 	self:setBetValueWithIndex(1, true)
 
 	self:showFastPotButton(list)
-end
 
-function P:showFastBetButton(min_chip_in, max_chip_in, list)
-	self.BgBetPk:SetActive(true)
-	self.BgPotPK:SetActive(false)
-
-	local my_info = self.data:getMyPlayerInfo()
-	local pot = self.data:getTotalPot()
-	local isOmaha = self.data:isOmaha()
-	local b3, b4, b5 = 3 * self.data:getBigBlind(), 4 * self.data:getBigBlind(), 5 * self.data:getBigBlind()
-	self.Bet3Button:SetActive(b3 - my_info.bet_chip <= my_info.chips and (not isOmaha or b3 - my_info.bet_chip <= pot))
-	self.Bet4Button:SetActive(b4 - my_info.bet_chip <= my_info.chips and (not isOmaha or b4 - my_info.bet_chip <= pot))
-	self.Bet5Button:SetActive(b5 - my_info.bet_chip <= my_info.chips and (not isOmaha or b5 - my_info.bet_chip <= pot))
-	bee.setText(self:find("TextNum", self.Bet3Button), self.data:getBetChipsStr(b3))
-	bee.setText(self:find("TextNum", self.Bet4Button), self.data:getBetChipsStr(b4))
-	bee.setText(self:find("TextNum", self.Bet5Button), self.data:getBetChipsStr(b5))
-
-	if isOmaha then
-		if my_info.chips <= pot then
-			self.AllinButton:SetActive(true)
-			self:refreshAllinNum()
-		else
-			self.BetPotButton:SetActive(true)
-			bee.setText(self:find("TextNum", self.BetPotButton), self.data:getBetChipsStr(pot + my_info.bet_chip))
-			self.AllinButton:SetActive(false)
+	if self._guideTag then
+		scheduler:removeTag(self._guideTag)
+		self._guideTag = nil
+	end
+	self._isInGuideFinger = nil
+	local flag = false
+	for _, v in ipairs(self.PotButtons) do
+		if v.activeSelf then
+			flag = true
+			break
 		end
-		if not self.Bet3Button.activeSelf then
-			self:showFastPotButton(list)
-		end
-	else
-		self.BetPotButton:SetActive(false)
-		self.AllinButton:SetActive(true)
-		self:refreshAllinNum()
+	end
+	if flag and LocalStore:isTagValid("guide_pk_raise_" .. PlayerModel:getUid(), true) then
+		self._guideTag = self:once(3, function()
+			self._guideTag = nil
+			if self.BgRaise.activeSelf and LocalStore:isTagValid("guide_pk_raise_" .. PlayerModel:getUid()) then
+				self._isInGuideFinger = true
+				self.GuideFinger:SetActive(true)
+			end
+		end)
 	end
 end
 

@@ -21,6 +21,8 @@ function P:onAwake()
 	self.BgCardPostion = self.BgCard.transform.localPosition
 	self.BgStatus = self:find("BgStatus")
 	self.BgStatus:SetActive(false)
+
+	bee.setSortingOrder(self.BgCard, 1)
 	
 	self.Button = self:find("Button")
 	bee.addClick2(self.Button, function()
@@ -32,6 +34,16 @@ function P:onAwake()
 	bee.addClick2(self:find("ButtonChip"), function()
 		SettingModel:setShowBB(not SettingModel:isShowBB())
 	end)
+	self.ButtonLevel = self:find("ButtonLevel")
+	if self.ButtonLevel then
+		bee.addClick2(self.ButtonLevel, function()
+			local info = self.data:getPlayer(self.seatid)
+			if info.uid == PlayerModel:getUid() then
+				Game:playSound("ui_button_confirm")
+				UiManager:showUI("Level", {from = "table"})
+			end
+		end)
+	end
 end
 
 function P:setSeatNode(seat)
@@ -72,8 +84,22 @@ function P:refreshUI()
 				self._roleSpine = bee.createObj(skinData.table_avatar)
 				self._roleSpine.transform:SetParent(self.ImageRole.transform, false)
 				self.ImageRole:GetComponent("Image").enabled = false
-				if not self:isMe() then
-					self._roleSpine.transform.localScale = Config.ROLE_OTHER_SCALE
+
+				local d = tpl_character_ingame[skinData.id]
+				if d then
+					if (self.data:getSeatNum() == 6 and d.flip_index6 and table.indexof(d.flip_index6, self.show_index) > 0) or (self.data:getSeatNum() == 3 and d.flip_index3 and table.indexof(d.flip_index3, self.show_index) > 0) then
+						self._roleSpine.transform.localScale = bee.v3(-1, 1, 1)
+					else
+						self._roleSpine.transform.localScale = bee.v3one
+					end
+					if d.my_offset and self:isMe() then
+						self._roleSpine.transform.anchoredPosition = bee.v2(d.my_offset[1], d.my_offset[2])
+					else
+						self._roleSpine.transform.anchoredPosition = bee.v2zero
+					end
+				else
+					self._roleSpine.transform.localScale = bee.v3one
+					self._roleSpine.transform.anchoredPosition = bee.v2zero
 				end
 				
 				local Mask = self:find("Mask", self._roleSpine)
@@ -81,10 +107,19 @@ function P:refreshUI()
 					if bee.isIos or bee.isEditor then
 						-- bee.convertMaskToSoftMask(Mask)
 					end
+					Mask:GetComponent("Image").enabled = not self:isMe()
+					Mask:GetComponent("Mask").enabled = not self:isMe()
+					Mask:GetComponent("Image").raycastTarget = false
+					if not self:isMe() then
+						Mask.transform.sizeDelta = bee.v2(1800, 480)
+					end
 					self._roleMask = Mask
 					self._roleMask2 = self:find("Mask2", self._roleSpine)
 					if self._roleMask2 then
 						self._roleMask2:GetComponent("Image").raycastTarget = false
+
+						self._roleMask2:GetComponent("Image").enabled = not self:isMe()
+						self._roleMask2:GetComponent("Mask").enabled = not self:isMe()
 					end
 					self._roleSpineNode = Mask.transform:GetChild(0).gameObject
 					self._roleSpinePos = self._roleSpineNode.transform.localPosition
@@ -102,6 +137,7 @@ function P:refreshUI()
 			self.ImageRole:GetComponent("Image").enabled = true
 		end
 	end
+	self._isInTopupStatus = nil
 	P.super.refreshUI(self)
 	GF.setTitleImage(self.ImageTitle, info.title, true, true)
 	self:initHandCards()
@@ -598,8 +634,38 @@ function P:refreshSittingOut()
 	-- 别删
 end
 
+function P:_refreshAddingChips(is_adding, chips, type)
+	if self._isInTopupStatus then
+		return
+	end
+	bee.Tween.killByTarget(self.BgStatus)
+	if is_adding and self.data:getRebuyRemainTime(self.seatid) > 0 then
+		self.BgStatus:SetActive(true)
+		bee.setText(self:find("TextStatus", self.BgStatus), _T("LAB_BUYINGING"))
+	else
+		self.BgStatus:SetActive(false)
+	end
+	if type == "topup" then
+		self._isInTopupStatus = true
+		self.BgStatus:SetActive(true)
+		bee.setText(self:find("TextStatus", self.BgStatus), _F("LAB_GAME_030", _N(chips or 0)))
+		bee.tween(self.BgStatus)
+		: delay(1)
+		: onComplete(function()
+			self._isInTopupStatus = nil
+			self.BgStatus:SetActive(false)
+		end)
+		: link()
+		: setTarget()
+	end
+end
+
 function P:refreshAddingChips(is_adding, chips, type)
 	if self.data:getRebuyRemainTime(self.seatid) > 0 then
+		if self.data:isInObserve() then
+			self:_refreshAddingChips(is_adding, chips, type)
+			return
+		end
 		local data = GF.getTableDataBySB(self.data:getGameType(), self.data:getSmallBlind())
 		if data then
 			if self.data:isFriendsRoom() then
@@ -615,6 +681,8 @@ function P:refreshAddingChips(is_adding, chips, type)
 		else
 			printError("refreshAddingChips no table data for sb: " .. self.data:getSmallBlind())
 		end
+	elseif self.data:isInObserve() then
+		self:_refreshAddingChips(is_adding, chips, type)
 	end
 end
 

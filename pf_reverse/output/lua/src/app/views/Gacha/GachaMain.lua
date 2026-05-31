@@ -23,12 +23,6 @@ function P:onAwake()
     self.DrawTicket = self:find("DrawTicket", Currency)
     self.DrawTicketIcon = self:find("DrawTicketIcon", self.DrawTicket)
     self.DrawTicketText = self:find("DrawTicketText", self.DrawTicket)
-
-    self.Up = self:find("Up", self.RightTop)
-    self.Up:SetActive(false)
-    self.UpTag = self:find("UpTag", self.Up)
-    self.UpNameText = self:find("UpNameText", self.Up)
-    self.UpTimeText = self:find("UpTimeText", self.Up)
     
     self.SkipToggle = self:find("SkipToggle", self.RightBottom)
 
@@ -44,6 +38,7 @@ function P:onAwake()
     self.Draw10Ticket = self:find("Draw10Ticket", self.Draw10Currency)
 
     bee.addClick(self:find("BackButton", self.LeftTop), function()
+        bee.logEvent("recruit-return", self._selectedCardPool)
         self:hideUI()
     end)
     bee.addClick(self.LoadingBackButton, function()
@@ -115,6 +110,21 @@ function P:onAwake()
     else
         bee.setUncheck(self.SkipToggle)
     end
+
+    self.Skin = self:find("Skin", self.RightTop)
+    self.AvatarImg = self:find("Avatar/Mask/AvatarImg", self.Skin)
+    self.SkinNameText = self:find("Information/SkinNameText", self.Skin)
+    self.EffSr = self:find("EffSr", self.Skin)
+    self.EffSsr = self:find("EffSsr", self.Skin)
+
+    bee.addClick(self.Skin, function()
+        Game:playSound("ui_button_confirm")
+        local showSkin = GachaModel:getCardPoolShowSkin(self._selectedCardPool)
+        bee.logEvent("recruit-skin-timelimit", self._selectedCardPool, showSkin)
+        if showSkin and showSkin > 0 then
+            ItemModel:jumpView(102001, showSkin)
+        end
+    end)
 end
 
 function P:evt_lan_mod()
@@ -283,11 +293,6 @@ end
 
 -- 卡池信息
 function P:setCardPoolShow()
-    if self.upScheduleTag then
-        scheduler:removeTag(self.upScheduleTag)
-        self.upScheduleTag = nil
-    end
-
     if self._gachaCenterItem then
         ObjectCache:putItem(self._gachaCenterItem)
         self._gachaCenterItem = nil
@@ -337,43 +342,26 @@ function P:setCardPoolShow()
     local TipsText = self:find("TipsBg/TipsText", showTitle)
     bee.setText(TipsText, _T(cfg.des))
 
-    if cfg.up then
-        self.Up:SetActive(true)
-
-        bee.setIconInAtlas(self.UpTag, cfg.up)
-        local upRole = tpl_character[cfg.up_character[1]]
-        bee.setText(self.UpNameText, _T(upRole.name))
-
-        local endTime = GachaModel:getCardPoolEndTime(self._selectedCardPool)
-        if endTime > 0 then
-            self.UpTimeText:SetActive(true)
-
-            local leftTime = endTime - bee.getServerTime()
-            if leftTime > 0 then
-                bee.setText(self.UpTimeText, _F("LAB_GACHA_028", ShopModel:getShopTimeText(leftTime)))
-                self.upScheduleTag = self:schedule(1, function()
-                    leftTime = leftTime - 1
-                    if leftTime > 0 then
-                        bee.setText(self.UpTimeText, _F("LAB_GACHA_028", ShopModel:getShopTimeText(leftTime)))
-                    else
-                        bee.setText(self.UpTimeText, _T("LAB_BACKPACK_DES_21"))
-                    end
-                end)
-            else
-                bee.setText(self.UpTimeText, _T("LAB_BACKPACK_DES_21"))
-            end
-        else
-            self.UpTimeText:SetActive(false)
-        end
-    else
-        self.Up:SetActive(false)
-    end
-
     if self._selectedCardPool == 10005 then
         self:find("Title/gacha_rainyleisure_title_bg_word_02", centerItem):SetActive(curLan ~= "en")
         self:find("Title/gacha_rainyleisure_title_bg_word_01", centerItem):SetActive(curLan ~= "en")
     elseif self._selectedCardPool == 20012 then
         self:find("bg_gacha_nightflame_bird", centerItem):SetActive(false)
+    end
+
+    local showSkin = GachaModel:getCardPoolShowSkin(self._selectedCardPool)
+    if showSkin and showSkin > 0 and ItemModel:isCanJump(102001, showSkin) then
+        self.Skin:SetActive(true)
+        local skinCfg = tpl_character_skin[showSkin]
+        if skinCfg then
+            local avatarCfg = tpl_props[skinCfg.avatar]
+            bee.setIconInAtlas(self.AvatarImg, avatarCfg.icon)
+            bee.setText(self.SkinNameText, _T(skinCfg.name))
+            self.EffSr:SetActive(skinCfg.rank == 1)
+            self.EffSsr:SetActive(skinCfg.rank == 2)
+        end
+    else
+        self.Skin:SetActive(false)
     end
 end
 
@@ -530,12 +518,15 @@ function P:onClickRecruitOne()
             ItemModel:jumpView(propCfg.accesses[1])
         end
         UiManager:showTip(params)
+        bee.logEvent("recruit-click", self._selectedCardPool, 0)
         return
     end
 
     if bee.checkCd("DrawCard", 2) then
         Game:playGachaMusic()
+        bee.logEvent("recruit-click", self._selectedCardPool, 1)
         GachaModel:recruitOne(self._selectedCardPool, costList)
+        bee.emit("evt_gachaStart")
     end
 end
 
@@ -572,12 +563,15 @@ function P:onClickRecruitTen()
             ItemModel:jumpView(propCfg.accesses[1])
         end
         UiManager:showTip(params)
+        bee.logEvent("recruit-click-10", self._selectedCardPool, 0)
         return
     end
 
     if bee.checkCd("DrawCard", 2) then
         Game:playGachaMusic()
+        bee.logEvent("recruit-click-10", self._selectedCardPool, 1)
         GachaModel:recruitTen(self._selectedCardPool, costList)
+        bee.emit("evt_gachaStart")
     end
 end
 

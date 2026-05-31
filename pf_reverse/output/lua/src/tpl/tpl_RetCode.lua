@@ -37,6 +37,9 @@ local function _initData()
 {"NO_CHIPS_STAND",1101,nil,"筹码不足被强制站起","籌碼不足，已被強制站起","You have stood up due to insufficient chips","チップ不足のため、強制的に離席しました","칩이 부족해 강제로 일어섰습니다"},
 {"NO_ACTION_STAND",1102,nil,"未操作自动站起","長時間未操作，已自動站起","You have stood up due to prolonged inactivity","長時間操作がなかったため、離席しました","조작하지 않아 자동으로 일어섰습니다"},
 {"KICKED_STAND",1103,nil,"被踢站起","被移出牌桌，已被強制站起","You have stood up due to being removed from the table","テーブルから退出させられたため、強制的に離席しました","강제 퇴장당해 일어섰습니다"},
+{"GM_CANCEL_MTT_STAND",1104,nil,"赛事已下架，请耐心等待官方通知","賽事已下架，請耐心等待官方通知","Event no longer available. Stay tuned for official announcements","該当トーナメントの掲載は終了しました。公式からのお知らせを今しばらくお待ちください。","赛事已下架，请耐心等待官方通知"},
+{"NO_PLAYER_CANCEL_MTT_STAND",1105,nil,"参赛人数不足，比赛已取消","參賽人數不足，比賽已取消","Tournament canceled due to insufficient entrants","参加人数が不足しているため、トーナメントは中止となりました。","参赛人数不足，比赛已取消"},
+{"ROOM_DISBAND_KICK_STAND",1106,nil,"房间解散，被踢出房间","房間解散，被踢出房間","Table disbanded. You have been removed","テーブルが解散されたため、自動的に退出しました。","房间解散，被踢站起"},
 {"ALREADY_IN_ROOM",1150,nil,"已经在房间","已在房間內","Already in the room","すでにルーム内にいます","이미 방에 있습니다"},
 {"ROOM_VERSION_TOO_HIGH",1151,nil,"房间版本高于客户端版本,需要升级客户端","房間版本高於客戶端版本，請更新客戶端","Room version is newer than your client. Please update your client","ルームのバージョンがクライアントより高いです。クライアントを更新してください","방 버전이 클라이언트 버전보다 높아 클라이언트 업그레이드가 필요합니다"},
 {"ROOM_VERSION_TOO_LOW",1152,nil,"房间版本低于客户端版本,无法进入房间","房間版本過低，無法進入","Room version is too low, unable to enter","ルームのバージョンが低すぎるため、入室できません","방 버전이 클라이언트 버전보다 낮아 방에 입장할 수 없습니다"},
@@ -73,7 +76,15 @@ local function _initData()
 {"ERR_DELETE_USING_DECORATION_SCHEME",1271,nil,"不能删除当前使用的方案","無法刪除目前正在使用的方案","This plan is currently in use and cannot be deleted","現在使用中のプランは削除できません",nil},
 {"ERR_SNG_NOT_AVAILABLE",1350,nil,"SNG比赛未开放","SNG賽事尚未開放","SNG is not available yet","SNG試合は開放されていません",nil},
 {"ERR_SNG_VERSION_NOT_MATCH",1351,nil,"SNG版本与玩家版本不匹配","SNG版本與當前版本不一致","Your SNG version does not match the current game version","SNGバージョンとクライアントバージョンが一致しません",nil},
-{"ERR_SNG_SIGN_FAILED",1352,nil,"SNG报名失败","SNG報名失敗","SNG registration failed.","SNG登録に失敗しました。",nil}
+{"ERR_SNG_SIGN_FAILED",1352,nil,"SNG报名失败","SNG報名失敗","SNG registration failed.","SNG登録に失敗しました。",nil},
+{"ERR_SNG_SIGN_REPEAT",1353,nil,"您已报名SNG赛事，无法报名新赛事","您已報名SNG賽事，無法報名新賽事","Failed. You've already registered for SNG","すでにSNGトーナメントにエントリー済みです。新しいトーナメントにはエントリーできません。",nil},
+{"ERR_MTT_NOT_AVAILABLE",1360,nil,"当前比赛未开放","當前比賽未開放","Not available yet","現在、このトーナメントは開催されていません。",nil},
+{"ERR_MTT_VERSION_NOT_MATCH",1361,nil,"客户端版本过低，无法报名该比赛。","客戶端版本過低，無法報名該比賽。","Version mismatch. Please update the game to register","ゲームのバージョンが古いため、このトーナメントにはエントリーできません。",nil},
+{"ERR_MTT_SIGN_PLAYER_MAX",1362,nil,"报名失败，该比赛报名人数已达上限。","報名失敗，該比賽報名人數已達上限。","Failed. Registration is full","エントリーに失敗しました。参加人数が上限に達しています。",nil},
+{"ERR_MTT_SIGN_DEADLINE",1363,nil,"报名失败，该比赛报名已截止。","報名失敗，該比賽報名已截止。","Failed. Registration is closed","エントリーに失敗しました。募集期間が終了しています。",nil},
+{"ERR_MTT_SIGN_REPEAT",1364,nil,"您已成功报名。","您已成功報名。","You've already registered for this tournament","エントリーが完了しました。",nil},
+{"ERR_MTT_CANCEL_SIGN_DEADLINE1",1365,nil,"该比赛正处于牌桌分配阶段，无法取消报名。","該比賽正處於牌桌分配階段，無法取消報名。","Failed. You cannot unregister while being assigned to a table","テーブルの割り当て中のため、エントリーをキャンセルできません。",nil},
+{"ERR_MTT_CANCEL_SIGN_DEADLINE2",1366,nil,"该比赛已开赛，无法取消报名。","該比賽已開賽，無法取消報名。","Failed. The tournament has already started","既にトーナメントが開始されているため、エントリーをキャンセルできません。",nil}
 }
     for _, v in pairs(bodys) do
         local m = {}

@@ -88,6 +88,8 @@ end
 function P:afterShow()
 	P.super.afterShow(self)
 	GF.dealDeepLinkParams()
+
+	TournamentModel:refreshMatchingTip()
 end
 
 function P:onHide()
@@ -154,7 +156,7 @@ function P:refreshUI()
 		end
 	end
 
-	local cfg = tpl_card_table[PlayerModel:getCurCardTable()]
+	local cfg = tpl_card_table[DecorationModel:getCurCardTable(self.data:getIngameScheme())]
 	if cfg then
 		bee.setSprite(self.ImageBg, cfg.bg_image)
 		bee.setSprite(self.ImageTable, cfg.image)
@@ -449,7 +451,7 @@ function P:evt_LevelUpBRC(msg)
 end
 
 function P:evt_FaceBRC(msg)
-	if SettingModel:isHideChat() and msg.seatid + 1 ~= self.data:getMyPosition() then
+	if SettingModel:isHideChat() and (msg.seatid + 1 ~= self.data:getMyPosition() or self.data:isInObserve()) then
 		return
 	end
 	if 0 == msg.code then
@@ -465,7 +467,7 @@ function P:evt_FaceBRC(msg)
 end
 
 function P:evt_TextBRC(msg)
-	if SettingModel:isHideChat() and msg.seatid + 1 ~= self.data:getMyPosition()  then
+	if SettingModel:isHideChat() and (msg.seatid + 1 ~= self.data:getMyPosition() or self.data:isInObserve())  then
 		return
 	end
 	local player = self.data:getPlayer(msg.seatid + 1)
@@ -493,6 +495,24 @@ function P:evt_GetRoomDataRSP(msg)
 	UiManager:hideUI("IngameResult")
 	self._nodeCache:clearAll()
 	self:refreshUI()
+end
+
+function P:evt_ChangeTableRSP(msg)
+	UiManager:hideUI("IngameAllin")
+	UiManager:hideUI("IngameResult")
+	self._nodeCache:clearAll()
+	self:refreshUI()
+end
+
+function P:evt_FriendRoomOwnerChangeBRC(msg)
+	local info, i = self.data:getPlayerByUid(msg.owner.uid)
+	if info then
+		self.seatController[i]:emitFunc("refreshFriendOwner", info)
+	end
+end
+
+function P:evt_ChangeObserveViewRSP()
+	self:evt_GetRoomDataRSP()
 end
 
 function P:hideWaitTip()

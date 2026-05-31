@@ -28,10 +28,12 @@ function P:onShow()
 
     local d = tpl_props[self._data.item_id or self._data.id]
     bee.setText(self.TextName, _T(d.name))
-	if self._params.format then
-    	bee.setText(self.TextDec, _F(d.des, unpack(self._params.format)))
+    if self._params.format then
+        bee.setText(self.TextDec, _F(d.des, unpack(self._params.format)))
+    elseif self._data.format then
+        bee.setText(self.TextDec, _F(d.des, unpack(self._data.format)))
 	else
-		bee.setText(self.TextDec, _T(d.des))
+		bee.setText(self.TextDec, ItemModel:getItemDesText(d.id))
 	end
     if d.preview == 1 then
     	self.ViewIcon:SetActive(true)
@@ -71,6 +73,12 @@ function P:setContentPos()
     end
 
 	self.ItemTips.transform.localPosition = bee.v3(endPosX, endPosY)
+end
+
+function P:evt_hideUiWhenAction(isVisible)
+    if not isVisible then
+        self:hideUIForce()
+    end
 end
 
 return P

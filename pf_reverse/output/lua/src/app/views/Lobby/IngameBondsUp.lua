@@ -25,7 +25,7 @@ function P:onAwake()
     bee.addClick(self.GoButton, function()
         Game:playSound("ui_button_confirm")
         bee.removeAllTasks()
-        UiManager:showUI("CharacterMainBonds")
+        UiManager:showUI("CharacterMainBonds", {data = CharacterModel:getRole(self._skin.role)})
         self:hideUIForce()
         bee.logEvent("ingame-affinity-up", GameModel.gameType, GameModel.roomId)
     end)
@@ -41,7 +41,7 @@ function P:onAwake()
     bee.addClick(self.ChangeButton, function()
         Game:playSound("ui_button_confirm")
         bee.removeAllTasks()
-        UiManager:showUI("CharacterMain", {role_id = self._role:getUsingSkin()})
+        UiManager:showUI("CharacterMain", {role_id = self._skin.role})
         self:hideUIForce()
         bee.logEvent("ingame-affinity_change", GameModel.gameType, GameModel.roomId)
     end)
@@ -54,9 +54,20 @@ function P:onShow()
     local role = info and CharacterModel:getRole(info.role_id) or CharacterModel:getUsingRole()
     self._role = role
     
+    local skin = nil
+    if info and info.skin_id then
+        skin = tpl_character_skin[info.skin_id]
+    end
+    if not skin then
+        skin = role:getSkinData()
+    end
+
+    self._skin = skin
+
     bee.setTextCut(self.TextName, role:getName(), 270)
     
-    bee.invoke(self.CharacterImage, "setSkinImage", role:getSkinData())
+    bee.invoke(self.CharacterImage, "setSkinImage", skin)
+    bee.invoke(self.CharacterImage, "setSkinRotate")
 
     bee.setText(self.TextLevel, role:getBondLevelStr(""))
 
@@ -112,11 +123,12 @@ function P:evt_GetUserBondInfoRSP(msg)
     if 0 == msg.code then
         -- PlayerModel:setTodayHands(msg.hands)
         local str = ""
-        if self._params and GF.isSNG(self._params.info.game_type) then
-            if msg.sng_hands < VipModel:getFriendshipTournament() then
-                str = string.format("<color=#1b8b05>%d/%d</color>", msg.sng_hands, VipModel:getFriendshipTournament())
+        if self._params and GF.isTournament(self._params.info.game_type) then
+            if msg.sng_hands + msg.mtt_hands < VipModel:getFriendshipTournament() then
+                str = string.format("<color=#1b8b05>%d/%d</color>", msg.sng_hands + msg.mtt_hands, VipModel:getFriendshipTournament())
             else
-                str = string.format("<color=#c00036>%d/%d %s</color>", msg.sng_hands, VipModel:getFriendshipTournament(), _T("LAB_GAME_009"))
+                str = string.format("<color=#c00036>%d/%d %s</color>", msg.sng_hands + msg.mtt_hands, VipModel:getFriendshipTournament(), _T("LAB_GAME_009"))
+                LocalStore:isDailyTagValidCrossDay("IngameBondsUp_SNG")
             end
             bee.setText(self.TextTip, _T("LAB_VIP_TEXT_25") .. " " .. str)
         else
@@ -124,6 +136,7 @@ function P:evt_GetUserBondInfoRSP(msg)
                 str = string.format("<color=#1b8b05>%d/%d</color>", msg.hands, VipModel:getFriendshipHands())
             else
                 str = string.format("<color=#c00036>%d/%d %s</color>", msg.hands, VipModel:getFriendshipHands(), _T("LAB_GAME_009"))
+                LocalStore:isDailyTagValidCrossDay("IngameBondsUp_NORMAL")
             end
             bee.setText(self.TextTip, _T("LAB_VIP_TEXT_15") .. " " .. str)
         end

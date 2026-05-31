@@ -24,7 +24,16 @@ function P:onStart()
 end
 
 function P:setRewardCont()
-	local items = self._params.items or {}
+	local items =  {}
+	-- 筛选可展示道具
+	if self._params.items then
+		for i,v in ipairs(self._params.items) do
+			if tpl_props[v.item_id or v.id] then
+				table.insert(items, v)
+			end
+		end
+	end
+
 	local rowCount = math.ceil(#items / 4)
 	for i = 1, rowCount do
 		local rowObj = CU.GameObject.Instantiate(self.ItemRow)

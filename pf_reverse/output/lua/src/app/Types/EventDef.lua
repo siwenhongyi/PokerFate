@@ -38,6 +38,8 @@ local P = {
 	"evt_refreshLobbyMusic",
 	"evt_uiBlur",		-- ui 模糊
 	"evt_refreshSysunlock", -- 刷新系统解锁
+	"evt_loading_show", -- 显示 loading
+	"evt_loading_hide", -- 隐藏 loading
 
 	-- 人个信息面板
 	"evt_refreshDeclaration",	-- 刷新个人宣言
@@ -46,6 +48,7 @@ local P = {
 	"evt_refreshBlind",		-- 刷新 blind
 	"evt_hideUiWhenAction",	-- 执行动作时隐藏 ui, 参数传 isVisible
 	"evt_refreshShowBB", 	-- 刷新显示大盲
+	"evt_assistant_show_board", -- 牌局助手显示公共牌
 
 	-- poker record
 	"evt_recordRunAction",	-- 执行行动
@@ -87,6 +90,8 @@ local P = {
 	-- 引导
 	"evt_sys_guide_start", -- 引导开始
 	"evt_sys_guide_end", -- 引导结束
+	"evt_guide_ui_show", -- 引导界面显示
+	"evt_guide_ui_hide", -- 引导界面隐藏
 }
 
 EventDef = {}

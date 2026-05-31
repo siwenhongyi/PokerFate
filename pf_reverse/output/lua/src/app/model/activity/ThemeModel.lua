@@ -16,6 +16,8 @@ function P:ctor()
     self.SchoolStoryItems = {11100404,11100405,11100406}
     -- 兔女郎剧情物品ID
     self.BunnyGirlStoryItems = {11100407,11100408,11100409}
+    -- 运动会剧情物品ID
+    self.SportsStoryItems = {11100411,11100410,11100412}
 end
 
 function P:afterLogin()
@@ -50,7 +52,7 @@ end
 function P:getCurRoleId()
     local id = CharacterModel:getUsingRoleId()
     local d = tpl_theme_activity[self:getConfId()]
-    if d then
+    if d and d.player_add then
         for i = 1, #d.player_add - 1, 2 do
             if d.player_add[i] == id then
                 return id
@@ -58,6 +60,81 @@ function P:getCurRoleId()
         end
     end
     return 0
+end
+
+function P:getSkinAddEffectIndex()
+    local data = tpl_theme_activity[self:getConfId()]
+    local effTimeCount = #data.add_time
+    local effIndex = 0
+
+    for i = 1, effTimeCount do
+        if bee.getServerTime() > data.add_time[i] then
+            effIndex = i
+        end
+    end
+
+    --test
+    if effIndex == 0 then
+        effIndex = 1
+    end
+    if PlayerModel:isEventWhite() then
+        effIndex = effTimeCount
+    end
+
+    return effIndex
+end
+
+function P:getSkinAddEffectList()
+    local data = tpl_theme_activity[self:getConfId()]
+    local effIndex = self:getSkinAddEffectIndex()
+    if data.skin_add then
+        return data.skin_add[effIndex]
+    else
+        return nil
+    end
+end
+
+function P:getCurSkinAddData()
+    local isRandom = DecorationModel:isInGameSchemeRandom()
+    local skinList = {}
+    if not isRandom then
+        local scheme = DecorationModel:getInGameSchemeInfoById(DecorationModel:getInGameSpecifySchemeId())
+         for _,sv in pairs(scheme.skin_id) do
+            table.insert(skinList, sv)
+        end
+    else
+        local ids = DecorationModel:getInGameRandomSchemeList()
+        for _,v in pairs(ids) do
+            local scheme = DecorationModel:getInGameSchemeInfoById(v)
+            for _,sv in pairs(scheme.skin_id) do
+                table.insert(skinList, sv)
+            end
+        end
+    end
+
+    local effList = self:getSkinAddEffectList()
+    if effList then
+        for i = 1, #effList - 1, 2 do
+            for _,v in pairs(skinList) do
+                if effList[i] == v then
+                    return {effList[i], effList[i + 1]}
+                end
+            end
+        end
+    end
+
+    -- local roleId = CharacterModel:getUsingRoleId()
+    -- local skinData = CharacterModel:getRoleSkinData(roleId)
+    -- local effList = self:getSkinAddEffectList()
+    
+    -- if effList then
+    --     for i = 1, #effList - 1, 2 do
+    --         if effList[i] == skinData.id then
+    --             return {effList[i], effList[i + 1]}
+    --         end
+    --     end
+    -- end
+    return nil
 end
 
 function P:getCurPlotId()
@@ -88,6 +165,8 @@ function P:createAddtionButton()
         return bee.createObj("views/School/SchoolAddition")
     elseif id == ActivityId.BunnyGirl then
         return bee.createObj("views/BunnyGirl/BunnyGirlAddition")
+    elseif id == ActivityId.Sports then
+        return bee.createObj("views/Sports/SportsAddition")
     end
     return bee.createObj("views/Hotspring/HotSpringAddition")
 end
@@ -103,6 +182,8 @@ function P:createRewardTag(id)
         return bee.createObj("views/School/SchoolReward")
     elseif id == ActivityId.BunnyGirl then
         return bee.createObj("views/BunnyGirl/BunnyGirlReward")
+    elseif id == ActivityId.Sports then
+        return bee.createObj("views/Sports/SportsReward")
     end
     return bee.createObj("views/GalaSeason/GalaReward")
 end
@@ -201,6 +282,19 @@ function P:refreshReddot()
             end
         end
         RedManager:addTagWithNum(storyNum, RedTag.BunnyGirlPlot)
+    elseif self:getConfId() == ActivityId.Sports then
+        RedManager:addTagWithNum(taskNum, RedTag.SportsTask)
+        
+        local storyNum = 0
+        for _, v in ipairs(self.SportsStoryItems) do
+            if ItemModel:getItemNumById(v) > 0 then
+                local d = self:getStoryData(v)
+                if d and not self:isPlotRewarded(d.id) then
+                    storyNum = storyNum + 1
+                end
+            end
+        end
+        RedManager:addTagWithNum(storyNum, RedTag.SportsPlot)
     end
 end
 
@@ -260,6 +354,12 @@ end
 
 function P:reqSetCurRole(roleId, cb)
     CharacterModel:changeUsingRole(roleId)
+end
+function P:reqSetCurSkin(skinId)
+    CharacterModel:changeUsingSkin(skinId)
+end
+function P:setCurSkin(skinId)
+    DecorationModel:useInGameSkin(skinId)
 end
 
 function P:reqPlotReward(plotId, cb)

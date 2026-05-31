@@ -67,4 +67,10 @@ function P:setContentPos()
 	self.ItemTips.transform.localPosition = bee.v3(endPosX, endPosY)
 end
 
+function P:evt_hideUiWhenAction(isVisible)
+    if not isVisible then
+    	self:hideUIForce()
+    end
+end
+
 return P

@@ -14,6 +14,8 @@ function P:refreshMatch()
         UiManager:showUI("TournamentSNGMatchmaking")
     else
         UiManager:hideUIForce("TournamentSNGMatchmaking")
+
+        TournamentModel:setMatchingSngInfo(0, 0, {}, 0)
     end
 end
 

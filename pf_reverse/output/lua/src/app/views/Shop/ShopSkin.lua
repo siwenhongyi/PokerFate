@@ -75,10 +75,13 @@ function P:onAwake()
 	bee.addClick(self.PurchaseGreyButton, function()
 		UiManager:showToast(_T("LAB_SHOP_ROLE_SKIN_14"))
 	end)
+
 end
 
 function P:onStart()
 	self:initSkinLit()
+
+	TaskModel:reportTask(TaskType.CheckView, TaskTargetId.ShopSkin)
 end
 
 function P:onDestroy()
@@ -188,6 +191,7 @@ function P:refreshSkinItem(item, data)
 			end
 		end
 	end)
+	bee.setBtEnable(item, false)
 end
 
 function P:_setTimeShow(item, leftTime)
@@ -322,6 +326,26 @@ function P:onPointerDown(e)
 	self._isDraged = nil
 end
 
+function P:onPointerUp(e)
+	if not self._isDraged then
+		local upTarget = e.pointerCurrentRaycast.gameObject
+		while upTarget and upTarget.name ~= "SkinItem(Clone)" do
+			upTarget = upTarget.transform.parent and upTarget.transform.parent.gameObject or nil
+		end
+		if upTarget then
+			for _, v in ipairs(self._itemsTras) do
+				if upTarget == v.gameObject then
+					local cmp = v.gameObject:GetComponent("Button")
+					if cmp then
+						cmp.onClick:Invoke()
+					end
+					return
+				end
+			end
+		end
+	end
+end
+
 function P:onDrag(e)
 	local x = e.delta.x
 	self._curPos = self._curPos + x
@@ -331,6 +355,7 @@ function P:onDrag(e)
 		self._curPos = self._maxPos
 	end
 	self:refreshItems(self._curPos)
+	self._isDraged = true
 end
 
 function P:onEndDrag(e)

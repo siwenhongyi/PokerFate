@@ -47,7 +47,7 @@ end
 function P:initUI()
 	self.ItemBg = self:find("ItemBg")
 	self.Icon = self:find("Icon")
-	self.CountText = self:find("CountText")
+	self.CountText = self:find("CountText") or self:find("TextCount")
 	self.TimeTag = self:find("TimeTag")
 	self.TimeText = self:find("TimeText", self.TimeTag)
 	self.LinkTag = self:find("LinkTag")
@@ -57,6 +57,7 @@ local ICON_SCALE = 128 / 160
 function P:setData(data)
 	self.data = data
 	self.id = data.item_id or data.id
+	self.num = data.item_num or data.num
 	self.icon = data.icon
 
 	self:refreshUI()
@@ -90,14 +91,20 @@ function P:refreshUI()
 			local s1, s2 = self.ItemBg.transform.sizeDelta, self.Icon.transform.sizeDelta
 			local s = ICON_SCALE * s1.x / s2.x
 			self.Icon.transform.localScale = bee.v3(s, s, 1)
+		elseif cfg.type == GPropKind.Title then
+			local s = self.Icon.transform.sizeDelta
+			local titleWithScale = 1.5
+			s.x = s.x * titleWithScale
+			s.y = s.x * 60 / 340
+			self.Icon.transform.sizeDelta = s
 		end
 	end
 
 	-- 数量
 	if self.CountText then
-		if self.data.num and self.data.num > 0 and ItemModel:getGPropType(cfg.type) ~= GPropType.Display then
+		if self.num and self.num > 0 and ItemModel:getGPropType(cfg.type) ~= GPropType.Display then
 			self.CountText:SetActive(true)
-			bee.setTextGold(self.CountText, _N(self.data.num))
+			bee.setTextGold(self.CountText, _N(self.num))
 		else
 			self.CountText:SetActive(false)
 		end
@@ -201,8 +208,16 @@ function P:bindPreview()
 			UiManager:showUI("BackpackMusic", {data = ItemModel:getItem(self.id, true)})
 		elseif cfg.type == GPropKind.LobbyScene then
 			UiManager:showUI("BackpackLobbyPreview", {data = ItemModel:getItem(self.id, true), list = {ItemModel:getItem(self.id, true)}})
+		elseif cfg.type == GPropKind.AllInEff then
+			local themeInfo = PlayerModel:getCurScheme()
+			local skinCfg = tpl_character_skin[themeInfo.skin_id]
+			UiManager:showUI(GameModel:getAllinUiName(cfg.id), {role = CharacterModel:getRoleData(skinCfg.role), skin = skinCfg})
 		else
-			UiManager:showUI("BackpackPreview", {data = ItemModel:getItem(self.id, true)})
+			local zOrder = nil
+			if bee.isInGame() then
+				zOrder = 32000
+			end
+			UiManager:showUI("BackpackPreview", {data = ItemModel:getItem(self.id, true), zOrder = zOrder})
 		end
 	end, true)
 	return self

@@ -38,8 +38,9 @@ function P:initTableCards()
             self:find("ImageCard3", self.Ani_card),
             self:find("ImageCard4", self.Ani_card),
         }
+        local image = DecorationModel:getCurCardBackImage(self.data:getIngameScheme())
         for _, v in ipairs(self.ImageCards) do
-            bee.setSpriteImg(v, PlayerModel:getCurCardBackImage())
+            bee.setSpriteImg(v, image)
         end
     end
 end
@@ -64,7 +65,7 @@ end
 
 function P:refreshCard()
 	local info = self.data:getPlayer(self.seatid)
-	if not self.data:isPlaying() or not info or not info.has_card or info.is_fold or self:isMe() then
+	if not self.data:isPlaying() or not info or not info.has_card or info.is_fold or self:isMe() or info.seatid == self.data:getObserveSeatid() then
 		for _, v in ipairs(self.ImageCards) do
 			v:SetActive(false)
 		end

@@ -22,8 +22,8 @@ function P:onAwake()
 
     self.BuyIn = self:find("BuyIn", self.Bottom)
     self.NextButton = self:find("NextButton", self.Bottom)
+    self.ObserveButton = self:find("ObserveButton", self.Bottom)
     self.CloseButton = self:find("CloseButton", self.RightTop)
-
 
     self.Eliminated = self:find("Eliminated", self.Center)
     self.WIN = self:find("WIN", self.Center)
@@ -50,6 +50,11 @@ function P:onAwake()
         end
         TournamentModel:reqSngSign(self._data, self.signItem and self.signItem.item_id or 0, function()
         end)
+    end)
+    bee.addClick(self.ObserveButton, function()
+        Game:playSound("ui_button_confirm")
+        bee.logEvent("tournament-view", 1, GameModel.data.room_info.tour_id)
+		Net:sendReq("pb.EnterRoomREQ", {roomid = GameModel.data:getRoomId(), is_observer = true, uid_being_observed = PlayerModel:getUid()})
     end)
     bee.addClick(self.ShareButton, function()
         Game:playSound("ui_button_confirm")
@@ -115,6 +120,7 @@ function P:onShow()
     end
     TournamentModel:setByinText(self:find("tournament_lobby_frame_01/TextByin", self.BuyIn), self.signItem, true)
 
+    self.ObserveButton:SetActive(self._data.rank > 2)
     if 1 == self._data.rank and self.ShareButton then
         bee.invoke(self.CharacterImage, "setSkin", skin or CharacterModel:getUsingRole():getSkinData(), false)
         Game:playSound("sound_SNG_win")
@@ -171,6 +177,14 @@ function P:onShow()
             item:SetActive(true)
             PropItem:create(item, {id = GPropId.ExpSNG, num = self._data.exp_inc, format = {VipModel:getExpTournament()}}): bindTips()
         end
+        if self._data.act_reward_list then
+            for _, v in ipairs(self._data.act_reward_list) do
+                flag = true
+                local item = CU.GameObject.Instantiate(Item3, BgView.transform, false)
+                item:SetActive(true)
+                PropItem:create(item, {id = v.item_id, num = v.item_num}): bindTips()
+            end
+        end
         Rewards02:SetActive(flag)
         if not flag then
             Rewards01.transform.localPosition = bee.v3(0, 100, 0)
@@ -216,6 +230,14 @@ function P:onShow()
             item:SetActive(true)
             PropItem:create(item, {id = GPropId.ExpSNG, num = self._data.exp_inc, format = {VipModel:getExpTournament()}}): bindTips()
         end
+        if self._data.act_reward_list then
+            for _, v in ipairs(self._data.act_reward_list) do
+                flag = true
+                local item = CU.GameObject.Instantiate(Item3, BgView.transform, false)
+                item:SetActive(true)
+                PropItem:create(item, {id = v.item_id, num = v.item_num}): bindTips()
+            end
+        end
         Rewards01:SetActive(not flag)
         Rewards02:SetActive(flag)
         if flag then
@@ -224,6 +246,7 @@ function P:onShow()
             bee.setText(self:find("TextRank", Rewards01), _T("LAB_TOURNAMENT_SNG_INFO34") .. _N(self._data.rank))
         end
     end
+    bee.invoke(self.CharacterImage, "setSkinRotate")
     Game:stopMusic()
 end
 

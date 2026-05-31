@@ -23,7 +23,11 @@ local function _initData()
 {101305,"LAB_CHAR_NAME_1013",1,"RoleSpine/1013_5/Role1013_5",nil},
 {100205,"LAB_CHAR_NAME_1002",1,"RoleSpine/1002_5/Role1002_5",nil},
 {100105,"LAB_CHAR_NAME_1001",1,"RoleSpine/1001_6/Role1001_6",nil},
-{101405,"LAB_CHAR_NAME_1014",1,"RoleSpine/1014_5/Role1014_5",nil}
+{101405,"LAB_CHAR_NAME_1014",1,"RoleSpine/1014_5/Role1014_5",nil},
+{100906,"LAB_CHAR_NAME_1009",1,"RoleSpine/1009_6/Role1009_6",nil},
+{101505,"LAB_CHAR_NAME_1015",1,"RoleSpine/1015_5/Role1015_5",nil},
+{101605,"LAB_CHAR_NAME_1016",1,"RoleSpine/1016_5/Role1016_5",nil},
+{1016,"LAB_CHAR_NAME_1016",1,"RoleSpine/1016_1/Role1016_1",nil}
 }
     for _, v in pairs(bodys) do
         local m = {}

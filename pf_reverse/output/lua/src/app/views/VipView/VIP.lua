@@ -218,11 +218,13 @@ function P:refreshAttrs()
     self:removeAllChildren(self.Content)
     self.Items = {}
     for i = 1, #d.rewards - 1, 2 do
-        local item = CU.GameObject.Instantiate(self.Item01, self.Content.transform, false)
-        item:SetActive(true)
-        PropItem:bindItemNode(item, {id = d.rewards[i], num = d.rewards[i + 1]}): bindTips()
-        self:find("Mask", item):SetActive(flag)
-        table.insert(self.Items, item)
+        if tpl_props[d.rewards[i]] then
+            local item = CU.GameObject.Instantiate(self.Item01, self.Content.transform, false)
+            item:SetActive(true)
+            PropItem:bindItemNode(item, {id = d.rewards[i], num = d.rewards[i + 1]}): bindTips()
+            self:find("Mask", item):SetActive(flag)
+            table.insert(self.Items, item)
+        end
     end
 end
 

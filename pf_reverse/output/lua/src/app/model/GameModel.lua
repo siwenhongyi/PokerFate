@@ -76,6 +76,9 @@ end
 
 function P:getReplayTitle(data)
     local subTitle = _N(data.small_blind) .. "/" .. _N(data.big_blind)
+    if (data.ante and data.ante ~= 0) then
+        subTitle = subTitle .. " (" .. _N(data.ante) .. ")"
+    end
     if data.tour_name and "" ~= data.tour_name then
         return data.tour_name .. "-" .. subTitle .. "-" .. TimeHelp:getDateTimeStr(data.game_start_time)
     end
@@ -151,7 +154,7 @@ function P:getAllinEffectName(kind, item_id)
     if tpl_props[item_id] then
         return tpl_nameplate_anim[tpl_props[item_id].mapId].eff .. "_" .. kind
     end
-    return "Prefab/PKTable/Eff_Allin_fire_" .. "_" .. kind
+    return "Prefab/PKTable/Eff_Allin_fire" .. "_" .. kind
 end
 
 function P:isAutoSwitchTable()
@@ -185,7 +188,9 @@ function P:switchTable(fromMenu)
         default_byin = info.default_byin,
         wait_blind = not LocalStore:getBoolForKey("poker_pay_bb_byin", true),
         ip = PlayerModel:getIP(),
+        scheme = GameModel.data:getIngameScheme(),
     }
+    d.scheme.role_id = tpl_character_skin[d.scheme.skin_id].role
     if GameModel.data:isPlaying() and GameModel.data:isMePlaying() and not GameModel.data:isMeFold() then
         UiManager:showTip({
             text = _T("LAB_GAME_047"),

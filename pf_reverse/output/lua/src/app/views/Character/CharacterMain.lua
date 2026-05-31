@@ -8,6 +8,7 @@ function P:onAwake()
     self.bg_character_bg_hellhound = self:find("bg_character_bg_hellhound", self.Center)
     self.Characters = self:find("Characters", self.Right)
     self.EmptyCharacters = self:find("Empty", self.Characters)
+    self.DecorationSchemeItem = self:find("DecorationSchemeItem", self.Right)
     local CharacterList = self:find("CharacterList", self.Characters)
     local Item1 = self:find("Item1", CharacterList)
     Item1:SetActive(false)
@@ -90,6 +91,13 @@ function P:onAwake()
             Game:playSound("ui_button_confirm")
             self:showList(1)
         end
+    end)
+
+    bee.addClick(self.DecorationSchemeItem, function ()
+        ItemModel:jumpView(13002, nil, function ()
+            self:showList(1)
+        end)
+        bee.logEvent("style-preset-role")
     end)
 
     -- 任务-查看角色界面
@@ -274,7 +282,18 @@ function P:refreshCharacter(data, item)
     local d = tpl_character[data.role_id]
     local skin = CharacterModel:getRoleSkinData(data.role_id)
     bee.setIcon(self:find("Mask/ImageIcon", item), skin.ui_avatar_1)
-    self:find("tag", item):SetActive(data.role_id == CharacterModel.using_role_id)
+    local isRandom = DecorationModel:isInGameSchemeRandom()
+    local useTag = self:find("tag", item)
+    local randomTag = self:find("randomTag", item)
+    if not isRandom then
+        local isUsing = DecorationModel:checkRoleInSpecify(data.role_id)
+        useTag:SetActive(isUsing)
+        randomTag:SetActive(false)
+    else
+        local inRandom = DecorationModel:checkRoleInRandomList(data.role_id)
+        useTag:SetActive(false)
+        randomTag:SetActive(inRandom)
+    end
     self:find("icon_lock_02", item):SetActive(data.locked)
     self:find("character_list_grid_selected", item):SetActive(self._selectItem == item)
 
@@ -326,19 +345,42 @@ function P:refreshCharacter(data, item)
 
     bee.addClick2(item, function()
         if self._role == data then
-            if data.role_id ~= CharacterModel.using_role_id then
-                if data.locked then
-                    UiManager:showToast(_T("LAB_CHAR_075"))
-                else
-                    Game:playSound("ui_button_confirm")
-                    self._old_role_id = CharacterModel.using_role_id
-                    CharacterModel:changeUsingRole(data.role_id)
-                    bee.logEvent("character-inuse", data.role_id)
-                end
+            if data.locked then
+                UiManager:showToast(_T("LAB_CHAR_075"))
             else
-                Game:playSound("ui_button_confirm")
+                local isRandom = DecorationModel:isInGameSchemeRandom()
+                if not isRandom then
+                    local isUsing = DecorationModel:checkRoleInSpecify(data.role_id)
+                    if not isUsing then
+                        Game:playSound("ui_button_confirm")
+                        -- self._old_role_id = data.role_id
+                        -- CharacterModel:changeUsingRole(data.role_id)
+                        DecorationModel:useInGameSkin(data.skin_info.skin_id, function (oldSkin)
+                            local skinCfg = tpl_character_skin[oldSkin]
+                            self._old_role_id = skinCfg.role
+                        end)
+                        bee.logEvent("character-inuse", data.role_id)
+                    end
+                else
+                    UiManager:showToast(_T("LAB_DECOR_PLAN_TIPS_11"))
+                end
             end
-            return
+
+            -- if data.role_id ~= CharacterModel.using_role_id then
+            --     UiManager:showToast(_T("LAB_DECOR_PLAN_TIPS_11"))
+            --     -- if data.locked then
+            --     --     UiManager:showToast(_T("LAB_CHAR_075"))
+            --     -- else
+            --     --     Game:playSound("ui_button_confirm")
+            --     --     self._old_role_id = CharacterModel.using_role_id
+            --     --     CharacterModel:changeUsingRole(data.role_id)
+            --     --     bee.logEvent("character-inuse", data.role_id)
+            --     -- end
+            --     -- LAB_DECOR_PLAN_TIPS_13
+            -- else
+            --     Game:playSound("ui_button_confirm")
+            -- end
+            -- return
         else
             Game:playSound("ui_button_confirm")
         end
@@ -386,15 +428,16 @@ function P:evt_RoleSetStarRSP(msg)
     end
 end
 
-function P:evt_updateScheme(schemeInfo)
-    if not schemeInfo then
-        return
+function P:evt_updateInGameScheme(msg)
+    if msg.modType == SchemeRandomTag.NoRandom then
+        if not UiManager:getUI("CharacterMainGarments") then
+            UiManager:showToast(_T("LAB_CHAR_104"))
+        end
     end
-    self.CharacterList:refreshShowingUi()
-    self:refreshRole()
 
-    if not UiManager:getUI("CharacterMainGarments") then
-        UiManager:showToast(_T("LAB_CHAR_104"))
+    if msg.scheme then
+        self.CharacterList:refreshShowingUi()
+        self:refreshRole()
     end
 end
 
@@ -419,6 +462,7 @@ function P:evt_role_back_to_main(name)
             if UiManager:isTopUI(self.node) then
                 self:refreshRole()
                 self:playAnimator(self._openAnim)
+                self:showList(1)
                 CharacterModel:refreshReddot(self._role.role_id)
             end
         end)

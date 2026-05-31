@@ -11,7 +11,7 @@ function P:onAwake()
     bee.addClick(self:find("ClaimButton", Panel), function()
 		Game:playSound("ui_button_confirm")
         if ItemModel:getItemNumById(GPropId.RoleGiftBox) > 0 then
-            UiManager:showUI("BackpackGift", {id = GPropId.RoleGiftBox})
+            UiManager:showUI("BackpackGift", {id = GPropId.RoleGiftBox, characterId = self._params and self._params.characterId})
         else
             ItemModel:jumpView(103002)
         end

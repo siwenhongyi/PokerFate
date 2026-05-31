@@ -212,7 +212,7 @@ POKER_ACTION = {
 POKER_ACTION_TAGS = {
     [POKER_ACTION.FOLD] = {name = "LAB_FOLD", bg = "InGame[ingame_action_05]", replayBg = "InGame[ingame_replay_action_05]"},
     [POKER_ACTION.CHECK] = {name = "LAB_CHECK", bg = "InGame[ingame_action_02]", replayBg = "InGame[ingame_replay_action_02]"},
-    [POKER_ACTION.CALL] = {name = "LAB_CALL", bg = "InGame[ingame_action_04]", replayBg = "InGame[ingame_replay_action_04]", nameImg = "ingame_action_call_tw"},
+    [POKER_ACTION.CALL] = {name = "LAB_CALL", bg = "InGame[ingame_action_01]", replayBg = "InGame[ingame_replay_action_01]", nameImg = "ingame_action_call_tw"},
     [POKER_ACTION.RAISE] = {name = "LAB_RAISE", bg = "InGame[ingame_action_04]", replayBg = "InGame[ingame_replay_action_04]", nameImg = "ingame_action_raise_tw"},
     [POKER_ACTION.BET] = {name = "LAB_BET", bg = "InGame[ingame_action_04]", replayBg = "InGame[ingame_replay_action_04]", nameImg = "ingame_action_bet_tw"},
     [POKER_ACTION.SB] = {name = "LAB_SMALL_BLIND", bg = "InGame[ingame_action_01]", replayBg = "InGame[ingame_replay_action_01]", nameImg = "ingame_action_sb_tw"},
@@ -227,6 +227,23 @@ POKER_ACTION_TAGS = {
     [POKER_ACTION.ALLIN] = {name = "LAB_ALL_IN_LOWER", bg = "InGame[ingame_action_03]", replayBg = "InGame[ingame_replay_action_03]", nameImg = "ingame_action_allin_tw"},
 }
 
+POKER_RECORD_TAGS = {
+    [POKER_ACTION.FOLD] = "InGame[ingame_assistant_detailes_action_frame_04]",
+    [POKER_ACTION.CHECK] = "InGame[ingame_assistant_detailes_action_frame_03]",
+    [POKER_ACTION.CALL] = "InGame[ingame_assistant_detailes_action_frame_01]",
+    [POKER_ACTION.RAISE] = "InGame[ingame_assistant_detailes_action_frame_02]",
+    [POKER_ACTION.BET] = "InGame[ingame_assistant_detailes_action_frame_02]",
+    [POKER_ACTION.SB] = "InGame[ingame_assistant_detailes_action_frame_01]",
+    [POKER_ACTION.BB] = "InGame[ingame_assistant_detailes_action_frame_01]",
+    [POKER_ACTION.ANTE] = "InGame[ingame_assistant_detailes_action_frame_01]",
+    [POKER_ACTION.FORCE_BB] = "InGame[ingame_assistant_detailes_action_frame_01]",
+    [POKER_ACTION.SYS_FOLD] = "InGame[ingame_assistant_detailes_action_frame_04]",
+    [POKER_ACTION.SYS_CHECK] = "InGame[ingame_assistant_detailes_action_frame_03]",
+    [POKER_ACTION.STRADDLE] = "InGame[ingame_assistant_detailes_action_frame_01]",
+    [POKER_ACTION.LEAVE_FOLD] = "InGame[ingame_assistant_detailes_action_frame_04]",
+    [POKER_ACTION.ALLIN] = "InGame[ingame_assistant_detailes_action_frame_05]",
+}
+
 POKER_ROUND = {
 	PRE_FLOP = 1,
 	FLOP = 2,
@@ -234,6 +251,13 @@ POKER_ROUND = {
 	RIVER = 4,
 	OVER = 5,
 	FINISH = 6,  --结算阶段
+}
+
+POKER_ROUND_NAME = {
+    [POKER_ROUND.PRE_FLOP] = "LAB_GAME_063",
+    [POKER_ROUND.FLOP] = "LAB_GAME_064",
+    [POKER_ROUND.TURN] = "LAB_GAME_065",
+    [POKER_ROUND.RIVER] = "LAB_GAME_066",
 }
 
 POKER_TYPE = {
@@ -442,6 +466,7 @@ SHOP_TYPE = {
     activity_gifts = 19,    -- 礼包商城-活动礼包
     hot_spring = 10001,    -- 温泉季商店
     gala_season = 10002,   -- 礼服季商店
+    activity_sports = 20001,    -- 运动会活动商店
 }
 
 SHOP_PAGE_TYPE = {
@@ -574,6 +599,7 @@ TaskType = {
 TaskTargetId = {
     ShopChip = 101,         -- 商城-充值筹码界面
     ShopPackage = 102,      -- 商城-特惠礼包界面
+    ShopSkin = 103,         -- 商城-服饰界面
     Role = 201,             -- 角色界面
     Info = 301,             -- 其他玩家个人信息界面
     InfoInGame = 302,       -- 牌局其他玩家个人信息界面
@@ -642,6 +668,7 @@ ActivityId = {
     GalaSeason = 10002,     -- 礼服季活动
     School = 10003,         --开学季活动
     BunnyGirl = 10004,      --兔女郎活动
+    Sports = 10005,         --运动会活动
 
     SpringFestival = 3001,  --春节活动
 }
@@ -663,15 +690,20 @@ MediaPlatform = {
 }
 
 ------------------ 装饰方案 ------------------
+SchemeTag = {
+    Lobby = 1,  --大厅
+    Ingame = 2, --房间
+}
+
 MusicTag = {
-    Single = 1,
-    Order = 2,
-    Random = 3,
+    Single = 1, --单曲
+    Order = 2, --队列
+    Random = 3, --随机
 }
 
 SchemeRandomTag = {
-    NoRandom = 0,
-    Random = 1,
+    NoRandom = 0, --不随机
+    Random = 1, --随机
 }
 
 ------------------ 排行榜 ------------------
@@ -690,9 +722,23 @@ VibrateKind = {
 
 ------------------ 比赛 ------------------
 TOUR_STATUS = {
+    Unopen = -1,   -- 比赛未开始 mtt
     Unregister = 0, -- 未报名
     Register = 1,   -- 已报名未开赛
-    Inprocess = 2,  -- 比赛进行中
-    Finished = 3,   -- 比赛结束
+    Inprocess = 2,  -- 比赛进行中 sng/mtt
+    Finished = 3,   -- 比赛结束 sng/mtt
     Losed = 4,      -- 比赛中途被淘汰
+}
+
+MTT_PLAYER_STATUS = {
+    Unregister = 0, -- 未报名
+    Register = 1,   -- 已报名
+    Losed = 2,      -- 比赛中途被淘汰
+}
+
+MTT_SIGN_STATUS = {
+    Unopen = -1,  -- 未开放报名
+    Inporcess = 0,   -- 报名中
+    Delayed = 1,   -- 延迟报名中
+    Closed = 2,    -- 报名截止
 }

@@ -113,7 +113,7 @@ function P:onAwake()
         end
         if CharacterModel:getLeftGiftCnt() <= 0 and not self._lovesSpc[self._selectGift.item_id] then
             if not ShopModel:autoShowCharacterGift(self._role.role_id) then
-                UiManager:showUI("CharacterGiftResult", {data = self._selectGift})
+                UiManager:showUI("CharacterGiftResult", {data = self._selectGift, characterId = self._role.role_id})
             end
             return
         end

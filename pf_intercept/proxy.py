@@ -16,6 +16,8 @@ Traffic flow:
 
 import argparse
 import asyncio
+from dataclasses import dataclass
+import ipaddress
 import json
 import logging
 import socket
@@ -23,6 +25,7 @@ import ssl
 import struct
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import websockets
 import websockets.exceptions
@@ -70,6 +73,10 @@ _LOGS_DIR.mkdir(exist_ok=True)
 _DATA_DIR = Path(__file__).parent.parent / "data"
 _DATA_DIR.mkdir(exist_ok=True)
 _IP_CACHE_FILE = _DATA_DIR / "ip_cache.json"
+_ORIGINAL_RESPONSE_FILE = _DATA_DIR / "force_domain_original_response.json"
+_SELECTED_ROUTE_FILE = _DATA_DIR / "selected_route.json"
+_ROUTE_HOST_FAST_MS = 100.0
+_ROUTE_CACHE_TTL_SEC = 120.0
 
 
 def _load_ip_cache() -> dict[str, str]:
@@ -165,6 +172,8 @@ _wss_down_notice_active: bool = False
 _active_wss_session_id: int = 0
 _active_client_ws = None
 _active_server_ws = None
+_route_cache: dict[str, tuple[float, float | None, "RuntimeRoute"]] = {}
+_route_select_locks: dict[str, asyncio.Lock] = {}
 
 
 def _get_host_lock(hostname: str) -> asyncio.Lock:
@@ -428,6 +437,338 @@ async def _connect_first_success(ips: list[str], port: int, timeout: float) -> t
                 t.cancel()
 
 
+@dataclass(frozen=True)
+class ServerRouteCandidate:
+    mode: str
+    server_host: str
+    wss_host: str
+    wss_port: int
+    http_scheme: str | None
+    http_host: str | None
+    http_port: int | None
+
+
+@dataclass(frozen=True)
+class ProbedRoute:
+    candidate: ServerRouteCandidate
+    wss_tcp_host: str
+    latency_ms: float | None
+
+
+@dataclass(frozen=True)
+class RuntimeRoute:
+    mode: str
+    visible_host: str
+    wss_tcp_host: str
+    wss_tcp_port: int
+    wss_latency_ms: float | None
+    http_scheme: str | None
+    http_upstream_host: str | None
+    http_tcp_host: str | None
+    http_port: int | None
+
+
+def _get_route_lock(visible_host: str) -> asyncio.Lock:
+    lock = _route_select_locks.get(visible_host)
+    if lock is None:
+        lock = asyncio.Lock()
+        _route_select_locks[visible_host] = lock
+    return lock
+
+
+def _is_ip_literal(host: str | None) -> bool:
+    if not host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+def _parse_url_endpoint(url: str | None, default_scheme: str) -> tuple[str, str, int] | None:
+    if not url:
+        return None
+    raw = str(url).strip()
+    if not raw:
+        return None
+    if "://" not in raw:
+        raw = f"{default_scheme}://{raw}"
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return None
+    host = parsed.hostname
+    if not host:
+        return None
+    scheme = parsed.scheme or default_scheme
+    default_port = 443 if scheme in ("wss", "https") else 80
+    try:
+        port = parsed.port or default_port
+    except ValueError:
+        port = default_port
+    return scheme, host, port
+
+
+def _load_original_server_response() -> dict | None:
+    try:
+        return json.loads(_ORIGINAL_RESPONSE_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        log.warning("[ROUTE] failed to load %s: %s", _ORIGINAL_RESPONSE_FILE, exc)
+        return None
+
+
+def _original_response_mtime() -> float | None:
+    try:
+        return _ORIGINAL_RESPONSE_FILE.stat().st_mtime
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+
+
+def _parse_server_route_candidates(data: dict | None, visible_host: str) -> list[ServerRouteCandidate]:
+    servers = ((data or {}).get("server") or {}).get("server") or []
+    candidates: list[ServerRouteCandidate] = []
+
+    for entry in servers:
+        if not isinstance(entry, dict):
+            continue
+        wss = _parse_url_endpoint(entry.get("server_host"), "wss")
+        if wss is None:
+            continue
+        _, wss_host, wss_port = wss
+        if wss_port == 443:
+            # 443 is used by the local transparent HTTPS passthrough; using it
+            # as a game WSS target conflicts with the current deployment.
+            continue
+
+        http = _parse_url_endpoint(entry.get("http_host"), "http")
+        http_scheme: str | None = None
+        http_host: str | None = None
+        http_port: int | None = None
+        if http is not None:
+            http_scheme, http_host, http_port = http
+
+        is_ip = _is_ip_literal(wss_host)
+        if not is_ip and wss_host not in set(PREFERRED_WSS_HOSTS) | {visible_host}:
+            continue
+
+        candidates.append(
+            ServerRouteCandidate(
+                mode="ip" if is_ip else "host",
+                server_host=str(entry.get("server_host") or ""),
+                wss_host=wss_host,
+                wss_port=wss_port,
+                http_scheme=http_scheme,
+                http_host=http_host,
+                http_port=http_port,
+            )
+        )
+
+    if candidates:
+        return candidates
+
+    return [
+        ServerRouteCandidate(
+            mode="host",
+            server_host=f"wss://{visible_host}:{SERVER_WSS_PORT}",
+            wss_host=visible_host,
+            wss_port=SERVER_WSS_PORT,
+            http_scheme=None,
+            http_host=None,
+            http_port=None,
+        )
+    ]
+
+
+async def _tcp_connect_latency_ms(host: str, port: int, timeout: float = 2.0) -> float | None:
+    loop = asyncio.get_event_loop()
+    start = loop.time()
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port),
+            timeout=timeout,
+        )
+        elapsed = (loop.time() - start) * 1000.0
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        # Silence "unused" linters while keeping reader alive until close.
+        _ = reader
+        return elapsed
+    except Exception:
+        return None
+
+
+async def _probe_route_candidate(candidate: ServerRouteCandidate) -> ProbedRoute:
+    if _is_ip_literal(candidate.wss_host):
+        hosts = [candidate.wss_host]
+    else:
+        hosts = _resolve_host_candidates(candidate.wss_host, force_refresh=False)
+        if not hosts:
+            hosts = [candidate.wss_host]
+
+    async def _probe_one(host: str) -> tuple[str, float | None]:
+        return host, await _tcp_connect_latency_ms(host, candidate.wss_port)
+
+    results = await asyncio.gather(
+        *(_probe_one(host) for host in hosts),
+        return_exceptions=True,
+    )
+    best_host = hosts[0]
+    best_latency: float | None = None
+    for result in results:
+        if isinstance(result, Exception):
+            continue
+        host, latency = result
+        if latency is None:
+            continue
+        if best_latency is None or latency < best_latency:
+            best_host = host
+            best_latency = latency
+    return ProbedRoute(candidate=candidate, wss_tcp_host=best_host, latency_ms=best_latency)
+
+
+def _choose_probed_route(probed: list[ProbedRoute]) -> ProbedRoute | None:
+    usable = [route for route in probed if route.latency_ms is not None]
+    if not usable:
+        return probed[0] if probed else None
+
+    host_routes = [route for route in usable if route.candidate.mode == "host"]
+    best_host = min(host_routes, key=lambda r: r.latency_ms) if host_routes else None
+    if best_host is not None and best_host.latency_ms is not None and best_host.latency_ms <= _ROUTE_HOST_FAST_MS:
+        return best_host
+
+    return min(usable, key=lambda r: r.latency_ms)
+
+
+def _first_resolved_host(host: str | None) -> str | None:
+    if not host:
+        return None
+    if _is_ip_literal(host):
+        return host
+    candidates = _resolve_host_candidates(host, force_refresh=False)
+    return candidates[0] if candidates else host
+
+
+def _runtime_route_from_probe(visible_host: str, probed: ProbedRoute) -> RuntimeRoute:
+    c = probed.candidate
+    http_tcp_host = _first_resolved_host(c.http_host)
+    return RuntimeRoute(
+        mode=c.mode,
+        visible_host=visible_host,
+        wss_tcp_host=probed.wss_tcp_host,
+        wss_tcp_port=c.wss_port,
+        wss_latency_ms=probed.latency_ms,
+        http_scheme=c.http_scheme,
+        http_upstream_host=c.http_host,
+        http_tcp_host=http_tcp_host,
+        http_port=c.http_port,
+    )
+
+
+def _persist_selected_route(route: RuntimeRoute) -> None:
+    try:
+        _SELECTED_ROUTE_FILE.write_text(
+            json.dumps(
+                {
+                    "visible_host": route.visible_host,
+                    "mode": route.mode,
+                    "wss_tcp_host": route.wss_tcp_host,
+                    "wss_tcp_port": route.wss_tcp_port,
+                    "wss_latency_ms": route.wss_latency_ms,
+                    "http_scheme": route.http_scheme,
+                    "http_upstream_host": route.http_upstream_host,
+                    "http_tcp_host": route.http_tcp_host,
+                    "http_port": route.http_port,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        log.warning("[ROUTE] failed to persist selected route: %s", exc)
+
+
+async def _select_upstream_route(
+    visible_host: str,
+    *,
+    force_refresh: bool = False,
+) -> RuntimeRoute:
+    mtime = _original_response_mtime()
+    now = asyncio.get_event_loop().time()
+    cached = _route_cache.get(visible_host)
+    if cached and not force_refresh:
+        expires_at, cached_mtime, route = cached
+        if now < expires_at and cached_mtime == mtime:
+            return route
+
+    lock = _get_route_lock(visible_host)
+    async with lock:
+        cached = _route_cache.get(visible_host)
+        now = asyncio.get_event_loop().time()
+        if cached and not force_refresh:
+            expires_at, cached_mtime, route = cached
+            if now < expires_at and cached_mtime == mtime:
+                return route
+
+        candidates = _parse_server_route_candidates(
+            _load_original_server_response(),
+            visible_host,
+        )
+        probed = await asyncio.gather(
+            *(_probe_route_candidate(candidate) for candidate in candidates),
+            return_exceptions=True,
+        )
+        routes = [route for route in probed if isinstance(route, ProbedRoute)]
+        chosen = _choose_probed_route(routes)
+        if chosen is None:
+            chosen = ProbedRoute(
+                candidate=ServerRouteCandidate(
+                    mode="host",
+                    server_host=f"wss://{visible_host}:{SERVER_WSS_PORT}",
+                    wss_host=visible_host,
+                    wss_port=SERVER_WSS_PORT,
+                    http_scheme=None,
+                    http_host=None,
+                    http_port=None,
+                ),
+                wss_tcp_host=visible_host,
+                latency_ms=None,
+            )
+
+        route = _runtime_route_from_probe(visible_host, chosen)
+        latency_text = ", ".join(
+            f"{r.candidate.mode}:{r.candidate.wss_host}:{r.candidate.wss_port}"
+            f"={r.latency_ms:.0f}ms" if r.latency_ms is not None
+            else f"{r.candidate.mode}:{r.candidate.wss_host}:{r.candidate.wss_port}=fail"
+            for r in routes
+        )
+        log.info(
+            "[ROUTE] selected %s route for %s: wss_tcp=%s:%d http=%s://%s:%s; probes=[%s]",
+            route.mode,
+            visible_host,
+            route.wss_tcp_host,
+            route.wss_tcp_port,
+            route.http_scheme or "-",
+            route.http_upstream_host or "-",
+            route.http_port or "-",
+            latency_text,
+        )
+        _persist_selected_route(route)
+        _route_cache[visible_host] = (
+            now + _ROUTE_CACHE_TTL_SEC,
+            mtime,
+            route,
+        )
+        return route
+
 
 # ── SSL contexts ──────────────────────────────────────────────────────────────
 
@@ -496,6 +837,7 @@ async def _do_inject(
     inject: tuple,
     inject_room_id: int,
     session_id: int,
+    inject_guard=None,
 ) -> None:
     """Fire-and-forget coroutine: encode and send a bot action to the server."""
     if not _is_active_wss_session(session_id):
@@ -508,10 +850,15 @@ async def _do_inject(
         inject_type, inject_fields = inject
         delay_sec = 0.0
 
+    if not bridge.injection_guard_is_current(inject_guard):
+        return
+
     if delay_sec and delay_sec > 0:
         await asyncio.sleep(float(delay_sec))
         if not _is_active_wss_session(session_id):
             log.info("[BOT→S] skip delayed injection from stale WSS session #%s", session_id)
+            return
+        if not bridge.injection_guard_is_current(inject_guard):
             return
 
     pb_body = codec.encode(inject_type, inject_fields)
@@ -625,7 +972,17 @@ async def _s2c_analysis_worker(
             result = bridge.handle(frame.type_name, msg)
             inject_room_id = bridge.room_id_for_c2s(frame.room_id)
             for inject in _iter_injects(result):
-                asyncio.create_task(_do_inject(server_ws, bridge, inject, inject_room_id, session_id))
+                inject_guard = bridge.injection_guard_for(inject)
+                asyncio.create_task(
+                    _do_inject(
+                        server_ws,
+                        bridge,
+                        inject,
+                        inject_room_id,
+                        session_id,
+                        inject_guard,
+                    )
+                )
 
 
 async def _pipe_c2s(client_ws, server_ws, buf: FrameBuffer, session_id: int) -> None:
@@ -810,29 +1167,24 @@ async def _handle_wss(client_ws) -> None:
     if ":" in upstream_host:
         upstream_host = upstream_host.split(":")[0]
     upstream_uri = f"wss://{upstream_host}:{SERVER_WSS_PORT}{path}"
-
-    # IP resolution: cached good IP first, then DNS candidates, DNS refresh only on failure.
-    def _pick_ip(force_refresh: bool = False) -> str | None:
-        if not force_refresh:
-            cached = _host_ok_ip_cache.get(upstream_host)
-            if cached:
-                return cached
-        candidates = _resolve_host_candidates(upstream_host, force_refresh=force_refresh)
-        return candidates[0] if candidates else None
-
-    upstream_ip = _pick_ip() or upstream_host
+    route = await _select_upstream_route(upstream_host)
 
     log.info(
-        "[WSS] session #%s client connected, path=%s → %s (tcp=%s:%d, fwd_headers=%d, subprotocols=%s)",
-        session_id, path, upstream_uri, upstream_ip, SERVER_WSS_PORT,
+        "[WSS] session #%s client connected, path=%s → %s "
+        "(route=%s tcp=%s:%d latency=%s, fwd_headers=%d, subprotocols=%s)",
+        session_id, path, upstream_uri,
+        route.mode,
+        route.wss_tcp_host,
+        route.wss_tcp_port,
+        f"{route.wss_latency_ms:.0f}ms" if route.wss_latency_ms is not None else "-",
         len(additional_headers), subprotocols,
     )
-    print(f"[proxy] WSS 已连接  {upstream_uri}  (ip={upstream_ip})")
+    print(f"[proxy] WSS 已连接  {upstream_uri}  (route={route.mode} tcp={route.wss_tcp_host}:{route.wss_tcp_port})")
 
-    def _connect_kwargs(ip: str):
+    def _connect_kwargs(selected: RuntimeRoute):
         return dict(
-            host=ip,
-            port=SERVER_WSS_PORT,
+            host=selected.wss_tcp_host,
+            port=selected.wss_tcp_port,
             ssl=client_ssl,
             server_hostname=upstream_host,
             additional_headers=additional_headers or None,
@@ -844,12 +1196,13 @@ async def _handle_wss(client_ws) -> None:
 
     try:
         try:
-            async with websockets.connect(upstream_uri, **_connect_kwargs(upstream_ip)) as upstream_ws:
+            async with websockets.connect(upstream_uri, **_connect_kwargs(route)) as upstream_ws:
                 if not _is_active_wss_session(session_id):
                     await _close_ws_quietly(upstream_ws, reason="stale session")
                     return
-                _host_ok_ip_cache[upstream_host] = upstream_ip
-                _persist_ip_cache()
+                if route.mode == "host":
+                    _host_ok_ip_cache[upstream_host] = route.wss_tcp_host
+                    _persist_ip_cache()
                 if _wss_down_notice_active:
                     notify("wss_reconnected")
                     _wss_down_notice_active = False
@@ -859,19 +1212,26 @@ async def _handle_wss(client_ws) -> None:
         except (OSError, asyncio.TimeoutError) as net_err:
             # Network-level failure (TCP connect / TLS timeout): refresh DNS and retry once.
             log.warning(
-                "[WSS] connect to %s (%s) failed: %s; refreshing DNS and retrying",
-                upstream_host, upstream_ip, net_err,
+                "[WSS] connect to %s via %s:%d failed: %s; refreshing route and retrying",
+                upstream_host, route.wss_tcp_host, route.wss_tcp_port, net_err,
             )
-            print(f"[proxy] WSS 连接失败 {upstream_host} ({upstream_ip})，正在刷新 DNS 重试...")
-            fresh_ip = _pick_ip(force_refresh=True)
-            if fresh_ip and fresh_ip != upstream_ip:
-                log.info("[WSS] retry with fresh IP: %s → %s", upstream_host, fresh_ip)
-                async with websockets.connect(upstream_uri, **_connect_kwargs(fresh_ip)) as upstream_ws:
+            print(f"[proxy] WSS 连接失败 {upstream_host} ({route.wss_tcp_host}:{route.wss_tcp_port})，正在刷新线路重试...")
+            fresh_route = await _select_upstream_route(upstream_host, force_refresh=True)
+            if (fresh_route.wss_tcp_host, fresh_route.wss_tcp_port) != (route.wss_tcp_host, route.wss_tcp_port):
+                log.info(
+                    "[WSS] retry with fresh route: %s → %s:%d (%s)",
+                    upstream_host,
+                    fresh_route.wss_tcp_host,
+                    fresh_route.wss_tcp_port,
+                    fresh_route.mode,
+                )
+                async with websockets.connect(upstream_uri, **_connect_kwargs(fresh_route)) as upstream_ws:
                     if not _is_active_wss_session(session_id):
                         await _close_ws_quietly(upstream_ws, reason="stale session")
                         return
-                    _host_ok_ip_cache[upstream_host] = fresh_ip
-                    _persist_ip_cache()
+                    if fresh_route.mode == "host":
+                        _host_ok_ip_cache[upstream_host] = fresh_route.wss_tcp_host
+                        _persist_ip_cache()
                     if _wss_down_notice_active:
                         notify("wss_reconnected")
                         _wss_down_notice_active = False
@@ -929,6 +1289,29 @@ async def _pipe_raw(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
         writer.close()
 
 
+async def _open_route_http_upstream(
+    route: RuntimeRoute,
+    *,
+    timeout: float = 5.0,
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter] | None:
+    if not route.http_tcp_host or not route.http_port or not route.http_scheme:
+        return None
+
+    ssl_ctx = None
+    server_hostname = None
+    if route.http_scheme == "https":
+        ssl_ctx = _make_client_ssl()
+        server_hostname = route.http_upstream_host or route.visible_host
+
+    conn = asyncio.open_connection(
+        route.http_tcp_host,
+        route.http_port,
+        ssl=ssl_ctx,
+        server_hostname=server_hostname,
+    )
+    return await asyncio.wait_for(conn, timeout=timeout)
+
+
 async def _handle_passthrough(
     client_reader: asyncio.StreamReader,
     client_writer: asyncio.StreamWriter,
@@ -956,14 +1339,39 @@ async def _handle_passthrough(
     target_host = _extract_sni_hostname(initial) or _extract_http_host(initial) or _real_server_sni or SERVER_HOST
     if ":" in target_host:
         target_host = target_host.split(":", 1)[0]
+    protocol = "TLS" if initial and initial[0:1] == b"\x16" else "HTTP"
 
     srv_reader: asyncio.StreamReader | None = None
     srv_writer: asyncio.StreamWriter | None = None
     chosen_ip: str | None = None
+    route: RuntimeRoute | None = None
+
+    # Plain HTTP can be paired with the same server entry selected for WSS:
+    # - host mode: client still sees http://host, upstream may be HTTPS host.
+    # - ip mode: client still sees http://host, upstream goes to server IP:8888.
+    if protocol == "HTTP" and target_host in set(PREFERRED_WSS_HOSTS) | {SERVER_HOST}:
+        try:
+            route = await _select_upstream_route(target_host)
+            opened = await _open_route_http_upstream(route)
+            if opened is not None:
+                srv_reader, srv_writer = opened
+                chosen_ip = route.http_tcp_host
+        except (OSError, asyncio.TimeoutError) as exc:
+            tcp_log.warning(
+                "[TCP] route HTTP upstream %s://%s:%s (%s:%s) failed: %s",
+                route.http_scheme if route else "-",
+                route.http_upstream_host if route else "-",
+                route.http_port if route else "-",
+                route.http_tcp_host if route else "-",
+                route.http_port if route else "-",
+                exc,
+            )
+        except Exception:
+            log.exception("[TCP] unexpected route HTTP upstream failure for %s", target_host)
 
     # Try cached-good IP first; this avoids DNS + candidate racing for stable hosts.
     cached = _host_ok_ip_cache.get(target_host)
-    if cached:
+    if srv_writer is None and cached:
         try:
             conn = asyncio.open_connection(cached, real_port)
             srv_reader, srv_writer = await asyncio.wait_for(conn, timeout=2.5)
@@ -1021,16 +1429,32 @@ async def _handle_passthrough(
         client_writer.close()
         return
 
-    path = _extract_http_path(initial) if initial and not initial[0:1] == b"\x16" else None
-    protocol = "TLS" if initial and initial[0:1] == b"\x16" else "HTTP"
+    path = _extract_http_path(initial) if protocol == "HTTP" else None
     if path:
-        tcp_log.info("[TCP] %s → %s:%d (%s)  %s %s",
-                     peer, target_host, real_port, chosen_ip, protocol, path)
+        if route is not None and route.http_tcp_host == chosen_ip:
+            tcp_log.info(
+                "[TCP] %s → %s:%d (%s://%s:%s via %s:%s route=%s)  %s %s",
+                peer,
+                target_host,
+                real_port,
+                route.http_scheme,
+                route.http_upstream_host,
+                route.http_port,
+                route.http_tcp_host,
+                route.http_port,
+                route.mode,
+                protocol,
+                path,
+            )
+        else:
+            tcp_log.info("[TCP] %s → %s:%d (%s)  %s %s",
+                         peer, target_host, real_port, chosen_ip, protocol, path)
     else:
         tcp_log.info("[TCP] %s → %s:%d (%s)  [%s]",
                      peer, target_host, real_port, chosen_ip, protocol)
-    _host_ok_ip_cache[target_host] = chosen_ip
-    _persist_ip_cache()
+    if route is None or route.mode == "host":
+        _host_ok_ip_cache[target_host] = chosen_ip
+        _persist_ip_cache()
 
     t0 = asyncio.get_event_loop().time()
     try:

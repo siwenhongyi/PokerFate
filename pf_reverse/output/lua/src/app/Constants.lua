@@ -74,6 +74,8 @@ elseif bee.isRelease then
     else
         G_HTTP_URL = "https://ga-foreign.poker-fate.com/"
         G_HTTP_URL_2 = "https://awsb-entry.poker-fate.com/"
+        -- G_HTTP_URL_3 = "https://zga-entry.allinmoe.com/"
+        -- G_HTTP_URL_4 = "https://zga-entry.poker-fate.net/"
         -- G_HTTP_URL_5 = "http://106.15.91.81/"
     end
 end

@@ -43,6 +43,7 @@ from pokerfate.strategy.range_v2.hand_categorizer import (
     made_hand_info as _hero_made_info,
 )
 from pokerfate.strategy.range_v2 import board_analyzer as _range_board
+from pokerfate.strategy.range_v2.empirical_model import population_rate, population_strength
 from pokerfate.strategy.v3 import board as _v3_board
 
 log = logging.getLogger(__name__)
@@ -1418,7 +1419,7 @@ class PokerBot:
           - bluff_ag_scale 低（≤0.18）→ 对手极少弃 → 压低
         """
         if opp_id < 0:
-            return 0.45
+            return population_rate('fold_to_cbet', 0.45)
         base = self.opponent_model.fold_to_cbet_rate(opp_id)
         bluff_ag = adj.get('bluff_ag_scale', 0.55)
         if bluff_ag >= 0.85:
@@ -1988,34 +1989,59 @@ class PokerBot:
         conf = 0.0
         if street == 'flop':
             n = float(opp_stats.flop_bet_count + opp_stats.flop_passive_count)
-            # TODO(empirical-bayes): replace fixed priors (mean/strength) with
-            # pool priors estimated from persisted opponent history
-            # (opponents.json), segmented by game format and stake.
-            p = self._bayes_shrunk_rate(opp_stats.flop_bet_count, n, prior_mean=0.45, prior_strength=24.0)
-            read = p - 0.45
-            conf = self._confidence_weight(n, k=24.0)
+            base = population_rate('flop_afq', 0.45)
+            strength = population_strength('flop_afq', 24.0)
+            p = self._bayes_shrunk_rate(
+                opp_stats.flop_bet_count, n,
+                prior_mean=base, prior_strength=strength,
+            )
+            read = p - base
+            conf = self._confidence_weight(n, k=strength)
             lam = 0.10
         elif street == 'turn':
             n_t = float(opp_stats.turn_bet_count + opp_stats.turn_passive_count)
-            # TODO(empirical-bayes): same as flop, move to dynamic pool priors.
-            p_t = self._bayes_shrunk_rate(opp_stats.turn_bet_count, n_t, prior_mean=0.40, prior_strength=24.0)
+            turn_base = population_rate('turn_afq', 0.40)
+            turn_strength = population_strength('turn_afq', 24.0)
+            p_t = self._bayes_shrunk_rate(
+                opp_stats.turn_bet_count, n_t,
+                prior_mean=turn_base, prior_strength=turn_strength,
+            )
             # If turn aggression is high but river AFq is low, treat as turn over-bluff tendency.
             n_r = float(opp_stats.river_bet_count + opp_stats.river_call_count + opp_stats.river_check_count)
-            p_r = self._bayes_shrunk_rate(opp_stats.river_bet_count, n_r, prior_mean=0.35, prior_strength=24.0)
+            river_afq_base = population_rate('river_afq', 0.35)
+            river_afq_strength = population_strength('river_afq', 24.0)
+            p_r = self._bayes_shrunk_rate(
+                opp_stats.river_bet_count, n_r,
+                prior_mean=river_afq_base, prior_strength=river_afq_strength,
+            )
             river_falloff = max(0.0, p_t - p_r)
-            read = (p_t - 0.40) + 0.50 * river_falloff
-            conf = min(self._confidence_weight(n_t, 24.0), self._confidence_weight(n_r, 24.0))
+            read = (p_t - turn_base) + 0.50 * river_falloff
+            conf = min(
+                self._confidence_weight(n_t, turn_strength),
+                self._confidence_weight(n_r, river_afq_strength),
+            )
             lam = 0.10
         elif street == 'river':
             n_bf = float(opp_stats.river_bet_count + opp_stats.river_check_count)
             n_bw = float(opp_stats.bet_win_count)
-            # TODO(empirical-bayes): calibrate river priors from historical pool
-            # to avoid static assumptions across different player pools.
-            p_bf = self._bayes_shrunk_rate(opp_stats.river_bet_count, n_bf, prior_mean=0.35, prior_strength=30.0)
-            p_bw = self._bayes_shrunk_rate(opp_stats.bluff_win_count, n_bw, prior_mean=0.25, prior_strength=30.0)
+            river_bet_base = population_rate('river_bet_frequency', 0.35)
+            river_bet_strength = population_strength('river_bet_frequency', 30.0)
+            bluff_base = population_rate('bluff_win_rate', 0.25)
+            bluff_strength = population_strength('bluff_win_rate', 30.0)
+            p_bf = self._bayes_shrunk_rate(
+                opp_stats.river_bet_count, n_bf,
+                prior_mean=river_bet_base, prior_strength=river_bet_strength,
+            )
+            p_bw = self._bayes_shrunk_rate(
+                opp_stats.bluff_win_count, n_bw,
+                prior_mean=bluff_base, prior_strength=bluff_strength,
+            )
             # Blend volume (bet freq) + quality (weak-hand win rate as bluff proxy).
-            read = 0.50 * (p_bf - 0.35) + 0.50 * (p_bw - 0.25)
-            conf = min(self._confidence_weight(n_bf, 30.0), self._confidence_weight(n_bw, 30.0))
+            read = 0.50 * (p_bf - river_bet_base) + 0.50 * (p_bw - bluff_base)
+            conf = min(
+                self._confidence_weight(n_bf, river_bet_strength),
+                self._confidence_weight(n_bw, bluff_strength),
+            )
             lam = 0.14
         else:
             return 0.0
@@ -2247,10 +2273,17 @@ class PokerBot:
             else:
                 # EQR mode: reset scalar range estimator
                 stats = self.opponent_model.get(pid)
-                prior = stats.vpip if stats.hands_seen >= MIN_HANDS_FOR_CLASSIFICATION else 0.35
+                prior = (
+                    stats.vpip
+                    if stats.hands_seen >= MIN_HANDS_FOR_CLASSIFICATION
+                    else population_rate('vpip', 0.35)
+                )
                 pfr_vpip = (stats.pfr / stats.vpip
                             if stats.hands_seen >= MIN_HANDS_FOR_CLASSIFICATION and stats.vpip > 0
-                            else 0.75)
+                            else (
+                                population_rate('pfr', 0.20)
+                                / max(population_rate('vpip', 0.35), 1e-9)
+                            ))
                 bluff_wr = stats.bluff_win_rate
                 bet_win_n = stats.bet_win_count
                 river_bf_n = stats.river_bet_count + stats.river_check_count
@@ -2378,24 +2411,93 @@ class PokerBot:
         """Build a PlayerProfile from OpponentModel data (read-only)."""
         s = self.opponent_model.get(player_id)
         name = self.opponent_model._id_to_name.get(player_id, str(player_id))
+        three_bet_opps = float(s.three_bet_opportunities or 0)
+        fold_3bet_opps = float(s.fold_to_3bet_opps or 0)
+        fold_cbet_opps = float(s.fold_to_cbet_opps or 0)
+        flop_seen = float(s.flop_seen_count or 0)
+        showdown_n = float(s.showdown_count or 0)
+        flop_actions = float(s.flop_bet_count + s.flop_passive_count)
+        turn_actions = float(s.turn_bet_count + s.turn_passive_count)
+        river_actions = float(s.river_bet_count + s.river_call_count + s.river_check_count)
+        river_facing = float(s.river_facing_bet_opps or 0)
+        river_bf_n = float(s.river_bet_count + s.river_check_count)
+        bet_win_n = float(s.bet_win_count or 0)
+
+        three_bet = self._bayes_shrunk_rate(
+            s.three_bet_count, three_bet_opps,
+            population_rate('three_bet', 0.06),
+            population_strength('three_bet', 80.0),
+        )
+        fold_to_3bet = self._bayes_shrunk_rate(
+            s.fold_to_3bet_count, fold_3bet_opps,
+            population_rate('fold_to_3bet', 0.55),
+            population_strength('fold_to_3bet', 30.0),
+        )
+        fold_to_cbet = self._bayes_shrunk_rate(
+            s.fold_to_cbet_count, fold_cbet_opps,
+            population_rate('fold_to_cbet', 0.45),
+            population_strength('fold_to_cbet', 50.0),
+        )
+        wtsd = (
+            s.wtsd if s.server_wtsd_prior > 0 else self._bayes_shrunk_rate(
+                s.showdown_count, flop_seen,
+                population_rate('wtsd', 0.25),
+                population_strength('wtsd', 80.0),
+            )
+        )
+        wmsd = self._bayes_shrunk_rate(
+            s.showdown_win_count, showdown_n,
+            population_rate('wmsd', 0.50),
+            population_strength('wmsd', 80.0),
+        )
+        flop_afq = self._bayes_shrunk_rate(
+            s.flop_bet_count, flop_actions,
+            population_rate('flop_afq', 0.45),
+            population_strength('flop_afq', 80.0),
+        )
+        turn_afq = self._bayes_shrunk_rate(
+            s.turn_bet_count, turn_actions,
+            population_rate('turn_afq', 0.40),
+            population_strength('turn_afq', 80.0),
+        )
+        river_afq = self._bayes_shrunk_rate(
+            s.river_bet_count, river_actions,
+            population_rate('river_afq', 0.35),
+            population_strength('river_afq', 80.0),
+        )
+        river_fold_rate = self._bayes_shrunk_rate(
+            s.river_facing_bet_fold_count, river_facing,
+            population_rate('river_fold_rate', 0.35),
+            population_strength('river_fold_rate', 58.0),
+        )
+        river_bet_freq = self._bayes_shrunk_rate(
+            s.river_bet_count, river_bf_n,
+            population_rate('river_bet_frequency', 0.35),
+            population_strength('river_bet_frequency', 80.0),
+        )
+        bluff_win_rate = self._bayes_shrunk_rate(
+            s.bluff_win_count, bet_win_n,
+            population_rate('bluff_win_rate', 0.25),
+            population_strength('bluff_win_rate', 80.0),
+        )
         return PlayerProfile(
             name=name,
             hands_seen=s.hands_seen,
             vpip=s.vpip,
             pfr=s.pfr,
             af=s.aggression_factor,
-            three_bet_pct=s.three_bet_pct,
-            fold_to_3bet=s.fold_to_3bet,
-            fold_to_cbet=s.fold_to_cbet,
+            three_bet_pct=three_bet,
+            fold_to_3bet=fold_to_3bet,
+            fold_to_cbet=fold_to_cbet,
             fold_to_cbet_opps=s.fold_to_cbet_opps,
-            wtsd=s.wtsd,
-            wmsd=s.wmsd,
-            flop_afq=s.flop_afq,
-            turn_afq=s.turn_afq,
-            river_afq=s.river_afq,
-            river_fold_rate=s.river_fold_rate,
-            river_bet_freq=s.river_bet_frequency,
-            bluff_win_rate=s.bluff_win_rate,
+            wtsd=wtsd,
+            wmsd=wmsd,
+            flop_afq=flop_afq,
+            turn_afq=turn_afq,
+            river_afq=river_afq,
+            river_fold_rate=river_fold_rate,
+            river_bet_freq=river_bet_freq,
+            bluff_win_rate=bluff_win_rate,
             bet_win_count=s.bet_win_count,
             river_bet_count=s.river_bet_count,
             river_check_count=s.river_check_count,

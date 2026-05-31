@@ -239,6 +239,12 @@ function P:setPlayerItem(item, data)
 		bee.setIcon(CharacterImg, skinCfg.image, true)
 		CharacterImg.transform.localPosition = bee.v3(skinCfg.leaderboard_offset[1], skinCfg.leaderboard_offset[2], 0)
 		CharacterImg.transform.localScale = bee.v3(skinCfg.leaderboard_offset[3], skinCfg.leaderboard_offset[3], 1)
+		
+        if skinCfg.spine_rotation then
+            CharacterImg.transform.localEulerAngles = bee.v3(0, 0, skinCfg.spine_rotation)
+        else
+            CharacterImg.transform.localEulerAngles = bee.v3zero
+        end
 	end
 
 	if EffectRoot.transform.childCount > 0 then

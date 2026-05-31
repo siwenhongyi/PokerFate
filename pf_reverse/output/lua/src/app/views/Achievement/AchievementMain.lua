@@ -12,6 +12,7 @@ function P:onAwake()
     self.Loading = self:find("AnimRoot/Loading")
 
     bee.addClick(self:find("RecordButton", self.LeftBottom), function ()
+        bee.logEvent("achievement-get")
         Game:playSound("ui_button_confirm")
         UiManager:showUI("AchievementRecord")
         -- self:()
@@ -93,6 +94,7 @@ function P:refreshItem(data, item, isInit, index)
 
     bee.setIcon(icon, data.icon)
     bee.addClick(item, function()
+        bee.logEvent("achievement-theme", data.id)
         UiManager:showUI("AchievementDetail", {themeType = data.id, datas = self.themeDatas})
     end, true)
 end
@@ -108,10 +110,14 @@ function P:evt_refreshAchievementThemeReddot(themeId)
     end
 end
 
+function P:hideUI()
+    P.super.hideUI(self)
+    self.Loading:SetActive(false)
+end
+
 --引导
 function P:anchievementGuide()
 	GuideManager:startSystemGuide(16001, 0.65)
-
 end
 
 

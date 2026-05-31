@@ -106,7 +106,7 @@ bee.clearFontCache = function()
 end
 
 bee.setText = function(obj, s, cmpName)
-    if obj then
+    if not bee.isNull(obj) then
         local cmp = obj:GetComponent(cmpName or "Text")
         if cmp then
             cmp.text = s
@@ -127,7 +127,7 @@ bee.setText = function(obj, s, cmpName)
 end
 
 bee.setTextCut = function(obj, s, width)
-    if obj then
+    if not bee.isNull(obj) then
         local cmp = obj:GetComponent("Text")
         if cmp then
             if s and "" ~= s then

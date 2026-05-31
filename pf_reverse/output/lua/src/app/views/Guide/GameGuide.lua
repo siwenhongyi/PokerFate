@@ -37,10 +37,14 @@ function P:onShow()
     self.HollowItems = {}
     self:initUI(false, self._params.delay)
     self:initEvent()
+
+    bee.emit(EventDef.evt_guide_ui_show)
 end
 
 function P:onDestroy()
     P.super.onDestroy(self)
+
+    bee.emit(EventDef.evt_guide_ui_hide)
 end
 
 function P:showUI()

@@ -49,6 +49,7 @@ from pokerfate.strategy.range_estimator import (
 )
 from pokerfate.strategy.range_v2.showdown_learner import ShowdownLearner, _board_at_street
 from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards
+from pokerfate.strategy.range_v2.empirical_model import bb_key, set_current_big_blind
 from pokerfate.strategy.range_estimator import ShowdownCalibrator
 from pokerfate.data import init as _init_data
 
@@ -57,7 +58,11 @@ _init_data()
 
 _DEFAULT_LOG_FILE    = str(Path(__file__).resolve().parent / "logs" / "pokerfate.log")
 _DEFAULT_ROBOT_LOG_FILE = str(Path(__file__).resolve().parent / "logs" / "bot.log")
-_DEFAULT_OPPONENTS   = str(Path(__file__).resolve().parent / "data" / "opponents.json")
+_DEFAULT_MODEL_DIR = Path(__file__).resolve().parent / "data" / "local_models"
+
+
+def _default_opponents_path(big_blind: float) -> Path:
+    return _DEFAULT_MODEL_DIR / f"opponents_{bb_key(big_blind)}.json"
 
 _PUSH_STREET_LABELS = {
     "preflop": "翻前",
@@ -245,12 +250,14 @@ class PokerFateAPI:
         self.my_player_id = my_player_id
         self.big_blind = big_blind
         self.small_blind = small_blind
+        set_current_big_blind(big_blind)
         self.verbose = verbose
         self._decision_seed_base = decision_seed
         self._decision_index = 0
         _in_test = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+        self._autosave_uses_default = autosave_path is _UNSET and not _in_test
         if autosave_path is _UNSET:
-            autosave_path = None if _in_test else _DEFAULT_OPPONENTS
+            autosave_path = None if _in_test else str(_default_opponents_path(big_blind))
         self.autosave_path = autosave_path
         if log_file is _UNSET:
             log_file = None if _in_test else _DEFAULT_LOG_FILE
@@ -272,36 +279,7 @@ class PokerFateAPI:
 
         # Auto-load opponent data (+ embedded showdown/learner data) from disk on startup
         if autosave_path:
-            self._bot.opponent_model = self._bot.opponent_model.__class__.load(autosave_path)
-            if self._bot.opponent_model._stats:
-                self._log.raw({"event": "model_loaded", "path": autosave_path,
-                               "known_opponents": len(self._bot.opponent_model._stats)})
-            showdown_raw = self._bot.opponent_model._showdown_data
-            if showdown_raw:
-                if use_range_equity:
-                    # Range V2: load ShowdownLearner data (key: "range_v2_learner")
-                    v2_data = showdown_raw.get('range_v2_learner')
-                    if v2_data:
-                        self._bot._showdown_learner = ShowdownLearner.from_dict(v2_data)
-                        self._bot._action_model.showdown_learner = self._bot._showdown_learner
-                    # 缺陷 C: Hero equity meta-calibrator 持久化
-                    heq_data = showdown_raw.get('hero_eq_calibrator')
-                    if heq_data:
-                        from pokerfate.strategy.range_v2.hero_eq_calibrator import (
-                            HeroEquityCalibrator,
-                        )
-                        self._bot._hero_eq_calibrator = HeroEquityCalibrator.from_dict(heq_data)
-                    river_rel_data = showdown_raw.get('river_relative_calibrator')
-                    if river_rel_data:
-                        from pokerfate.strategy.range_v2.river_relative_calibrator import (
-                            RiverRelativeCalibrator,
-                        )
-                        self._bot._river_relative_calibrator = (
-                            RiverRelativeCalibrator.from_dict(river_rel_data)
-                        )
-                else:
-                    # EQR: load ShowdownCalibrator
-                    self._bot.range_estimator.showdown_calibrator = ShowdownCalibrator.from_dict(showdown_raw)
+            self._load_persisted_model(str(autosave_path))
 
         # Session-level state: persists across hands
         self._session_stacks: Dict[int, float] = {}   # player_id -> last known stack
@@ -355,10 +333,71 @@ class PokerFateAPI:
         else:
             self._calibrator = None
 
+    def _showdown_persistence_data(self) -> dict:
+        if self._bot.use_range_equity:
+            return {
+                'range_v2_learner': self._bot._showdown_learner.to_dict(),
+                'hero_eq_calibrator': self._bot._hero_eq_calibrator.to_dict(),
+                'river_relative_calibrator': (
+                    self._bot._river_relative_calibrator.to_dict()
+                ),
+            }
+        return self._bot.range_estimator.showdown_calibrator.to_dict()
+
+    def _save_persisted_model(self) -> None:
+        if not self.autosave_path:
+            return
+        self._bot.opponent_model.save(
+            self.autosave_path,
+            showdown_data=self._showdown_persistence_data(),
+        )
+
+    def _load_persisted_model(self, filepath: str) -> None:
+        self._bot.opponent_model = self._bot.opponent_model.__class__.load(filepath)
+        if self._bot.opponent_model._stats:
+            self._log.raw({"event": "model_loaded", "path": filepath,
+                           "known_opponents": len(self._bot.opponent_model._stats)})
+        showdown_raw = self._bot.opponent_model._showdown_data
+        if not showdown_raw:
+            return
+        if self._bot.use_range_equity:
+            v2_data = showdown_raw.get('range_v2_learner')
+            if v2_data:
+                self._bot._showdown_learner = ShowdownLearner.from_dict(v2_data)
+                self._bot._action_model.showdown_learner = self._bot._showdown_learner
+            heq_data = showdown_raw.get('hero_eq_calibrator')
+            if heq_data:
+                from pokerfate.strategy.range_v2.hero_eq_calibrator import (
+                    HeroEquityCalibrator,
+                )
+                self._bot._hero_eq_calibrator = HeroEquityCalibrator.from_dict(heq_data)
+            river_rel_data = showdown_raw.get('river_relative_calibrator')
+            if river_rel_data:
+                from pokerfate.strategy.range_v2.river_relative_calibrator import (
+                    RiverRelativeCalibrator,
+                )
+                self._bot._river_relative_calibrator = (
+                    RiverRelativeCalibrator.from_dict(river_rel_data)
+                )
+        else:
+            self._bot.range_estimator.showdown_calibrator = (
+                ShowdownCalibrator.from_dict(showdown_raw)
+            )
+
     def set_table_blinds(self, big_blind: float, small_blind: float) -> None:
         """Update blinds after EnterRoomRSP (new table); refreshes unknown-stack fallback."""
+        new_big_blind = float(big_blind)
+        if (
+            self._autosave_uses_default
+            and self.autosave_path
+            and bb_key(new_big_blind) != bb_key(self.big_blind)
+        ):
+            self._save_persisted_model()
+            self.autosave_path = str(_default_opponents_path(new_big_blind))
+            self._load_persisted_model(self.autosave_path)
         self.big_blind = float(big_blind)
         self.small_blind = float(small_blind)
+        set_current_big_blind(self.big_blind)
         self._default_stack = 100.0 * self.big_blind
         self._bot._range_tracker.set_big_blind(self.big_blind)
 
@@ -1601,21 +1640,7 @@ class PokerFateAPI:
         self._log.flush_robot_hand_if_needed()
 
         # Auto-save opponent model + showdown/learner data into one file
-        if self.autosave_path:
-            if self._bot.use_range_equity:
-                sd_data = {
-                    'range_v2_learner': self._bot._showdown_learner.to_dict(),
-                    'hero_eq_calibrator': self._bot._hero_eq_calibrator.to_dict(),
-                    'river_relative_calibrator': (
-                        self._bot._river_relative_calibrator.to_dict()
-                    ),
-                }
-            else:
-                sd_data = self._bot.range_estimator.showdown_calibrator.to_dict()
-            self._bot.opponent_model.save(
-                self.autosave_path,
-                showdown_data=sd_data,
-            )
+        self._save_persisted_model()
 
     def last_hand_push_detail(self, max_bytes: int = 2200) -> str:
         """Return the latest hand detail in a push-friendly compact form."""

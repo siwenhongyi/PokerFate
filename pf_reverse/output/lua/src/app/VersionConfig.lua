@@ -1,5 +1,5 @@
 -- 资源版本号，也用于判断资源加载
-G_UPDATE_VERSION = "1.5.1"
+G_UPDATE_VERSION = "1.5.9"
 
 -- 远程版本号，用于大厅内判断资源更新
 G_REMOTE_VERSION = G_UPDATE_VERSION

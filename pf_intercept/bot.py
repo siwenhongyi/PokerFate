@@ -44,6 +44,7 @@ log = logging.getLogger("pf_bot")
 
 WireInject: TypeAlias = tuple[str, dict] | tuple[str, dict, float]
 WireInjectResult: TypeAlias = WireInject | list[WireInject] | None
+InjectGuard: TypeAlias = tuple[str, int]
 
 _MAX_INJECT_DELAY = float(config.ACTION_INJECT_DELAY_MAX_SEC)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -118,6 +119,19 @@ def _clamp_inject_delay(result: WireInjectResult, max_delay: float) -> WireInjec
         inject_type, fields, delay_sec = result
         return inject_type, fields, min(float(delay_sec), max_delay)
     return result
+
+
+def _seat_status_has_player(seat_status: dict) -> bool:
+    player = seat_status.get("player") or {}
+    uid = player.get("uid")
+    if uid is not None:
+        try:
+            return int(uid) > 0
+        except (TypeError, ValueError):
+            return bool(str(uid).strip())
+    if seat_status.get("has_card") is True:
+        return True
+    return _chip_int(seat_status.get("hand_chips", 0), 0) > 0
 
 # ── Card conversion ────────────────────────────────────────────────────────────
 
@@ -452,6 +466,28 @@ class BotBridge:
             return pending + result
         return pending + [result]
 
+    def injection_guard_for(self, inject: WireInject) -> InjectGuard | None:
+        inject_type = inject[0] if inject else ""
+        if inject_type != "pb.ActionREQ":
+            return None
+        return (str(self._current_gameid or ""), int(self._hand_seq))
+
+    def injection_guard_is_current(self, guard: InjectGuard | None) -> bool:
+        if guard is None:
+            return True
+        gameid, hand_seq = guard
+        if int(hand_seq) == int(self._hand_seq) and str(gameid) == str(self._current_gameid or ""):
+            return True
+        log.warning(
+            "[BOT→S] skip stale ActionREQ guard_gameid=%s current_gameid=%s "
+            "guard_hand=%s current_hand=%s",
+            gameid or "<none>",
+            self._current_gameid or "<none>",
+            hand_seq,
+            self._hand_seq,
+        )
+        return False
+
     def _notify(self, event: str, **fields) -> None:
         """Room-aware notification wrapper. SNG/tournament/friend rooms stay quiet."""
         if self._is_sng_room:
@@ -694,6 +730,7 @@ class BotBridge:
         tid = _chip_int(table_status.get("tid", 0), 0)
         if tid > 0:
             self._table_tid = tid
+        previous_gameid = self._current_gameid
         gameid = str(table_status.get("gameid") or "").strip()
         if gameid and gameid != "0":
             self._current_gameid = gameid
@@ -710,6 +747,14 @@ class BotBridge:
                     seat = _chip_int(seat_status.get("seatid", 0), 0)
                     self._set_my_seat(seat, "EnterRoomRSP.uid")
                     break
+
+        # If reconnect lands in a different hand, rebuild the API hand from
+        # EnterRoomRSP before using playing_status. Otherwise old hole cards /
+        # board/action history from the previous hand can leak into decisions.
+        self._start_hand_from_enter_room_snapshot_if_needed(
+            table_status,
+            previous_gameid=previous_gameid,
+        )
 
         # 重进 / 回桌后必须用服务端筹码覆盖快照（见 _sync_stacks_from_table_snapshot 注释）
         self._sync_stacks_from_table_snapshot(table_status)
@@ -729,8 +774,11 @@ class BotBridge:
                     self._announced_stages.add(s)
 
         playing_status = msg.get("playing_status") or {}
-        self._restore_hole_cards_from_playing_status(playing_status)
-        restored_action = self._action_from_enter_room_playing_status(table_status, playing_status)
+        if self._enter_room_playing_status_is_current_hand(table_status, playing_status):
+            self._restore_hole_cards_from_playing_status(playing_status)
+            restored_action = self._action_from_enter_room_playing_status(table_status, playing_status)
+        else:
+            restored_action = None
 
         if fallback_inject and restored_action:
             if isinstance(restored_action, list):
@@ -918,27 +966,146 @@ class BotBridge:
             log.info("[gamedata] %s: API 未就绪，数据已缓存 (hands=%d)",
                      display_name, data.get("play_times", 0))
 
-    def _sync_stacks_from_table_snapshot(self, table_status: dict) -> None:
-        """用 EnterRoomRSP.table_status 里的 hand_chips 对齐本地快照。
+    def _reset_hand_local_state(self, *, stage: int = 1) -> None:
+        self._stage = stage
+        self._pot = 0
+        self._my_bet = 0
+        self._max_bet = 0
+        self._street_bets = {}
+        self._my_forced_post_this_street = False
+        self._folded = set()
+        self._announced_stages = set()
+        self._hole_cards_count = 0
+        self._pending_showdown = {}
+        self._pending_winner_types = {}
+        self._pending_injects = []
 
-        盈利锁仓在 DealerInfo 里会写入 _hand_start_chips 后发 LeaveRoom；若重进后不刷新，
-        WinnerRSP 仍用离桌前的大筹码作基准 + profit，会误再次触发锁仓。
+    def _apply_pending_seeds_for_players(self, players: list[PlayerInfo]) -> None:
+        if not self._pending_seeds or self._api is None:
+            return
+        om = self._api._bot.opponent_model
+        player_names = {p.player_id: p.name for p in players}
+        for uid, payload in self._pending_seeds.items():
+            if isinstance(payload, dict) and "data" in payload:
+                data = payload.get("data") or {}
+                cached_name = str(payload.get("name") or "")
+            else:
+                data = payload
+                cached_name = ""
+            display_name = player_names.get(uid) or cached_name
+            if display_name:
+                om.register_name(uid, display_name)
+            stats = om.get(uid)
+            if seed_from_server(stats, data):
+                pname = display_name or f"uid{uid}"
+                log.info(
+                    "[gamedata] %s 缓存数据写入 | hands=%d VPIP=%.0f%% PFR=%.0f%% "
+                    "AF=%.2f wtsd=%.0f%%",
+                    pname,
+                    data.get("play_times", 0),
+                    stats.vpip * 100,
+                    stats.pfr * 100,
+                    stats.aggression_factor,
+                    stats.wtsd * 100,
+                )
+        self._pending_seeds.clear()
+
+    def _start_hand_from_enter_room_snapshot_if_needed(
+        self,
+        table_status: dict,
+        *,
+        previous_gameid: str,
+    ) -> bool:
+        gameid = str(table_status.get("gameid") or "").strip()
+        if not gameid or gameid == "0" or gameid == previous_gameid:
+            return False
+        if table_status.get("is_playing") is not True:
+            return False
+        stage = _chip_int(table_status.get("stage"), 0)
+        if stage not in (1, 2, 3, 4):
+            return False
+        if self._my_seat is None or not self._ensure_api():
+            return False
+
+        start_info: list[dict] = []
+        for seat_status in table_status.get("seat", []) or []:
+            if not _seat_status_has_player(seat_status):
+                continue
+            seat = _chip_int(seat_status.get("seatid", 0), 0)
+            chips = seat_status.get("hand_chips")
+            if chips is None:
+                chips = seat_status.get("begin_chips", 0)
+            start_info.append({"seatid": seat, "chips": chips})
+        if not start_info:
+            return False
+
+        self._hand_seq += 1
+        self._reset_hand_local_state(stage=stage)
+
+        start_info.sort(key=lambda si: si["seatid"])
+        self._all_seats = [si["seatid"] for si in start_info]
+        dealer_seat = _chip_int(table_status.get("d_idx", 0), 0)
+        seat_positions = _seat_positions(self._all_seats, dealer_seat)
+        self._snapshot_current_hand_robots(self._all_seats)
+        self._seat_chips = {}
+        self._hand_start_chips = {}
+
+        players = []
+        for si in start_info:
+            seat = si["seatid"]
+            chips = _chip_int(si.get("chips", 0), 0)
+            self._seat_chips[seat] = chips
+            self._hand_start_chips[seat] = chips
+            if seat == self._my_seat:
+                self._my_chips = chips
+            players.append(PlayerInfo(
+                player_id=self._seat_to_player_id(seat),
+                name=self._seat_player_name(seat),
+                stack=chips,
+                position=seat_positions.get(seat, ""),
+            ))
+
+        self._apply_pending_seeds_for_players(players)
+        self._api.new_hand(
+            players=players,
+            dealer_id=self._seat_to_player_id(dealer_seat),
+            hand_number=self._hand_seq,
+        )
+        log.warning(
+            "[BOT] 重连恢复：检测到 gameid 切换 %s -> %s，已从 EnterRoomRSP.table_status 重建当前手。",
+            previous_gameid or "<none>",
+            gameid,
+        )
+        return True
+
+    def _sync_stacks_from_table_snapshot(self, table_status: dict) -> None:
+        """用 EnterRoomRSP.table_status 对齐本地筹码快照。
+
+        hand_chips 是当前剩余筹码；begin_chips 才是本手开局筹码。
+        WinnerRSP.profit 需要加在 begin_chips 上，不能用局中剩余筹码当基准。
         """
         for seat_status in table_status.get("seat", []) or []:
+            if not _seat_status_has_player(seat_status):
+                continue
             seat = _chip_int(seat_status.get("seatid", 0), 0)
             if "seatid" not in seat_status:
                 log.debug(
                     "[BOT] table_status seat missing seatid; assume 0: %s",
                     seat_status,
                 )
-            raw = seat_status.get("hand_chips")
-            if raw is None:
-                raw = seat_status.get("begin_chips")
-            if raw is None:
+            current_raw = seat_status.get("hand_chips")
+            if current_raw is None:
+                current_raw = seat_status.get("begin_chips")
+            if current_raw is None:
                 continue
-            chips = _chip_int(raw, 0)
+            start_raw = seat_status.get("begin_chips")
+            if start_raw is None:
+                start_raw = current_raw
+
+            chips = _chip_int(current_raw, 0)
+            start_chips = _chip_int(start_raw, chips)
             self._seat_chips[seat] = chips
-            self._hand_start_chips[seat] = chips
+            self._hand_start_chips[seat] = start_chips
             if self._my_seat is not None and seat == self._my_seat:
                 self._my_chips = chips
 
@@ -957,6 +1124,8 @@ class BotBridge:
         my_bet = 0
         desktop_total = 0
         for seat_status in table_status.get("seat", []) or []:
+            if not _seat_status_has_player(seat_status):
+                continue
             seat = _chip_int(seat_status.get("seatid", 0), 0)
             seats.append(seat)
             action_type = _chip_int(seat_status.get("action_type", 0), 0)
@@ -1006,6 +1175,41 @@ class BotBridge:
         self._api.deal_hole_cards(cards)
         log.info("[BOT] Reconnect restored %d hole card(s) from EnterRoomRSP.playing_status", len(cards))
 
+    def _enter_room_playing_status_is_current_hand(
+        self,
+        table_status: dict,
+        playing_status: dict,
+    ) -> bool:
+        """Guard against stale EnterRoomRSP.playing_status after reconnect churn."""
+        if not table_status or not playing_status:
+            return False
+        if table_status.get("is_playing") is not True:
+            if "action_seatid" in playing_status:
+                log.warning(
+                    "[BOT] EnterRoomRSP.playing_status ignored: table is not playing "
+                    "(action_idx=%s gameid=%s)",
+                    table_status.get("action_idx"),
+                    table_status.get("gameid"),
+                )
+            return False
+        action_idx = _chip_int(table_status.get("action_idx"), -1)
+        if action_idx < 0:
+            log.warning(
+                "[BOT] EnterRoomRSP.playing_status ignored: invalid table action_idx=%s gameid=%s",
+                table_status.get("action_idx"),
+                table_status.get("gameid"),
+            )
+            return False
+        stage = _chip_int(table_status.get("stage"), 0)
+        if stage not in (1, 2, 3, 4):
+            log.warning(
+                "[BOT] EnterRoomRSP.playing_status ignored: invalid/missing stage=%s gameid=%s",
+                table_status.get("stage"),
+                table_status.get("gameid"),
+            )
+            return False
+        return True
+
     def _action_from_enter_room_playing_status(
         self,
         table_status: dict,
@@ -1013,7 +1217,12 @@ class BotBridge:
     ) -> WireInjectResult:
         if not playing_status or self._my_seat is None:
             return None
+        if not self._enter_room_playing_status_is_current_hand(table_status, playing_status):
+            return None
         if "action_seatid" not in playing_status:
+            return None
+        table_action_seat = _chip_int(table_status.get("action_idx"), -1)
+        if table_action_seat != self._my_seat:
             return None
         action_seat = _chip_int(playing_status.get("action_seatid"), -1)
         if action_seat != self._my_seat:
@@ -1096,15 +1305,7 @@ class BotBridge:
             self._current_gameid = gameid
         self._hand_seq += 1
 
-        self._stage   = 1
-        self._pot     = 0
-        self._my_bet  = 0
-        self._max_bet = 0
-        self._street_bets = {}
-        self._my_forced_post_this_street = False
-        self._folded  = set()
-        self._announced_stages = set()
-        self._hole_cards_count = 0
+        self._reset_hand_local_state(stage=1)
 
         raw_start_info = msg.get("start_info", [])
         start_info = []
@@ -1147,33 +1348,7 @@ class BotBridge:
         # 应用 API 创建前已缓冲的 server stats：
         # 必须在 new_hand（内部调用 register_name）之前 pre-register 玩家名，
         # 否则 opponent_model 里 seat 还映射着上一局的旧玩家，seed 会写错位置。
-        if self._pending_seeds:
-            om = self._api._bot.opponent_model
-            player_names = {p.player_id: p.name for p in players}
-            for uid, payload in self._pending_seeds.items():
-                if isinstance(payload, dict) and "data" in payload:
-                    data = payload.get("data") or {}
-                    cached_name = str(payload.get("name") or "")
-                else:
-                    data = payload
-                    cached_name = ""
-                display_name = player_names.get(uid) or cached_name
-                if display_name:
-                    om.register_name(uid, display_name)
-                stats = om.get(uid)
-                if seed_from_server(stats, data):
-                    pname = display_name or f"uid{uid}"
-                    log.info(
-                        "[gamedata] %s 缓存数据写入 | hands=%d VPIP=%.0f%% PFR=%.0f%% "
-                        "AF=%.2f wtsd=%.0f%%",
-                        pname,
-                        data.get("play_times", 0),
-                        stats.vpip * 100,
-                        stats.pfr * 100,
-                        stats.aggression_factor,
-                        stats.wtsd * 100,
-                    )
-            self._pending_seeds.clear()
+        self._apply_pending_seeds_for_players(players)
 
         self._api.new_hand(
             players=players,

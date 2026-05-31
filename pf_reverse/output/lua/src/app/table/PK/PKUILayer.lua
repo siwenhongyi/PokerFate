@@ -5,6 +5,7 @@ function P:onAwake()
     self.RightTop = self:find("RightTop")
     self.MenuButton = self:find("MenuButton", self.LeftTop)
     self.NetworkButton = self:find("NetworkButton", self.LeftTop)
+    self.AssistantButton = self:find("AssistantButton", self.LeftTop)
     self.TextBlind = self:find("BlindsInfo/TextBlind", self.LeftTop)
     self.BlindsInfoAllin = self:find("BlindsInfoAllin", self.LeftTop)
 
@@ -24,6 +25,12 @@ function P:onAwake()
         Game:playSound("ui_button_confirm")
         UiManager:showUI("Loginline")
         bee.logEvent("table-route-access", GameModel.data:getGameType(), GameModel.data:getRoomId())
+    end)
+
+    bee.addClick(self.AssistantButton, function()
+        Game:playSound("ui_button_confirm")
+        UiManager:showUI("IngameAssistant")
+        bee.logEvent("ingame-helper", GameModel.data:getGameType(), GameModel.data:getRoomId())
     end)
 
     bee.addClick(self.ChatButton, function()
@@ -66,6 +73,10 @@ function P:onShow()
     end
 
     QuickByModel:addButtonItem(self.uiName, self:find("QuickByButton", self.RightTop))
+
+    if GameModel.data and GameModel.data:isInObserve() then
+        self.ChatButton:SetActive(false)
+    end
 end
 
 function P:refreshGameName()

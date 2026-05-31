@@ -33,6 +33,8 @@ function P:bindCurUi(clsName)
 		if clsName == "PKTable3D" then
 			if GameModel.data and GameModel.data:isSNG() and not GameModel.data:isRecord() then
 				clsName = "PKTable3DSNG"
+			elseif GameModel.data and GameModel.data:isMTT() and not GameModel.data:isRecord() then
+				clsName = "PKTable3DMTT"
 			end
 		end
 		if self._ui_config and self._ui_config[clsName] then
@@ -214,7 +216,7 @@ function P:resizeBuffers(scaleW, scaleH)
 end
 
 function P:_resetScreenMatch(canvas)
-	if canvas and self.screenMatchValue then
+	if not bee.isNull(canvas) and self.screenMatchValue then
 		local cmp = canvas:GetComponent("CanvasScaler")
 		if cmp then
 			cmp.matchWidthOrHeight = self.screenMatchValue

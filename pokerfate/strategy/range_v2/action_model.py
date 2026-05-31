@@ -24,6 +24,11 @@ from pokerfate.core.config import MIN_HANDS_FOR_CLASSIFICATION
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
 from pokerfate.strategy.range_v2 import hand_categorizer as hcat
 from pokerfate.strategy.range_v2.blocker import blocker_weights
+from pokerfate.strategy.range_v2.empirical_model import (
+    CAT_ORDER as EMPIRICAL_CAT_ORDER,
+    empirical_action_likelihood,
+    population_rate,
+)
 
 # ---------------------------------------------------------------------------
 # Context passed to the likelihood function
@@ -47,6 +52,8 @@ class ActionContext:
     is_ip: bool = False
     # Normalized preflop action label for calibration features only.
     preflop_action_type: str = ""
+    # Table big blind, used only for bb-specific empirical priors.
+    big_blind: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -61,20 +68,20 @@ class PlayerProfile:
     """
     name: str = ""
     hands_seen: int = 0
-    vpip: float = 0.35
-    pfr: float = 0.20
+    vpip: float = population_rate('vpip', 0.35)
+    pfr: float = population_rate('pfr', 0.20)
     af: float = 2.0
-    three_bet_pct: float = 0.06
-    fold_to_3bet: float = 0.55
-    fold_to_cbet: float = 0.45
+    three_bet_pct: float = population_rate('three_bet', 0.06)
+    fold_to_3bet: float = population_rate('fold_to_3bet', 0.55)
+    fold_to_cbet: float = population_rate('fold_to_cbet', 0.45)
     fold_to_cbet_opps: int = 0
-    wtsd: float = 0.25
-    wmsd: float = 0.50
-    flop_afq: float = 0.45
-    turn_afq: float = 0.40
-    river_afq: float = 0.35
-    river_fold_rate: float = 0.35
-    river_bet_freq: float = 0.35
+    wtsd: float = population_rate('wtsd', 0.25)
+    wmsd: float = population_rate('wmsd', 0.50)
+    flop_afq: float = population_rate('flop_afq', 0.45)
+    turn_afq: float = population_rate('turn_afq', 0.40)
+    river_afq: float = population_rate('river_afq', 0.35)
+    river_fold_rate: float = population_rate('river_fold_rate', 0.35)
+    river_bet_freq: float = population_rate('river_bet_frequency', 0.35)
     bluff_win_rate: float = 0.0
     bet_win_count: int = 0
     river_bet_count: int = 0
@@ -534,6 +541,20 @@ class ActionModel:
         conf = _confidence('af', prof.hands_seen)
         result = conf * adjusted + (1.0 - conf) * gto_freqs
 
+        empirical = empirical_action_likelihood(action, street, ctx, prof)
+        if empirical is not None:
+            empirical_freq, blend, _key, _n = empirical
+            empirical_per_cat = np.array(
+                [_clip(float(empirical_freq.get(c, gto_per_cat[i])), 0.01, 0.99)
+                 for i, c in enumerate(EMPIRICAL_CAT_ORDER)],
+                dtype=np.float64,
+            )
+            empirical_arr = empirical_per_cat[cat_idx]
+            if action != 'fold':
+                strong_mask = (cat_idx == _CAT_IDX['nuts']) | (cat_idx == _CAT_IDX['strong'])
+                empirical_arr = np.where(strong_mask, np.maximum(empirical_arr, result), empirical_arr)
+            result = (1.0 - blend) * result + blend * empirical_arr
+
         # Showdown learner override (vectorized blend)
         if self.showdown_learner is not None and prof.name:
             learned = self.showdown_learner.get_learned_freq(
@@ -602,6 +623,22 @@ class ActionModel:
             adjusted = _clip(gto_freq * scale, 0.01, 0.99)
             conf = _confidence('af', prof.hands_seen)
             result[idx] = conf * adjusted + (1 - conf) * gto_freq
+
+        empirical = empirical_action_likelihood(action, street, ctx, prof)
+        if empirical is not None:
+            empirical_freq, blend, _key, _n = empirical
+            for idx in range(1326):
+                cat = categories[idx]
+                if street == 'river' and cat in ('draw', 'weak_draw'):
+                    cat = 'air'
+                if cat in empirical_freq:
+                    empirical_value = _clip(float(empirical_freq[cat]), 0.01, 0.99)
+                    if action != 'fold' and cat in ('nuts', 'strong'):
+                        empirical_value = max(empirical_value, result[idx])
+                    result[idx] = (
+                        (1.0 - blend) * result[idx]
+                        + blend * empirical_value
+                    )
 
         if self.showdown_learner is not None and prof.name:
             learned = self.showdown_learner.get_learned_freq(
@@ -720,10 +757,11 @@ class ActionModel:
             # 每个 category 由直接相关的统计量独立驱动，不互相污染。
             #
             # air: 由 bluff_win_rate 驱动（诈唬倾向的直接度量）
-            #   GTO 基线 bluff rate ≈ 25%；whale ≈ 5%、maniac ≈ 45%。
+            #   基线来自持久化对手池；whale 更低、maniac 更高。
             #   样本不足 (<5) 时不调整，用 GTO 默认。
             if prof.bet_win_count >= 5:
-                air_mult = _clip(prof.bluff_win_rate / 0.25, 0.2, 2.0)
+                bluff_base = max(0.05, population_rate('bluff_win_rate', 0.25))
+                air_mult = _clip(prof.bluff_win_rate / bluff_base, 0.2, 2.0)
                 scales['air'] *= air_mult
                 scales['weak_draw'] *= _clip(air_mult, 0.4, 1.5)
 
@@ -750,7 +788,8 @@ class ActionModel:
 
         elif action == 'call':
             # WTSD high → calls more with all categories
-            wtsd_scale = _clip(prof.wtsd / 0.25, 0.5, 2.5)
+            wtsd_base = max(0.05, population_rate('wtsd', 0.25))
+            wtsd_scale = _clip(prof.wtsd / wtsd_base, 0.5, 2.5)
             for cat in scales:
                 scales[cat] = wtsd_scale
 
@@ -773,7 +812,11 @@ class ActionModel:
             # aggression，不是 air flat call）不走这条路。
             gap = prof.vpip - prof.pfr
             if prof.wtsd >= 0.30 and gap > 0.20:
-                looseness = _clip(min(prof.wtsd / 0.25, gap / 0.20), 1.0, 2.0)
+                wtsd_base = max(0.05, population_rate('wtsd', 0.25))
+                # This branch is a safety guard against over-narrowing passive
+                # callers.  Population WTSD can be higher than the original
+                # guard baseline, but that must not weaken the protection.
+                looseness = _clip(min(prof.wtsd / min(wtsd_base, 0.25), gap / 0.20), 1.0, 2.0)
                 scales['air'] *= looseness * 2.0
                 scales['weak_draw'] *= looseness * 1.5
                 scales['draw'] *= looseness * 1.2
@@ -791,8 +834,9 @@ class ActionModel:
             )
             if trap_prior:
                 # 插值：wtsd 越高（或 vpip 越高）trap 越可能，nuts 增幅越大
+                wtsd_base = max(0.05, population_rate('wtsd', 0.25))
                 trap_strength = _clip(
-                    max(prof.wtsd / 0.40, prof.vpip / 0.60), 1.0, 1.8
+                    max(prof.wtsd / max(0.40, wtsd_base), prof.vpip / 0.60), 1.0, 1.8
                 )
                 scales['nuts'] *= trap_strength
                 scales['strong'] *= (1.0 + (trap_strength - 1.0) * 0.7)
@@ -801,16 +845,18 @@ class ActionModel:
             if street == 'flop' and prof.fold_to_cbet_opps >= 60:
                 # Direct fold_to_cbet application
                 ftc = prof.fold_to_cbet
+                ftc_base = max(0.05, population_rate('fold_to_cbet', 0.45))
                 # Strong hands don't fold regardless; weak hands fold more
                 scales['nuts'] = 0.05
                 scales['strong'] = 0.1
-                scales['medium'] = _clip(ftc / 0.45, 0.5, 2.0)
-                scales['draw'] = _clip(ftc * 0.7 / 0.45, 0.3, 1.5)
-                scales['weak_draw'] = _clip(ftc * 1.2 / 0.45, 0.5, 2.5)
-                scales['air'] = _clip(ftc * 1.4 / 0.45, 0.7, 3.0)
+                scales['medium'] = _clip(ftc / ftc_base, 0.5, 2.0)
+                scales['draw'] = _clip(ftc * 0.7 / ftc_base, 0.3, 1.5)
+                scales['weak_draw'] = _clip(ftc * 1.2 / ftc_base, 0.5, 2.5)
+                scales['air'] = _clip(ftc * 1.4 / ftc_base, 0.7, 3.0)
             elif street == 'river' and prof.river_facing_bet_opps >= 30:
                 river_fold = prof.river_fold_rate
-                rf_scale = _clip(river_fold / 0.35, 0.5, 2.0)
+                river_fold_base = max(0.05, population_rate('river_fold_rate', 0.35))
+                rf_scale = _clip(river_fold / river_fold_base, 0.5, 2.0)
                 scales['nuts'] = 0.05
                 scales['strong'] = 0.2
                 for cat in ('medium', 'draw', 'weak_draw', 'air'):

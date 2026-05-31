@@ -110,6 +110,7 @@ function P:onStart()
         self.characterCls:setBubbleItem(self.BubbleItem)
         self:initClickVoice()
         self._characterInit = true
+		self.characterCls:setSkinRotate()
     end
 
     bee.setIconInAtlas(self.Point, tpl_props[GPropId.ActivePoint].icon)
@@ -336,7 +337,7 @@ function P:setTaskItem(item, data, isInit, index)
 	-- 任务描述
 	local showText = TaskModel:getTaskDesc(cfg, data)
 	local needValue = #data.value == 1 and data.value[1] or data.value[2]
-	if cfg.task_type == 313 then
+	if cfg.task_type == 313 or cfg.task_type == 111 then
 		needValue = data.value[3]
 	end
 	if data.current_value < needValue then

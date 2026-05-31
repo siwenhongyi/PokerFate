@@ -9,6 +9,39 @@ function net:GetRoomDataRSP(msg)
 	elseif bee.isInGame() then
 		bee.enterScene("MainScene")
 	end
+	
+	GameModel.data:clearHandInfos()
+end
+
+function net:ChangeTableRSP(msg)
+	if not GameModel.data then return end
+
+	GameModel.data.room_status = msg.room_status
+	GameModel.data.playing_status = msg.playing_status
+	GameModel.data.table_status = msg.table_status
+	GameModel.data:updateRoomInfo()
+	GameModel.data.seatid_being_observed = msg.seatid_being_observed
+
+	if GameModel.data:isMTT() then
+		GameModel.data:setRoomInfo(msg)
+	end
+
+
+	if GameModel.data.table_status then
+		GameModel.data:setDealerStatus(GameModel.data.table_status.dealer_status)
+	end
+
+	GameModel.data:updateSeatInfoList(GameModel.data.table_status.seat)
+
+	GameModel.data:clearHandInfos()
+end
+
+function net:ChangeObserveViewRSP(msg)
+    GameModel.stopGameMsg = nil
+	if not GameModel.data then return end
+	if msg.code == 0 then
+		GameModel.data.seatid_being_observed = msg.seatid_being_observed
+	end
 end
 
 function net:QuickStartRSP(msg)
@@ -37,6 +70,8 @@ function net:EnterRoomRSP(msg)
         local data
 		if GF.isSNG(msg.game_type) then
 			data = require("app.table.data.PKDataSNG"):create(msg)
+		elseif GF.isMTT(msg.game_type) then
+			data = require("app.table.data.PKDataMTT"):create(msg)
 		else
 			data = require("app.table.data.PKData"):create(msg)
 		end
@@ -114,6 +149,9 @@ function net:LeaveRoomRSP(msg)
 	local code = msg.code
 	local last_info = GameModel.bond_settle_info
 	local last_over_info = GameModel.over_bond_settle_info
+	if GF.isSNG(msg.game_type) and not msg.back_wait then
+		TournamentModel:setMatchingSngInfo(0, 0, {}, 0)
+	end
 	GameModel.bond_settle_info = nil
 	GameModel.over_bond_settle_info = nil
 	GameModel.summary = nil
@@ -140,17 +178,43 @@ function net:LeaveRoomRSP(msg)
 		if msg.client_str and "" ~= msg.client_str then
 			info = json.decode(msg.client_str)
 			if info and info.key == "invite" then
-				Net:sendReq("pb.EnterRoomREQ", {
-					roomid = info.roomid,
-					uid = PlayerModel:getUid(),
-					byin_chips = 0,
-					client_str = msg.client_str,
-				})
+				if info.loading then
+					UiManager:showUI("LoadingLayer", {cb = function()
+						Net:sendReq("pb.EnterRoomREQ", {
+							roomid = info.roomid,
+							uid = PlayerModel:getUid(),
+							byin_chips = 0,
+							client_str = msg.client_str,
+						})
+					end})
+				else
+					Net:sendReq("pb.EnterRoomREQ", {
+						roomid = info.roomid,
+						uid = PlayerModel:getUid(),
+						byin_chips = 0,
+						client_str = msg.client_str,
+					})
+				end
 				return
 			elseif info and info.key == "switch_table" then
 				UiManager:showUI("LoadingLayer", {cb = function()
 					Net:sendReq("pb.QuickStartREQ", info)
 				end})
+				return
+			elseif info and info.key == "enterroom" then
+				if info.loading then
+					UiManager:showUI("LoadingLayer", {cb = function()
+						Net:sendReq("pb.EnterRoomREQ", {
+							roomid = info.roomid,
+							uid = PlayerModel:getUid(),
+						})
+					end})
+				else
+					Net:sendReq("pb.EnterRoomREQ", {
+						roomid = info.roomid,
+						uid = PlayerModel:getUid(),
+					})
+				end
 				return
 			end
 		end
@@ -180,6 +244,14 @@ function net:LeaveRoomRSP(msg)
 				-- 	SdkHelper:startAppReview()
 				-- end
 			-- end
+		end
+		if "" ~= msg.reason then
+			code = tonumber(msg.reason)
+			if code then
+				bee.once(1.5, function()
+					Net:onErrorCode({code = code})
+				end)
+			end
 		end
 	end
 end
@@ -241,12 +313,13 @@ function net:SitDownRSP(msg)
 		
 		bee.once(0.5, function()
 			local r = CharacterModel:getUsingRole()
-			if r and GameModel.data and (not GameModel.data:isSNG() and not GameModel.data:isMTT()) then
-				local skin = r:getSkinData()
+			local player = GameModel.data:getMyPlayerInfo()
+			if player and GameModel.data and (not GameModel.data:isSNG() and not GameModel.data:isMTT()) then
+    			local skin = tpl_character_skin[player.skin_id]
 				if skin and skin.kind == SKIN_KIND.AWAKEN then
-					Game:playRoleInVoice(CharacterModel:getUsingRoleId(), ROLE_VOICE.take_a_seat_awakened)
+					Game:playRoleInVoice(skin.role, ROLE_VOICE.take_a_seat_awakened)
 				else
-					Game:playRoleInVoice(CharacterModel:getUsingRoleId(), ROLE_VOICE.take_a_seat)
+					Game:playRoleInVoice(skin and skin.role or 1001, ROLE_VOICE.take_a_seat)
 				end
 			end
 		end)

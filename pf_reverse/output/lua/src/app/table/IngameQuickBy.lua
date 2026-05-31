@@ -50,7 +50,7 @@ function P:onShow()
     self._shopData = tpl_quick_purchase[self._data.quick_buy]
 
     bee.setText(self.TextChip, _N(self._shopData.props[2]))
-    bee.setIcon(self.ingame_bankrupt_chip_01, self._shopData.icon, true)
+    bee.setIcon(self.ingame_bankrupt_chip_01, self._shopData.image, true)
 
     ShopModel:setTextPrice(self.TextPrice, self._shopData.buy_id)
     self.GreatValueFrame:SetActive(false)
