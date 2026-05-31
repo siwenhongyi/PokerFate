@@ -194,6 +194,66 @@ class TestBotBridgeReconnectRestore:
         assert out is None
         assert fake.requests == []
 
+    def test_enter_room_rsp_does_not_duplicate_recent_action_notify(self) -> None:
+        b, fake = self._bridge()
+        b._hole_cards_count = 2
+        b._current_gameid = "game-dup"
+        b._stage = 4
+        b._pot = 150000
+        b._my_chips = 627881
+        b._all_seats = [0, 1]
+
+        first = b.handle(
+            "pb.ActionNotifyBRC",
+            {
+                "seatid": 0,
+                "call_need_chips": "50000",
+                "min_chipin": "100000",
+                "max_chipin": "627881",
+            },
+        )
+        second = b.handle(
+            "pb.EnterRoomRSP",
+            {
+                "code": 0,
+                "roomid": 123,
+                "game_type": 10010101,
+                "room_info": {"bb": "10", "sb": "5"},
+                "table_status": {
+                    "stage": 4,
+                    "gameid": "game-dup",
+                    "pool": ["150000"],
+                    "seat": [
+                        {
+                            "seatid": 0,
+                            "action_type": 5,
+                            "player": {"uid": "99", "name": "Hero"},
+                            "hand_chips": "627881",
+                        },
+                        {
+                            "seatid": 1,
+                            "action_type": 5,
+                            "player": {"uid": "100", "name": "Villain"},
+                            "hand_chips": "1408650",
+                        },
+                    ],
+                },
+                "playing_status": {
+                    "card1": 1028,
+                    "card2": 781,
+                    "action_seatid": 0,
+                    "call_need_chips": "50000",
+                    "min_chipin": "100000",
+                    "max_chipin": "627881",
+                    "action_time": 15,
+                },
+            },
+        )
+
+        assert first[0] == "pb.ActionREQ"
+        assert second is None
+        assert len(fake.requests) == 1
+
 
 def test_dealer_info_passes_positions_to_api(monkeypatch) -> None:
     calls = []

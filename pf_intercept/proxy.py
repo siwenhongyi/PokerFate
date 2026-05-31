@@ -194,55 +194,22 @@ async def _close_ws_quietly(
     code: int = 1001,
     reason: str = "",
     timeout: float = 0.75,
-) -> bool:
+) -> None:
     if ws is None:
-        return True
+        return
     try:
         await asyncio.wait_for(ws.close(code=code, reason=reason), timeout=timeout)
-        return True
     except asyncio.TimeoutError:
         log.debug("[WSS] close timeout; force transport close (%s)", reason)
         _force_transport_close(ws)
-        return False
     except Exception as exc:
         log.debug("[WSS] close ignored: %s", exc)
-        return False
 
 
 def _schedule_ws_close(ws, *, code: int = 1001, reason: str = "") -> None:
     if ws is None:
         return
     asyncio.create_task(_close_ws_quietly(ws, code=code, reason=reason))
-
-
-async def _retire_superseded_wss(prev_client_ws, prev_server_ws, session_id: int) -> None:
-    sockets = [ws for ws in (prev_client_ws, prev_server_ws) if ws is not None]
-    if not sockets:
-        return
-    timeout = 0.5
-    log.info(
-        "[WSS] session #%s closing %d superseded socket(s) before upstream connect (timeout=%.2fs)",
-        session_id,
-        len(sockets),
-        timeout,
-    )
-    results = await asyncio.gather(
-        *(
-            _close_ws_quietly(ws, reason="superseded by reconnect", timeout=timeout)
-            for ws in sockets
-        ),
-        return_exceptions=True,
-    )
-    graceful = sum(1 for result in results if result is True)
-    for ws, result in zip(sockets, results):
-        if result is not True:
-            _force_transport_close(ws)
-    log.info(
-        "[WSS] session #%s superseded socket close complete (%d/%d graceful); connecting upstream",
-        session_id,
-        graceful,
-        len(sockets),
-    )
 
 
 def _peer_is_loopback(peer) -> bool:
@@ -790,7 +757,8 @@ async def _handle_wss(client_ws) -> None:
     _active_server_ws = None
     if prev_client_ws is not None or prev_server_ws is not None:
         log.info("[WSS] session #%s supersedes previous WSS session", session_id)
-        await _retire_superseded_wss(prev_client_ws, prev_server_ws, session_id)
+        _schedule_ws_close(prev_client_ws, reason="superseded by reconnect")
+        _schedule_ws_close(prev_server_ws, reason="superseded by reconnect")
 
     req = getattr(client_ws, "request", None)
     path = (req.path if req else None) or "/"

@@ -27,6 +27,7 @@ import functools
 import json
 import logging
 import random
+import time
 from pathlib import Path
 from typing import TypeAlias
 
@@ -302,6 +303,8 @@ class BotBridge:
         self._hand_seq: int = 0
         self._auto_collected_gameids: set[str] = set()
         self._pending_injects: list[WireInject] = []
+        self._last_hero_action_notify_sig: tuple | None = None
+        self._last_hero_action_notify_at: float = 0.0
 
         # GameData API: 已拉取过的 uid（本次 proxy 进程内不重复拉）
         self._fetched_uids: set[str] = set()
@@ -1031,12 +1034,29 @@ class BotBridge:
 
         notify_msg = dict(playing_status)
         notify_msg["seatid"] = self._my_seat
+        sig = self._hero_action_notify_signature(notify_msg)
+        if (
+            sig == self._last_hero_action_notify_sig
+            and time.monotonic() - self._last_hero_action_notify_at < 0.75
+        ):
+            log.info("[BOT] EnterRoomRSP.playing_status duplicates recent ActionNotifyBRC; skip restore action")
+            return None
         log.warning("[BOT] 重连恢复：EnterRoomRSP.playing_status 仍轮到我行动，补一次决策。")
         restored = self._on_action_notify(notify_msg)
         action_time = _chip_float(playing_status.get("action_time"), 0.0)
         if action_time > 0:
             restored = _clamp_inject_delay(restored, max(0.0, action_time - 1.0))
         return restored
+
+    def _hero_action_notify_signature(self, msg: dict) -> tuple:
+        return (
+            self._current_gameid,
+            self._stage,
+            self._my_seat,
+            _chip_int(msg.get("call_need_chips", 0)),
+            _chip_int(msg.get("min_chipin", 0)),
+            _chip_int(msg.get("max_chipin", 0)),
+        )
 
     def _ensure_api(self) -> bool:
         """Create PokerFateAPI once seat and blind values are known. Returns True if ready."""
@@ -1331,6 +1351,8 @@ class BotBridge:
             return None
 
         call_need = _chip_int(msg.get("call_need_chips", 0))
+        self._last_hero_action_notify_sig = self._hero_action_notify_signature(msg)
+        self._last_hero_action_notify_at = time.monotonic()
 
         # Sometimes ActionNotify arrives before a full HandCardRSP payload.
         # Avoid crashing preflop strategy on incomplete hole cards.
