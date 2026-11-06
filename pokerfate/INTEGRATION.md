@@ -63,7 +63,6 @@ api = PokerFateAPI(
     small_blind=1.0,         # 小盲注金额（默认 big_blind / 2）
     equity_iterations=800,   # 胜率计算精度（越高越准但越慢，建议 500-3000）
     verbose=False,           # True 时打印调试级别的内部细节到控制台
-    use_range_equity=True,   # True=range_v2；False=旧 EQR/蒙卡压缩路径
     enable_showdown_calibration=True,
     decision_seed=None,      # 可选：固定决策随机种子，便于复盘/测试
 )
@@ -71,7 +70,7 @@ api = PokerFateAPI(
 
 **默认路径行为**：
 
-- `autosave_path` 不传时，正常运行会统一写入 `pokerfate/data/local_models/opponents_all_bb.json`；传 `None` 则禁用自动保存。
+- `autosave_path` 不传时，正常运行会统一写入 `pokerfate/data/local_models/opponents.json`；传 `None` 则禁用自动保存。
 - `log_file` 不传时，正常运行会写入包目录内的 `pokerfate/logs/pokerfate.log`；传 `None` 则禁用文件日志。
 - 测试环境中默认禁用 autosave 和文件日志。
 
@@ -365,7 +364,7 @@ PlayerInfo(player_id=3, name="NewBot", stack=None)    # 同样默认 100 BB
 对手模型**每局结束后自动保存**，程序被强制结束（Ctrl+C / IDE Stop）最多损失当局数据。
 
 ```python
-# 不传 autosave_path：自动保存到 pokerfate/data/local_models/opponents_all_bb.json
+# 不传 autosave_path：自动保存到 pokerfate/data/local_models/opponents.json
 api = PokerFateAPI()
 
 # 自定义路径

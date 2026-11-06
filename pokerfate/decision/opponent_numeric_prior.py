@@ -16,7 +16,7 @@ from typing import Any
 
 
 MODEL_DIR = Path(__file__).resolve().parents[1] / "data" / "local_models"
-OPPONENT_MODEL_FILE = "opponents_all_bb.json"
+OPPONENT_MODEL_FILE = "opponents.json"
 
 FEATURES = (
     "vpip",
@@ -121,12 +121,11 @@ def build_numeric_prior(
     profile: Any,
     adjustments: dict[str, Any] | None,
     street: str,
-    big_blind: Any = None,
 ) -> NumericOpponentPrior:
     """Return continuous response biases from numeric player similarity."""
     adjustments = adjustments or {}
     street_l = str(street or "").lower()
-    model = _load_model("all_bb")
+    model = _load_model()
     current = _profile_vector(profile, model)
     final_values, source, knn_conf = _combine_features(current, model)
 
@@ -239,9 +238,8 @@ def build_numeric_prior(
 def numeric_feature_confidence(
     profile: Any,
     street: str,
-    big_blind: Any = None,
 ) -> float:
-    model = _load_model("all_bb")
+    model = _load_model()
     current = _profile_vector(profile, model)
     _final_values, _source, knn_conf = _combine_features(current, model)
     return _clamp(0.60 * _query_confidence(current) + 0.40 * knn_conf, 0.0, 1.0)
@@ -342,8 +340,8 @@ def _query_confidence(current: _FeatureVector) -> float:
     return _clamp(numerator / denominator, 0.0, 1.0)
 
 
-@lru_cache(maxsize=4)
-def _load_model(key: str) -> _NumericModel:
+@lru_cache(maxsize=1)
+def _load_model() -> _NumericModel:
     path = MODEL_DIR / OPPONENT_MODEL_FILE
     if not path.exists():
         return _empty_model()
@@ -663,23 +661,6 @@ def _pressure_score(values: dict[str, float]) -> float:
         0.0,
         1.0,
     )
-
-
-def _bb_key(big_blind: Any = None) -> str:
-    if isinstance(big_blind, str):
-        raw = big_blind.strip()
-        if raw in {"bb_1k", "bb_10k", "bb_50k"}:
-            return raw
-        if raw in {"1k", "10k", "50k"}:
-            return f"bb_{raw}"
-    try:
-        bb = float(big_blind or 0.0)
-    except Exception:
-        return "bb_10k"
-    if bb <= 0:
-        return "bb_10k"
-    candidates = {1000.0: "bb_1k", 10000.0: "bb_10k", 50000.0: "bb_50k"}
-    return candidates[min(candidates, key=lambda value: abs(value - bb))]
 
 
 def _profile_float(profile: Any, name: str, default: float) -> float:

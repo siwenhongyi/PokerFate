@@ -155,7 +155,6 @@ def _bot_worker_main(to_worker, from_worker, options: dict[str, Any]) -> None:
 
         bridge = BotBridge(
             max_auto_rebuy=int(options.get("max_auto_rebuy", 1)),
-            use_range_equity=bool(options.get("use_range_equity", True)),
         )
         _queue_put(
             from_worker,
@@ -286,11 +285,9 @@ class BotWorkerClient:
         *,
         max_auto_rebuy: int,
         profit_lock_bb: int | None,
-        use_range_equity: bool,
     ) -> None:
         self.max_auto_rebuy = int(max_auto_rebuy)
         self.profit_lock_bb = profit_lock_bb
-        self.use_range_equity = bool(use_range_equity)
         self.log = logging.getLogger("pf_proxy")
 
         self._ctx = multiprocessing.get_context("spawn")
@@ -322,7 +319,6 @@ class BotWorkerClient:
         options = {
             "max_auto_rebuy": self.max_auto_rebuy,
             "profit_lock_bb": self.profit_lock_bb,
-            "use_range_equity": self.use_range_equity,
         }
         self._proc = self._ctx.Process(
             target=_bot_worker_main,

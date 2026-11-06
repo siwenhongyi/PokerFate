@@ -766,7 +766,7 @@ def _select_book_action(
     if not enabled:
         return out
 
-    numeric_prior = build_numeric_prior(profile, adjustments, street, big_blind)
+    numeric_prior = build_numeric_prior(profile, adjustments, street)
     confidence = _exploit_confidence(
         profile,
         adjustments,

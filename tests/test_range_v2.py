@@ -1659,7 +1659,12 @@ class TestBucketPosteriorCalibration:
         w /= w.sum()
         tracker._weights[player_id] = w
 
-    def test_flop_raise_over_calibration_moves_strong_up_air_down(self):
+    def test_flop_raise_over_calibration_moves_strong_up_air_down(self, monkeypatch):
+        # Exercise the built-in table, not the retrained runtime params on disk.
+        monkeypatch.setattr(
+            "pokerfate.strategy.range_v2.bayesian_range_tracker._load_runtime_bucket_calibration",
+            lambda: None,
+        )
         tracker = BayesianRangeTracker(ActionModel())
         board = [Card.from_str(c) for c in ['Qh', 'Jd', '7c']]
         self._seed_bucket_weights(

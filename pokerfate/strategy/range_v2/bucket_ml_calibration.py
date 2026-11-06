@@ -24,12 +24,11 @@ except Exception:
 CAT_ORDER = ("nuts", "strong", "medium", "draw", "weak_draw", "air")
 EPS = 1e-6
 _ROOT = Path(__file__).resolve().parents[2] / "data" / "runtime_calibration"
-_MODEL_KEY = "all_bb"
-_CACHE: Dict[tuple[str, str], Optional[dict[str, Any]]] = {}
-_BOOSTER_CACHE: Dict[tuple[str, str], Any] = {}
+_CACHE: Dict[str, Optional[dict[str, Any]]] = {}
+_BOOSTER_CACHE: Dict[str, Any] = {}
 
 
-def mode_for_big_blind(big_blind: Optional[float]) -> str:
+def ml_mode() -> str:
     raw = os.environ.get("PF_BUCKET_ML", "off")
     mode = str(raw or "off").strip().lower()
     if mode in {"0", "false", "no", "none", "off", "disabled"}:
@@ -45,17 +44,17 @@ def experiment_flags() -> dict[str, str]:
     }
 
 
-def _model_path(big_blind: Optional[float], mode: str) -> Path:
-    return _ROOT / _MODEL_KEY / "runtime_lgbm_bucket_model.json"
+def _model_path() -> Path:
+    return _ROOT / "runtime_lgbm_bucket_model.json"
 
 
-def _load_model(big_blind: Optional[float], mode: str) -> Optional[dict[str, Any]]:
+def _load_model(mode: str) -> Optional[dict[str, Any]]:
     if mode != "lgbm":
         return None
-    cache_key = (_MODEL_KEY, mode)
+    cache_key = mode
     if cache_key in _CACHE:
         return _CACHE[cache_key]
-    path = _model_path(big_blind, mode)
+    path = _model_path()
     if not path.exists():
         _CACHE[cache_key] = None
         return None
@@ -250,12 +249,11 @@ def _predict_lgbm(
     probs: np.ndarray,
     features: dict[str, float],
     *,
-    big_blind: Optional[float],
     mode: str,
 ) -> np.ndarray:
     if Booster is None:
         return probs
-    cache_key = (_MODEL_KEY, mode)
+    cache_key = mode
     booster = _BOOSTER_CACHE.get(cache_key)
     if booster is None:
         model_str = str(model.get("model_str") or "")
@@ -287,7 +285,6 @@ def _predict_lgbm(
 def calibrate_bucket_probs(
     bucket_probs: dict[str, float],
     *,
-    big_blind: Optional[float],
     street: str,
     trigger: str,
     active_count: int,
@@ -303,10 +300,10 @@ def calibrate_bucket_probs(
     is_raise_over: bool = False,
     action_sequence: str = "",
 ) -> tuple[dict[str, float], dict[str, Any]]:
-    mode = mode_for_big_blind(big_blind)
+    mode = ml_mode()
     if mode == "off":
         return {}, {}
-    model = _load_model(big_blind, mode)
+    model = _load_model(mode)
     if not model:
         return {}, {"mode": mode, "used": False, "reason": "model_missing"}
     probs = np.array([float(bucket_probs.get(cat, 0.0) or 0.0) for cat in CAT_ORDER], dtype=np.float64)
@@ -331,7 +328,7 @@ def calibrate_bucket_probs(
         is_raise_over=is_raise_over,
         action_sequence=action_sequence,
     )
-    ml_probs = _predict_lgbm(model, probs, features, big_blind=big_blind, mode=mode)
+    ml_probs = _predict_lgbm(model, probs, features, mode=mode)
     alpha = max(0.0, min(1.0, float(model.get("blend_alpha", 0.0) or 0.0)))
     blended = (1.0 - alpha) * probs + alpha * ml_probs
     blended = np.clip(blended, EPS, 1.0)

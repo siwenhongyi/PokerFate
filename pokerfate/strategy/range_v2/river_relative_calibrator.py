@@ -12,7 +12,7 @@ mass while preserving the tie mass.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 from pokerfate.core.card import Card
 from pokerfate.core.hand_evaluator import HandEvaluator
@@ -244,7 +244,6 @@ class RiverRelativeCalibrator:
         board_texture: str,
         action_ctx: str,
         exact_bounds: Dict[str, bool] | None = None,
-        big_blind: Optional[float] = None,
         bucket_dist: Dict[str, float] | None = None,
         active_count: int = 1,
         board_len: int = 5,
@@ -287,7 +286,6 @@ class RiverRelativeCalibrator:
 
         rel, ml_diag = rel_ml.calibrate_dist(
             rel,
-            big_blind=big_blind,
             bucket_dist=bucket_dist,
             hero_bucket=hero_bucket,
             hero_made_subtype=hero_made_subtype,

@@ -9,7 +9,7 @@ from pokerfate.strategy.range_v2.cec_calibration import (
 
 def test_cec_calibration_builds_runtime_view(tmp_path):
     root = tmp_path / "runtime_calibration"
-    out = root / "bb_10k"
+    out = root
     out.mkdir(parents=True)
     rows = []
     for idx in range(90):
@@ -35,8 +35,7 @@ def test_cec_calibration_builds_runtime_view(tmp_path):
     )
 
     _MODEL_CACHE.clear()
-    model = load_cec_model(big_blind=10000, runtime_root=root, blocking=True)
-    assert model.bb_bucket == "all_bb"
+    model = load_cec_model(runtime_root=root, blocking=True)
     assert model.rows == 90
     assert model.groups["line"]["river|check|check|single"].rows == 90
 
@@ -58,7 +57,6 @@ def test_cec_calibration_builds_runtime_view(tmp_path):
     }
     calibrated = calibrate_range_v2_prior(
         prior,
-        big_blind=10000,
         runtime_root=root,
         blocking=True,
     )
@@ -73,16 +71,15 @@ def test_cec_calibration_builds_runtime_view(tmp_path):
 def test_cec_calibration_default_load_is_nonblocking(tmp_path):
     _MODEL_CACHE.clear()
     root = tmp_path / "runtime_calibration"
-    (root / "bb_10k").mkdir(parents=True)
-    model = load_cec_model(big_blind=10000, runtime_root=root)
-    assert model.bb_bucket == "all_bb"
+    root.mkdir(parents=True)
+    model = load_cec_model(runtime_root=root)
     assert model.rows == 0
 
 
 def test_cec_calibration_incremental_refresh_reads_appended_rows(tmp_path):
     _MODEL_CACHE.clear()
     root = tmp_path / "runtime_calibration"
-    out = root / "bb_10k"
+    out = root
     out.mkdir(parents=True)
     path = out / "train.rows.jsonl"
     row = {
@@ -101,12 +98,11 @@ def test_cec_calibration_incremental_refresh_reads_appended_rows(tmp_path):
         "action_bet_ratio": 0.5,
     }
     path.write_text(json.dumps(row) + "\n", encoding="utf-8")
-    model = load_cec_model(big_blind=50000, runtime_root=root, blocking=True)
+    model = load_cec_model(runtime_root=root, blocking=True)
     assert model.rows == 1
 
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({**row, "actual_bucket": "air"}) + "\n")
-    model = load_cec_model(big_blind=1000, runtime_root=root, blocking=True)
-    assert model.bb_bucket == "all_bb"
+    model = load_cec_model(runtime_root=root, blocking=True)
     assert model.rows == 2
     assert model.groups["line"]["turn|bet|half|single"].rows == 2

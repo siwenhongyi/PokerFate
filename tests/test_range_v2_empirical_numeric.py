@@ -133,8 +133,8 @@ def _numeric_model():
 
 
 def _install_model(monkeypatch, model):
-    em._numeric_index_for_key.cache_clear()
-    monkeypatch.setattr(em, "_load_empirical_model_for_key", lambda _key: model)
+    em._numeric_index.cache_clear()
+    monkeypatch.setattr(em, "_load_empirical_model", lambda: model)
 
 
 def test_empirical_action_likelihood_uses_numeric_neighbors(monkeypatch):
@@ -160,7 +160,6 @@ def test_empirical_preflop_prior_uses_numeric_neighbors(monkeypatch):
     dist, blend, key, n = em.empirical_preflop_bucket_prior(
         "BTN",
         _profile(hands_seen=20),
-        10000,
     )
 
     assert key.startswith("knn:BTN")

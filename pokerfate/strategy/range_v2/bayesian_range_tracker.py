@@ -41,9 +41,8 @@ from pokerfate.strategy.range_v2.bucket_ml_calibration import calibrate_bucket_p
 from pokerfate.strategy.range_v2.empirical_model import (
     CAT_ORDER as EMPIRICAL_CAT_ORDER,
     empirical_preflop_bucket_prior,
-    set_current_big_blind,
 )
-from pokerfate.strategy.range_v2.runtime_formula_calibration import bb_key, load_params
+from pokerfate.strategy.range_v2.runtime_formula_calibration import load_params
 
 log = logging.getLogger(__name__)
 
@@ -184,14 +183,12 @@ def _preflop_action_type(action: str, context: ActionContext) -> str:
     return action or ''
 
 
-def _load_runtime_bucket_calibration(
-    big_blind: Optional[float],
-) -> Optional[Dict[str, tuple[float, Dict[str, float]]]]:
-    key = "all_bb"
+def _load_runtime_bucket_calibration() -> Optional[Dict[str, tuple[float, Dict[str, float]]]]:
+    key = "bucket"
     if key in _RUNTIME_BUCKET_CAL_CACHE:
         return _RUNTIME_BUCKET_CAL_CACHE[key]
 
-    raw = load_params('bucket', big_blind)
+    raw = load_params('bucket')
     if raw is None:
         _RUNTIME_BUCKET_CAL_CACHE[key] = None
         return None
@@ -432,7 +429,6 @@ class BayesianRangeTracker:
 
     def set_big_blind(self, big_blind: float) -> None:
         self._big_blind = float(big_blind or 0.0)
-        set_current_big_blind(self._big_blind)
 
     def set_known_cards(self, cards: List[Card]) -> None:
         """Call once per hand with bot's hole cards."""
@@ -489,7 +485,7 @@ class BayesianRangeTracker:
             return
         if not board or len(board) < 3:
             return
-        runtime_params = _load_runtime_bucket_calibration(self._big_blind) or {}
+        runtime_params = _load_runtime_bucket_calibration() or {}
         base_key = f'{street} {trigger}'
         active_count = sum(1 for pid in self._weights if pid not in self._folded)
         meta = self._action_meta.get(player_id, {})
@@ -575,7 +571,6 @@ class BayesianRangeTracker:
         range_pct = float((w > range_threshold).sum()) / 1326
         ml_target, _diag = calibrate_bucket_probs(
             {cat: float(val) for cat, val in zip(_BUCKET_CAL_CATS, p)},
-            big_blind=self._big_blind,
             street=street,
             trigger=trigger,
             active_count=active_count,
@@ -642,9 +637,7 @@ class BayesianRangeTracker:
             else:
                 w[idx] = 0.03
 
-        empirical_prior = empirical_preflop_bucket_prior(
-            position, profile, self._big_blind,
-        )
+        empirical_prior = empirical_preflop_bucket_prior(position, profile)
         if empirical_prior is not None:
             target_dist, blend, _key, _n = empirical_prior
             active_total = float(w.sum())

@@ -30,7 +30,6 @@ from pf_intercept.config import (
     PREFERRED_WSS_HOSTS,
 )
 from pf_intercept.wire.framing import FrameBuffer, encode_frame
-from pf_intercept.robot.tracker import RobotTracker
 from pf_intercept.proxy.bot_worker import BotWorkerClient
 from pf_intercept.proxy.heartbeat import HeartbeatTrace
 from pf_intercept.proxy.logging_setup import (
@@ -85,7 +84,6 @@ from pf_intercept.wire import codec
 # ── Bot worker client (constructed in main() with CLI options) ────────────────
 _bot: BotWorkerClient | None = None
 _entertainment: EntertainmentRuntime | None = None
-_robot_tracker = RobotTracker(_DATA_DIR)
 
 # ── Server state ──────────────────────────────────────────────────────────────
 _real_server_sni: str = SERVER_HOST       # fallback SNI when Host header is absent
@@ -93,6 +91,12 @@ _wss_down_notice_active: bool = False
 _active_wss_session_id: int = 0
 _active_client_ws = None
 _active_server_ws = None
+
+
+def _in_tournament_room() -> bool:
+    """SNG/MTT tables are played by hand: the proxy stays silent there too."""
+    settings = _bot.runtime_settings() if _bot is not None else None
+    return bool((settings or {}).get("tournament_passthrough"))
 
 
 def _is_active_wss_session(session_id: int) -> bool:
@@ -307,12 +311,6 @@ async def _s2c_analysis_worker(
             if msg is None:
                 log.warning("[S→C] %s  (decode failed — run pf_intercept/tools/gen_pb2.sh first)", frame.type_name)
                 continue
-            if frame.type_name == "pb.SelfUserInfoRSP":
-                brief = msg.get("brief") or {}
-                uid = brief.get("uid")
-                if uid is not None:
-                    _robot_tracker.set_self_uid(uid)
-            _robot_tracker.observe(frame.type_name, msg, room_id=frame.room_id)
             log.info("[S→C] %s  %s", frame.type_name, msg)
             bot.submit_s2c(
                 session_id=session_id,
@@ -678,8 +676,11 @@ async def _handle_wss(client_ws) -> None:
         print(f"[proxy] WSS 已断开  client_code={_cc}  upstream_code={_uc}"
               + ("  ⚠️ 异常断开" if abnormal else ""))
         if abnormal and not _wss_down_notice_active:
-            notify("wss_disconnected")
-            _wss_down_notice_active = True
+            if _in_tournament_room():
+                log.info("[Bark] tournament room: skip wss_disconnected notify")
+            else:
+                notify("wss_disconnected")
+                _wss_down_notice_active = True
         if _is_active_wss_session(session_id):
             _active_client_ws = None
             _active_server_ws = None
@@ -699,7 +700,6 @@ def _load_bark_key_from_file() -> None:
 async def main(
     max_auto_rebuy: int = 1,
     profit_lock_bb: int | None = None,
-    use_range_equity: bool = True,
     entertainment_web_host: str | None = config.ENTERTAINMENT_WEB_HOST,
     entertainment_web_port: int | None = config.ENTERTAINMENT_WEB_PORT,
 ) -> None:
@@ -716,7 +716,6 @@ async def main(
     _bot = BotWorkerClient(
         max_auto_rebuy=max_auto_rebuy,
         profit_lock_bb=profit_lock_bb,
-        use_range_equity=use_range_equity,
     )
     await _bot.start()
     start_calibration_spool_worker()
@@ -747,8 +746,7 @@ async def main(
     )
     print(
         f"[proxy] Bot 初始化完成  max_rebuy={max_auto_rebuy}  "
-        f"profit_lock={config.PROFIT_LOCK_BB_THRESHOLD}BB  "
-        f"equity_mode={'range' if use_range_equity else 'eqr'}"
+        f"profit_lock={config.PROFIT_LOCK_BB_THRESHOLD}BB"
     )
     print(f"[proxy] BotWorker 已启动  pid={_bot.pid}  日志={_LOGS_DIR / 'bot_worker.log'}")
     print(
@@ -824,12 +822,6 @@ def _parse_proxy_args() -> argparse.Namespace:
         help=f"盈利锁仓阈值（大盲倍数），达到后离桌再以 100BB 进房（默认用 pf_intercept.config 的值 {config.PROFIT_LOCK_BB_THRESHOLD}）",
     )
     p.add_argument(
-        "--equity-mode",
-        choices=["range", "eqr"],
-        default="range",
-        help="胜率模型：range=两阶段Range估算（默认），eqr=GTO+EQR（同mingli分支）",
-    )
-    p.add_argument(
         "--entertainment-web-host",
         default=config.ENTERTAINMENT_WEB_HOST,
         help=f"娱乐小游戏 Web 监听地址（默认 {config.ENTERTAINMENT_WEB_HOST}）",
@@ -854,7 +846,6 @@ if __name__ == "__main__":
         main(
             max_auto_rebuy=_args.max_auto_rebuy,
             profit_lock_bb=_args.profit_lock_bb,
-            use_range_equity=(_args.equity_mode == "range"),
             entertainment_web_host=(
                 None if _args.no_entertainment_web else _args.entertainment_web_host
             ),

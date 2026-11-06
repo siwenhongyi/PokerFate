@@ -65,7 +65,7 @@ def test_file_spool_worker_consumes_job_and_applies_updates(tmp_path):
     assert list((spool_dir / "processing").glob("*.pkl")) == []
     assert list((spool_dir / "failed").glob("*.pkl")) == []
 
-    row_files = list((runtime_root / "bb_10k").glob("*.rows.jsonl"))
+    row_files = list(runtime_root.glob("*.rows.jsonl"))
     assert row_files
     assert sum(1 for path in row_files for _ in path.open(encoding="utf-8")) >= 1
     row = json.loads(row_files[0].read_text(encoding="utf-8").splitlines()[0])
@@ -128,7 +128,7 @@ def test_range_compare_spool_worker_writes_hand_level_row(tmp_path):
         max_jobs=1,
     ) == 1
 
-    row_files = list((runtime_root / "bb_10k").glob("range_compare.*.jsonl"))
+    row_files = list(runtime_root.glob("range_compare.*.jsonl"))
     assert len(row_files) == 1
     row = json.loads(row_files[0].read_text(encoding="utf-8").strip())
     assert row["schema"] == "runtime_range_compare_169_v1"

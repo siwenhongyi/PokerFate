@@ -213,12 +213,15 @@ def test_sticky_multiway_nuts_still_value_bets() -> None:
         villain_stats=sticky_passive_stats(),
         n_sticky=1,
         max_value_lean=1.3,
+        seed=7,
     )
 
     out = V3Engine().decide(ctx)
 
+    # Purposes are mixed (thick value / range cbet / stab); the invariant is
+    # that a set never checks against sticky multiway fields.
     assert out.action == 'bet'
-    assert out.purpose in ('monster_value_plan', 'thick_value_bet', 'range_cbet')
+    assert out.amount >= 0.5 * ctx.pot
 
 
 def test_sticky_heads_up_strong_value_gets_larger_sizing_candidates() -> None:

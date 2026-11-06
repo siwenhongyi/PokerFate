@@ -813,8 +813,8 @@ def test_numeric_prior_wmsd_confidence_uses_showdown_samples():
         river_action_count=80,
     )
 
-    thin_prior = build_numeric_prior(thin, {}, "river", 10000)
-    proven_prior = build_numeric_prior(proven, {}, "river", 10000)
+    thin_prior = build_numeric_prior(thin, {}, "river")
+    proven_prior = build_numeric_prior(proven, {}, "river")
 
     assert proven_prior.nut_heavy_score > thin_prior.nut_heavy_score + 0.10
 

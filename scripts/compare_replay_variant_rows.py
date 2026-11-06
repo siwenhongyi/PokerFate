@@ -51,22 +51,11 @@ def _load_replay_meta(path: Path) -> dict[tuple[Any, ...], dict[str, Any]]:
                 if ev.get("type") != "decision":
                     continue
                 meta[(source, session, hand_no, idx)] = {
-                    "bb": _bb_bucket(float(hand.get("big_blind") or 0.0)),
                     "big_blind": float(hand.get("big_blind") or 0.0),
                     "street": ev.get("street", ""),
                     "hist_delta": int(result.get("my_delta") or 0),
                 }
     return meta
-
-
-def _bb_bucket(bb: float) -> str:
-    if 7000 <= bb <= 15000:
-        return "10k"
-    if 35000 <= bb <= 65000:
-        return "50k"
-    if bb > 0:
-        return str(int(round(bb)))
-    return "unknown"
 
 
 def _decision_tag(row: dict[str, Any]) -> tuple[str, float]:
@@ -132,7 +121,6 @@ def main() -> None:
         if tag == "unchanged":
             continue
         m = meta.get(key, {})
-        bb = m.get("bb", "unknown")
         big_blind = float(m.get("big_blind") or 0.0)
         hist_delta = int(m.get("hist_delta") or base_row.get("hist_hand_delta") or 0)
         direction = _bucket_direction(tag, hist_delta)
@@ -142,9 +130,9 @@ def main() -> None:
         net_bb = hist_delta / big_blind if big_blind > 0 else 0.0
 
         for agg_key in [
-            (bb, direction),
-            (bb, street, direction),
-            (bb, purpose, direction),
+            (direction,),
+            (street, direction),
+            (purpose, direction),
         ]:
             row = agg[agg_key]
             row["decisions"] += 1
@@ -156,7 +144,6 @@ def main() -> None:
         direction_counts[direction] += 1
         changed_rows.append({
             "key": key,
-            "bb": bb,
             "street": street,
             "purpose": purpose,
             "change": tag,

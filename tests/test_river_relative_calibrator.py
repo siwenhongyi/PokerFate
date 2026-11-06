@@ -97,8 +97,7 @@ def test_exact_lock_hand_is_not_calibrated_down():
 
 
 def test_river_relative_ml_runs_before_online_bias(monkeypatch, tmp_path):
-    path = tmp_path / "all_bb" / "runtime_lgbm_relative_model.json"
-    path.parent.mkdir(parents=True)
+    path = tmp_path / "runtime_lgbm_relative_model.json"
     path.write_text(
         """
         {
@@ -142,7 +141,6 @@ def test_river_relative_ml_runs_before_online_bias(monkeypatch, tmp_path):
         hero_made_subtype="pair",
         board_texture="unpaired:rainbow",
         action_ctx="passive",
-        big_blind=10_000,
         bucket_dist={"strong": 0.7, "medium": 0.3},
         active_count=2,
         range_pct=0.25,

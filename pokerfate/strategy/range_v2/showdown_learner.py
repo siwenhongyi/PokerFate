@@ -45,7 +45,6 @@ class ShowdownLearner:
     (name, street, action) 能直接 O(1) 返回该 (street, action) 的观察总数，
     不影响 poker_bot 的 use_calibration 判据。
 
-    Completely independent from EQR's ShowdownCalibrator.
     """
 
     _MIN_SAMPLES = 8

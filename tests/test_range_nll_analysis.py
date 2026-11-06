@@ -7,7 +7,7 @@ from pf_entertainment.range_nll import range_nll_payload
 
 def test_range_nll_payload_analyzes_runtime_rows(tmp_path):
     root = tmp_path / "runtime_calibration"
-    out = root / "bb_10k"
+    out = root
     out.mkdir(parents=True)
     rows = [
         {

@@ -23,7 +23,7 @@ def range_nll_payload(
 ) -> dict[str, Any]:
     """Analyze runtime exact-combo NLL rows written by Range V2 calibration."""
     root = Path(runtime_root)
-    files = sorted(root.glob("bb_*/*.rows.jsonl"))
+    files = sorted(root.glob("*.rows.jsonl"))
     overall = _new_acc()
     by_street: dict[str, dict[str, Any]] = {}
     by_bucket: dict[str, dict[str, Any]] = {}
@@ -598,7 +598,6 @@ def _add_cec_integration(
     cec, diag = calibrate_bucket_dist(
         raw,
         context=row_context(row),
-        big_blind=row.get("bb"),
         runtime_root=runtime_root,
     )
     if not cec:

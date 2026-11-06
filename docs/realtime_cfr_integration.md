@@ -107,7 +107,7 @@ realtime CFR 仍以均衡策略为锚点，不直接用画像替代 solver：
 
 数据不够时不再使用对手类型标签。CFR 决策层使用 `opponent_numeric_prior` 的数值先验：
 
-- 从本项目 `pokerfate/data/local_models/opponents_all_bb.json` 读取统一玩家库，离线构造 pool baseline 和软 KNN 先验。
+- 从本项目 `pokerfate/data/local_models/opponents.json` 读取统一玩家库，离线构造 pool baseline 和软 KNN 先验。
 - 特征是连续数值：VPIP/PFR/gap、AF、WTSD/WMSD、street AFq、river bet/fold、fold to cbet、bluff win rate、3bet/fold to 3bet 等。
 - 每个特征按自己的机会样本做 shrink：`rate = player * reliability + (1 - reliability) * (KNN/pool)`；没有机会样本的字段不会被当成 0。
 - 最终输出不是玩家类型，而是 `fold_bias/sticky_bias/raise_bias` 以及 `sticky/fold_lean/underbluff/pressure` 连续分。

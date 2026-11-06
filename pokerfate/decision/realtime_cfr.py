@@ -875,7 +875,7 @@ def _select_exploit_action(
         return out
 
     line_context = dict(line_context or {})
-    numeric_prior = build_numeric_prior(profile, adjustments, street, big_blind)
+    numeric_prior = build_numeric_prior(profile, adjustments, street)
     confidence = _exploit_confidence(
         profile,
         adjustments,

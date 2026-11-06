@@ -980,7 +980,7 @@ def main() -> None:
     ap.add_argument("--equity-relative-features", action="store_true")
     ap.add_argument("--equity-context-features", action="store_true")
     ap.add_argument("--equity-player-profile-json", type=Path,
-                    default=Path("pokerfate/data/local_models/opponents_all_bb.json"))
+                    default=Path("pokerfate/data/local_models/opponents.json"))
     ap.add_argument("--include-player", action="store_true")
     ap.add_argument("--max-train-rows", type=int, default=0)
     ap.add_argument("--max-val-rows", type=int, default=0)

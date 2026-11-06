@@ -25,10 +25,7 @@ if str(ROOT) not in sys.path:
 from pokerfate.strategy.range_v2.empirical_model import (
     CAT_ORDER,
     MODEL_DIR,
-    SUPPORTED_BB_KEYS,
-    bb_key,
     build_numeric_profile_payload,
-    MODEL_KEY,
     empirical_model_path,
 )
 
@@ -45,9 +42,6 @@ CONSOLE_CAL_RE = re.compile(
     r"⚖\s+(preflop|flop|turn|river)\s+.+?\s+"
     r"(reset|board:\w+|action:\w+)\s+实际桶=([^\(\s]+)"
 )
-HAND_HEADER_RE = re.compile(r"第\s+\d+\s+手\s+(.*)")
-PLAYER_BB_RE = re.compile(r"(.+?)\s+(-?\d+(?:\.\d+)?)bb(?:\s+\[[^\]]*\])?$")
-FINAL_STACK_RE = re.compile(r"(.+?)\s+(-?\d+(?:\.\d+)?)$")
 
 
 def _iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
@@ -64,116 +58,27 @@ def _iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
                 yield row
 
 
-def _row_bb_key(row: dict[str, Any], path: Path | None = None) -> str:
-    raw = str(row.get("bb_bucket") or "")
-    if raw in SUPPORTED_BB_KEYS:
-        return raw
-    path = path or Path(str(row.get("source") or ""))
-    for part in path.parts:
-        if part in SUPPORTED_BB_KEYS:
-            return part
-    raw_bb = row.get("bb")
-    if raw_bb is not None:
-        return bb_key(raw_bb)
-    return "bb_10k"
-
-
-def _load_rows(paths: Iterable[Path], target_bb: str) -> list[dict[str, Any]]:
+def _load_rows(paths: Iterable[Path]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in paths:
         if path.exists():
-            for row in _iter_jsonl(path):
-                if _row_bb_key(row, path) == target_bb:
-                    rows.append(row)
+            rows.extend(_iter_jsonl(path))
     return rows
 
 
-def _split_console_players(text: str) -> list[str]:
-    return [part.strip() for part in re.split(r"\s{2,}", text.strip()) if part.strip()]
-
-
-def _parse_console_hand_stacks(line: str) -> dict[str, float]:
-    m = HAND_HEADER_RE.search(line)
-    if not m:
-        return {}
-    out: dict[str, float] = {}
-    for part in _split_console_players(m.group(1)):
-        mm = PLAYER_BB_RE.match(part)
-        if not mm:
-            continue
-        try:
-            out[mm.group(1).strip()] = float(mm.group(2))
-        except Exception:
-            continue
-    return out
-
-
-def _median(values: list[float]) -> float:
-    values = sorted(values)
-    n = len(values)
-    if n == 0:
-        return 0.0
-    mid = n // 2
-    if n % 2:
-        return values[mid]
-    return (values[mid - 1] + values[mid]) / 2.0
-
-
-def _infer_console_bb_from_final(line: str, hand_stacks_bb: dict[str, float]) -> str:
-    if "│" not in line or not hand_stacks_bb:
-        return ""
-    tail = line.split("│", 1)[1]
-    ratios: list[float] = []
-    for part in _split_console_players(tail):
-        mm = FINAL_STACK_RE.match(part)
-        if not mm:
-            continue
-        name = mm.group(1).strip()
-        try:
-            chips = float(mm.group(2))
-            stack_bb = float(hand_stacks_bb.get(name, 0.0) or 0.0)
-        except Exception:
-            continue
-        if chips <= 0 or stack_bb <= 0:
-            continue
-        ratios.append(chips / stack_bb)
-    if not ratios:
-        return ""
-    candidates = {"bb_1k": 1000.0, "bb_10k": 10000.0, "bb_50k": 50000.0}
-
-    def score(candidate: float) -> float:
-        return _median([abs((ratio / candidate) - 1.0) for ratio in ratios])
-
-    best_key, best_value = min(candidates.items(), key=lambda item: score(item[1]))
-    return best_key if score(best_value) <= 0.60 else ""
-
-
-def _rows_from_console(path: Path, target_bb: str, fallback_bb: str) -> list[dict[str, Any]]:
+def _rows_from_console(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if not path.exists():
         return rows
-    hand_stacks_bb: dict[str, float] = {}
-    current_bb = fallback_bb
     for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        hand_stacks = _parse_console_hand_stacks(raw)
-        if hand_stacks:
-            hand_stacks_bb = hand_stacks
-            continue
-        inferred = _infer_console_bb_from_final(raw, hand_stacks_bb)
-        if inferred:
-            current_bb = inferred
-            continue
         m = CONSOLE_CAL_RE.search(raw)
         if not m:
-            continue
-        if current_bb != target_bb:
             continue
         bucket = BUCKET_TRANSLATE.get(m.group(3), m.group(3))
         if bucket not in CAT_ORDER:
             continue
         rows.append({
             "source": str(path),
-            "bb_bucket": current_bb,
             "street": m.group(1),
             "trigger": m.group(2),
             "actual_bucket": bucket,
@@ -402,32 +307,24 @@ def _build_player_preflop_counts(
     return counts
 
 
-def _default_train_rows(target_bb: str) -> list[Path]:
-    return [ROOT / "data" / "runtime_calibration" / target_bb / "train.rows.jsonl"]
-
-
-def _opponents_path(target_bb: str, override: Path | None) -> Path:
-    if override is not None:
-        return override
-    return MODEL_DIR / "opponents_all_bb.json"
+DEFAULT_TRAIN_ROWS = ROOT / "data" / "runtime_calibration" / "train.rows.jsonl"
+DEFAULT_OPPONENTS = MODEL_DIR / "opponents.json"
 
 
 def _build_model(
     *,
-    target_bb: str,
     row_paths: list[Path],
     console_logs: list[Path],
-    fallback_console_bb: str,
     opponents_path: Path,
     out_path: Path,
     min_action_n: int,
     min_prior_n: int,
     action_prior_weight: float,
 ) -> dict[str, Any]:
-    rows = _load_rows(row_paths, target_bb)
+    rows = _load_rows(row_paths)
     console_rows = []
     for path in console_logs:
-        console_rows.extend(_rows_from_console(path, target_bb, fallback_console_bb))
+        console_rows.extend(_rows_from_console(path))
     all_rows = rows + console_rows
     opponents = _load_opponent_stats(opponents_path)
     player_action_counts = _build_player_action_counts(rows, opponents)
@@ -441,12 +338,10 @@ def _build_model(
 
     model = {
         "schema": "range_v2_empirical_model_v2",
-        "bb_bucket": target_bb,
         "generated_at": int(time.time()),
         "sources": {
             "rows": [str(p) for p in row_paths],
             "console_logs": [str(p) for p in console_logs],
-            "fallback_console_bb": fallback_console_bb,
             "opponents": str(opponents_path),
             "structured_rows": len(rows),
             "console_rows": len(console_rows),
@@ -471,7 +366,6 @@ def _build_model(
     )
     tmp.replace(out_path)
     return {
-        "bb_bucket": target_bb,
         "out": str(out_path),
         "rows": len(rows),
         "console_rows": len(console_rows),
@@ -485,58 +379,29 @@ def _build_model(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--bb", default="all",
-                    help="bb_1k/bb_10k/bb_50k, or all (default)")
     ap.add_argument("--row", type=Path, action="append", default=[],
-                    help="structured calibration JSONL; defaults to data/runtime_calibration/<bb>/train.rows.jsonl")
+                    help=f"structured calibration JSONL; default {DEFAULT_TRAIN_ROWS}")
     ap.add_argument("--console-log", type=Path, action="append", default=[],
                     help="optional console log; only global calibration lines are used")
-    ap.add_argument("--fallback-console-bb", default="bb_10k",
-                    help="fallback bb bucket only if a legacy console log cannot be inferred")
-    ap.add_argument("--opponents", type=Path, default=None,
-                    help="override opponent model JSON; default is pokerfate/data/local_models/opponents_all_bb.json")
+    ap.add_argument("--opponents", type=Path, default=DEFAULT_OPPONENTS,
+                    help=f"opponent model JSON (uid keyed); default {DEFAULT_OPPONENTS}")
     ap.add_argument("--out", type=Path, default=None,
-                    help="override output path; only valid when --bb is not all")
+                    help=f"output path; default {empirical_model_path()}")
     ap.add_argument("--min-action-n", type=int, default=12)
     ap.add_argument("--min-prior-n", type=int, default=20)
     ap.add_argument("--action-prior-weight", type=float, default=3000.0)
     args = ap.parse_args()
 
-    raw_bb = str(args.bb).strip()
-    if raw_bb == "all":
-        targets = list(SUPPORTED_BB_KEYS)
-    else:
-        target = bb_key(raw_bb)
-        if target not in SUPPORTED_BB_KEYS:
-            ap.error(f"unsupported --bb: {args.bb}")
-        targets = [target]
-    fallback_console_bb = bb_key(args.fallback_console_bb)
-    if fallback_console_bb not in SUPPORTED_BB_KEYS:
-        ap.error(f"unsupported --fallback-console-bb: {args.fallback_console_bb}")
-    if args.out is not None and len(targets) != 1:
-        ap.error("--out is only valid for one --bb target")
-
-    summaries = []
-    for target_bb in targets:
-        row_paths = args.row or _default_train_rows(target_bb)
-        default_out = (
-            MODEL_DIR / f"range_v2_empirical_model_{target_bb}.json"
-            if raw_bb == "all"
-            else empirical_model_path(MODEL_KEY)
-        )
-        summaries.append(_build_model(
-            target_bb=target_bb,
-            row_paths=row_paths,
-            console_logs=args.console_log,
-            fallback_console_bb=fallback_console_bb,
-            opponents_path=_opponents_path(target_bb, args.opponents),
-            out_path=args.out or default_out,
-            min_action_n=args.min_action_n,
-            min_prior_n=args.min_prior_n,
-            action_prior_weight=args.action_prior_weight,
-        ))
-    print(json.dumps(summaries if len(summaries) > 1 else summaries[0],
-                     ensure_ascii=False, indent=2, sort_keys=True))
+    summary = _build_model(
+        row_paths=args.row or [DEFAULT_TRAIN_ROWS],
+        console_logs=args.console_log,
+        opponents_path=args.opponents,
+        out_path=args.out or empirical_model_path(),
+        min_action_n=args.min_action_n,
+        min_prior_n=args.min_prior_n,
+        action_prior_weight=args.action_prior_weight,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

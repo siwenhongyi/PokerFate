@@ -61,18 +61,8 @@ from pokerfate.decision import (
 )
 from pokerfate.decision.g5_model import G5ActionModel, stable_player_name
 from pokerfate.logger import PokerLogger
-from pokerfate.strategy.range_estimator import (
-    _ACTION_COMPRESSION_RAISE_PREFLOP,
-    _ACTION_COMPRESSION_RAISE_POSTFLOP,
-    HandRangeEstimator,
-    ShowdownCalibrator as LegacyShowdownCalibrator,
-)
 from pokerfate.strategy.range_v2.action_model import ActionContext
-from pokerfate.strategy.range_v2.empirical_model import (
-    bb_key,
-    empirical_action_likelihood,
-    set_current_big_blind,
-)
+from pokerfate.strategy.range_v2.empirical_model import empirical_action_likelihood
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
 from pokerfate.strategy.range_v2.cec_calibration import calibrate_range_v2_prior
 from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards
@@ -90,18 +80,14 @@ _UNSET = object()  # sentinel for log_file default
 _init_data()
 
 _DEFAULT_LOG_FILE    = str(Path(__file__).resolve().parent / "logs" / "pokerfate.log")
-_DEFAULT_ROBOT_LOG_FILE = str(Path(__file__).resolve().parent / "logs" / "bot.log")
 _DEFAULT_MODEL_DIR = Path(__file__).resolve().parent / "data" / "local_models"
 _DEFAULT_G5_LOG_FILE = str(Path(__file__).resolve().parent / "logs" / "g5.log")
 _POSTFLOP_STREET_RANK = {"flop": 1, "turn": 2, "river": 3}
 
 
-def _default_opponents_path(big_blind: float | None = None) -> Path:
-    return _DEFAULT_MODEL_DIR / "opponents_all_bb.json"
-
-
-def _default_g5_model_path(big_blind: float) -> Path:
-    return _DEFAULT_MODEL_DIR / f"g5_stats_{bb_key(big_blind)}.json"
+# Opponent data is keyed by uid only (no per-stake split).
+_DEFAULT_OPPONENTS_PATH = _DEFAULT_MODEL_DIR / "opponents.json"
+_DEFAULT_G5_MODEL_PATH = _DEFAULT_MODEL_DIR / "g5_stats.json"
 
 _PUSH_STREET_LABELS = {
     "preflop": "翻前",
@@ -259,9 +245,7 @@ class PokerFateAPI:
         equity_iterations: int = 800,
         autosave_path: Optional[str] = _UNSET,
         log_file: Optional[str] = _UNSET,
-        robot_log_file: Optional[str] = _UNSET,
         verbose: bool = False,
-        use_range_equity: bool = True,
         enable_showdown_calibration: bool = True,
         decision_seed: Optional[int] = None,
         decision_engine: Optional[str] = None,
@@ -300,22 +284,18 @@ class PokerFateAPI:
         self.my_player_id = my_player_id
         self.big_blind = big_blind
         self.small_blind = small_blind
-        set_current_big_blind(big_blind)
         self.verbose = verbose
         self._decision_seed_base = decision_seed
         self._decision_index = 0
         _in_test = bool(os.environ.get("PYTEST_CURRENT_TEST"))
-        self._autosave_uses_default = autosave_path is _UNSET and not _in_test
         if autosave_path is _UNSET:
-            autosave_path = None if _in_test else str(_default_opponents_path(big_blind))
+            autosave_path = None if _in_test else str(_DEFAULT_OPPONENTS_PATH)
         self.autosave_path = autosave_path
         if log_file is _UNSET:
             log_file = None if _in_test else _DEFAULT_LOG_FILE
-        if robot_log_file is _UNSET:
-            robot_log_file = None if _in_test else _DEFAULT_ROBOT_LOG_FILE
         self._g5_log_file = None if _in_test else _DEFAULT_G5_LOG_FILE
         self._g5_model_path = (
-            None if _in_test else str(_default_g5_model_path(big_blind))
+            None if _in_test else str(_DEFAULT_G5_MODEL_PATH)
         ) if g5_model_path is _UNSET else g5_model_path
         self._g5_action_model = (
             G5ActionModel.load(self._g5_model_path)
@@ -324,14 +304,12 @@ class PokerFateAPI:
         self._log = PokerLogger(
             log_file=log_file,
             console=True,
-            robot_log_file=robot_log_file,
         )
         self._default_stack = 100.0 * big_blind  # fallback when stack is unknown
 
         self._bot = PokerBot(
             name="PokerFate",
             equity_iterations=equity_iterations,
-            use_range_equity=use_range_equity,
         )
         self._bot._range_tracker.set_big_blind(self.big_blind)
         self._external_decision_engine = None
@@ -413,7 +391,7 @@ class PokerFateAPI:
         # ── 2026-04-23: Showdown calibration ──
         # 每次 tracker range 调整时记录预测，手牌结束时对比摊牌实际，写入
         # pokerfate.log JSON 流供 offline 校准分析。仅 range_v2 路径启用。
-        if self._bot.use_range_equity and enable_showdown_calibration:
+        if enable_showdown_calibration:
             self._calibrator = FileSpoolShowdownCalibrator(
                 logger=self._log,
                 big_blind=self.big_blind,
@@ -469,15 +447,13 @@ class PokerFateAPI:
             traceback.print_exc()
 
     def _showdown_persistence_data(self) -> dict:
-        if self._bot.use_range_equity:
-            return {
-                'range_v2_learner': self._bot._showdown_learner.to_dict(),
-                'hero_eq_calibrator': self._bot._hero_eq_calibrator.to_dict(),
-                'river_relative_calibrator': (
-                    self._bot._river_relative_calibrator.to_dict()
-                ),
-            }
-        return self._bot.range_estimator.showdown_calibrator.to_dict()
+        return {
+            'range_v2_learner': self._bot._showdown_learner.to_dict(),
+            'hero_eq_calibrator': self._bot._hero_eq_calibrator.to_dict(),
+            'river_relative_calibrator': (
+                self._bot._river_relative_calibrator.to_dict()
+            ),
+        }
 
     def _save_persisted_model(self) -> None:
         if not self.autosave_path:
@@ -512,43 +488,23 @@ class PokerFateAPI:
         showdown_raw = self._bot.opponent_model._showdown_data
         if not showdown_raw:
             return
-        if self._bot.use_range_equity:
-            v2_data = showdown_raw.get('range_v2_learner')
-            if v2_data:
-                self._bot._showdown_learner = ShowdownLearner.from_dict(v2_data)
-                self._bot._action_model.showdown_learner = self._bot._showdown_learner
-            heq_data = showdown_raw.get('hero_eq_calibrator')
-            if heq_data:
-                self._bot._hero_eq_calibrator = HeroEquityCalibrator.from_dict(heq_data)
-            river_rel_data = showdown_raw.get('river_relative_calibrator')
-            if river_rel_data:
-                self._bot._river_relative_calibrator = (
-                    RiverRelativeCalibrator.from_dict(river_rel_data)
-                )
-        else:
-            self._bot.range_estimator.showdown_calibrator = (
-                LegacyShowdownCalibrator.from_dict(showdown_raw)
+        v2_data = showdown_raw.get('range_v2_learner')
+        if v2_data:
+            self._bot._showdown_learner = ShowdownLearner.from_dict(v2_data)
+            self._bot._action_model.showdown_learner = self._bot._showdown_learner
+        heq_data = showdown_raw.get('hero_eq_calibrator')
+        if heq_data:
+            self._bot._hero_eq_calibrator = HeroEquityCalibrator.from_dict(heq_data)
+        river_rel_data = showdown_raw.get('river_relative_calibrator')
+        if river_rel_data:
+            self._bot._river_relative_calibrator = (
+                RiverRelativeCalibrator.from_dict(river_rel_data)
             )
 
     def set_table_blinds(self, big_blind: float, small_blind: float) -> None:
         """Update blinds after EnterRoomRSP (new table); refreshes unknown-stack fallback."""
-        new_big_blind = float(big_blind)
-        if (
-            self._autosave_uses_default
-            and self.autosave_path
-            and bb_key(new_big_blind) != bb_key(self.big_blind)
-        ):
-            self._save_persisted_model()
-            if self._g5_model_path:
-                self._save_g5_action_model()
-                self._g5_model_path = str(_default_g5_model_path(new_big_blind))
-                self._g5_action_model = G5ActionModel.load(self._g5_model_path)
-                if self._external_decision_engine is not None:
-                    self._external_decision_engine.options.model_file = self._g5_model_path
-                self._bootstrap_g5_action_model_from_opponents()
         self.big_blind = float(big_blind)
         self.small_blind = float(small_blind)
-        set_current_big_blind(self.big_blind)
         self._default_stack = 100.0 * self.big_blind
         self._bot._range_tracker.set_big_blind(self.big_blind)
         if self._range_compare_collector is not None:
@@ -571,13 +527,11 @@ class PokerFateAPI:
         if (
             self._runtime_calibration_recorder is None
             and self._calibrator is not None
-            and self._bot.use_range_equity
         ):
             self._runtime_calibration_recorder = RuntimeCalibrationRecorder()
         if (
             self._range_compare_collector is None
             and self._calibrator is not None
-            and self._bot.use_range_equity
         ):
             self._range_compare_collector = FileSpoolRangeCompareCollector(
                 logger=self._log,
@@ -1013,15 +967,6 @@ class PokerFateAPI:
             or str(street or "").lower() not in {"turn", "river"}
         ):
             return None
-        if not self._bot.use_range_equity:
-            self._realtime_cfr_error = "range_v2_disabled"
-            self._log.raw({
-                "event": "decision_engine_fallback",
-                "engine": "realtime_cfr",
-                "phase": "prepare",
-                "reason": "range_v2_disabled",
-            })
-            return None
         try:
             action = self._realtime_cfr_engine.decide(
                 RealtimeCFRDecisionContext(
@@ -1074,8 +1019,6 @@ class PokerFateAPI:
         villain_id: int,
     ) -> dict[str, Any]:
         """Compact Range V2 posterior/context for realtime CFR exploit only."""
-        if not self._bot.use_range_equity:
-            return {}
         t0 = time.perf_counter()
         timing: dict[str, float] = {}
         out: dict[str, Any] = {}
@@ -1141,7 +1084,7 @@ class PokerFateAPI:
         if out:
             try:
                 cec_t0 = time.perf_counter()
-                out = calibrate_range_v2_prior(out, big_blind=self.big_blind)
+                out = calibrate_range_v2_prior(out)
                 timing["cec_calibration_ms"] = (time.perf_counter() - cec_t0) * 1000.0
             except Exception:
                 pass
@@ -1662,8 +1605,6 @@ class PokerFateAPI:
         return dict(sorted(out.items()))
 
     def _pf_range_169_for_player(self, player_id: int) -> dict[str, float]:
-        if not self._bot.use_range_equity:
-            return {}
         try:
             weights = self._bot._range_tracker.get_distribution(player_id)
         except Exception:
@@ -1724,8 +1665,6 @@ class PokerFateAPI:
         if not self._runtime_collection_enabled:
             return
         if self._range_compare_collector is None:
-            return
-        if not self._bot.use_range_equity:
             return
         g5_ranges = self._g5_ranges_by_pid(g5_result)
         if not g5_ranges:
@@ -2357,19 +2296,18 @@ class PokerFateAPI:
         range_pct = 0.0
         bucket_dist = None
         vs_hero = None
-        if self._bot.use_range_equity:
-            range_pct = self._bot._range_tracker.get_effective_range_pct(event.player_id)
-            if self._board:
-                bucket_dist = self._bot._range_tracker.get_bucket_distribution(
-                    event.player_id, self._board,
+        range_pct = self._bot._range_tracker.get_effective_range_pct(event.player_id)
+        if self._board:
+            bucket_dist = self._bot._range_tracker.get_bucket_distribution(
+                event.player_id, self._board,
+            )
+            # River HU: compute hero-relative distribution so log shows
+            # "beats hero %" instead of only the overloaded NUTS bucket
+            # (see get_vs_hero_dist docstring — fix for problem 8a).
+            if self._hole_cards and len(self._board) >= 5:
+                vs_hero = self._bot._range_tracker.get_vs_hero_dist(
+                    event.player_id, self._board, self._hole_cards,
                 )
-                # River HU: compute hero-relative distribution so log shows
-                # "beats hero %" instead of only the overloaded NUTS bucket
-                # (see get_vs_hero_dist docstring — fix for problem 8a).
-                if self._hole_cards and len(self._board) >= 5:
-                    vs_hero = self._bot._range_tracker.get_vs_hero_dist(
-                        event.player_id, self._board, self._hole_cards,
-                    )
 
         # to_call for the BOT (how much we'd need to call if it's our turn next)
         to_call = 0.0
@@ -3137,8 +3075,6 @@ class PokerFateAPI:
         showdown_hands: Optional[Dict[int, List[str]]] = None,
         winner_hand_types: Optional[Dict[int, int]] = None,
         my_profit_delta: Optional[float] = None,
-        robot_player_ids: Optional[List[int] | set[int]] = None,
-        robot_player_uids: Optional[Dict[int, str]] = None,
     ) -> None:
         """Notify the bot that the hand is over.
 
@@ -3168,12 +3104,6 @@ class PokerFateAPI:
             because stack diff is wrong on profit_lock leave-reenter
             cycles (stack drops to 100 BB re-buy while the hand itself
             may have been a normal win/loss/chop).
-        robot_player_ids : list/set, optional
-            Player IDs known to be robots in this hand. If any of them has
-            revealed cards, the complete formatted hand log is copied to
-            pokerfate/logs/bot.log after all end-of-hand logs are emitted.
-        robot_player_uids : dict, optional
-            Optional player_id → uid mapping for the bot.log header.
         """
         if final_stacks:
             for pid, stack in final_stacks.items():
@@ -3205,18 +3135,6 @@ class PokerFateAPI:
             for pid, cards in showdown_hands.items():
                 name = self._session_names.get(pid, str(pid))
                 sd_by_name[name] = [str(c) for c in cards]
-        robot_ids = {int(pid) for pid in (robot_player_ids or [])}
-        robot_showdown_players = []
-        if showdown_hands and robot_ids:
-            robot_uids = robot_player_uids or {}
-            for pid in sorted(set(showdown_hands) & robot_ids):
-                robot_showdown_players.append({
-                    "player_id": pid,
-                    "seat": pid,
-                    "uid": robot_uids.get(pid, ""),
-                    "name": self._session_names.get(pid, str(pid)),
-                    "cards": [str(c) for c in showdown_hands.get(pid, [])],
-                })
 
         def _fmt_hole(cards) -> str:
             """底牌格式化（带花色符号），用于 fallback 展示。"""
@@ -3319,7 +3237,6 @@ class PokerFateAPI:
             winner_payouts=winner_payouts,
             final_stacks=final_stacks,
         )
-        self._log.mark_robot_showdown_hand(robot_showdown_players)
         self._flush_river_value_sizing_rows(
             winner_ids=winner_ids,
             winner_names=winner_names,
@@ -3351,10 +3268,7 @@ class PokerFateAPI:
                 if len(self._board) < 5:
                     continue
                 # 判断本手该玩家是否有过下注/加注行为
-                if self._bot.use_range_equity:
-                    action_seq = self._bot._v2_action_history.get(pid, [])
-                else:
-                    action_seq = self._bot.range_estimator._hand_actions.get(pid, [])
+                action_seq = self._bot._v2_action_history.get(pid, [])
                 had_aggression = any(a == 'raise' for _, a in action_seq)
                 self._bot.opponent_model.record_win_with_hand_type(
                     pid,
@@ -3363,147 +3277,114 @@ class PokerFateAPI:
                     board_hand_type=board_hand_type,
                 )
 
-        if self._bot.use_range_equity:
-            # ── Range V2 showdown processing ──
-            if showdown_hands:
-                # 先把所有亮牌 villain 的底牌预先喂给 calibrator，这样每个
-                # villain 的 ⚖ 输出里"多人池实际胜率"能引用其他 villain 的
-                # 真手牌（多人池模拟需要所有活跃对手的牌）。
+        # ── Range V2 showdown processing ──
+        if showdown_hands:
+            # 先把所有亮牌 villain 的底牌预先喂给 calibrator，这样每个
+            # villain 的 ⚖ 输出里"多人池实际胜率"能引用其他 villain 的
+            # 真手牌（多人池模拟需要所有活跃对手的牌）。
+            if self._calibrator is not None:
+                for pid, cards in showdown_hands.items():
+                    if pid == self.my_player_id:
+                        continue
+                    hole_pre = [Card.from_str(str(c)) if isinstance(c, str) else c
+                                for c in cards[:2]]
+                    self._calibrator.record_actual(
+                        player_id=pid,
+                        actual_cards=hole_pre,
+                        final_board=self._board,
+                        hero_cards=self._hole_cards,
+                    )
+
+            for pid, cards in showdown_hands.items():
+                if pid == self.my_player_id:
+                    continue
+                name = self._session_names.get(pid, str(pid))
+                hole = [Card.from_str(str(c)) if isinstance(c, str) else c for c in cards[:2]]
+                self._bot.observe_showdown(pid, cards, name=name, board=self._board)
+                # Log with Range V2 format
+                learner = self._bot._showdown_learner
+                card_strs = [str(c) for c in cards]
+                action_seq = self._bot._v2_action_history.get(pid, [])
+                street_entries = []
+                for street_key in ('preflop', 'flop', 'turn', 'river'):
+                    n = learner.sample_count(name, street_key, 'raise')
+                    if n == 0:
+                        continue
+                    learned = learner.get_learned_freq(name, street_key, 'raise')
+                    # 本次摊牌在该街道的 category
+                    street_board = _board_at_street(self._board, street_key)
+                    cat = categorize_cards(hole, street_board) if street_board or street_key == 'preflop' else None
+                    # 只有本手在该街道有 raise 行动才显示 category
+                    had_action = any(s == street_key and a == 'raise' for s, a in action_seq)
+                    street_entries.append({
+                        "street": street_key,
+                        "action": "raise",
+                        "sample_count": n,
+                        "category": cat if had_action else None,
+                        "learned_freq": learned,
+                    })
+                if street_entries:
+                    self._log.showdown_learner(
+                        player_name=name,
+                        cards=card_strs,
+                        streets=street_entries,
+                    )
+                # 紧跟 ◈ 学习 之后输出该 villain 的所有 ⚖ 校准记录
                 if self._calibrator is not None:
-                    for pid, cards in showdown_hands.items():
-                        if pid == self.my_player_id:
-                            continue
-                        hole_pre = [Card.from_str(str(c)) if isinstance(c, str) else c
-                                    for c in cards[:2]]
-                        self._calibrator.record_actual(
-                            player_id=pid,
-                            actual_cards=hole_pre,
-                            final_board=self._board,
-                            hero_cards=self._hole_cards,
-                        )
-
-                for pid, cards in showdown_hands.items():
-                    if pid == self.my_player_id:
-                        continue
-                    name = self._session_names.get(pid, str(pid))
-                    hole = [Card.from_str(str(c)) if isinstance(c, str) else c for c in cards[:2]]
-                    self._bot.observe_showdown(pid, cards, name=name, board=self._board)
-                    # Log with Range V2 format
-                    learner = self._bot._showdown_learner
-                    card_strs = [str(c) for c in cards]
-                    action_seq = self._bot._v2_action_history.get(pid, [])
-                    street_entries = []
-                    for street_key in ('preflop', 'flop', 'turn', 'river'):
-                        n = learner.sample_count(name, street_key, 'raise')
-                        if n == 0:
-                            continue
-                        learned = learner.get_learned_freq(name, street_key, 'raise')
-                        # 本次摊牌在该街道的 category
-                        street_board = _board_at_street(self._board, street_key)
-                        cat = categorize_cards(hole, street_board) if street_board or street_key == 'preflop' else None
-                        # 只有本手在该街道有 raise 行动才显示 category
-                        had_action = any(s == street_key and a == 'raise' for s, a in action_seq)
-                        street_entries.append({
-                            "street": street_key,
-                            "action": "raise",
-                            "sample_count": n,
-                            "category": cat if had_action else None,
-                            "learned_freq": learned,
-                        })
-                    if street_entries:
-                        self._log.showdown_learner(
-                            player_name=name,
-                            cards=card_strs,
-                            streets=street_entries,
-                        )
-                    # 紧跟 ◈ 学习 之后输出该 villain 的所有 ⚖ 校准记录
-                    if self._calibrator is not None:
-                        results = self._calibrator.emit_records_for(
-                            player_id=pid,
-                            hero_cards=self._hole_cards,
-                            final_board=self._board,
-                        )
-                        # 缺陷 C: 同时把 (hero_bucket, street, n_opp,
-                        # action_ctx, predicted_multi, actual_multi) 喂给
-                        # hero 自校准器。action_ctx 从 snapshot 的 trigger
-                        # 推导——separating passive / bet / raise，避免不同
-                        # 压缩档位的 bias 互相稀释。
-                        for r in results:
-                            rec = r.record
-                            action_ctx = classify_action_ctx_from_trigger(rec.trigger)
-                            if (
-                                rec.predicted_hero_eq_multi is not None
-                                and r.actual_hero_eq_street_multi is not None
-                                and rec.hero_bucket
-                            ):
-                                self._bot._hero_eq_calibrator.record(
-                                    bucket=rec.hero_bucket,
-                                    street=rec.street,
-                                    num_opp=len(rec.active_player_ids),
-                                    predicted=rec.predicted_hero_eq_multi,
-                                    actual=r.actual_hero_eq_street_multi,
-                                    action_ctx=action_ctx,
-                                )
-                            if (
-                                rec.street == 'river'
-                                and rec.villain_vs_hero_dist
-                                and r.actual_relation
-                                and rec.hero_bucket
-                            ):
-                                self._bot._river_relative_calibrator.record(
-                                    hero_bucket=rec.hero_bucket,
-                                    hero_made_subtype=rec.hero_made_subtype,
-                                    board_texture=rec.board_texture,
-                                    action_ctx=action_ctx,
-                                    predicted_dist=rec.villain_vs_hero_dist,
-                                    actual_relation=r.actual_relation,
-                                )
+                    results = self._calibrator.emit_records_for(
+                        player_id=pid,
+                        hero_cards=self._hole_cards,
+                        final_board=self._board,
+                    )
+                    # 缺陷 C: 同时把 (hero_bucket, street, n_opp,
+                    # action_ctx, predicted_multi, actual_multi) 喂给
+                    # hero 自校准器。action_ctx 从 snapshot 的 trigger
+                    # 推导——separating passive / bet / raise，避免不同
+                    # 压缩档位的 bias 互相稀释。
+                    for r in results:
+                        rec = r.record
+                        action_ctx = classify_action_ctx_from_trigger(rec.trigger)
                         if (
-                            self._runtime_calibration_recorder is not None
-                            and results
-                            and "PYTEST_CURRENT_TEST" not in os.environ
+                            rec.predicted_hero_eq_multi is not None
+                            and r.actual_hero_eq_street_multi is not None
+                            and rec.hero_bucket
                         ):
-                            try:
-                                self._runtime_calibration_recorder.write_results(
-                                    results,
-                                    big_blind=self.big_blind,
-                                    final_board=self._board,
-                                    source="runtime",
-                                )
-                            except Exception:
-                                traceback.print_exc()
-        else:
-            # ── EQR showdown processing ──
-            # Showdown calibration: update range estimator with revealed hands + log
-            if showdown_hands:
-                _ACTION_COMPRESSION_RAISE_ALL = {
-                    "preflop": _ACTION_COMPRESSION_RAISE_PREFLOP,
-                    **_ACTION_COMPRESSION_RAISE_POSTFLOP,
-                }
-                for pid, cards in showdown_hands.items():
-                    if pid == self.my_player_id:
-                        continue
-                    name = self._session_names.get(pid, str(pid))
-                    strength_by_street = self._bot.observe_showdown(pid, cards, name=name, board=self._board) or {}
-                    cal = self._bot.range_estimator.showdown_calibrator
-                    card_strs = [str(c) for c in cards]
-                    street_entries = []
-                    for street_key, gto_factor in _ACTION_COMPRESSION_RAISE_ALL.items():
-                        n = cal.sample_count(name, "raise", street_key)
-                        if n == 0:
-                            continue
-                        street_entries.append({
-                            "street": street_key, "action": "raise",
-                            "calibrated_factor": cal.calibrated_factor(name, "raise", street_key, gto_factor),
-                            "gto_factor": gto_factor, "sample_count": n,
-                            "hand_strength_pct": strength_by_street.get(street_key),
-                        })
-                    if street_entries:
-                        self._log.showdown_calibration(
-                            player_name=name, cards=card_strs, streets=street_entries,
-                        )
-
-        self._log.flush_robot_hand_if_needed()
+                            self._bot._hero_eq_calibrator.record(
+                                bucket=rec.hero_bucket,
+                                street=rec.street,
+                                num_opp=len(rec.active_player_ids),
+                                predicted=rec.predicted_hero_eq_multi,
+                                actual=r.actual_hero_eq_street_multi,
+                                action_ctx=action_ctx,
+                            )
+                        if (
+                            rec.street == 'river'
+                            and rec.villain_vs_hero_dist
+                            and r.actual_relation
+                            and rec.hero_bucket
+                        ):
+                            self._bot._river_relative_calibrator.record(
+                                hero_bucket=rec.hero_bucket,
+                                hero_made_subtype=rec.hero_made_subtype,
+                                board_texture=rec.board_texture,
+                                action_ctx=action_ctx,
+                                predicted_dist=rec.villain_vs_hero_dist,
+                                actual_relation=r.actual_relation,
+                            )
+                    if (
+                        self._runtime_calibration_recorder is not None
+                        and results
+                        and "PYTEST_CURRENT_TEST" not in os.environ
+                    ):
+                        try:
+                            self._runtime_calibration_recorder.write_results(
+                                results,
+                                big_blind=self.big_blind,
+                                final_board=self._board,
+                                source="runtime",
+                            )
+                        except Exception:
+                            traceback.print_exc()
 
         # Auto-save opponent model + showdown/learner data into one file
         self._save_persisted_model()

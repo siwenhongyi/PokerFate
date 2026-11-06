@@ -47,17 +47,6 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
-def _bb_key(big_blind: float) -> str:
-    bb = float(big_blind or 0.0)
-    rounded = round(bb)
-    if abs(bb - rounded) < 1e-6:
-        bb_int = int(rounded)
-        if bb_int >= 1000 and bb_int % 1000 == 0:
-            return f"bb_{bb_int // 1000}k"
-        return f"bb_{bb_int}"
-    return "bb_" + str(bb).replace(".", "_")
-
-
 def _default_root() -> Path:
     return Path(__file__).resolve().parents[2] / "data" / "runtime_calibration"
 
@@ -149,7 +138,7 @@ class RuntimeCalibrationRecorder:
                 source=source,
             )
             split = row["split"]
-            path = self.root / row["bb_bucket"] / f"{split}.rows.jsonl"
+            path = self.root / f"{split}.rows.jsonl"
             rows_by_path.setdefault(path, []).append(row)
             count += 1
 
@@ -178,8 +167,7 @@ class RuntimeCalibrationRecorder:
         "when hero used this value size, did worse hands pay or did the bet
         only fold out worse / get raised by better".
         """
-        split = self._split_for_hand(hand_id, big_blind)
-        bb_bucket = _bb_key(big_blind)
+        split = self._split_for_hand(hand_id)
         out = {
             "schema": _RIVER_VALUE_SIZING_SCHEMA,
             "source": source,
@@ -192,11 +180,10 @@ class RuntimeCalibrationRecorder:
             "git_diff_hash": self.git_meta.get("git_diff_hash", ""),
             "split": split,
             "bb": float(big_blind or 0.0),
-            "bb_bucket": bb_bucket,
             "hand": int(hand_id),
         }
         out.update(_json_safe(row))
-        path = self.root / bb_bucket / f"river_value_sizing.{split}.jsonl"
+        path = self.root / f"river_value_sizing.{split}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(out, ensure_ascii=False, sort_keys=True))
@@ -212,8 +199,7 @@ class RuntimeCalibrationRecorder:
         source: str = "runtime",
     ) -> int:
         """Append one hand-level PokerFate-vs-g5 169-range comparison row."""
-        split = self._split_for_hand(hand_id, big_blind)
-        bb_bucket = _bb_key(big_blind)
+        split = self._split_for_hand(hand_id)
         out = {
             "schema": _RANGE_COMPARE_SCHEMA,
             "source": source,
@@ -226,19 +212,18 @@ class RuntimeCalibrationRecorder:
             "git_diff_hash": self.git_meta.get("git_diff_hash", ""),
             "split": split,
             "bb": float(big_blind or 0.0),
-            "bb_bucket": bb_bucket,
             "hand": int(hand_id),
         }
         out.update(_json_safe(row))
-        path = self.root / bb_bucket / f"range_compare.{split}.jsonl"
+        path = self.root / f"range_compare.{split}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(out, ensure_ascii=False, sort_keys=True))
             f.write("\n")
         return 1
 
-    def _split_for_hand(self, hand_id: int, big_blind: float) -> str:
-        key = f"{self.session_id}|{_bb_key(big_blind)}|{int(hand_id)}"
+    def _split_for_hand(self, hand_id: int) -> str:
+        key = f"{self.session_id}|{int(hand_id)}"
         digest = hashlib.sha1(key.encode("utf-8")).hexdigest()
         bucket = int(digest[:8], 16) % 10000
         return "val" if bucket < int(self.val_ratio * 10000) else "train"
@@ -252,7 +237,7 @@ class RuntimeCalibrationRecorder:
         source: str,
     ) -> dict[str, Any]:
         rec = result.record
-        split = self._split_for_hand(rec.hand_id, big_blind)
+        split = self._split_for_hand(rec.hand_id)
         return {
             "schema": _SCHEMA,
             "source": source,
@@ -266,7 +251,6 @@ class RuntimeCalibrationRecorder:
             "git_diff_hash": self.git_meta.get("git_diff_hash", ""),
             "split": split,
             "bb": float(big_blind or 0.0),
-            "bb_bucket": _bb_key(big_blind),
             "hand": int(rec.hand_id),
             "street": rec.street,
             "player_uid": str(rec.player_id),

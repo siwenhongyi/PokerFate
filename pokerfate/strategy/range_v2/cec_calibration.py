@@ -19,7 +19,6 @@ from typing import Any, Optional
 
 CAT_ORDER = ("nuts", "strong", "medium", "draw", "weak_draw", "air")
 DEFAULT_RUNTIME_ROOT = Path(__file__).resolve().parents[3] / "data" / "runtime_calibration"
-MODEL_KEY = "all_bb"
 FALLBACK_BUCKET_PRIOR = {
     "nuts": 0.06,
     "strong": 0.24,
@@ -37,7 +36,7 @@ MIN_ROWS_BY_LEVEL = {
 }
 DEFAULT_RAW_RELIABILITY = 0.85
 _CACHE_TTL_SEC = 30.0
-_MODEL_CACHE: dict[tuple[str, str], "_CECCacheState"] = {}
+_MODEL_CACHE: dict[str, "_CECCacheState"] = {}
 
 
 @dataclass(frozen=True)
@@ -54,7 +53,6 @@ class CECGroup:
 @dataclass(frozen=True)
 class CECModel:
     root: str
-    bb_bucket: str
     files: int
     rows: int
     groups: dict[str, dict[str, CECGroup]]
@@ -62,13 +60,12 @@ class CECModel:
 
 
 class _CECCacheState:
-    def __init__(self, *, root: Path, key: str) -> None:
+    def __init__(self, *, root: Path) -> None:
         self.root = root
-        self.key = key
         self.lock = threading.Lock()
         self.refreshing = False
         self.last_check = 0.0
-        self.model = _empty_model(root=root, bb_bucket=key)
+        self.model = _empty_model(root=root)
         self.groups_acc = _new_groups_acc()
         self.offsets: dict[str, int] = {}
         self.rows = 0
@@ -77,7 +74,6 @@ class _CECCacheState:
 def calibrate_range_v2_prior(
     prior: dict[str, Any],
     *,
-    big_blind: Any = None,
     runtime_root: Path | str | None = None,
     blocking: bool = False,
 ) -> dict[str, Any]:
@@ -92,7 +88,6 @@ def calibrate_range_v2_prior(
     calibrated, diag = calibrate_bucket_dist(
         raw_bucket,
         context=context,
-        big_blind=big_blind,
         runtime_root=runtime_root,
         blocking=blocking,
     )
@@ -118,7 +113,6 @@ def calibrate_bucket_dist(
     bucket_dist: dict[str, Any],
     *,
     context: dict[str, Any] | None = None,
-    big_blind: Any = None,
     runtime_root: Path | str | None = None,
     blocking: bool = False,
 ) -> tuple[dict[str, float], dict[str, Any]]:
@@ -126,7 +120,7 @@ def calibrate_bucket_dist(
     if not raw:
         return {}, {"used": False, "reason": "empty_bucket_dist"}
 
-    model = load_cec_model(big_blind=big_blind, runtime_root=runtime_root, blocking=blocking)
+    model = load_cec_model(runtime_root=runtime_root, blocking=blocking)
     group = _select_group(model, context or {})
     if group is None:
         calibrated = _blend(raw, FALLBACK_BUCKET_PRIOR, 1.0 - DEFAULT_RAW_RELIABILITY)
@@ -175,17 +169,15 @@ def calibrate_bucket_dist(
 
 def load_cec_model(
     *,
-    big_blind: Any = None,
     runtime_root: Path | str | None = None,
     blocking: bool = False,
 ) -> CECModel:
     root = Path(runtime_root) if runtime_root is not None else DEFAULT_RUNTIME_ROOT
-    key = MODEL_KEY
-    cache_key = (str(root), key)
+    cache_key = str(root)
     now = time.time()
     state = _MODEL_CACHE.get(cache_key)
     if state is None:
-        state = _CECCacheState(root=root, key=key)
+        state = _CECCacheState(root=root)
         _MODEL_CACHE[cache_key] = state
 
     with state.lock:
@@ -239,10 +231,9 @@ def _new_groups_acc() -> dict[str, dict[str, dict[str, Any]]]:
     }
 
 
-def _empty_model(*, root: Path, bb_bucket: str) -> CECModel:
+def _empty_model(*, root: Path) -> CECModel:
     return CECModel(
         root=str(root),
-        bb_bucket=bb_bucket,
         files=0,
         rows=0,
         groups={level: {} for level in ("line", "size", "action", "street", "overall")},
@@ -261,7 +252,7 @@ def _schedule_refresh(state: _CECCacheState) -> None:
 
 def _refresh_state(state: _CECCacheState) -> None:
     try:
-        files = _row_files(state.root, state.key)
+        files = _row_files(state.root)
         with state.lock:
             state.last_check = time.time()
             tracked = {str(path) for path in files}
@@ -285,7 +276,6 @@ def _refresh_state(state: _CECCacheState) -> None:
         with state.lock:
             state.model = _finalize_model(
                 root=state.root,
-                bb_bucket=state.key,
                 files=len(files),
                 rows=state.rows,
                 groups_acc=state.groups_acc,
@@ -358,30 +348,9 @@ def _merge_groups_acc(
                 target_bin["actual_sum"] += float(bin_acc.get("actual_sum", 0.0))
 
 
-def _build_model(*, root: Path, bb_bucket: str, files: list[Path]) -> CECModel:
-    groups = _new_groups_acc()
-    rows = 0
-    for path in files:
-        try:
-            fh = path.open("r", encoding="utf-8")
-        except OSError:
-            continue
-        with fh:
-            for line in fh:
-                try:
-                    row = json.loads(line)
-                except Exception:
-                    continue
-                if _add_model_row(groups, row):
-                    rows += 1
-
-    return _finalize_model(root=root, bb_bucket=bb_bucket, files=len(files), rows=rows, groups_acc=groups)
-
-
 def _finalize_model(
     *,
     root: Path,
-    bb_bucket: str,
     files: int,
     rows: int,
     groups_acc: dict[str, dict[str, dict[str, Any]]],
@@ -395,7 +364,6 @@ def _finalize_model(
                 finalized[level][key] = group
     return CECModel(
         root=str(root),
-        bb_bucket=bb_bucket,
         files=files,
         rows=rows,
         groups=finalized,
@@ -482,22 +450,8 @@ def _context_from_prior(prior: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _row_files(root: Path, key: str) -> list[Path]:
-    if key != MODEL_KEY:
-        exact = sorted((root / key).glob("*.rows.jsonl"))
-        if exact:
-            return exact
-    return sorted(root.glob("bb_*/*.rows.jsonl"))
-
-
-def _newest_mtime(root: Path) -> float:
-    newest = 0.0
-    for path in root.glob("bb_*/*.rows.jsonl"):
-        try:
-            newest = max(newest, path.stat().st_mtime)
-        except OSError:
-            continue
-    return newest
+def _row_files(root: Path) -> list[Path]:
+    return sorted(root.glob("*.rows.jsonl"))
 
 
 def _normalize_bucket_dist(raw: Any) -> dict[str, float]:
@@ -623,4 +577,4 @@ def _clamp(value: float, lo: float, hi: float) -> float:
 
 
 if os.environ.get("PF_CEC_CALIBRATION_PRELOAD", "").lower() in {"1", "true", "yes"}:
-    load_cec_model(big_blind=None, blocking=True)
+    load_cec_model(blocking=True)

@@ -8,9 +8,9 @@ OpponentModel 支持将对手数据持久化到 JSON 文件。
 遇到熟悉对手时，可以直接加载历史数据，继续利用已积累的统计信息进行可剥削调整。
 
 用法：
-    model = OpponentModel.load("opponents_all_bb.json")  # 从文件加载
+    model = OpponentModel.load("opponents.json")  # 从文件加载
     ...（对战过程中 model 自动更新）
-    model.save("opponents_all_bb.json")           # 保存到文件
+    model.save("opponents.json")           # 保存到文件
 """
 
 from __future__ import annotations

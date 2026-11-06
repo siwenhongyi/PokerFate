@@ -22,12 +22,11 @@ except Exception:
 
 EPS = 1e-12
 _ROOT = Path(__file__).resolve().parents[2] / "data" / "runtime_calibration"
-_MODEL_KEY = "all_bb"
-_CACHE: dict[tuple[str, str], Optional[dict[str, Any]]] = {}
-_BOOSTER_CACHE: dict[tuple[str, str], Any] = {}
+_CACHE: dict[str, Optional[dict[str, Any]]] = {}
+_BOOSTER_CACHE: dict[str, Any] = {}
 
 
-def mode_for_big_blind(big_blind: Optional[float]) -> str:
+def ml_mode() -> str:
     raw = os.environ.get("PF_RIVER_RELATIVE_ML", "off")
     mode = str(raw or "off").strip().lower()
     if mode in {"0", "false", "no", "none", "off", "disabled", "关"}:
@@ -42,17 +41,17 @@ def clear_caches() -> None:
     _BOOSTER_CACHE.clear()
 
 
-def _model_path(big_blind: Optional[float], mode: str) -> Path:
-    return _ROOT / _MODEL_KEY / "runtime_lgbm_relative_model.json"
+def _model_path() -> Path:
+    return _ROOT / "runtime_lgbm_relative_model.json"
 
 
-def _load_model(big_blind: Optional[float], mode: str) -> Optional[dict[str, Any]]:
+def _load_model(mode: str) -> Optional[dict[str, Any]]:
     if mode != "lgbm":
         return None
-    cache_key = (_MODEL_KEY, mode)
+    cache_key = mode
     if cache_key in _CACHE:
         return _CACHE[cache_key]
-    path = _model_path(big_blind, mode)
+    path = _model_path()
     if not path.exists():
         _CACHE[cache_key] = None
         return None
@@ -153,7 +152,6 @@ def _shift_relation_eq(dist: dict[str, float], target_eq: float) -> dict[str, fl
 def calibrate_dist(
     dist: dict[str, float] | None,
     *,
-    big_blind: Optional[float],
     bucket_dist: dict[str, float] | None,
     hero_bucket: str,
     hero_made_subtype: str,
@@ -183,10 +181,10 @@ def calibrate_dist(
     if not base_rel:
         return {}, {"mode": "off", "used": False, "reason": "empty_dist"}
     base_eq = _relation_eq(base_rel)
-    mode = mode_for_big_blind(big_blind)
+    mode = ml_mode()
     if mode == "off":
         return base_rel, {"mode": mode, "used": False, "reason": "mode_off"}
-    model = _load_model(big_blind, mode)
+    model = _load_model(mode)
     if not model:
         return base_rel, {"mode": mode, "used": False, "reason": "model_missing"}
     if Booster is None:
@@ -197,7 +195,7 @@ def calibrate_dist(
     if not feature_names or not model_str:
         return base_rel, {"mode": mode, "used": False, "reason": "model_invalid"}
     try:
-        cache_key = (_MODEL_KEY, mode)
+        cache_key = mode
         booster = _BOOSTER_CACHE.get(cache_key)
         if booster is None:
             booster = Booster(model_str=model_str)

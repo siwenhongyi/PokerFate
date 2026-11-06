@@ -2,6 +2,8 @@
 
 import threading
 
+import pytest
+
 from pf_intercept import config
 from pf_intercept.bot import BotBridge
 from pokerfate.api import BotDecision
@@ -710,20 +712,6 @@ def test_gamedata_thread_fallback_cleans_up(monkeypatch) -> None:
     assert not b._gamedata_threads
 
 
-def test_robot_snapshot_excludes_self_uid(monkeypatch) -> None:
-    b = BotBridge()
-    b._my_seat = 0
-    b._my_uid = "99"
-    b._seat_uids = {0: "99", 1: "88"}
-    b._seat_names = {0: "me", 1: "robot"}
-    monkeypatch.setattr("pf_intercept.bot._load_known_robot_uids", lambda: {"99", "88"})
-
-    b._snapshot_current_hand_robots([0, 1])
-
-    assert b._current_hand_robot_seats == {1}
-    assert b._current_hand_robot_uids == {1: "88"}
-
-
 def test_hand_card_rsp_does_not_auto_show_hero_cards() -> None:
     class FakeAPI:
         def __init__(self):
@@ -1203,7 +1191,7 @@ class TestBankrollSampling:
         """Full cycle: trigger → leave → UserValueRSP sample → reenter."""
         b = self._setup()
         bb = 2.0
-        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)   # 800 for 400 BB at BB=2
+        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)   # 400 for 200 BB at BB=2
         # Bring on-table chips to exactly threshold (hero started 200).
         out = b.handle(
             "pb.WinnerRSP",
@@ -1299,97 +1287,116 @@ def test_enter_room_syncs_current_and_start_chips_from_table() -> None:
     assert b._seat_chips[5] == 100000
 
 
-def test_enter_room_uses_sngroom_info_blinds_when_room_info_empty() -> None:
-    """SNG EnterRoomRSP has room_info={}, so blinds must come from sngroom_info."""
+_TOURNAMENT_ENTER_ROOMS = [
+    {"game_type": 10050301, "sngroom_info": {"blind_level": 1, "sb": "25", "bb": "50"}},
+    {"game_type": 10060301},
+    {"game_type": 40050301},
+    {"game_type": 10070401, "mttroom_info": {"blind_level": 3}},
+    {"game_type": 20050302},
+    {"game_type": 0, "sngroom_info": {"blind_level": 1}},
+    {"mttroom_info": {"blind_level": 1}},
+]
+
+
+@pytest.mark.parametrize("room", _TOURNAMENT_ENTER_ROOMS)
+def test_tournament_room_is_fully_passive(monkeypatch, room) -> None:
+    import pf_intercept.bot as bot_mod
+
+    notified = []
+    fetched = []
+    monkeypatch.setattr(bot_mod, "notify", lambda event, **fields: notified.append(event))
+    monkeypatch.setattr(
+        BotBridge,
+        "_start_gamedata_fetch_thread",
+        lambda self, uid, seat, name="": fetched.append(uid),
+    )
+
     b = BotBridge(max_auto_rebuy=3)
-    b._my_seat = 0
+    b._my_uid = "99"
     b._bb = 10000.0
     b._sb = 5000.0
-
-    b.handle(
+    out = b.handle(
         "pb.EnterRoomRSP",
         {
             "code": 0,
             "roomid": 20399792,
-            "game_type": 10050301,
             "room_info": {},
-            "sngroom_info": {
-                "blind_level": 1,
-                "sb": "25",
-                "bb": "50",
-                "blind_list": [
-                    {"blind_level": 1, "small_blind": "25", "big_blind": "50"},
-                    {"blind_level": 2, "small_blind": "50", "big_blind": "100"},
+            "table_status": {
+                "gameid": "t1",
+                "seat": [
+                    {"seatid": 0, "player": {"uid": "99", "name": "me"}, "hand_chips": "1500"},
+                    {"seatid": 1, "player": {"uid": "77", "name": "villain"}, "hand_chips": "1500"},
                 ],
             },
-            "table_status": {"seat": []},
+            **room,
         },
     )
 
-    assert b._bb == 50.0
-    assert b._sb == 25.0
+    assert out is None
+    assert b._tournament_passthrough is True
+    assert b.runtime_settings()["tournament_passthrough"] is True
+    # Identification only: no blinds, seats, names or opponent fetches.
+    assert (b._bb, b._sb) == (10000.0, 5000.0)
+    assert b._my_seat is None
+    assert b._seat_names == {}
 
-    b.handle(
-        "pb.DealerInfoRSP",
-        {
-            "dealer": 0,
-            "small_blind": 1,
-            "big_blind": 2,
-            "start_info": [{"chips": "1000"}, {"seatid": 1, "chips": "1000"}],
-            "gameid": "sng1",
-        },
-    )
-    assert b._api is not None
-    assert b._api.big_blind == 50.0
-    assert b._api.small_blind == 25.0
-    assert b._api._runtime_calibration_recorder is None
-    assert b._api._runtime_collection_skip_reason == "sng"
+    frames = [
+        ("pb.SitDownRSP", {"seatid": 0, "chips": "1500"}),
+        ("pb.DealerInfoRSP", {
+            "dealer": 0, "small_blind": 0, "big_blind": 1,
+            "start_info": [{"chips": "1500"}, {"seatid": 1, "chips": "1500"}],
+            "gameid": "t1",
+        }),
+        ("pb.HandCardRSP", {"cards": [270, 526]}),
+        ("pb.ActionNotifyBRC", {"seatid": 0, "call_need_chips": "50", "action_time": 15}),
+        ("pb.ActionBRC", {"seatid": 1, "action_type": 4, "action_chips": "100"}),
+        ("pb.ShowHandRSP", {"infos": [{"seatid": 1, "hand_cards": [270, 526]}]}),
+        ("pb.WinnerRSP", {"winner": [], "profit": [{"uid": "99", "chips": "30000"}]}),
+        ("pb.NoticeRebyRSP", {"seatid": 0, "reby_left_time": 30}),
+        ("pb.UserValueRSP", {"type": 10100001, "value": 50_000}),
+        ("pb.UserLoginRSP", {"code": 0}),
+        ("pb.LeaveRoomRSP", {"code": 0}),
+    ]
+    for type_name, msg in frames:
+        assert b.handle(type_name, msg) is None, type_name
+
+    assert b._api is None
+    assert b._my_seat is None
+    assert b._bankroll_samples == []
+    assert notified == []
+    assert fetched == []
 
 
-def test_sng_and_friend_rooms_disable_runtime_collection() -> None:
+def test_tournament_drops_pending_cash_actions() -> None:
+    b = BotBridge(max_auto_rebuy=3)
+    b._my_seat = 2
+    b._my_chips = 4000
+    b._seat_chips[2] = 4000
+    b._profit_lock_reenter = {"quickstart": True}
+    b._profit_lock_deferred = {"pending": True}
+    b._profit_lock_award_rebuy_after_enter = True
+    b._room_escape_reenter = {"quickstart": True}
+    b._bankroll_pending_action = {"kind": "auto_rebuy"}
+    b._bankroll_pending_reason = "auto_rebuy"
+    b._pending_injects = [("pb.ActionREQ", {})]
+
+    b.handle("pb.EnterRoomRSP", {"code": 0, "roomid": 1, "game_type": 10070401})
+
+    assert b._profit_lock_reenter is None
+    assert b._profit_lock_deferred is None
+    assert b._profit_lock_award_rebuy_after_enter is False
+    assert b._room_escape_reenter is None
+    assert b._bankroll_pending_action is None
+    assert b._bankroll_pending_reason == ""
+    assert b._pending_injects == []
+    assert b._current_table_chips() == 0
+
+
+def test_cash_enter_room_after_tournament_resumes_bot() -> None:
     b = BotBridge(max_auto_rebuy=3)
     b._my_seat = 0
-    b.handle(
-        "pb.EnterRoomRSP",
-        {
-            "code": 0,
-            "roomid": 20399792,
-            "game_type": 10050301,
-            "room_info": {},
-            "sngroom_info": {"blind_level": 1, "sb": "25", "bb": "50"},
-            "table_status": {"seat": []},
-        },
-    )
-    b.handle(
-        "pb.DealerInfoRSP",
-        {
-            "dealer": 0,
-            "small_blind": 25,
-            "big_blind": 50,
-            "start_info": [{"chips": "1000"}, {"seatid": 1, "chips": "1000"}],
-            "gameid": "sng1",
-        },
-    )
-
-    assert b._skip_runtime_collection is True
-    assert b._skip_runtime_collection_reason == "sng"
-    assert b._api is not None
-    assert b._api._runtime_calibration_recorder is None
-
-    b.handle(
-        "pb.EnterRoomRSP",
-        {
-            "code": 0,
-            "roomid": 200001,
-            "game_type": 20010103,
-            "room_info": {"bb": 2.0, "sb": 1.0},
-            "table_status": {"seat": []},
-        },
-    )
-
-    assert b._skip_runtime_collection is True
-    assert b._skip_runtime_collection_reason == "friend_room"
-    assert b._api._runtime_calibration_recorder is None
+    b.handle("pb.EnterRoomRSP", {"code": 0, "roomid": 1, "game_type": 10050301})
+    assert b._tournament_passthrough is True
 
     b.handle(
         "pb.EnterRoomRSP",
@@ -1401,141 +1408,79 @@ def test_sng_and_friend_rooms_disable_runtime_collection() -> None:
             "table_status": {"seat": []},
         },
     )
+    assert b._tournament_passthrough is False
+    assert b.runtime_settings()["tournament_passthrough"] is False
+    assert b._session_game_type == 10010101
+    assert (b._bb, b._sb) == (2.0, 1.0)
 
+    b.handle(
+        "pb.DealerInfoRSP",
+        {
+            "dealer": 0,
+            "small_blind": 1,
+            "big_blind": 2,
+            "start_info": [{"chips": "200"}, {"seatid": 1, "chips": "200"}],
+            "gameid": "cash1",
+        },
+    )
+    assert b._api is not None
     assert b._skip_runtime_collection is False
-    assert b._skip_runtime_collection_reason == ""
     assert b._api._runtime_calibration_recorder is not None
 
 
-def test_blind_status_updates_sng_blinds_from_cached_schedule() -> None:
+def test_tournament_game_type_does_not_overwrite_cash_session() -> None:
+    """QuickStart fallback must never reuse a tournament game_type."""
     b = BotBridge(max_auto_rebuy=3)
-    b._my_seat = 0
     b.handle(
         "pb.EnterRoomRSP",
-        {
-            "code": 0,
-            "roomid": 20399792,
-            "game_type": 10050301,
-            "room_info": {},
-            "sngroom_info": {
-                "blind_level": 1,
-                "blind_list": [
-                    {"blind_level": 1, "small_blind": "25", "big_blind": "50"},
-                    {"blind_level": 2, "small_blind": "50", "big_blind": "100"},
-                ],
-            },
-            "table_status": {"seat": []},
-        },
+        {"code": 0, "roomid": 5, "game_type": 10010101, "room_info": {"bb": 2.0, "sb": 1.0}},
     )
+    b.handle("pb.EnterRoomRSP", {"code": 0, "roomid": 6, "game_type": 10070401})
+    assert b._session_game_type == 10010101
+
+
+def test_friend_room_disables_runtime_collection() -> None:
+    b = BotBridge(max_auto_rebuy=3)
+    b._my_seat = 0
+    cash_enter = {
+        "code": 0,
+        "roomid": 20242379,
+        "game_type": 10010101,
+        "room_info": {"bb": 2.0, "sb": 1.0},
+        "table_status": {"seat": []},
+    }
+    b.handle("pb.EnterRoomRSP", cash_enter)
     b.handle(
         "pb.DealerInfoRSP",
         {
             "dealer": 0,
             "small_blind": 1,
             "big_blind": 2,
-            "start_info": [{"chips": "1000"}, {"seatid": 1, "chips": "1000"}],
-            "gameid": "sng1",
+            "start_info": [{"chips": "200"}, {"seatid": 1, "chips": "200"}],
+            "gameid": "cash1",
         },
     )
-
-    b.handle("pb.BlindStatusBRC", {"blind_level": 2, "upblind_time": 60})
-
-    assert b._bb == 100.0
-    assert b._sb == 50.0
     assert b._api is not None
-    assert b._api.big_blind == 100.0
-    assert b._api.small_blind == 50.0
+    assert b._api._runtime_calibration_recorder is not None
 
-
-def test_sng_train_game_type_disables_profit_lock_without_sng_info(monkeypatch) -> None:
-    import pf_intercept.bot as bot_mod
-
-    notified = []
-    monkeypatch.setattr(bot_mod, "notify", lambda event, **fields: notified.append(event))
-
-    b = BotBridge(max_auto_rebuy=3)
-    b._my_uid = "99"
-    b._my_seat = 0
-    b._uid_to_seat["99"] = 0
     b.handle(
         "pb.EnterRoomRSP",
         {
             "code": 0,
-            "roomid": 20399792,
-            "game_type": 40050301,
-            "room_info": {},
+            "roomid": 200001,
+            "game_type": 20010103,
+            "room_info": {"bb": 2.0, "sb": 1.0},
             "table_status": {"seat": []},
         },
     )
-    b._bb = 50.0
-    b._sb = 25.0
+    assert b._skip_runtime_collection is True
+    assert b._skip_runtime_collection_reason == "friend_room"
+    assert b._api._runtime_calibration_recorder is None
 
-    out = b.handle(
-        "pb.WinnerRSP",
-        {
-            "winner": [],
-            "profit": [{"uid": "99", "chips": "30000"}],
-        },
-    )
-
-    assert b._is_sng_room is True
-    assert b._skip_profit_lock is True
-    assert b._skip_profit_lock_reason == "sng"
-    assert out is None
-    assert b._profit_lock_deferred is None
-    assert "profit_lock_trigger" not in notified
-
-
-def test_sng_disables_profit_lock_even_above_threshold(monkeypatch) -> None:
-    import pf_intercept.bot as bot_mod
-
-    notified = []
-    monkeypatch.setattr(bot_mod, "notify", lambda event, **fields: notified.append(event))
-
-    b = BotBridge(max_auto_rebuy=3)
-    b._my_uid = "99"
-    b._my_seat = 0
-    b._uid_to_seat["99"] = 0
-    b.handle(
-        "pb.EnterRoomRSP",
-        {
-            "code": 0,
-            "roomid": 20399792,
-            "game_type": 10050301,
-            "room_info": {},
-            "sngroom_info": {
-                "blind_level": 1,
-                "sb": "25",
-                "bb": "50",
-            },
-            "table_status": {"seat": []},
-        },
-    )
-    b.handle(
-        "pb.DealerInfoRSP",
-        {
-            "dealer": 0,
-            "small_blind": 1,
-            "big_blind": 2,
-            "start_info": [{"chips": "1000"}, {"seatid": 1, "chips": "1000"}],
-            "gameid": "sng1",
-        },
-    )
-
-    out = b.handle(
-        "pb.WinnerRSP",
-        {
-            "winner": [],
-            "profit": [{"uid": "99", "chips": "30000"}],
-        },
-    )
-
-    assert out is None
-    assert b._skip_profit_lock is True
-    assert b._skip_profit_lock_reason == "sng"
-    assert b._profit_lock_deferred is None
-    assert b._profit_lock_reenter is None
-    assert "profit_lock_trigger" not in notified
+    b.handle("pb.EnterRoomRSP", cash_enter)
+    assert b._skip_runtime_collection is False
+    assert b._skip_runtime_collection_reason == ""
+    assert b._api._runtime_calibration_recorder is not None
 
 
 def test_friend_room_game_type_disables_profit_lock(monkeypatch) -> None:
@@ -1615,27 +1560,6 @@ def test_friend_room_info_disables_profit_lock_without_game_type(monkeypatch) ->
     assert out is None
     assert b._profit_lock_deferred is None
     assert "profit_lock_trigger" not in notified
-
-
-def test_sng_suppresses_bot_notifications(monkeypatch) -> None:
-    import pf_intercept.bot as bot_mod
-
-    notified = []
-    monkeypatch.setattr(bot_mod, "notify", lambda event, **fields: notified.append(event))
-
-    b = BotBridge(max_auto_rebuy=3)
-    b._is_sng_room = True
-    b._my_seat = 0
-    b._bb = 50.0
-    b._hand_start_chips[0] = 1000
-
-    b._check_hand_swing(2000)
-    out = b.handle("pb.NoticeRebyRSP", {"seatid": 0, "reby_left_time": 30})
-
-    assert out is not None and out[0] == "pb.UserValueREQ"
-    reby = b.handle("pb.UserValueRSP", {"type": 10100001, "value": 50_000})
-    assert reby is not None and reby[0] == "pb.RebyREQ"
-    assert notified == []
 
 
 def test_friend_room_suppresses_bot_notifications(monkeypatch) -> None:
@@ -1739,7 +1663,7 @@ def test_auto_collect_special_hand_calls_collcard(monkeypatch) -> None:
     ]
 
 
-def test_auto_collect_special_hand_skips_sng_and_friend(monkeypatch) -> None:
+def test_auto_collect_special_hand_skips_friend_room(monkeypatch) -> None:
     import pf_intercept.bot as bot_mod
 
     calls = []
@@ -1750,11 +1674,7 @@ def test_auto_collect_special_hand_skips_sng_and_friend(monkeypatch) -> None:
     )
 
     b = BotBridge(max_auto_rebuy=3)
-    b._current_gameid = "g-sng"
-    b._is_sng_room = True
-    assert b._maybe_auto_collect_current_hand(["葫芦"]) is False
-
-    b._is_sng_room = False
+    b._current_gameid = "g-friend"
     b._is_friend_room = True
     assert b._maybe_auto_collect_current_hand(["皇家同花顺"]) is False
     assert calls == []

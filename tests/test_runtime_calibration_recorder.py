@@ -70,12 +70,13 @@ def test_runtime_calibration_recorder_writes_bb_split_rows(tmp_path):
     )
 
     assert written == 1
-    row_path = tmp_path / "bb_50k" / "train.rows.jsonl"
+    row_path = tmp_path / "train.rows.jsonl"
     rows = [json.loads(line) for line in row_path.read_text().splitlines()]
     assert len(rows) == 1
     row = rows[0]
     assert row["schema"] == "runtime_range_calibration_v2"
-    assert row["bb_bucket"] == "bb_50k"
+    assert "bb_bucket" not in row
+    assert row["bb"] == 50000.0
     assert row["split"] == "train"
     assert row["actual_bucket"] == "strong"
     assert row["actual_combo"] == "AdQd"
@@ -137,12 +138,13 @@ def test_runtime_calibration_recorder_writes_river_value_sizing_rows(tmp_path):
     )
 
     assert written == 1
-    row_path = tmp_path / "bb_50k" / "river_value_sizing.train.jsonl"
+    row_path = tmp_path / "river_value_sizing.train.jsonl"
     rows = [json.loads(line) for line in row_path.read_text().splitlines()]
     assert len(rows) == 1
     row = rows[0]
     assert row["schema"] == "runtime_river_value_sizing_v1"
-    assert row["bb_bucket"] == "bb_50k"
+    assert "bb_bucket" not in row
+    assert row["bb"] == 50000.0
     assert row["split"] == "train"
     assert row["hand"] == 43
     assert row["purpose"] == "overbet_value"

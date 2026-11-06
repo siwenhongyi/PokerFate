@@ -30,7 +30,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from pokerfate.strategy.range_v2.equity_ml_calibration import calibrate_equity
-from pokerfate.strategy.range_v2.runtime_formula_calibration import bb_key, load_params
+from pokerfate.strategy.range_v2.runtime_formula_calibration import load_params
 
 
 _MIN_SAMPLES = 10         # 低于此样本量直接返回 raw
@@ -123,11 +123,10 @@ def _apply_runtime_model(raw_eq: float, model: Dict[str, Any] | None) -> float:
     return max(0.0, min(1.0, out))
 
 
-def _load_runtime_equity_params(big_blind: Optional[float]) -> Optional[Dict[str, Any]]:
-    key = "all_bb"
-    if key not in _RUNTIME_EQUITY_CACHE:
-        _RUNTIME_EQUITY_CACHE[key] = load_params('equity', big_blind)
-    return _RUNTIME_EQUITY_CACHE[key]
+def _load_runtime_equity_params() -> Optional[Dict[str, Any]]:
+    if 'equity' not in _RUNTIME_EQUITY_CACHE:
+        _RUNTIME_EQUITY_CACHE['equity'] = load_params('equity')
+    return _RUNTIME_EQUITY_CACHE['equity']
 
 
 def classify_action_ctx_from_trigger(trigger: str) -> str:
@@ -183,7 +182,6 @@ class HeroEquityCalibrator:
 
     def calibrate(self, raw_eq: float, bucket: str, street: str,
                   num_opp: int, action_ctx: str = 'passive',
-                  big_blind: Optional[float] = None,
                   board_texture: str = '',
                   bucket_dist: Optional[Dict[str, float]] = None,
                   range_pct: float = 0.0,
@@ -211,7 +209,7 @@ class HeroEquityCalibrator:
         if not bucket or not street:
             return raw_eq
         calibrated = raw_eq
-        runtime_params = _load_runtime_equity_params(big_blind)
+        runtime_params = _load_runtime_equity_params()
         if runtime_params:
             texture = board_texture or 'pre'
             size_ctx = _runtime_size_context(
@@ -248,7 +246,6 @@ class HeroEquityCalibrator:
         formula_eq = calibrated
         calibrated, ml_diag = calibrate_equity(
             calibrated,
-            big_blind=big_blind,
             bucket_dist=bucket_dist or {},
             street=street,
             trigger=trigger,

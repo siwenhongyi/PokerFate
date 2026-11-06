@@ -1922,14 +1922,17 @@ class TestPurposeTriggers:
 
         p = SemiBluff()
         board = cards('Jd', '9d', '7h')
+        # A real nut flush draw (AdKd on Jd9d7h): sticky villains still pay it off.
         ctx = self._base_ctx(
             street='flop',
             board=board,
             board_sig=v3_board.analyze(board),
+            hole_cards=cards('Ad', 'Kd'),
             hero_bucket='draw',
-            equity_range=0.38,
+            equity_range=0.45,
             is_pfr=True,
-            draw=DrawProfile(flush_draw=True),
+            draw=DrawProfile(flush_draw=True, overcards=True),
+            blockers=BlockerSet(nut_flush_blocker=True),
             villain_stats=VillainStats(
                 vpip=0.60, af=0.7, fold_to_cbet=0.10,
                 fold_to_cbet_opps=8, hands_seen=25,

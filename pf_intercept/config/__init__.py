@@ -98,7 +98,7 @@ G5_SHADOW_DECISIONS = True
 # 本次启动盈亏展示不再依赖牌局内累计。Bot 在登录后和关键节点请求
 # pb.UserValueREQ(type=Gold)，用「钱包余额 + 当前桌上筹码」相对启动基线计算。
 # 盈利锁仓触发条件仍然只看当前桌上筹码，不看启动盈亏。
-PROFIT_LOCK_BB_THRESHOLD = 400
+PROFIT_LOCK_BB_THRESHOLD = 200
 
 # 离桌后等待多久再发 EnterRoomREQ（秒），给客户端切场景/进桌动画一点时间。
 PROFIT_LOCK_REENTER_DELAY_SEC = 4.0
@@ -144,13 +144,11 @@ WATCH_S2C = {
     "pb.EnterRoomRSP",
     "pb.SitDownRSP",
     "pb.SitDownBRC",    # player name updates when someone sits down
-    "pb.OtherEnterRoomBRC",  # room population update; includes rb_num robot count
-    "pb.OtherLeaveRoomBRC",  # room population update; includes rb_num robot count
+    "pb.OtherLeaveRoomBRC",  # someone left the room (seat bookkeeping)
     # Hand lifecycle
     "pb.DealerInfoRSP",
     "pb.HandCardRSP",
     "pb.RoundStartBRC",
-    "pb.BlindStatusBRC",  # SNG/tournament blind-level changes
     "pb.ActionNotifyBRC",
     "pb.ActionBRC",
     "pb.RoundOverBRC",

@@ -21,7 +21,7 @@ def main() -> None:
         "--runtime-root",
         type=Path,
         default=DEFAULT_RUNTIME_ROOT,
-        help="runtime_calibration directory containing bb_*/*.rows.jsonl",
+        help="runtime_calibration directory containing *.rows.jsonl",
     )
     parser.add_argument("--json", action="store_true", help="print full JSON payload")
     args = parser.parse_args()

@@ -22,9 +22,8 @@ from pokerfate.strategy.range_v2.bucket_ml_calibration import CAT_ORDER
 
 EPS = 1e-6
 _ROOT = Path(__file__).resolve().parents[2] / "data" / "runtime_calibration"
-_MODEL_KEY = "all_bb"
-_CACHE: dict[tuple[str, str], Optional[dict[str, Any]]] = {}
-_BOOSTER_CACHE: dict[tuple[str, str, str], Any] = {}
+_CACHE: dict[str, Optional[dict[str, Any]]] = {}
+_BOOSTER_CACHE: dict[tuple[str, str], Any] = {}
 _STRATEGY_VERSION_CACHE: Optional[str] = None
 _PROFILE_DEFAULTS = {
     "PF_TURN_FLOP_RELATIVE_GUARD": "1",
@@ -36,7 +35,7 @@ _PROFILE_DEFAULTS = {
 }
 
 
-def mode_for_big_blind(big_blind: Optional[float]) -> str:
+def ml_mode() -> str:
     raw = os.environ.get("PF_EQUITY_ML", "lgbm")
     mode = str(raw or "off").strip().lower()
     if mode in {"0", "false", "no", "none", "off", "disabled", "关"}:
@@ -104,17 +103,17 @@ def _current_experiment_profile() -> str:
     )
 
 
-def _model_path(big_blind: Optional[float], mode: str) -> Path:
-    return _ROOT / _MODEL_KEY / "runtime_lgbm_equity_model.json"
+def _model_path() -> Path:
+    return _ROOT / "runtime_lgbm_equity_model.json"
 
 
-def _load_model(big_blind: Optional[float], mode: str) -> Optional[dict[str, Any]]:
+def _load_model(mode: str) -> Optional[dict[str, Any]]:
     if mode != "lgbm":
         return None
-    cache_key = (_MODEL_KEY, mode)
+    cache_key = mode
     if cache_key in _CACHE:
         return _CACHE[cache_key]
-    path = _model_path(big_blind, mode)
+    path = _model_path()
     if not path.exists():
         _CACHE[cache_key] = None
         return None
@@ -307,7 +306,6 @@ def _vector_from_feature_names(features: dict[str, float], feature_names: list[s
 def calibrate_equity(
     raw_eq: float,
     *,
-    big_blind: Optional[float],
     bucket_dist: dict[str, float] | None,
     street: str,
     trigger: str = "",
@@ -336,10 +334,10 @@ def calibrate_equity(
     player_profile: dict[str, Any] | None = None,
 ) -> tuple[float, dict[str, Any]]:
     base = max(0.0, min(1.0, float(raw_eq)))
-    mode = mode_for_big_blind(big_blind)
+    mode = ml_mode()
     if mode == "off":
         return base, {"mode": mode, "used": False, "reason": "mode_off"}
-    model = _load_model(big_blind, mode)
+    model = _load_model(mode)
     if not model:
         return base, {"mode": mode, "used": False, "reason": "model_missing"}
     if Booster is None:
@@ -361,7 +359,7 @@ def calibrate_equity(
     if not feature_names or not model_str:
         return base, {"mode": mode, "used": False, "reason": "model_invalid"}
     try:
-        cache_key = (_MODEL_KEY, mode, str(street or "global"))
+        cache_key = (mode, str(street or "global"))
         booster = _BOOSTER_CACHE.get(cache_key)
         if booster is None:
             booster = Booster(model_str=model_str)

@@ -61,7 +61,7 @@ def test_worker_clears_bark_key_when_file_missing(tmp_path) -> None:
 
 def test_client_routes_worker_messages_to_cache_pending_and_session_queue() -> None:
     async def run() -> None:
-        client = BotWorkerClient(max_auto_rebuy=1, profit_lock_bb=None, use_range_equity=True)
+        client = BotWorkerClient(max_auto_rebuy=1, profit_lock_bb=None)
         client._loop = asyncio.get_running_loop()
         client._ready = client._loop.create_future()
 
@@ -97,7 +97,7 @@ def test_client_routes_worker_messages_to_cache_pending_and_session_queue() -> N
 
 def test_bot_worker_process_start_stop() -> None:
     async def run() -> None:
-        client = BotWorkerClient(max_auto_rebuy=1, profit_lock_bb=None, use_range_equity=True)
+        client = BotWorkerClient(max_auto_rebuy=1, profit_lock_bb=None)
         await client.start()
         try:
             status = client.status()

@@ -16,11 +16,8 @@ from typing import Any, Dict, Optional, Tuple
 
 
 CAT_ORDER = ("nuts", "strong", "medium", "draw", "weak_draw", "air")
-SUPPORTED_BB_KEYS = ("bb_1k", "bb_10k", "bb_50k")
-DEFAULT_BB_KEY = "bb_10k"
-MODEL_KEY = "all_bb"
 MODEL_DIR = Path(__file__).resolve().parents[2] / "data" / "local_models"
-_CURRENT_BB_KEY = DEFAULT_BB_KEY
+MODEL_FILE = MODEL_DIR / "range_v2_empirical_model.json"
 FEATURES = (
     "vpip",
     "pfr",
@@ -99,37 +96,13 @@ class _NumericIndex:
     player_count: int
 
 
-def bb_key(big_blind: Any = None) -> str:
-    """Map table blind to the three supported local model buckets."""
-    if isinstance(big_blind, str):
-        raw = big_blind.strip()
-        if raw in SUPPORTED_BB_KEYS:
-            return raw
-        if raw in {"1k", "10k", "50k"}:
-            return f"bb_{raw}"
-    try:
-        bb = float(big_blind or 0.0)
-    except Exception:
-        return _CURRENT_BB_KEY
-    if bb <= 0:
-        return _CURRENT_BB_KEY
-    candidates = {1000.0: "bb_1k", 10000.0: "bb_10k", 50000.0: "bb_50k"}
-    return candidates[min(candidates, key=lambda value: abs(value - bb))]
+def empirical_model_path() -> Path:
+    return MODEL_FILE
 
 
-def set_current_big_blind(big_blind: Any) -> None:
-    """Set process-wide default used by call sites that do not carry bb."""
-    global _CURRENT_BB_KEY
-    _CURRENT_BB_KEY = bb_key(big_blind)
-
-
-def empirical_model_path(big_blind: Any = None) -> Path:
-    return MODEL_DIR / f"range_v2_empirical_model_{MODEL_KEY}.json"
-
-
-@lru_cache(maxsize=8)
-def _load_empirical_model_for_key(key: str) -> Dict[str, Any]:
-    path = empirical_model_path(key)
+@lru_cache(maxsize=1)
+def _load_empirical_model() -> Dict[str, Any]:
+    path = empirical_model_path()
     if not path.exists():
         return {}
     try:
@@ -141,14 +114,14 @@ def _load_empirical_model_for_key(key: str) -> Dict[str, Any]:
     return {}
 
 
-def load_empirical_model(big_blind: Any = None) -> Dict[str, Any]:
-    return _load_empirical_model_for_key(MODEL_KEY)
+def load_empirical_model() -> Dict[str, Any]:
+    return _load_empirical_model()
 
 
-def population_rate(name: str, fallback: float, big_blind: Any = None) -> float:
+def population_rate(name: str, fallback: float) -> float:
     """Return a generated population mean for a named rate."""
     try:
-        rec = load_empirical_model(big_blind).get("population_rates", {}).get(name, {})
+        rec = load_empirical_model().get("population_rates", {}).get(name, {})
         value = float(rec.get("mean", fallback))
     except Exception:
         return float(fallback)
@@ -157,9 +130,9 @@ def population_rate(name: str, fallback: float, big_blind: Any = None) -> float:
     return value
 
 
-def population_strength(name: str, fallback: float, big_blind: Any = None) -> float:
+def population_strength(name: str, fallback: float) -> float:
     try:
-        rec = load_empirical_model(big_blind).get("population_rates", {}).get(name, {})
+        rec = load_empirical_model().get("population_rates", {}).get(name, {})
         value = float(rec.get("prior_strength", fallback))
     except Exception:
         return float(fallback)
@@ -324,7 +297,7 @@ def empirical_action_likelihood(
     if numeric is not None:
         return numeric
 
-    model = load_empirical_model(ctx.big_blind)
+    model = load_empirical_model()
     table = model.get("action_likelihoods") or {}
     if not table:
         return None
@@ -340,7 +313,6 @@ def empirical_action_likelihood(
 def empirical_preflop_bucket_prior(
     position: str,
     profile: Any,
-    big_blind: Any = None,
 ) -> Optional[Tuple[Dict[str, float], float, str, int]]:
     """Return a gentle bucket-level prior for cold/small-sample players."""
     if profile is None or not str(getattr(profile, "name", "") or "").strip():
@@ -349,11 +321,11 @@ def empirical_preflop_bucket_prior(
     if hands >= 80:
         return None
 
-    numeric = _numeric_preflop_prior(position, profile, big_blind, hands)
+    numeric = _numeric_preflop_prior(position, profile, hands)
     if numeric is not None:
         return numeric
 
-    model = load_empirical_model(big_blind)
+    model = load_empirical_model()
     table = model.get("preflop_bucket_priors") or {}
     if not table:
         return None
@@ -373,7 +345,7 @@ def _numeric_action_likelihood(
     ctx: Any,
     profile: Any,
 ) -> Optional[Tuple[Dict[str, float], float, str, int]]:
-    index = _numeric_index_for_key(MODEL_KEY)
+    index = _numeric_index()
     if not index.rows or not index.action_counts:
         return None
     scored, query_conf = _knn_scores(profile, index)
@@ -385,7 +357,7 @@ def _numeric_action_likelihood(
     label = action_label(action, is_rr)
     size = _bet_size_bucket(float(getattr(ctx, "bet_ratio", 0.0) or 0.0))
     rr = "1" if is_rr else "0"
-    raw_model = load_empirical_model(getattr(ctx, "big_blind", None))
+    raw_model = load_empirical_model()
     global_rec = _global_action_likelihood_from_table(
         raw_model.get("action_likelihoods") or {},
         street_s,
@@ -453,10 +425,9 @@ def _numeric_action_likelihood(
 def _numeric_preflop_prior(
     position: str,
     profile: Any,
-    big_blind: Any,
     hands: int,
 ) -> Optional[Tuple[Dict[str, float], float, str, int]]:
-    index = _numeric_index_for_key(MODEL_KEY)
+    index = _numeric_index()
     if not index.rows or not index.preflop_counts:
         return None
     scored, query_conf = _knn_scores(profile, index)
@@ -464,7 +435,7 @@ def _numeric_preflop_prior(
         return None
 
     pos = str(position or "CO")
-    raw_model = load_empirical_model(big_blind)
+    raw_model = load_empirical_model()
     global_rec = _global_preflop_prior_from_table(
         raw_model.get("preflop_bucket_priors") or {},
         pos,
@@ -525,9 +496,9 @@ def _action_context_keys(street: str, size: str, rr: str) -> tuple[str, ...]:
     )
 
 
-@lru_cache(maxsize=8)
-def _numeric_index_for_key(key: str) -> _NumericIndex:
-    raw = _load_empirical_model_for_key(key)
+@lru_cache(maxsize=1)
+def _numeric_index() -> _NumericIndex:
+    raw = _load_empirical_model()
     section = raw.get("numeric_profile_priors") or {}
     if not isinstance(section, dict):
         return _empty_numeric_index()

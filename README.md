@@ -40,8 +40,7 @@ pokerfate/api.py             ← 对外接口：手牌管理、决策请求、�
 | `strategy/postflop.py` | 翻后策略兼容层，封装 `strategy/v3/` 决策引擎 |
 | `strategy/v3/` | 翻后目的选择、下注尺度、攻防决策 |
 | `strategy/gto.py` | GTO 数学：pot odds、MDF、SPR、下注尺度 |
-| `strategy/range_v2/` | 默认 range equity：1326 组合建模、Bayesian range tracker、range equity |
-| `strategy/range_estimator.py` | EQR 模式的旧 range 压缩 + 摊牌校准 |
+| `strategy/range_v2/` | range equity：1326 组合建模、Bayesian range tracker、range equity |
 | `core/hand_evaluator.py` | 7张牌最优5张评估 |
 | `core/equity.py` | 蒙特卡洛胜率计算 |
 | `core/game_state.py` | 游戏状态数据结构 |
@@ -51,9 +50,7 @@ pokerfate/api.py             ← 对外接口：手牌管理、决策请求、�
 ```
 request_action()
     ├── preflop → 手牌强度百分位 × 位置系数 × 对手类型调整
-    └── postflop → equity source → v3 engine
-                    ├── range 模式（默认）：Bayesian range tracker → range equity
-                    └── eqr 模式：蒙卡胜率 + 对手压缩校准
+    └── postflop → Bayesian range tracker → range equity → v3 engine
 ```
 
 ---
@@ -77,8 +74,9 @@ request_action()
 
 **关键自动行为（BotBridge）**：
 
-- **seat / blinds 自检测**：从 `SitDownRSP` / `EnterRoomRSP` 自动识别；SNG/锦标赛房间从 `sngroom_info` 和 `BlindStatusBRC` 同步当前盲注
-- **盈利锁仓**：现金桌筹码达到阈值（默认 400BB）后自动离桌，以 100BB 重进，避免亏还回去；SNG/锦标赛房间不触发
+- **比赛房完全旁路**：进入 SNG / MTT / 好友 SNG（`EnterRoomRSP` 的 game_type 或 `sngroom_info` / `mttroom_info`）后，程序只做识别，不决策、不注入、不采集、不记资金、不推送，由玩家手动打；进入下一个非比赛房自动恢复托管
+- **seat / blinds 自检测**：从 `SitDownRSP` / `EnterRoomRSP` 自动识别
+- **盈利锁仓**：现金桌筹码达到阈值（默认 200BB）后自动离桌，以 100BB 重进，避免亏还回去；好友房不触发
 - **自动续入**：筹码清零后自动 rebuy（次数上限可配置，锁仓成功回桌后上限 +1）
 - **人类延迟模拟**：按 street/动作类型/底池大小随机注入思考延迟
 
@@ -97,7 +95,7 @@ request_action()
 | `gamedata_no_history` | 本次进程首次遇到无历史数据玩家（code=-2），每次启动最多一次 |
 | `token_captured` | 模板支持；当前 `force_domain.py` 只写入 token 文件，不自动推送 |
 
-设备 Key 存放在 `data/bark_key.txt`（第一行）。SNG/锦标赛房间会跳过 BotBridge 产生的 Bark 事件推送；proxy 级别的 `wss_disconnected` 仍按 Bark 配置发送。
+设备 Key 存放在 `data/bark_key.txt`（第一行）。比赛房（SNG/MTT）里不发任何推送，包括 proxy 级别的 `wss_disconnected`；好友房跳过 BotBridge 产生的推送。
 
 ---
 
@@ -189,15 +187,13 @@ bash pf_intercept/tools/gen_pb2.sh
 ```bash
 .venv/bin/python -m pf_intercept.proxy \
   --max-auto-rebuy 3 \
-  --profit-lock-bb 400 \
-  --equity-mode range
+  --profit-lock-bb 200
 ```
 
 参数含义：
 
 - `--max-auto-rebuy`：最大自动续入次数（默认 1）。
 - `--profit-lock-bb`：盈利锁仓阈值；不传则使用 `pf_intercept.config`。
-- `--equity-mode`：`range` 为默认 range_v2，`eqr` 为旧 EQR/蒙卡压缩路径。
 
 启动后打开游戏客户端正常进桌，proxy 自动检测 seat/blinds 并开始决策。
 
@@ -230,7 +226,7 @@ data/entertainment_color_records.json
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `PROFIT_LOCK_BB_THRESHOLD` | `400` | 触发盈利锁仓的筹码阈值（BB 倍数） |
+| `PROFIT_LOCK_BB_THRESHOLD` | `200` | 触发盈利锁仓的筹码阈值（BB 倍数） |
 | `PROFIT_LOCK_REENTER_DELAY_SEC` | `4.0` | 离桌后等待多久再重进（秒） |
 | `PROFIT_LOCK_LEAVE_SEAT_RESERVE` | `True` | 离桌时是否留座 |
 | `ACTION_INJECT_DELAY_MAX_SEC` | `3.0` | 模拟人类思考的最长延迟（秒） |

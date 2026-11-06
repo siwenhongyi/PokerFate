@@ -99,7 +99,7 @@ def test_bucket_ml_runtime_features_include_bet_size() -> None:
 
 
 def test_runtime_equity_formula_prefers_size_context(monkeypatch) -> None:
-    def fake_load_runtime_params(_big_blind):
+    def fake_load_runtime_params():
         return {
             "flop|strong|2|bet": {"type": "bias", "bias": -0.20},
             "flop|strong|2|bet|size=pot rr=1": {"type": "bias", "bias": 0.20},
@@ -118,7 +118,6 @@ def test_runtime_equity_formula_prefers_size_context(monkeypatch) -> None:
         "flop",
         2,
         action_ctx="bet",
-        big_blind=10_000,
         action_bet_ratio=1.0,
         bet_size_bucket="pot",
         is_raise_over=True,

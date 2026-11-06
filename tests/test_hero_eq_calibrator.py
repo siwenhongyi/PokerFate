@@ -13,7 +13,7 @@ from pokerfate.strategy.range_v2.hero_eq_calibrator import (
 
 @pytest.fixture(autouse=True)
 def _disable_runtime_models(monkeypatch):
-    monkeypatch.setattr(heq, "_load_runtime_equity_params", lambda _big_blind: None)
+    monkeypatch.setattr(heq, "_load_runtime_equity_params", lambda: None)
     monkeypatch.setattr(
         heq,
         "calibrate_equity",
@@ -94,7 +94,7 @@ class TestHeroEquityCalibrator:
         monkeypatch.setattr(
             heq,
             '_load_runtime_equity_params',
-            lambda _bb: {
+            lambda: {
                 'turn|medium|3+|passive': {'type': 'bias', 'bias': 0.03},
                 'turn|medium|4|*': {'type': 'bias', 'bias': 0.06},
                 'turn|medium|4|passive': {'type': 'bias', 'bias': 0.08},

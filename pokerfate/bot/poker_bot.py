@@ -10,7 +10,6 @@ import numpy as np
 
 from pokerfate.bot.opponent_model import OpponentModel
 from pokerfate.core.card import Card
-from pokerfate.core.config import MIN_HANDS_FOR_CLASSIFICATION
 from pokerfate.core.equity import EquityCalculator
 from pokerfate.core.game_state import Action, ActionType, GameState, Player, Street
 from pokerfate.core.hand_evaluator import HandEvaluator, HandRank
@@ -24,7 +23,6 @@ from pokerfate.strategy.postflop import (
     _hero_draw_profile,
 )
 from pokerfate.strategy.preflop import PreflopStrategy, _3BET_VALUE, _hand_category
-from pokerfate.strategy.range_estimator import HandRangeEstimator
 from pokerfate.strategy.range_v2 import board_analyzer as _range_board
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
 from pokerfate.strategy.range_v2.action_model import ActionContext, ActionModel, PlayerProfile
@@ -71,7 +69,6 @@ class PokerBot:
         self,
         name: str = "PokerFate",
         equity_iterations: int = 1000,
-        use_range_equity: bool = True,
     ):
         self.name = name
         self.equity_calc = EquityCalculator()
@@ -79,11 +76,9 @@ class PokerBot:
         self.postflop = PostflopStrategy()
         self.gto = GTOMath()
         self.opponent_model = OpponentModel()
-        self.range_estimator = HandRangeEstimator()  # EQR mode only
         self.equity_iterations = equity_iterations
-        self.use_range_equity = use_range_equity   # True=range_v2模式, False=EQR模式
 
-        # Range V2 (completely independent from EQR)
+        # Range V2
         self._showdown_learner = ShowdownLearner()
         self._action_model = ActionModel(showdown_learner=self._showdown_learner)
         self._range_tracker = BayesianRangeTracker(self._action_model)
@@ -100,7 +95,7 @@ class PokerBot:
         self._last_equity: float = 0.5
         self._last_equity_random: float = 0.5
         self._last_spr: float = 0.0
-        self._last_equity_mode: str = "mc_eqr"
+        self._last_equity_mode: str = "range_v2"
         self._last_reasoning: str = ""
         self._last_gto_refs: dict | None = None
         self._pending_decision_seed: Optional[int] = None
@@ -212,7 +207,7 @@ class PokerBot:
 
         # 翻前面对加注时使用 range equity 作为决策依据（random 仅供参考对比）
         opp_ids = [p.player_id for p in gs.active_players if p.player_id != player.player_id]
-        if self.use_range_equity and opp_ids and facing_action in ('open', '3bet', '4bet'):
+        if opp_ids and facing_action in ('open', '3bet', '4bet'):
             # Multi-range equity: each opponent uses their own Bayesian
             # distribution. The prior single-range weighted_equity call used
             # the primary raiser's range for ALL opponents — wrong in
@@ -564,7 +559,7 @@ class PokerBot:
             raw_mc = river_rel_clamp_equity_to_bounds(raw_mc, river_exact_bounds)
         self._last_equity_random = raw_mc
 
-        if self.use_range_equity and bool(board) and opp_ids:
+        if bool(board) and opp_ids:
             # ── Range V2 path ──
             # 方案 D (2026-04-21): 多人底池用 weighted_equity_multi，每个对手采自己的
             # range。这**不是**之前被回滚的"weighted_equity(num_opponents>N)"bug
@@ -639,7 +634,6 @@ class PokerBot:
             range_eq = self._hero_eq_calibrator.calibrate(
                 range_eq, hero_bucket, street, len(opp_ids),
                 action_ctx=action_ctx,
-                big_blind=bb,
                 board_texture=river_rel_board_texture_key(board),
                 bucket_dist=target_bucket_dist,
                 range_pct=target_range_pct,
@@ -665,27 +659,15 @@ class PokerBot:
                 range_eq, river_exact_bounds,
             )
             call_equity = range_eq
-            discount = 1.0
-            min_rf = target_range_pct
             self._last_equity_mode = "range_v2"
         else:
-            # ── EQR path (completely independent) ──
-            discount = self.range_estimator.worst_discount(opp_ids)
-            min_rf = self.range_estimator.get_range_fraction(
-                primary_opp_id if (primary_opp_id is not None and primary_opp_id >= 0) else -1
-            )
-            call_equity = max(
-                0.0,
-                raw_mc - (1.0 - discount) * (1.0 - raw_mc),
-            )
-            call_equity = river_rel_clamp_equity_to_bounds(
-                call_equity, river_exact_bounds,
-            )
-            self._last_equity_mode = "mc_eqr"
+            # No opponent range available (e.g. everyone else all-in before the
+            # flop): fall back to equity vs random hands.
+            call_equity = raw_mc
+            self._last_equity_mode = "mc_random"
+            self._hero_eq_calibrator.last_diagnostic = {}
 
         equity = call_equity
-        if self._last_equity_mode != "range_v2":
-            self._hero_eq_calibrator.last_diagnostic = {}
         self._last_equity = equity
 
         # Get exploit adjustments
@@ -789,12 +771,12 @@ class PokerBot:
                         'medium': 0.5, 'strong': 0.7, 'nuts': 1.0}
         hero_bucket = _hero_categorize(
             list(player.hole_cards), list(board)
-        ) if (self.use_range_equity and bool(board)) else 'medium'
+        ) if bool(board) else 'medium'
         hero_strength = _BUCKET_RANK.get(hero_bucket, 0.5)
         # Villain range 平均强度：优先 primary_opp 的 bucket_dist（已在 P26
         # 之前计算）；cold start 时默认 0.4（略低于均值，匹配未知对手偏弱）
         v_bucket_dist: Dict[str, float] = {}
-        if (self.use_range_equity and bool(board)
+        if (bool(board)
                 and primary_opp_id is not None and primary_opp_id >= 0):
             try:
                 v_bucket_dist = self._range_tracker.get_bucket_distribution(
@@ -842,8 +824,7 @@ class PokerBot:
         # ── P26: villain bucket_dist['nuts'] for call tightening.
         # Only nuts% is used now — strong% was for the removed zero_bluff gate.
         villain_nuts_pct = 0.0
-        if (self.use_range_equity
-                and bool(board)
+        if (bool(board)
                 and primary_opp_id is not None
                 and primary_opp_id >= 0):
             try:
@@ -861,8 +842,7 @@ class PokerBot:
 
         villain_vs_hero_dist: Dict[str, float] = {}
         river_relative_calibration: Dict[str, object] = {}
-        if (self.use_range_equity
-                and len(board) >= 5
+        if (len(board) >= 5
                 and primary_opp_id is not None
                 and primary_opp_id >= 0):
             try:
@@ -901,7 +881,6 @@ class PokerBot:
                     board_texture=river_rel_board_texture_key(board),
                     action_ctx=rel_action_ctx,
                     exact_bounds=river_exact_bounds,
-                    big_blind=bb,
                     bucket_dist=v_bucket_dist,
                     active_count=num_opponents,
                     board_len=len(board),
@@ -1081,18 +1060,6 @@ class PokerBot:
                 max_effective = max(acting_effective)
                 amount = min(amount, max_effective)
 
-        if self.use_range_equity:
-            use_calibration = (
-                primary_opp_id >= 0
-                and self._showdown_learner.sample_count(
-                    self.opponent_model._id_to_name.get(primary_opp_id, ''), street, 'raise') >= 8
-            )
-        else:
-            use_calibration = (
-                primary_opp_id >= 0
-                and self.range_estimator.has_calibration(primary_opp_id)
-            )
-
         opp_label = ""
         if primary_opp_id >= 0:
             opp_label = self.opponent_model._id_to_name.get(primary_opp_id, f"P{primary_opp_id}")
@@ -1108,16 +1075,9 @@ class PokerBot:
             board,
             action_str,
             raw_equity=raw_mc,
-            discount=discount,
-            streets_bet=(len(set(s for s, a in self._v2_action_history.get(primary_opp_id, []) if a == 'raise'))
-                         if self.use_range_equity and primary_opp_id >= 0
-                         else self.range_estimator.streets_bet(primary_opp_id) if primary_opp_id >= 0 else 0),
             street=street,
-            use_calibration=use_calibration,
             spr=spr,
             position=pos,
-            equity_mode=self._last_equity_mode,
-            min_rf=min_rf,
             num_opp=num_opponents,
             opp_label=opp_label,
             is_delayed_cbet=is_delayed_cbet,
@@ -1491,11 +1451,7 @@ class PokerBot:
     ) -> str:
         cat = _hand_category(hole_cards)
         depth = GTOMath.stack_bb_category(stack_bb * big_blind, big_blind)
-        if self._last_equity_mode == "range_top":
-            rnd = f"vs随机{self._last_equity_random:.0%}"
-            eq = f"胜率{self._last_equity:.0%}({rnd} range)"
-        else:
-            eq = f"胜率{self._last_equity:.0%}"
+        eq = f"胜率{self._last_equity:.0%}"
         facing_cn = {"none": "无开牌", "open": "面对开加", "3bet": "面对3bet", "4bet": "面对4bet"}
         facing = facing_cn.get(facing_action, facing_action)
         tag = "【GTOv2·翻前】"
@@ -1536,14 +1492,9 @@ class PokerBot:
         board: List[Card],
         action_str: str,
         raw_equity: float = None,
-        discount: float = 1.0,
-        streets_bet: int = 0,
         street: str = "",
-        use_calibration: bool = False,
         spr: float = 1.0,
         position: str = "MP",
-        equity_mode: str = "mc_eqr",
-        min_rf: float = 1.0,
         num_opp: int = 1,
         opp_label: str = "",
         is_delayed_cbet: bool = False,
@@ -1569,14 +1520,7 @@ class PokerBot:
         spr_lbl = GTOMath.spr_category(spr)
         mw = f"{num_opp}人底池" if num_opp > 1 else "单挑"
 
-        if equity_mode == "range_top":
-            rnd = f"{raw_equity:.0%}" if raw_equity is not None else "?"
-            eq = f"决策胜率{equity:.0%}(vs随机{rnd} rf≤{min_rf:.0%}范围)"
-        elif raw_equity is not None and discount < 0.92 and streets_bet > 0:
-            cal_tag = "(校准)" if use_calibration else ""
-            eq = f"决策胜率{equity:.0%}(EQR:原{raw_equity:.0%} {streets_bet}街{cal_tag})"
-        else:
-            eq = f"决策胜率{equity:.0%}"
+        eq = f"决策胜率{equity:.0%}"
 
         opp_ctx = f" [{opp_label}]" if opp_label else ""
         head = f"{tag} {made} {position}/{mw} SPR≈{spr:.1f}({spr_lbl}) {tex}{opp_ctx}"
@@ -2187,67 +2131,62 @@ class PokerBot:
             folded = action.action_type == ActionType.FOLD
             self.opponent_model.record_river_facing_bet(player_id, folded)
 
-        # Update range estimator for every opponent action
-        if self.use_range_equity:
-            # Range V2: Bayesian update
-            profile = self._build_player_profile(player_id)
-            # bet_ratio is only meaningful for first-bets with a clean pot
-            # snapshot (see api.py docstring). Otherwise caller passes 0 and
-            # SIZING_CATEGORY_ADJ becomes a no-op.
-            bet_ratio = bet_amount / pot if (pot > 0 and bet_amount > 0) else 0.0
-            observed_preflop_type = self._preflop_action_type(
-                act,
-                street,
-                is_3bet_spot=is_3bet_spot,
-                is_fold_to_3bet_spot=is_fold_to_3bet_spot,
-            )
-            ctx = ActionContext(
-                position=opp_position, board=[], street=street,
-                facing_action=act, facing_cbet=False,
-                bet_ratio=bet_ratio,
-                is_raise_over=is_raise_over,
-                is_ip=is_ip,
-                preflop_action_type=observed_preflop_type,
-            )
-            # 方案 B (2026-04-24)：信号强度连续化。
-            #
-            # 旧 bool `high_signal` 只在 river 且 (is_raise_over or bet_ratio≥0.75)
-            # 时触发——遗漏了翻牌/转牌的 overbet/jam（hand 249 的 13.8x pot flop
-            # all-in 就走了 tempered 路径，坚果桶只给 25%，hero 爆仓 -104BB）。
-            #
-            # 新 signal_strength ∈ [0,1]：bet_ratio / is_raise_over / street 合成，
-            # tracker 按强度线性插值 α 和 λ——弱信号仍 tempered，强信号走纯 Bayes。
-            strength = self._signal_strength(
-                action=act, bet_ratio=bet_ratio,
-                is_raise_over=is_raise_over, street=street,
-            )
-            self._range_tracker.observe_action(
-                player_id, act, street, ctx, profile,
-                board=self._current_board,
-                signal_strength=strength,
-            )
-            # Track action history for ShowdownLearner
-            self._v2_action_history.setdefault(player_id, []).append((street, act))
-            seq = self._action_sequence_key(self._v2_action_history[player_id])
-            previous_meta = self._v2_action_meta.get(player_id, {})
-            meta_preflop_type = (
-                observed_preflop_type
-                if str(street or '').lower() == 'preflop'
-                else str(previous_meta.get('preflop_action_type') or '')
-            )
-            self._v2_action_meta[player_id] = {
-                'position': opp_position,
-                'is_ip': bool(is_ip),
-                'facing_action': act,
-                'preflop_action_type': meta_preflop_type,
-                'action_bet_ratio': float(bet_ratio or 0.0),
-                'bet_size_bucket': self._bet_size_bucket(bet_ratio),
-                'is_raise_over': bool(is_raise_over),
-                'action_sequence': seq,
-            }
-        else:
-            # EQR mode
-            self.range_estimator.observe_action(player_id, act, street)
+        # Range V2: Bayesian update for every opponent action
+        profile = self._build_player_profile(player_id)
+        # bet_ratio is only meaningful for first-bets with a clean pot
+        # snapshot (see api.py docstring). Otherwise caller passes 0 and
+        # SIZING_CATEGORY_ADJ becomes a no-op.
+        bet_ratio = bet_amount / pot if (pot > 0 and bet_amount > 0) else 0.0
+        observed_preflop_type = self._preflop_action_type(
+            act,
+            street,
+            is_3bet_spot=is_3bet_spot,
+            is_fold_to_3bet_spot=is_fold_to_3bet_spot,
+        )
+        ctx = ActionContext(
+            position=opp_position, board=[], street=street,
+            facing_action=act, facing_cbet=False,
+            bet_ratio=bet_ratio,
+            is_raise_over=is_raise_over,
+            is_ip=is_ip,
+            preflop_action_type=observed_preflop_type,
+        )
+        # 方案 B (2026-04-24)：信号强度连续化。
+        #
+        # 旧 bool `high_signal` 只在 river 且 (is_raise_over or bet_ratio≥0.75)
+        # 时触发——遗漏了翻牌/转牌的 overbet/jam（hand 249 的 13.8x pot flop
+        # all-in 就走了 tempered 路径，坚果桶只给 25%，hero 爆仓 -104BB）。
+        #
+        # 新 signal_strength ∈ [0,1]：bet_ratio / is_raise_over / street 合成，
+        # tracker 按强度线性插值 α 和 λ——弱信号仍 tempered，强信号走纯 Bayes。
+        strength = self._signal_strength(
+            action=act, bet_ratio=bet_ratio,
+            is_raise_over=is_raise_over, street=street,
+        )
+        self._range_tracker.observe_action(
+            player_id, act, street, ctx, profile,
+            board=self._current_board,
+            signal_strength=strength,
+        )
+        # Track action history for ShowdownLearner
+        self._v2_action_history.setdefault(player_id, []).append((street, act))
+        seq = self._action_sequence_key(self._v2_action_history[player_id])
+        previous_meta = self._v2_action_meta.get(player_id, {})
+        meta_preflop_type = (
+            observed_preflop_type
+            if str(street or '').lower() == 'preflop'
+            else str(previous_meta.get('preflop_action_type') or '')
+        )
+        self._v2_action_meta[player_id] = {
+            'position': opp_position,
+            'is_ip': bool(is_ip),
+            'facing_action': act,
+            'preflop_action_type': meta_preflop_type,
+            'action_bet_ratio': float(bet_ratio or 0.0),
+            'bet_size_bucket': self._bet_size_bucket(bet_ratio),
+            'is_raise_over': bool(is_raise_over),
+            'action_sequence': seq,
+        }
 
         # P9 – track opponent street actions for check-back detection
         if player_id not in self._opp_street_actions:
@@ -2264,19 +2203,14 @@ class PokerBot:
     def observe_showdown(self, player_id: int, cards, name: str = "", board=None) -> None:
         """在 showdown 时记录对手底牌，校准范围估算。
 
-        Range V2: feeds ShowdownLearner (category×action frequency).
-        EQR: feeds ShowdownCalibrator (average hand strength).
+        Feeds ShowdownLearner (category×action frequency).
         """
-        if self.use_range_equity:
-            # Range V2: record to ShowdownLearner
-            resolved_name = name or self.opponent_model._id_to_name.get(player_id, str(player_id))
-            hole = [Card.from_str(str(c)) if not hasattr(c, 'rank') else c for c in cards[:2]]
-            board_cards = [Card.from_str(str(c)) if not hasattr(c, 'rank') else c for c in (board or [])]
-            action_seq = self._v2_action_history.get(player_id, [])
-            self._showdown_learner.record(resolved_name, action_seq, hole, board_cards)
-            return None
-        else:
-            return self.range_estimator.observe_showdown(player_id, cards, name=name, board=board)
+        resolved_name = name or self.opponent_model._id_to_name.get(player_id, str(player_id))
+        hole = [Card.from_str(str(c)) if not hasattr(c, 'rank') else c for c in cards[:2]]
+        board_cards = [Card.from_str(str(c)) if not hasattr(c, 'rank') else c for c in (board or [])]
+        action_seq = self._v2_action_history.get(player_id, [])
+        self._showdown_learner.record(resolved_name, action_seq, hole, board_cards)
+        return None
 
     def new_hand(self, player_ids: List[int], player_names: Optional[Dict[int, str]] = None,
                  player_positions: Optional[Dict[int, str]] = None):
@@ -2304,47 +2238,20 @@ class PokerBot:
         self._v2_action_history: Dict[int, list] = {}  # player_id → [(street, action)]
         self._v2_action_meta: Dict[int, Dict[str, object]] = {}
         self._v2_positions: Dict[int, str] = dict(player_positions or {})
-        if self.use_range_equity:
-            self._range_tracker.start_new_hand()
+        self._range_tracker.start_new_hand()
         names = player_names or {}
         positions = player_positions or {}
         for pid in player_ids:
             self.opponent_model.record_hand_start(pid)
             name = names.get(pid, self.opponent_model._id_to_name.get(pid, str(pid)))
 
-            if self.use_range_equity:
-                # Range V2: reset Bayesian tracker with the player's actual
-                # position when known. Use `or 'CO'` (not dict.get(..., 'CO'))
-                # because upstream stores empty strings for unknown positions —
-                # an empty-string entry still exists in the dict, so get()
-                # would never fall back.
-                profile = self._build_player_profile(pid)
-                pos = positions.get(pid) or 'CO'
-                self._range_tracker.reset_hand(pid, pos, profile)
-            else:
-                # EQR mode: reset scalar range estimator
-                stats = self.opponent_model.get(pid)
-                prior = (
-                    stats.vpip
-                    if stats.hands_seen >= MIN_HANDS_FOR_CLASSIFICATION
-                    else population_rate('vpip', 0.35)
-                )
-                pfr_vpip = (stats.pfr / stats.vpip
-                            if stats.hands_seen >= MIN_HANDS_FOR_CLASSIFICATION and stats.vpip > 0
-                            else (
-                                population_rate('pfr', 0.20)
-                                / max(population_rate('vpip', 0.35), 1e-9)
-                            ))
-                bluff_wr = stats.bluff_win_rate
-                bet_win_n = stats.bet_win_count
-                river_bf_n = stats.river_bet_count + stats.river_check_count
-                river_bf = stats.river_bet_frequency
-                self.range_estimator.reset_hand(
-                    pid, prior_range=prior, name=name,
-                    pfr_vpip_ratio=pfr_vpip,
-                    bluff_win_rate=bluff_wr, bet_win_samples=bet_win_n,
-                    river_bet_freq=river_bf, river_bf_samples=river_bf_n,
-                )
+            # Reset Bayesian tracker with the player's actual position when
+            # known. Use `or 'CO'` (not dict.get(..., 'CO')) because upstream
+            # stores empty strings for unknown positions — an empty-string
+            # entry still exists in the dict, so get() would never fall back.
+            profile = self._build_player_profile(pid)
+            pos = positions.get(pid) or 'CO'
+            self._range_tracker.reset_hand(pid, pos, profile)
 
     def update_board(self, board: List[Card]) -> None:
         """Update tracked board for Range V2 observe_action."""
@@ -2352,13 +2259,11 @@ class PokerBot:
         # Board-aware prior recalibration: when a new street is dealt,
         # boost combos that make nuts / strong on the current board but
         # whose preflop prior weight was low (e.g. 74o on a 77x flop).
-        if self.use_range_equity:
-            self._range_tracker.reweight_for_board(board)
+        self._range_tracker.reweight_for_board(board)
 
     def set_hole_cards(self, cards: List[Card]) -> None:
         """Tell Range V2 tracker about bot's hole cards (card removal)."""
-        if self.use_range_equity:
-            self._range_tracker.set_known_cards(cards)
+        self._range_tracker.set_known_cards(cards)
 
     @property
     def last_equity(self) -> float:

@@ -3,9 +3,15 @@ Bot bridge: translates proxy events → PokerFateAPI calls → wire actions.
 
 Auto-detection:
   MY_SEAT_ID  ← pb.SitDownRSP.seatid
-  BIG_BLIND   ← pb.EnterRoomRSP.room_info.bb / sngroom_info.bb
-  SMALL_BLIND ← pb.EnterRoomRSP.room_info.sb / sngroom_info.sb
+  BIG_BLIND   ← pb.EnterRoomRSP.room_info.bb
+  SMALL_BLIND ← pb.EnterRoomRSP.room_info.sb
   (fallback to config values if messages aren't decoded yet)
+
+Tournament rooms (SNG / MTT / friend SNG):
+  Detected from pb.EnterRoomRSP only.  While seated in one the bridge is fully
+  passive: no decisions, injects, data collection, bankroll tracking or
+  notifications.  The player plays by hand; the next non-tournament
+  EnterRoomRSP resumes normal operation.
 
 Card encoding (GFunctions.lua / config.lua):
   code = num + suit * 256
@@ -24,12 +30,10 @@ stage (RoundStartBRC):
 from __future__ import annotations
 import asyncio
 import functools
-import json
 import logging
 import random
 import threading
 import time
-from pathlib import Path
 from typing import TypeAlias
 
 from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
@@ -48,8 +52,6 @@ WireInjectResult: TypeAlias = WireInject | list[WireInject] | None
 InjectGuard: TypeAlias = tuple[str, int]
 
 _MAX_INJECT_DELAY = float(config.ACTION_INJECT_DELAY_MAX_SEC)
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_ROBOT_PLAYERS_FILE = _PROJECT_ROOT / "data" / "robot_players.json"
 _BANKROLL_SAMPLE_LIMIT = 200
 _HERO_ACTION_PENDING_SUPPRESS_SEC = 8.0
 _BANKROLL_REASONS: dict[str, str] = {
@@ -61,20 +63,6 @@ _BANKROLL_REASONS: dict[str, str] = {
     "room_escape": "连续破产换桌",
     "profit_lock": "盈利锁仓离桌",
 }
-
-
-def _load_known_robot_uids() -> set[str]:
-    try:
-        data = json.loads(_ROBOT_PLAYERS_FILE.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return set()
-    except Exception:
-        log.exception("[ROBOT] failed to load %s", _ROBOT_PLAYERS_FILE)
-        return set()
-    robots = data.get("robots") if isinstance(data, dict) else {}
-    if not isinstance(robots, dict):
-        return set()
-    return {str(uid) for uid in robots if str(uid)}
 
 
 def _inject_delay_before_action(
@@ -170,13 +158,19 @@ def _card_str(code: int) -> str | None:
 # ── Constants ──────────────────────────────────────────────────────────────────
 
 _STAGE_TO_STREET = {1: "preflop", 2: "flop", 3: "turn", 4: "river"}
-_SNG_GAME_TYPES = {10050301, 10060301, 40050301}
+# Client GF.isTournament (SNG holdem/omaha/train + MTT) plus friend SNG.
+_TOURNAMENT_GAME_TYPES = {10050301, 10060301, 40050301, 10070401, 20050302}
 _FRIEND_GAME_TYPES = {20010103}
 _POSITION_LABELS_AFTER_BB = ["UTG", "UTG+1", "UTG+2", "LJ", "HJ", "CO"]
+# Frames still handled while seated in a tournament room: identity + room
+# detection only, so leaving the tournament can be noticed.
+_TOURNAMENT_PASSTHROUGH_TYPES = frozenset({"pb.SelfUserInfoRSP", "pb.EnterRoomRSP"})
 
 
-def _is_sng_game_type(game_type) -> bool:
-    return _chip_int(game_type, 0) in _SNG_GAME_TYPES
+def _is_tournament_enter_room(msg: dict) -> bool:
+    if _chip_int(msg.get("game_type"), 0) in _TOURNAMENT_GAME_TYPES:
+        return True
+    return bool(msg.get("sngroom_info") or msg.get("mttroom_info"))
 
 
 def _is_friend_game_type(game_type) -> bool:
@@ -337,7 +331,7 @@ class BotBridge:
       or None.
     """
 
-    def __init__(self, max_auto_rebuy: int = 1, use_range_equity: bool = True) -> None:
+    def __init__(self, max_auto_rebuy: int = 1) -> None:
         # Detected from game messages (may be pre-seeded by config)
         self._my_seat: int | None  = None
         self._my_uid:  str | None  = None
@@ -350,7 +344,6 @@ class BotBridge:
         # _max_auto_rebuy：启动时 CLI 上限，仅盈利锁仓成功回桌时 +1。
         # _auto_rebuy_done：本代理进程内累计已自动续入次数，进/出房间不重置（避免反复进出刷爆亏损）。
         self._max_auto_rebuy: int = max(1, min(20, int(max_auto_rebuy)))
-        self._use_range_equity: bool = use_range_equity
         self._auto_rebuy_done: int = 0
 
         # 盈利锁仓：WinnerRSP 达标后立刻设置服务端「下一手离桌」
@@ -379,11 +372,8 @@ class BotBridge:
         # 从最近一次成功进房 RSP 缓存，供 QuickStart 兜底（与客户端大厅一致）
         self._session_game_type: int = 0
         self._session_lobby_coin: int = 0
-        # SNG/tournament rooms carry blinds in sngroom_info instead of room_info.
-        # Cache the schedule so pb.BlindStatusBRC can update table blinds on level-up.
-        self._sng_blind_schedule: dict[int, tuple[float, float]] = {}
-        self._sng_blind_level: int = 0
-        self._is_sng_room: bool = False
+        # SNG/MTT: player takes over; bridge ignores everything except room detection.
+        self._tournament_passthrough: bool = False
         self._is_friend_room: bool = False
         self._skip_profit_lock: bool = False
         self._skip_profit_lock_reason: str = ""
@@ -420,8 +410,6 @@ class BotBridge:
         # resolve WinnerRSP entries that carry uid but no seatid.
         self._uid_to_seat: dict[str, int] = {}
         self._seat_uids: dict[int, str] = {}
-        self._current_hand_robot_seats: set[int] = set()
-        self._current_hand_robot_uids: dict[int, str] = {}
 
         # Per-hand state
         self._stage:    int       = 0
@@ -470,6 +458,7 @@ class BotBridge:
                 self._api.decision_engine_status()
                 if self._api is not None else None
             ),
+            "tournament_passthrough": self._tournament_passthrough,
             "profit_lock_enabled": not self._skip_profit_lock,
             "profit_lock_skip_reason": self._skip_profit_lock_reason,
             "big_blind": self._bb,
@@ -933,9 +922,9 @@ class BotBridge:
         return False
 
     def _notify(self, event: str, **fields) -> None:
-        """Room-aware notification wrapper. SNG/tournament/friend rooms stay quiet."""
-        if self._is_sng_room:
-            log.debug("[BOT] SNG room: skip notify event=%s", event)
+        """Room-aware notification wrapper. Tournament/friend rooms stay quiet."""
+        if self._tournament_passthrough:
+            log.debug("[BOT] tournament room: skip notify event=%s", event)
             return
         if self._is_friend_room:
             log.debug("[BOT] friend room: skip notify event=%s", event)
@@ -1004,6 +993,8 @@ class BotBridge:
     # ── Dispatch ──────────────────────────────────────────────────────────────
 
     def _dispatch(self, type_name: str, msg: dict) -> WireInjectResult:
+        if self._tournament_passthrough and type_name not in _TOURNAMENT_PASSTHROUGH_TYPES:
+            return None
         if   type_name == "pb.UserLoginRSP":    return self._on_user_login_rsp(msg)
         elif type_name == "pb.SelfUserInfoRSP": self._on_self_user_info(msg)
         elif type_name == "pb.UserValueRSP":    return self._on_user_value_rsp(msg)
@@ -1021,7 +1012,6 @@ class BotBridge:
         elif type_name == "pb.RoundOverBRC":     self._on_round_over(msg)
         elif type_name == "pb.ActionNotifyBRC":  return self._on_action_notify(msg)
         elif type_name == "pb.ShowHandRSP":      self._on_show_hand(msg)
-        elif type_name == "pb.BlindStatusBRC":   self._on_blind_status(msg)
         elif type_name == "pb.WinnerRSP":        return self._on_winner(msg)
         elif type_name == "pb.DelayLeaveRoomRSP": return self._on_delay_leave_room_rsp(msg)
         elif type_name == "pb.LeaveRoomRSP":     return self._on_leave_room_rsp(msg)
@@ -1133,52 +1123,44 @@ class BotBridge:
             self._api.set_table_blinds(float(self._bb), float(self._sb))
         return changed
 
-    def _remember_sng_blinds(self, sng_info: dict) -> tuple[float, float]:
-        """Cache SNG blind schedule and return the current blind pair, if known."""
-        if not sng_info:
-            self._sng_blind_schedule = {}
-            self._sng_blind_level = 0
-            return 0.0, 0.0
-
-        schedule: dict[int, tuple[float, float]] = {}
-        for item in sng_info.get("blind_list", []) or []:
-            level = _chip_int(item.get("blind_level"), 0)
-            bb = _chip_float(item.get("big_blind"), 0.0)
-            sb = _chip_float(item.get("small_blind"), 0.0)
-            if level > 0 and bb > 0:
-                schedule[level] = (bb, sb if sb > 0 else bb / 2.0)
-        if schedule:
-            self._sng_blind_schedule = schedule
-
-        level = _chip_int(sng_info.get("blind_level"), 0)
-        if level > 0:
-            self._sng_blind_level = level
-            if level in self._sng_blind_schedule:
-                return self._sng_blind_schedule[level]
-
-        bb = _chip_float(sng_info.get("bb"), 0.0)
-        sb = _chip_float(sng_info.get("sb"), 0.0)
-        if bb > 0:
-            return bb, sb if sb > 0 else bb / 2.0
-        return 0.0, 0.0
+    def _enter_tournament_passthrough(self, msg: dict) -> None:
+        """Hand the tournament table to the player: drop every pending bot action."""
+        if not self._tournament_passthrough:
+            log.warning(
+                "[BOT] 进入比赛房 game_type=%s roomid=%s：程序完全旁路，由玩家手动操作。",
+                msg.get("game_type"),
+                msg.get("roomid"),
+            )
+        self._tournament_passthrough = True
+        self._profit_lock_cancel_reenter()
+        self._room_escape_reenter = None
+        self._bankroll_pending_action = None
+        self._bankroll_pending_reason = ""
+        self._bankroll_pending_buyin_reason = ""
+        # Tournament chips are not bankroll; the cash seat (if any) is gone.
+        self._mark_my_table_chips_zero()
+        self._reset_hand_local_state()
 
     def _on_enter_room(self, msg: dict) -> WireInjectResult:
+        if _is_tournament_enter_room(msg):
+            self._enter_tournament_passthrough(msg)
+            return None
+        if self._tournament_passthrough:
+            self._tournament_passthrough = False
+            log.warning("[BOT] 离开比赛房，恢复托管 game_type=%s", msg.get("game_type"))
+
         self._profit_lock_reenter = None
         self._profit_lock_deferred = None
         self._room_escape_reenter = None
 
         if "game_type" in msg:
             self._session_game_type = _chip_int(msg.get("game_type"), 0)
-        sng_info = msg.get("sngroom_info") or {}
         friend_info = msg.get("friend_room_info") or {}
-        self._is_sng_room = _is_sng_game_type(self._session_game_type)
         self._is_friend_room = (
             _is_friend_game_type(self._session_game_type)
             or bool(friend_info)
         )
-        if self._is_sng_room:
-            self._skip_profit_lock_reason = "sng"
-        elif self._is_friend_room:
+        if self._is_friend_room:
             self._skip_profit_lock_reason = "friend_room"
         else:
             self._skip_profit_lock_reason = ""
@@ -1200,11 +1182,7 @@ class BotBridge:
             if self._bankroll_pending_buyin_reason in {"profit_lock", "room_escape"}:
                 self._note_bankroll_buyin(self._bankroll_pending_buyin_reason)
         fallback_inject: tuple[str, dict, float] | None = None
-        if self._is_sng_room and self._profit_lock_award_rebuy_after_enter:
-            log.warning("[BOT] SNG 房间：取消盈利锁仓重进奖励/通知。")
-            self._profit_lock_award_rebuy_after_enter = False
-            self._profit_lock_last_enter_fields = None
-        elif self._profit_lock_award_rebuy_after_enter:
+        if self._profit_lock_award_rebuy_after_enter:
             if self._profit_lock_last_enter_fields is None:
                 log.warning("[BOT] 盈利锁仓：收到 EnterRoomRSP 但没有待确认的 EnterRoomREQ，忽略重进奖励。")
                 self._profit_lock_award_rebuy_after_enter = False
@@ -1240,23 +1218,9 @@ class BotBridge:
             if self._table_room_id:
                 log.info("[BOT] Table room_id=%d (EnterRoomRSP)", self._table_room_id)
 
-        # Blind detection. Cash/friend rooms use room_info; SNG rooms use
-        # sngroom_info and BlindStatusBRC levels, matching the client GF.isSNG path.
+        # Blind detection (cash / friend rooms carry blinds in room_info).
         room_info = msg.get("room_info") or {}
-        if self._is_sng_room:
-            bb_sng, sb_sng = self._remember_sng_blinds(sng_info)
-            if bb_sng > 0:
-                source = "sngroom_info"
-                if self._sng_blind_level > 0:
-                    source = f"{source}.level{self._sng_blind_level}"
-                self._apply_table_blinds(
-                    big_blind=bb_sng,
-                    small_blind=sb_sng,
-                    source=source,
-                )
-        elif room_info.get("bb"):
-            self._sng_blind_schedule = {}
-            self._sng_blind_level = 0
+        if room_info.get("bb"):
             self._apply_table_blinds(
                 big_blind=room_info.get("bb"),
                 small_blind=room_info.get("sb"),
@@ -1421,35 +1385,8 @@ class BotBridge:
     def _seat_list_to_player_ids(self, seats: list[int]) -> list[int]:
         return [self._seat_to_player_id(seat) for seat in seats]
 
-    def _seat_set_to_player_ids(self, seats: set[int]) -> set[int]:
-        return {self._seat_to_player_id(seat) for seat in seats}
-
-    def _seat_uid_map_to_player_ids(self, seat_uids: dict[int, str]) -> dict[int, str]:
-        return {self._seat_to_player_id(seat): uid for seat, uid in seat_uids.items()}
-
     def _seat_showdown_to_player_ids(self, hands: dict[int, list[str]]) -> dict[int, list[str]]:
         return {self._seat_to_player_id(seat): cards for seat, cards in hands.items()}
-
-    def _snapshot_current_hand_robots(self, seats: list[int]) -> None:
-        """Freeze robot seats for this hand so later joins/leaves do not mutate it."""
-        known_robot_uids = _load_known_robot_uids()
-        self._current_hand_robot_seats = set()
-        self._current_hand_robot_uids = {}
-        if not known_robot_uids:
-            return
-        for seat in seats:
-            uid = self._seat_uids.get(seat)
-            if seat == self._my_seat or (self._my_uid and uid == self._my_uid):
-                continue
-            if uid and uid in known_robot_uids:
-                self._current_hand_robot_seats.add(seat)
-                self._current_hand_robot_uids[seat] = uid
-        if self._current_hand_robot_seats:
-            details = ", ".join(
-                f"seat{seat}:{self._seat_names.get(seat, '')}({self._current_hand_robot_uids.get(seat, '')})"
-                for seat in sorted(self._current_hand_robot_seats)
-            )
-            log.info("[ROBOT] current hand has known robot(s): %s", details)
 
     def _trigger_gamedata_fetch(self, seat_status: dict) -> None:
         """Fire-and-forget async fetch of 30-day server stats for one seat."""
@@ -1674,7 +1611,6 @@ class BotBridge:
         self._all_seats = [si["seatid"] for si in start_info]
         dealer_seat = _chip_int(table_status.get("d_idx", 0), 0)
         seat_positions = _seat_positions(self._all_seats, dealer_seat)
-        self._snapshot_current_hand_robots(self._all_seats)
         self._seat_chips = {}
         self._hand_start_chips = {}
 
@@ -1935,7 +1871,6 @@ class BotBridge:
             small_blind=sb,
             equity_iterations=3000,
             verbose=True,
-            use_range_equity=self._use_range_equity,
             decision_engine=getattr(config, "DECISION_ENGINE", "local"),
             g5_timeout_sec=getattr(config, "G5_TIMEOUT_SEC", 1.5),
             g5_recent_hands_count=getattr(config, "G5_RECENT_HANDS", 100),
@@ -2015,7 +1950,6 @@ class BotBridge:
             or big_blind_seat not in self._all_seats
             or (small_blind_seat == inferred_sb and big_blind_seat == inferred_bb)
         )
-        self._snapshot_current_hand_robots(self._all_seats)
         self._seat_chips = {}
         self._hand_start_chips = {}
 
@@ -2112,24 +2046,6 @@ class BotBridge:
                     street=_STAGE_TO_STREET.get(stage, "flop"),
                     pot=self._pot,
                 )
-
-    def _on_blind_status(self, msg: dict) -> None:
-        if not self._is_sng_room:
-            return
-        level = _chip_int(msg.get("blind_level"), 0)
-        if level <= 0:
-            return
-        self._sng_blind_level = level
-        pair = self._sng_blind_schedule.get(level)
-        if pair is None:
-            log.debug("[BOT] BlindStatusBRC level=%d but no SNG blind schedule cached", level)
-            return
-        bb, sb = pair
-        self._apply_table_blinds(
-            big_blind=bb,
-            small_blind=sb,
-            source=f"BlindStatusBRC.level{level}",
-        )
 
     def _on_action_brc(self, msg: dict) -> None:
         seat        = _chip_int(msg.get("seatid", 0), 0)
@@ -2493,8 +2409,6 @@ class BotBridge:
             ),
             winner_hand_types=self._pending_winner_types or None,
             my_profit_delta=my_profit_delta,
-            robot_player_ids=self._seat_set_to_player_ids(self._current_hand_robot_seats),
-            robot_player_uids=self._seat_uid_map_to_player_ids(self._current_hand_robot_uids),
         )
         self._pending_showdown = {}
         self._pending_winner_types = {}
@@ -2510,13 +2424,8 @@ class BotBridge:
     def _maybe_auto_collect_current_hand(self, reasons: list[str]) -> bool:
         if not getattr(config, "AUTO_COLLECT_SPECIAL_HANDS_ENABLED", True):
             return False
-        if self._is_sng_room or self._is_friend_room:
-            log.debug(
-                "[BOT] 自动收藏：特殊房间跳过 gameid=%s sng=%s friend=%s",
-                self._current_gameid,
-                self._is_sng_room,
-                self._is_friend_room,
-            )
+        if self._is_friend_room:
+            log.debug("[BOT] 自动收藏：好友房跳过 gameid=%s", self._current_gameid)
             return False
         reasons = [str(r) for r in reasons if str(r)]
         if not reasons:
