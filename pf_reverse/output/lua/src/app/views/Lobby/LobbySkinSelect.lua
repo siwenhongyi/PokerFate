@@ -89,6 +89,7 @@ function P:setCharacterShow()
 	local skinCfg = tpl_character_skin[self._selected]
 	if not self._characterCls then
 		self._characterCls = ObjectPool:getCls(self.CharacterImage)
+		self._characterCls:setShowReal(true)
 		self._characterCls:setRole(CharacterModel:getRole(skinCfg.role))
 
 		self._role = CharacterModel:getRole(skinCfg.role)

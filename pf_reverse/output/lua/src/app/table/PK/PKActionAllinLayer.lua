@@ -13,6 +13,9 @@ function P:setParams(params)
 end
 
 function P:onAwake()
+	self.Mask = self:find("Mask")
+	self.Mask:SetActive(false)
+
     self.ImageBg = self:find("ImageBg")
 	self.BgAction = self:find("BgAction", self.ImageBg)
 	self.BgActionPre = self:find("BgActionPre", self.ImageBg)
@@ -70,6 +73,37 @@ function P:refreshContent(fast)
 	self:show(fast)
 	self:showAutoBnts(false)
 	self:showActionBnts(true)
+end
+
+
+----------快捷键------------
+
+function P:foldEvent()
+	if self.BgAction.activeSelf then
+		if self.FoldButton and self.FoldButton.activeInHierarchy then
+			local btn = self.FoldButton:GetComponent("Button")
+			btn.onClick:Invoke()
+		end
+	else
+		if self.ButtonPreFold and self.ButtonPreFold.activeInHierarchy then
+			local btn = self.ButtonPreFold:GetComponent("Button")
+			btn.onClick:Invoke()
+		end
+	end
+end
+
+function P:allinEvent()
+	if self.BgAction.activeSelf then
+		if self.AllinButton and self.AllinButton.activeInHierarchy then
+			local btn = self.AllinButton:GetComponent("Button")
+			btn.onClick:Invoke()
+		end
+	else
+		if self.ButtonPreAllin and self.ButtonPreAllin.activeInHierarchy then
+			local btn = self.ButtonPreAllin:GetComponent("Button")
+			btn.onClick:Invoke()
+		end
+	end
 end
 
 return P

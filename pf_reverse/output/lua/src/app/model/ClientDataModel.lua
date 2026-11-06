@@ -9,6 +9,7 @@ function P:ctor()
     --[[
     {
         "play_DevelopmentFund_story": 1,    -- 返利基金是否已经播放过剧情了
+        "sys_guide_list": {},   --系统引导存储记录
     }
     ]]
     self._datas = {}
@@ -46,8 +47,8 @@ function P:getData(key)
     return self._datas[key]
 end
 
-function P:setData(key, value)
-    if self._datas[key] ~= value then
+function P:setData(key, value, force)
+    if self._datas[key] ~= value or force then
         self._datas[key] = value
         self._isDirty = true
 

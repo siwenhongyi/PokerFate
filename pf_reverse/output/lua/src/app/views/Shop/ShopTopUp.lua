@@ -8,8 +8,10 @@ local ItemBgList = {
 
 function P:onAwake()
 	self.TopUpItem = self:find("TopUpItem")
+	self.MonthlyCardItem = self:find("MonthlyCardItem")
 	self.TopUpScrollList = self:find("TopUpScrollList")
 	self.TopUpItem:SetActive(false)
+	self.MonthlyCardItem:SetActive(false)
 end
 
 local ROW_COUNT = 4
@@ -33,20 +35,25 @@ function P:onStart()
 	end
 
 	self.topUpList = UiListEx:create(self.TopUpScrollList)
-	self.topUpList:setCreateFunc(function()
-		return CU.GameObject.Instantiate(self.TopUpItem)
+	self.topUpList:setCreateFunc(function(data)
+		if data.__kind == 1 then
+			return CU.GameObject.Instantiate(self.MonthlyCardItem)
+		else
+			return CU.GameObject.Instantiate(self.TopUpItem)
+		end
 	end)
 	self.topUpList:setRefreshFunc(function(data, item, isInit, index)
-		self:setTopUpItem(item, data, isInit, index)
+		if data.__kind == 1 then
+			self:setMonthlyCardItem(item, data, isInit, index)
+		else
+			self:setTopUpItem(item, data, isInit, index)
+		end
 	end)
 	self.topUpList:setRowCount(ROW_COUNT)
 	self.topUpList:setRowPostions(rowPos)
 	self.topUpList:setWidth(510)
 
-	local datas = ShopModel:getShopTopUpList(self.shop_type)
-	self.topUpList:setDatas(datas)
-
-	
+	self:refreshUI()
 end
 
 function P:setTopUpItem(item, data, isInit, index)
@@ -136,8 +143,73 @@ function P:setTopUpItem(item, data, isInit, index)
 	end)
 end
 
+function P:setMonthlyCardItem(item, data, isInit, index)
+	local Ani_root = self:find("Ani_root", item)
+	local TimeIcon = self:find("TextBg/TimeIcon", Ani_root)
+	local TimeText = self:find("TextBg/TimeText", Ani_root)
+	local InfoButton = self:find("InfoButton", Ani_root)
+	local PriceText = self:find("PriceText", Ani_root)
+
+	if isInit then
+        self:once(0.1 * (index - 1), function()
+            Ani_root:SetActive(true)
+            self:playAnimator("UI_2_ShopPackage_item", Ani_root)
+        end)
+        Ani_root:SetActive(false)
+    else
+        Ani_root:SetActive(true)
+        self:playAnimator("UI_1_TaskView_item_idle", Ani_root)
+    end
+
+	if self._timeTag then
+		scheduler:removeTag(self._timeTag)
+		self._timeTag = nil
+	end
+
+    local pidCfg = ShopModel:getPidData(tpl_monthly_card[1].buy_id)
+    local isActive = ShopModel:isMonthlyCard()
+    if isActive then
+    	TimeIcon:SetActive(true)
+		local leftTime = ShopModel:getMonthlyCardLeftTime()
+		bee.setText(TimeText, ShopModel:getShopTimeText(leftTime))
+		self._timeTag = self:schedule(1, function()
+			leftTime = leftTime - 1
+			if leftTime > 0 then
+				bee.setText(TimeText, ShopModel:getShopTimeText(leftTime))
+			else
+				bee.setText(TimeText, _T("LAB_BACKPACK_DES_21"))
+			end
+		end)
+		bee.setText(PriceText, _T("LAB_MONTHLY_CARD_20") .. ShopModel:getPriText(pidCfg))
+    else
+    	TimeIcon:SetActive(false)
+    	bee.setText(TimeText, _T("LAB_SHOP_COMMON_47"))
+    	bee.setText(PriceText, ShopModel:getPriText(pidCfg))
+    end
+
+    bee.removeAllClick(item)
+    bee.addClick(item, function()
+		local leftTime = ShopModel:getMonthlyCardLeftTime()
+		if leftTime > 0 and (leftTime / 86400) > tpl_constdata.Monthly_Card_Limit then
+			UiManager:showToast(_T("LAB_MONTHLY_CARD_11"))
+			return
+		end
+		Game:playSound("ui_button_confirm")
+		UiManager:showUI("ShopMonthlyCardPurchase")
+	end)
+
+	bee.removeAllClick(InfoButton)
+	bee.addClick(InfoButton, function()
+		Game:playSound("ui_button_confirm")
+		UiManager:showUI("ShopMonthlyCardRules")
+	end)
+end
+
 function P:refreshUI()
 	local datas = ShopModel:getShopTopUpList(self.shop_type)
+	if self.shop_type == SHOP_TYPE.shop_recharge then
+		table.insert(datas, 1, {__kind = 1})
+	end
 	self.topUpList:setDatas(datas)
 end
 

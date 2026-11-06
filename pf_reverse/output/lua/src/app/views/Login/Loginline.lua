@@ -103,9 +103,9 @@ function P:tryPing()
         Net:getUrl(v.http_host .. "ping", function()
             v.delay = scheduler.timeSpend - dt
             num = num - 1
+            self:refreshUI()
             if num <= 0 then
                 self:refreshDefalut()
-                self:refreshUI()
             end
         end, 
         function()
@@ -137,7 +137,7 @@ function P:refreshUI()
         local url = self._urls[k]
         if url then
             v:SetActive(true)
-            if not key then
+            if not key or "" == key then
                 self:find("BgText/TextSel", v):SetActive(url.http_host == curUrl)
             else
                 self:find("BgText/TextSel", v):SetActive(url.http_host == key)

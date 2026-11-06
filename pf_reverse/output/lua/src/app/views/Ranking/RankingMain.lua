@@ -74,6 +74,8 @@ function P:onAwake()
 		self._clickSubId = RankingType.CurWeek
 		self:switchRankings()
 	end)
+
+	TaskModel:reportTask(TaskType.CheckView, TaskTargetId.Ranking)
 end
 
 function P:preHide()
@@ -223,11 +225,11 @@ function P:setPlayerItem(item, data)
 	if data.name == "" then
 		bee.setText(NameText, _T("LAB_LEADERBOARD_1"))
 	else
-		bee.setText(NameText, data.name)
+		bee.setText(NameText, GF.getOtherName(data.name, nil, data.uid))
 	end
 	
 	bee.setText(PointTitle, _T(tpl_leaderboard_info[self._clickId].name))
-	bee.setText(PointText, _N1(data.value))
+	bee.setText(PointText, _N2(data.value))
 	bee.setIcon(AvatarIcon, PlayerModel:getAvatarIcon(data.avatar))
 	bee.setIconInAtlas(PointIcon, tpl_leaderboard_info[self._clickId].icon_2, true)
 	GF.setFrameImage(AvatarFrame, data.frame)
@@ -236,9 +238,16 @@ function P:setPlayerItem(item, data)
 
 	local skinCfg = tpl_character_skin[data.skin_id]
 	if skinCfg then
+        skinCfg = GF.getShowSkinData(skinCfg)
 		bee.setIcon(CharacterImg, skinCfg.image, true)
 		CharacterImg.transform.localPosition = bee.v3(skinCfg.leaderboard_offset[1], skinCfg.leaderboard_offset[2], 0)
 		CharacterImg.transform.localScale = bee.v3(skinCfg.leaderboard_offset[3], skinCfg.leaderboard_offset[3], 1)
+		
+        if skinCfg.spine_rotation then
+            CharacterImg.transform.localEulerAngles = bee.v3(0, 0, skinCfg.spine_rotation)
+        else
+            CharacterImg.transform.localEulerAngles = bee.v3zero
+        end
 	end
 
 	if EffectRoot.transform.childCount > 0 then

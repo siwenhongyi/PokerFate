@@ -30,12 +30,12 @@ function P:initUI()
     self.Item1:SetActive(false)
 
     self.RewardItems = {
-        self:find("item01", AwakenReward),
-        self:find("item02", AwakenReward),
-        self:find("item03", AwakenReward),
-        self:find("item04", AwakenReward),
-        self:find("item05", AwakenReward),
-        self:find("item06", AwakenReward),
+        self:find("Item1/item01", AwakenReward),
+        self:find("Item1/item02", AwakenReward),
+        self:find("Item1/item03", AwakenReward),
+        self:find("Item2/item04", AwakenReward),
+        self:find("Item2/item05", AwakenReward),
+        self:find("Item2/item06", AwakenReward),
     }
 
     bee.addClick(self:find("BackButton", LeftTop), function()
@@ -86,6 +86,7 @@ function P:initUI()
             end
         end
         self._isInAwakening = true
+        bee.emit("evt_oathStart")
         Net:sendReq("pb.RoleAwakenREQ", {
             role_id = self._role.role_id
         })
@@ -155,6 +156,7 @@ function P:onShow()
 
         self._CharacterImage = self._params.roleCanvas:getRoleImage()
         self._CharacterImage.transform:SetParent(self.CharacterImage.transform, false)
+        self._CharacterImage.transform.localPosition = bee.v3(381, 0)
     end
     self:initAwakenItems()
 
@@ -197,6 +199,7 @@ function P:getAwakenItems()
 end
 
 function P:doAwakeAnim()
+    ShortcutKeyManager:switchEscCtrlSign(false)
     Game:pauseLobbyMusicTween()
     self._isPauseLobbyMusic = true
     self:once(tpl_constdata.Oath_BGM_Off, function()
@@ -248,11 +251,13 @@ function P:doAwakeAnim()
     end)
     self:once(10.5, function()
         UiManager:showUI("CharacterOathFulfilled", {data = self._role})
+        ShortcutKeyManager:switchEscCtrlSign(true)
         -- self.ImageExit:SetActive(true)
         -- bee.setText(self:find("Tips/TextTip", self.ImageExit), _T(self._role.info.awaken_tip))
         -- Game:playRoleOutVoice(self._role.role_id, tpl_chat_voice.awaken)
 
         SdkHelper:startAppReview()
+        
     end)
     self:once(12, function()
         self:hideUI()

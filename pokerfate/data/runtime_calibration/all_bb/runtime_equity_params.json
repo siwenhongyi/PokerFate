@@ -1,0 +1,62 @@
+{
+  "preflop|strong|1|passive": {
+    "bias": -0.09058,
+    "raw_bias": -0.09549,
+    "type": "bias"
+  },
+  "river|medium|2|bet": {
+    "a": 0.59294,
+    "b": -0.00234,
+    "type": "linear"
+  },
+  "river|medium|2|raise": {
+    "a": 0.4744,
+    "b": 0.00693,
+    "type": "linear"
+  },
+  "river|medium|3+|bet": {
+    "a": 0.86229,
+    "b": -0.00955,
+    "type": "linear"
+  },
+  "river|nuts|2|raise": {
+    "bias": -0.21667,
+    "raw_bias": -0.32259,
+    "type": "bias"
+  },
+  "river|nuts|3+|bet": {
+    "bias": -0.14875,
+    "raw_bias": -0.19349,
+    "type": "bias"
+  },
+  "river|strong|2|bet": {
+    "bias": -0.14408,
+    "raw_bias": -0.15967,
+    "type": "bias"
+  },
+  "river|strong|2|raise": {
+    "bias": -0.13434,
+    "raw_bias": -0.17231,
+    "type": "bias"
+  },
+  "river|strong|3+|bet": {
+    "bias": -0.10597,
+    "raw_bias": -0.1352,
+    "type": "bias"
+  },
+  "turn|medium|2|raise": {
+    "a": 0.69213,
+    "b": 0.02121,
+    "type": "linear"
+  },
+  "turn|strong|2|raise": {
+    "bias": -0.04011,
+    "raw_bias": -0.05511,
+    "type": "bias"
+  },
+  "turn|strong|3+|passive": {
+    "bias": 0.06953,
+    "raw_bias": 0.0712,
+    "type": "bias"
+  }
+}

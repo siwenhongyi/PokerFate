@@ -16,6 +16,7 @@ function P:onAwake()
 
     bee.addClick(self:find("BackButton", self.LeftTop), function()
         self:hideUI()
+        bee.emit("evt_oathOver")
     end)
     bee.addClick(self:find("CameraButton", self.RightTop), function()
         Game:playSound("ui_share_screenshot")
@@ -58,6 +59,7 @@ function P:onShow()
         -- bee.invoke(self.CharacterImage, "setRole", self._role, true)
         local roleImage = CharacterModel:getRoleImage()
         roleImage.transform:SetParent(self.CharacterImage.transform, false)
+        bee.invoke(roleImage, "setShowReal", true)
         bee.invoke(roleImage, "setRole", self._role, true)
     end
 

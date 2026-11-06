@@ -12,15 +12,15 @@ Grid JSON 支持两种格式：
 
 1) 参数网格（自动笛卡尔积）：
     {
-      "PF_DEFAULT_STAB_HU": ["0.3", "0.5", "0.7"],
-      "PF_DEFAULT_STAB_MULTI": ["0.3", "0.5", "0.7"]
+      "PF_POSTFLOP_PROFIT_EXPAND_V1": ["0", "1"],
+      "PF_PURE_BLUFF_ENABLED": ["0", "1"]
     }
 
 2) 显式配置列表：
     {
       "configs": [
-        {"PF_DEFAULT_STAB_HU": "0.5"},
-        {"PF_DEFAULT_STAB_HU": "0.7", "PF_DEFAULT_STAB_MULTI": "0.5"}
+        {"PF_POSTFLOP_PROFIT_EXPAND_V1": "1"},
+        {"PF_POSTFLOP_PROFIT_EXPAND_V1": "1", "PF_PURE_BLUFF_ENABLED": "0"}
       ]
     }
 """

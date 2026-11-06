@@ -1,10 +1,13 @@
-local P = class("TournamentSNGMatchmaking", UiFullView)
+local P = class("TournamentSNGMatchmaking", UiBase)
 
 
 function P:onAwake()
+	self._openAnim, self._closeAnim = "UI_1_" .. self.__cname .. "_into", "UI_1_" .. self.__cname .. "_back"
     self.Center = self:find("AnimRoot/Center")
     self.RightTop = self:find("AnimRoot/RightTop")
+    self.LeftTop = self:find("AnimRoot/LeftTop")
     self.ColorButton = self:find("ColorButton", self.RightTop)
+    self.BackButton = self:find("BackButton", self.LeftTop)
 
     self.Items = {
         self:find("Item1", self.Center),
@@ -19,12 +22,19 @@ function P:onAwake()
     self.CancelButton = self:find("CancelButton", self.Center)
 
     bee.addClick(self.CancelButton, function()
+        TournamentModel:setMatchingSngInfo(0, 0, {}, 0)
+
         Net:sendReq("pb.LeaveRoomREQ", {
             client_str = json.encode({
                 key = "tournament",
                 kind = 2,
             })
         })
+        bee.logEvent("tournament-signup-cancel", 1, GameModel.data.room_info.tour_id)
+    end)
+
+    bee.addClick(self.BackButton, function()
+        self:onBtClose()
     end)
 
     bee.addClick(self.ColorButton, function()
@@ -55,6 +65,8 @@ function P:preHide()
     self.CancelButton:SetActive(false)
     self.TextTip:SetActive(false)
     Game:playSound("sound_SNG_match")
+
+    UiManager:hideUIForce("CommonNoticeSmall")
 end
 
 function P:refreshUI()
@@ -69,6 +81,8 @@ function P:refreshUI()
     for i = index, 2 do
         self:refreshItem(self.Items[i], nil, false)
     end
+
+    TournamentModel:setMatchingSngInfo(GameModel.data:getRoomId(), index, GameModel.data.room_info.room_name or GameModel.data.room_info.name, GameModel.data.room_info.tour_id)
 end
 
 function P:refreshItem(item, player, showRole)
@@ -80,6 +94,7 @@ function P:refreshItem(item, player, showRole)
             Mask:SetActive(true)
             local skin = tpl_character_skin[player.skin_id or 0]
             if skin then
+                skin = GF.getShowSkinData(skin)
                 local ImageRole = self:find("Mask/ImageRole", item)
                 bee.setIcon(ImageRole, skin.image, true)
                 if skin.leaderboard_offset then
@@ -87,6 +102,11 @@ function P:refreshItem(item, player, showRole)
                     if skin.leaderboard_offset[3] then
                         ImageRole.transform.localScale = bee.v3(skin.leaderboard_offset[3], skin.leaderboard_offset[3], skin.leaderboard_offset[3])
                     end
+                end
+                if skin.spine_rotation then
+                    ImageRole.transform.localEulerAngles = bee.v3(0, 0, skin.spine_rotation)
+                else
+                    ImageRole.transform.localEulerAngles = bee.v3zero
                 end
             end
             if player.level > 0 then
@@ -96,7 +116,7 @@ function P:refreshItem(item, player, showRole)
                 Status:SetActive(false)
             end
             Name:SetActive(true)
-            bee.setTextCut(self:find("TEXT", Name), player.name, 280)
+            bee.setTextCut(self:find("TEXT", Name), GF.getOtherName(player.name, nil, player.uid), 280)
         else
             Mask:SetActive(false)
             self:find("tournament_matchmaking_wait", item):SetActive(false)
@@ -146,15 +166,28 @@ function P:evt_SngRoomStartBRC(msg)
 end
 
 function P:evt_SitDownBRC(msg)
-    self:refreshUI()
+    if GameModel.data:isSNG() then
+        self:refreshUI()
+    end
 end
 
 function P:evt_StandUpBRC(msg)
-    self:refreshUI()
+    if GameModel.data:isSNG() then
+        self:refreshUI()
+    end
 end
 
 function P:evt_ActionBRC(msg)
     self:hideUIForce()
+end
+
+function P:onBtClose()
+    UiManager:showTip({
+        text = _T("LAB_TOURNAMENT_SNG_INFO51"),
+        onSure = function()
+            Net:sendReq("pb.LeaveRoomREQ", {back_wait = true})
+        end
+    })
 end
 
 return P

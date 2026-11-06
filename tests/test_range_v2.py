@@ -9,6 +9,7 @@ Target bugs from the equity-branch review (see docs/reviews/2026-04-20-equity-br
 """
 
 import itertools
+import math
 
 import numpy as np
 from pokerfate.api import ActionEvent, PlayerInfo, PokerFateAPI
@@ -543,29 +544,36 @@ class TestPositionEndToEnd:
         )
 
     def test_opp_position_feeds_action_context(self):
-        """After notify_action, the tracker's action history contains the
-        street+refined action. We can't inspect the ActionContext directly
-        (it's local to observe_action) but we CAN verify the position was
-        used by checking _hand_positions is populated correctly.
-        """
         api = self._setup('SB')
-        # _hand_positions is the canonical storage for the per-hand map.
         assert api._hand_positions.get(1) == 'SB'
         assert api._hand_positions.get(0) == 'BTN'
 
-        # And when a villain acts, observe_action is called with opp_position.
-        # The tracker's action history should be populated without crashing.
         api.deal_board(['7h', '7d', '2c'], street='flop', pot=6.0)
         api.notify_action(ActionEvent(
             player_id=1, action='check', amount=0.0, street='flop',
         ))
         hist = api._bot._range_tracker._action_history.get(1, [])
         assert hist and hist[-1] == ('flop', 'check')
+        assert api._bot._range_tracker._action_meta[1]['position'] == 'SB'
+
+    def test_empty_action_context_preserves_reset_position(self):
+        tracker = BayesianRangeTracker(ActionModel())
+        profile = PlayerProfile()
+        tracker.reset_hand(1, 'BB', profile)
+        tracker.observe_action(
+            1,
+            'check',
+            'flop',
+            ActionContext(position='', board=[], street='flop', facing_action='check'),
+            profile,
+            board=[Card.from_str('7h'), Card.from_str('7d'), Card.from_str('2c')],
+        )
+        assert tracker._action_meta[1]['position'] == 'BB'
 
 
 class TestProfitLockOnTableTrigger:
     """Profit-lock trigger uses on-table chips (my_final >= threshold).
-    Session PnL is display-only and does NOT gate the trigger."""
+    Bankroll display is sampled from UserValueRSP and does NOT gate the trigger."""
 
     def _bootstrap(self):
         from pf_intercept.bot import BotBridge
@@ -577,16 +585,15 @@ class TestProfitLockOnTableTrigger:
         b._uid_to_seat["99"] = 0
         return b
 
-    def test_winning_a_hand_does_not_move_pnl(self):
-        """PnL is display-only — winning a hand (per-hand profit) does
-        NOT move _session_pnl_chips."""
+    def test_winning_a_hand_does_not_record_bankroll_sample(self):
+        """Winning a hand does not create/update a bankroll sample."""
         b = self._bootstrap()
-        assert b._session_pnl_chips == 0.0
+        assert b.bankroll_dashboard()["base_total_chips"] is None
         b.handle("pb.WinnerRSP", {
             "winner": [],
             "profit": [{"uid": "99", "chips": 150}],
         })
-        assert b._session_pnl_chips == 0.0
+        assert b.bankroll_dashboard()["base_total_chips"] is None
 
     def test_first_trigger_works_without_any_prior_leave(self):
         """Regression for the dead-lock: an on-table crossing of threshold
@@ -800,16 +807,16 @@ class TestMultiwayEquity:
         )
 
     def test_single_opponent_path_unchanged(self):
-        """len(opp)==1 时 multi 退化成 weighted_equity（结果相近）。"""
+        """len(opp)==1 时 multi 退化成 weighted_equity。"""
         calc = RangeEquityCalculator()
         hero = [Card.from_str('Ks'), Card.from_str('Qs')]
         board = [Card.from_str(c) for c in ['Ac', '7d', '5h']]
         w = self._uniform_weights()
-        eq_single = calc.weighted_equity(hero, board, w, 1, n_samples=500)
-        eq_multi = calc.weighted_equity_multi(hero, board, [w], n_samples=500)
-        # 阈值 0.08 容忍 n=500 MC 的方差（两侧各自 sampling，~±4pp 正常）
-        assert abs(eq_single - eq_multi) < 0.08, (
-            f"single/multi(n=1) 应相近: single={eq_single:.3f} multi={eq_multi:.3f}"
+        seed = 20260608
+        eq_single = calc.weighted_equity(hero, board, w, 1, n_samples=500, seed=seed)
+        eq_multi = calc.weighted_equity_multi(hero, board, [w], n_samples=500, seed=seed)
+        assert abs(eq_single - eq_multi) < 1e-12, (
+            f"single/multi(n=1) 应一致: single={eq_single:.3f} multi={eq_multi:.3f}"
         )
 
 
@@ -1399,6 +1406,28 @@ class TestAntiConcentrationRegularization:
 class TestShowdownCalibration:
     """验证 ShowdownCalibrator 在 tracker 更新时记录预测、摊牌时对比实际。"""
 
+    def test_start_new_hand_limits_active_weights_to_current_hand_players(self):
+        tracker = BayesianRangeTracker(action_model=ActionModel())
+        seen: list[tuple[int, int]] = []
+        tracker._prediction_hook = lambda **kwargs: seen.append((
+            int(kwargs["player_id"]),
+            len(kwargs.get("active_weights") or {}),
+        ))
+        prof = PlayerProfile(name="villain", hands_seen=20, vpip=0.30, pfr=0.20)
+
+        tracker.start_new_hand()
+        for pid in range(100, 110):
+            tracker.reset_hand(pid, "CO", prof)
+        assert max(count for _, count in seen) == 10
+
+        seen.clear()
+        tracker.start_new_hand()
+        for pid in (1, 2, 3):
+            tracker.reset_hand(pid, "CO", prof)
+
+        assert seen == [(1, 1), (2, 2), (3, 3)]
+        assert set(tracker._weights) == {1, 2, 3}
+
     def test_records_predictions_on_reset_and_action(self):
         """reset_hand + observe_action 各触发一次 record_prediction。"""
         from pokerfate.calibration import ShowdownCalibrator
@@ -1440,6 +1469,55 @@ class TestShowdownCalibration:
         # hero_eq 能算出来（hero 已知 + board 已设）
         assert second.predicted_hero_eq is not None
         assert 0.0 <= second.predicted_hero_eq <= 1.0
+        assert second.position == 'CO'
+        assert second.facing_action == 'bet'
+        assert second.action_bet_ratio == 0.0
+        assert second.bet_size_bucket == 'none'
+        assert second.action_sequence == 'flop:call'
+        assert second.board_features['high_card_rank'] == 13
+        assert 'flush_draw' in second.hero_draw
+        assert 'nut_flush_blocker' in second.hero_blockers
+
+    def test_preflop_action_type_survives_postflop_predictions(self):
+        from pokerfate.calibration import ShowdownCalibrator
+        from pokerfate.strategy.range_v2.action_model import ActionModel, ActionContext, PlayerProfile
+
+        calibrator = ShowdownCalibrator(logger=None)
+        tracker = BayesianRangeTracker(action_model=ActionModel())
+        tracker._prediction_hook = calibrator.record_prediction
+        tracker._name_resolver = lambda pid: f'P{pid}'
+        tracker.set_known_cards([Card.from_str('Ac'), Card.from_str('Kd')])
+        calibrator.start_hand(2)
+
+        prof = PlayerProfile(name='villain', hands_seen=20, vpip=0.30, pfr=0.20, af=2.0)
+        tracker.reset_hand(player_id=1, position='BB', profile=prof)
+        tracker.observe_action(
+            1,
+            'raise',
+            'preflop',
+            ActionContext(
+                position='BB',
+                board=[],
+                street='preflop',
+                facing_action='none',
+                preflop_action_type='open',
+            ),
+            prof,
+            board=[],
+        )
+        board = [Card.from_str(c) for c in ['5h', '8d', 'Kc']]
+        tracker.observe_action(
+            1,
+            'call',
+            'flop',
+            ActionContext(position='BB', board=board, street='flop', facing_action='call'),
+            prof,
+            board=board,
+        )
+
+        last = calibrator._hand_predictions[1][-1]
+        assert last.street == 'flop'
+        assert last.preflop_action_type == 'open'
 
     def test_record_actual_computes_compare(self):
         """record_actual 对每条历史预测计算 CalibrationResult。"""
@@ -1488,6 +1566,57 @@ class TestShowdownCalibration:
             assert r.actual_hero_eq_final in (0.0, 0.5, 1.0)
             # eq_prediction_error 应有值
             assert r.eq_prediction_error is not None
+            assert r.actual_combo
+            assert r.actual_combo_index is not None
+            assert r.static_combo_prob is not None
+            assert r.bayes_combo_prob is not None
+            assert r.nll_static is not None
+            assert r.nll_bayes is not None
+            assert r.delta_nll is not None
+            assert r.nll_source == 'exact_showdown'
+
+    def test_combo_nll_uses_exact_combo_probability(self):
+        from pokerfate.calibration import ShowdownCalibrator
+        from pokerfate.calibration.showdown_calibration import PredictionRecord
+
+        cal = ShowdownCalibrator(logger=None)
+        hero = [Card.from_str('Ac'), Card.from_str('Kd')]
+        board = [Card.from_str(c) for c in ['2c', '7d', 'Jh']]
+        actual = [Card.from_str('Qs'), Card.from_str('Qh')]
+        actual_idx = hcm.COMBO_TO_IDX[tuple(sorted(hcm.card_to_int(c) for c in actual))]
+        static = np.ones(1326, dtype=np.float64)
+        posterior = np.ones(1326, dtype=np.float64)
+        posterior[actual_idx] = 4.0
+        rec = PredictionRecord(
+            hand_id=9,
+            street='flop',
+            player_id=1,
+            player_name='villain',
+            board=board,
+            trigger='action:call',
+            range_pct=1.0,
+            bucket_dist={},
+            hero_cards=hero,
+            predicted_hero_eq=None,
+            static_weights=static,
+            posterior_weights=posterior,
+        )
+
+        result = cal._build_result(
+            rec,
+            actual,
+            hero,
+            board + [Card.from_str('4s'), Card.from_str('9c')],
+        )
+
+        assert result.actual_combo_index == actual_idx
+        assert result.bayes_combo_prob > result.static_combo_prob
+        assert result.delta_nll > 0
+        assert math.isclose(
+            result.delta_nll,
+            math.log(result.bayes_combo_prob / result.static_combo_prob),
+            rel_tol=1e-12,
+        )
 
     def test_no_hook_is_zero_overhead(self):
         """tracker._prediction_hook=None 时 observe_action 正常工作不崩。"""

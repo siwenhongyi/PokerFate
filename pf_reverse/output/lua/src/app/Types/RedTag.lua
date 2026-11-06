@@ -52,7 +52,8 @@ local TagLinks =
             "BackpackMusic",
             "BackpackScene",
             "BackpackEff",
-        }
+        },
+        BackpackEmoji = {},
     },
     SevenDayTask = {
         TaskChapter = {
@@ -63,10 +64,12 @@ local TagLinks =
     Activity = {    -- 活动
         "ActivitySignIn",
         "ActivityNewmanCheckin",
+        "ActivityRetentionSurvey", --回归问卷
     },
     SideGame = {
         "Pinball",
     },
+    Soccer = {},
 
     ------------------ 角色 ------------------
     Character = {   -- 角色
@@ -81,6 +84,8 @@ local TagLinks =
     CharacterProfileVoices4 = {}, -- 分析 声音 tag 4
     CharacterProfileVoices5 = {}, -- 分析 声音 tag 5
     CharacterProfileFiles = {},   -- 分析 档案
+    CharacterProfileFilesStory = {}, -- 分析 档案 剧情
+
 
     CharacterGarments = {}, -- 衣橱
     CharacterBonds = {},    -- 养成
@@ -104,6 +109,28 @@ local TagLinks =
     BunnyGirl = {
         BunnyGirlPlot = {},    -- 剧情解锁
         BunnyGirlTask = {},    -- 任务奖励
+    },
+    ------------------ 活动 运动会 ------------------
+    Sports = {
+        SportsPlot = {},    --剧情解锁
+        SportsTask = {},    --任务奖励
+    },
+    ------------------ 活动 泳装季 ------------------
+    Sayaka = {
+        SayakaPlot = {},    --剧情解锁
+        SayakaTask = {},    --任务奖励
+    },
+    ------------------ 活动 夏日祭 ------------------
+    Matsuri = {
+        MatsuriTask = {},    --任务奖励
+    },
+    ------------------ 活动 赛车祭 ------------------
+    Racing = {
+        RacingTask = {},    --任务奖励
+    },
+    ------------------ 活动 日幻 ------------------
+    Fantasy = {
+        FantasyTask = {},   --任务奖励
     },
 
     ------------------ 活动 新春 ------------------
@@ -129,6 +156,14 @@ local TagLinks =
         AchTheme3 = {},
         AchTheme4 = {},
         AchTheme5 = {},
+    },
+
+    ------------------ 派遣 ------------------
+    Dispatch = {
+        DispatchCenter = {
+            "DispatchSeasonPass",
+            "DispatchReward"
+        },
     },
 }
 

@@ -84,7 +84,14 @@ function P:onEnable()
 end
 
 function P:onStart()
-    self:invoke("onStart", 0)
+	if self.curObj then
+		local c = ObjectPool:getCls(self.curObj)
+		if c then
+			c._watiStart = false
+			if c.addAutoEvent then c:addAutoEvent() end
+			if c.onStart then c:onStart() end
+		end
+	end
 end
 
 function P:onUpdate()

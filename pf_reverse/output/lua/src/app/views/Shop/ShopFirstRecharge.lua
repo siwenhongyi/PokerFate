@@ -7,7 +7,7 @@ function P:onAwake()
 
 	self.ItemTable = self:find("ItemTable", self.Ani_root)
 	self.TableImg = self:find("TableImg", self.ItemTable)
-	self.TableNameText = self:find("TableNameText", self.ItemTable)
+	self.TableNameText = self:find("PropName", self.ItemTable)
 	self.ViewButton = self:find("ViewButton", self.ItemTable)
 
 	self.itemList = {}
@@ -38,14 +38,14 @@ function P:onStart()
 	local tablePropCfg = tpl_props[rewards[1].id]
 	local tableCfg = tpl_card_table[tablePropCfg.mapId]
 	bee.setIcon(self.TableImg, tableCfg.image)
-	bee.setText(self.TableNameText, _T(tablePropCfg.name))
+	self:_setPropName(self.TableNameText, _T(tablePropCfg.name))
 
 	for i = 1, 3 do
 		local item = self.itemList[i]
 		local prop = PropItem:create(self:find("PropItem", item), rewards[i + 1])
 		prop:hideBg()
 		prop:bindTips()
-		bee.setText(self:find("PropNameText", item), _T(tpl_props[rewards[i + 1].id].name))
+		self:_setPropName(self:find("PropName", item), _T(tpl_props[rewards[i + 1].id].name))
 	end
 
 	bee.removeAllClick(self.ItemTable)
@@ -56,6 +56,30 @@ function P:onStart()
 	end)
 
 	self:refreshUI()
+end
+
+function P:_setPropName(NameItem, NameText)
+	local PropNameText = self:find("PropNameText", NameItem)
+	bee.setText(PropNameText, NameText)
+
+	local s = NameItem.transform.sizeDelta
+	local len = CS.Utils.GetTextWidth(PropNameText:GetComponent("Text"), NameText)
+	bee.Tween.killByTarget(PropNameText)
+
+	if len <= s.x then
+		PropNameText.transform.localPosition = bee.v3zero
+	else
+		local offset = (len - s.x) / 2 + 15
+		PropNameText.transform.localPosition = bee.v3(offset)
+        bee.tween(PropNameText)
+        : delay(1)
+        : to(5, {position = bee.v3(-offset, 0, 0)})
+        : delay(3)
+        : to(0, {position = bee.v3(offset, 0, 0)})
+        : loop(-1)
+        : link()
+        : setTarget()
+	end
 end
 
 function P:refreshUI()

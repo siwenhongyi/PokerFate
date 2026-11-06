@@ -43,7 +43,11 @@ function P:refreshUI()
     self:refreshTag()
 end
 
-function P:refreshTag()
+function P:refreshTag(isForceHide)
+    if isForceHide then
+        self:showTag()
+        return
+    end
     local info = self.data:getPlayer(self.seatid)
     if info and info.on_seat and self.data:isPlaying() then
         local action_type = info.action_type
@@ -168,7 +172,7 @@ end
 
 function P:flyChipsToPot(from, to, num, cb)
 	for i = 1, num do
-		local eft = GameModel.layer:playUIEffect(self.data:getChipEft(), GameModel.layer.transform, nil, 3)
+		local eft = GameModel:playUIEffect(self.data:getChipEft(), nil, nil, 3)
 		eft.transform.position = from
 		local pos = eft.transform.localPosition
 		local ranPos = CU.Random.insideUnitCircle * 65
@@ -179,7 +183,7 @@ function P:flyChipsToPot(from, to, num, cb)
 			: to (0.533, {position = to})
 			: ease(DT.Ease.InBack)
 			: onComplete(function()
-				GameModel.layer:putEffectItem(eft)
+				GameModel:putEffectItem(eft)
 				if i == 1 then
 					cb()
 				end

@@ -12,7 +12,8 @@ local function _initData()
 {1005,"BackGround/table_mtt_outdoor_01.png","BackGround/scene_mtt_outdoor_01.png","ItemPreview[item_preview_table_mtt_outdoor_01]"},
 {1006,"BackGround/table_casino_01.png","BackGround/scene_casino_01.png","ItemPreview[item_preview_table_casino_01]"},
 {2001,"BackGround/table_hot_spring_01.png","BackGround/scene_hot_spring_01.png","ItemPreview[item_preview_table_hot_spring_01]"},
-{2002,"BackGround/table_activity_dress_01.png","BackGround/scene_activity_dress_01.png","ItemPreview[item_preview_table_activity_dress_01]"}
+{2002,"BackGround/table_activity_dress_01.png","BackGround/scene_activity_dress_01.png","ItemPreview[item_preview_table_activity_dress_01]"},
+{2003,"BackGround/table_sayaka_01.png","BackGround/scene_sayaka_01.png","ItemPreview[item_preview_table_sayaka_01]"}
 }
     for _, v in pairs(bodys) do
         local m = {}

@@ -22,6 +22,7 @@ function P:onShow()
     local datas = {}
     for _, v in ipairs(tpl_vip_exp_list_list) do
         table.insert(datas, {__kind = "title", data1 = v})
+        local flag = false
         for _, vv in ipairs(tpl_vip_exp_path_list) do
             if vv.group == v.id then
                 local d = _G["tpl_" .. vv.shop][vv.product_id]
@@ -33,13 +34,18 @@ function P:onShow()
                                 datas[#datas].data2 = vv
                             else
                                 table.insert(datas, {__kind = "item2", data1 = vv})
+                                flag = true
                             end
                         else
                             table.insert(datas, {__kind = "item1", data1 = vv})
+                            flag = true
                         end
                     end
                 end
             end
+        end
+        if not flag then
+            table.remove(datas, #datas)
         end
     end
 

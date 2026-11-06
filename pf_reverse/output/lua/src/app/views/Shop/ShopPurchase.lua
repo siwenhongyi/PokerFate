@@ -36,7 +36,7 @@ function P:onStart()
 	bee.setText(self.RoleNameText, _T(roleCfg.name))
 
 	local currencyCfg = tpl_props[cfg.pri[1]]
-	bee.setIconInAtlas(self.CurrencyIcon, currencyCfg.icon)
+	bee.setIconInAtlas(self.CurrencyIcon, currencyCfg.icon, true)
 	bee.setText(self.PriceText, cfg.pri[2])
 
 	bee.setIcon(self.SkinIcon, skinCfg.image_with_bg or skinCfg.image, true)
@@ -61,16 +61,8 @@ function P:onClickPurchase()
 			ShopModel:buyWithProp(cfg.shop_type, cfg.id)
 			self:hideUI()
 		else
-			UiManager:showTip({
-			multi = true,
-	        text = _F("LAB_SHOP_ROLE_SKIN_10", _T(tpl_props[cfg.pri[1]].name)),
-	        onSure = function()
-	            -- 跳转
-	            local propCfg = tpl_props[cfg.pri[1]]
-	            ItemModel:jumpView(propCfg.accesses[1])
-	            self:hideUI()
-	        end
-	    })
+	    	UiManager:showToast(_T("LAB_COMMON_TIPS_1"))
+			UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(cfg.pri[1], true)})
 		end
 	end
 

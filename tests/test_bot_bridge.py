@@ -1,7 +1,11 @@
 """pf_intercept BotBridge: profit-lock leave / re-enter and auto-rebuy cap."""
 
+import threading
+
 from pf_intercept import config
 from pf_intercept.bot import BotBridge
+from pokerfate.api import BotDecision
+from pokerfate.bot.opponent_model import OpponentModel, OpponentStats
 
 
 class TestBotBridgeActionAmounts:
@@ -35,10 +39,778 @@ class TestBotBridgeActionAmounts:
         assert b._api.events[0].action == "call"
         assert b._api.events[0].amount == 6
 
+    def test_opponent_action_uses_uid_not_seat_id(self):
+        b = BotBridge()
+        b._api = self._FakeAPI()
+        b._stage = 1
+        b._my_seat = 0
+        b._seat_uids = {2: "123456"}
+
+        b._on_action_brc({"seatid": 2, "action_type": 3, "chips": 6, "hand_chips": 194})
+
+        assert b._api.events[0].player_id == 123456
+
+    def test_opponent_action_without_uid_uses_negative_runtime_id(self):
+        b = BotBridge()
+        b._api = self._FakeAPI()
+        b._stage = 1
+        b._my_seat = 0
+
+        b._on_action_brc({"seatid": 2, "action_type": 3, "chips": 6, "hand_chips": 194})
+
+        assert b._api.events[0].player_id == -3
+
+
+def test_action_notify_duplicate_is_suppressed_until_table_advances() -> None:
+    class FakeAPI:
+        def __init__(self):
+            self.request_count = 0
+            self.events = []
+
+        def request_action(self, **kwargs):
+            self.request_count += 1
+            return BotDecision("raise", 50000.0)
+
+        def notify_action(self, event):
+            self.events.append(event)
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._my_seat = 0
+    b._stage = 3
+    b._current_gameid = "g42"
+    b._all_seats = [0, 1]
+    b._hole_cards_count = 2
+    b._bb = 10000
+    b._pot = 100000
+    b._my_chips = 800000
+
+    notify = {
+        "seatid": 0,
+        "call_need_chips": 0,
+        "min_chipin": 20000,
+        "max_chipin": 800000,
+    }
+
+    first = b._on_action_notify(dict(notify))
+    assert first is not None
+    assert b._api.request_count == 1
+
+    assert b._on_action_notify(dict(notify)) is None
+    assert b._api.request_count == 1
+
+    b._on_action_brc({
+        "seatid": 0,
+        "action_type": 4,
+        "chips": 50000,
+        "hand_chips": 750000,
+    })
+
+    assert b._on_action_notify(dict(notify)) is None
+    assert b._api.request_count == 1
+
+    b._on_action_brc({
+        "seatid": 1,
+        "action_type": 3,
+        "chips": 50000,
+        "hand_chips": 750000,
+    })
+
+    next_turn = b._on_action_notify(dict(notify))
+    assert next_turn is not None
+    assert b._api.request_count == 2
+
+
+def test_dealer_info_passes_global_hand_seq_to_api(monkeypatch) -> None:
+    calls = []
+
+    class FakeAPI:
+        def new_hand(self, **kwargs):
+            calls.append(kwargs)
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._hand_seq = 41
+    monkeypatch.setattr(b, "_ensure_api", lambda: True)
+
+    b._on_dealer_info(
+        {
+            "dealer": 0,
+            "start_info": [{"seatid": 0, "chips": 200}],
+            "gameid": "t42",
+        }
+    )
+
+    assert calls[0]["hand_number"] == 42
+
+
+class TestBotBridgeReconnectRestore:
+    class _FakeAPI:
+        def __init__(self):
+            self.hole_cards = []
+            self.requests = []
+            self.hands = []
+
+        def new_hand(self, **kwargs):
+            self.hands.append(kwargs)
+
+        def deal_hole_cards(self, cards):
+            self.hole_cards.append(cards)
+
+        def request_action(self, **kwargs):
+            self.requests.append(kwargs)
+            return BotDecision(action="call", amount=0.0)
+
+        def last_decision_diagnostics(self):
+            return {}
+
+        def set_runtime_collection_enabled(self, enabled, reason=""):
+            pass
+
+    def _bridge(self):
+        fake = self._FakeAPI()
+        b = BotBridge()
+        b._api = fake
+        b._my_uid = "99"
+        b._my_seat = 0
+        b._bb = 10.0
+        b._sb = 5.0
+        return b, fake
+
+    def test_enter_room_rsp_replays_pending_hero_action_after_reconnect(self, caplog) -> None:
+        b, fake = self._bridge()
+
+        with caplog.at_level("WARNING"):
+            out = b.handle(
+                "pb.EnterRoomRSP",
+                {
+                    "code": 0,
+                    "roomid": 123,
+                    "game_type": 10010101,
+                    "room_info": {"bb": "10", "sb": "5"},
+                    "table_status": {
+                        "is_playing": True,
+                        "action_idx": 0,
+                        "stage": 1,
+                        "gameid": "game-1",
+                        "seat": [
+                            {
+                                "seatid": 0,
+                                "action_type": 5,
+                                "player": {"uid": "99", "name": "Hero"},
+                                "hand_chips": "990",
+                                "destop_chips": "10",
+                            },
+                            {
+                                "seatid": 1,
+                                "action_type": 4,
+                                "player": {"uid": "100", "name": "Villain"},
+                                "hand_chips": "970",
+                                "destop_chips": "30",
+                            },
+                        ],
+                    },
+                    "playing_status": {
+                        "card1": 782,
+                        "card2": 1037,
+                        "action_seatid": 0,
+                        "call_need_chips": "20",
+                        "min_chipin": "40",
+                        "max_chipin": "990",
+                        "action_time": 3,
+                    },
+                },
+            )
+
+        assert out[0] == "pb.ActionREQ"
+        assert out[1] == {"action_type": 3, "chips": 0}
+        assert out[2] <= 2.0
+        assert fake.hole_cards == [["Ah", "Ks"]]
+        assert fake.requests[0]["to_call"] == 20
+        assert fake.requests[0]["current_bet"] == 30
+        assert not any("重连恢复" in r.message for r in caplog.records)
+
+    def test_enter_room_rsp_does_not_replay_when_hero_already_all_in(self) -> None:
+        b, fake = self._bridge()
+        b._hole_cards_count = 2
+
+        out = b.handle(
+            "pb.EnterRoomRSP",
+            {
+                "code": 0,
+                "roomid": 123,
+                "game_type": 10010101,
+                "room_info": {"bb": "10", "sb": "5"},
+                "table_status": {
+                    "is_playing": True,
+                    "action_idx": 0,
+                    "stage": 1,
+                    "seat": [
+                        {
+                            "seatid": 0,
+                            "action_type": 17,
+                            "is_allin": True,
+                            "player": {"uid": "99", "name": "Hero"},
+                            "destop_chips": "1000",
+                        }
+                    ],
+                },
+                "playing_status": {
+                    "action_seatid": 0,
+                    "call_need_chips": "20",
+                    "action_time": 3,
+                },
+            },
+        )
+
+        assert out is None
+        assert fake.requests == []
+
+    def test_enter_room_rsp_does_not_duplicate_recent_action_notify(self) -> None:
+        b, fake = self._bridge()
+        b._hole_cards_count = 2
+        b._current_gameid = "game-dup"
+        b._stage = 4
+        b._pot = 150000
+        b._my_chips = 627881
+        b._all_seats = [0, 1]
+
+        first = b.handle(
+            "pb.ActionNotifyBRC",
+            {
+                "seatid": 0,
+                "call_need_chips": "50000",
+                "min_chipin": "100000",
+                "max_chipin": "627881",
+            },
+        )
+        second = b.handle(
+            "pb.EnterRoomRSP",
+            {
+                "code": 0,
+                "roomid": 123,
+                "game_type": 10010101,
+                "room_info": {"bb": "10", "sb": "5"},
+                "table_status": {
+                    "is_playing": True,
+                    "action_idx": 0,
+                    "stage": 4,
+                    "gameid": "game-dup",
+                    "pool": ["150000"],
+                    "seat": [
+                        {
+                            "seatid": 0,
+                            "action_type": 5,
+                            "player": {"uid": "99", "name": "Hero"},
+                            "hand_chips": "627881",
+                        },
+                        {
+                            "seatid": 1,
+                            "action_type": 5,
+                            "player": {"uid": "100", "name": "Villain"},
+                            "hand_chips": "1408650",
+                        },
+                    ],
+                },
+                "playing_status": {
+                    "card1": 1028,
+                    "card2": 781,
+                    "action_seatid": 0,
+                    "call_need_chips": "50000",
+                    "min_chipin": "100000",
+                    "max_chipin": "627881",
+                    "action_time": 15,
+                },
+            },
+        )
+
+        assert first[0] == "pb.ActionREQ"
+        assert second is None
+        assert len(fake.requests) == 1
+
+    def test_enter_room_rsp_ignores_stale_playing_status_after_hand_end(self) -> None:
+        b, fake = self._bridge()
+        b._current_gameid = "old-hand"
+
+        out = b.handle(
+            "pb.EnterRoomRSP",
+            {
+                "code": 0,
+                "roomid": 123,
+                "game_type": 10010101,
+                "room_info": {"bb": "10", "sb": "5"},
+                "table_status": {
+                    "action_idx": -1,
+                    "gameid": "old-hand",
+                    "seat": [
+                        {
+                            "seatid": 0,
+                            "action_type": 5,
+                            "player": {"uid": "99", "name": "Hero"},
+                            "hand_chips": "1747862",
+                        }
+                    ],
+                },
+                "playing_status": {
+                    "card1": 1034,
+                    "card2": 259,
+                    "action_seatid": 0,
+                    "call_need_chips": "41620",
+                    "max_chipin": "1789482",
+                },
+            },
+        )
+
+        assert out is None
+        assert fake.hole_cards == []
+        assert fake.requests == []
+
+    def test_enter_room_rsp_rebuilds_hand_when_gameid_changed_before_restore(self) -> None:
+        b, fake = self._bridge()
+        b._current_gameid = "old-hand"
+        b._hole_cards_count = 2
+
+        out = b.handle(
+            "pb.EnterRoomRSP",
+            {
+                "code": 0,
+                "roomid": 123,
+                "game_type": 10010101,
+                "room_info": {"bb": "10", "sb": "5"},
+                "table_status": {
+                    "is_playing": True,
+                    "action_idx": 0,
+                    "d_idx": 2,
+                    "stage": 1,
+                    "gameid": "new-hand",
+                    "seat": [
+                        {
+                            "seatid": 0,
+                            "action_type": 5,
+                            "player": {"uid": "99", "name": "Hero"},
+                            "hand_chips": "1000",
+                        },
+                        {
+                            "seatid": 1,
+                            "action_type": 0,
+                            "player": {"uid": "-1"},
+                            "hand_chips": "0",
+                        },
+                        {
+                            "seatid": 2,
+                            "action_type": 5,
+                            "player": {"uid": "100", "name": "Villain"},
+                            "hand_chips": "1000",
+                        },
+                    ],
+                },
+                "playing_status": {
+                    "card1": 782,
+                    "card2": 1037,
+                    "action_seatid": 0,
+                    "call_need_chips": "10",
+                    "min_chipin": "20",
+                    "max_chipin": "1000",
+                    "action_time": 3,
+                },
+            },
+        )
+
+        assert out[0] == "pb.ActionREQ"
+        assert fake.hands
+        assert len(fake.hands[0]["players"]) == 2
+        assert fake.hole_cards == [["Ah", "Ks"]]
+        assert fake.requests[0]["to_call"] == 10
+
+    def test_action_inject_guard_rejects_stale_hand(self) -> None:
+        b, _fake = self._bridge()
+        b._current_gameid = "game-1"
+        b._hand_seq = 7
+
+        guard = b.injection_guard_for(("pb.ActionREQ", {"action_type": 2}, 1.0))
+
+        assert guard == ("game-1", 7)
+        assert b.injection_guard_is_current(guard)
+        b._current_gameid = "game-2"
+        assert not b.injection_guard_is_current(guard)
+        assert b.injection_guard_for(("pb.ShowMyCardREQ", {"pos": 1}, 0.0)) is None
+
+
+def test_dealer_info_passes_positions_to_api(monkeypatch) -> None:
+    calls = []
+
+    class FakeAPI:
+        def new_hand(self, **kwargs):
+            calls.append(kwargs)
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._my_seat = 0
+    b._seat_uids = {0: "100", 2: "200", 5: "500"}
+    monkeypatch.setattr(b, "_ensure_api", lambda: True)
+
+    b._on_dealer_info(
+        {
+            "dealer": 2,
+            "start_info": [
+                {"seatid": 5, "chips": 200},
+                {"seatid": 0, "chips": 200},
+                {"seatid": 2, "chips": 200},
+            ],
+            "gameid": "pos1",
+        }
+    )
+
+    positions = {p.player_id: p.position for p in calls[0]["players"]}
+    seat_indices = {p.player_id: p.seat_index for p in calls[0]["players"]}
+    assert calls[0]["dealer_id"] == 200
+    assert positions == {
+        100: "BB",
+        200: "BTN",
+        500: "SB",
+    }
+    assert seat_indices == {100: 0, 200: 2, 500: 5}
+
+
+def test_dealer_info_uses_server_blind_seats_for_positions(monkeypatch) -> None:
+    calls = []
+
+    class FakeAPI:
+        def new_hand(self, **kwargs):
+            calls.append(kwargs)
+
+        def disable_external_decision_current_hand(self, reason):
+            self.disabled_reason = reason
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._my_seat = 2
+    b._seat_uids = {
+        0: "10523070",
+        1: "10671762",
+        2: "10262053",
+        3: "10754527",
+        4: "10473646",
+    }
+    monkeypatch.setattr(b, "_ensure_api", lambda: True)
+
+    b._on_dealer_info(
+        {
+            "dealer": 1,
+            "small_blind": 3,
+            "big_blind": 4,
+            "start_info": [
+                {"seatid": 3, "chips": 127194},
+                {"seatid": 4, "chips": 24539},
+                {"chips": 28647},
+                {"seatid": 1, "chips": 83264},
+                {"seatid": 2, "chips": 100000},
+            ],
+            "gameid": "force-bb-layout",
+        }
+    )
+
+    positions = {p.player_id: p.position for p in calls[0]["players"]}
+    seat_indices = {p.player_id: p.seat_index for p in calls[0]["players"]}
+    assert positions[10671762] == "BTN"
+    assert positions[10754527] == "SB"
+    assert positions[10473646] == "BB"
+    assert positions[10523070] == "UTG"
+    assert positions[10262053] == "UTG+1"
+    assert seat_indices[10523070] == 0
+    assert seat_indices[10671762] == 1
+    assert seat_indices[10262053] == 2
+    assert seat_indices[10754527] == 3
+    assert seat_indices[10473646] == 4
+    assert not getattr(b._api, "disabled_reason", "")
+
+
+def test_force_big_blind_keeps_external_engine_available_for_current_hand() -> None:
+    class FakeAPI:
+        def __init__(self):
+            self.disabled_reason = ""
+
+        def disable_external_decision_current_hand(self, reason):
+            self.disabled_reason = reason
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._my_seat = 2
+
+    b._on_action_brc(
+        {"seatid": 2, "action_type": 11, "chips": 1000, "hand_chips": 99000}
+    )
+
+    assert b._api.disabled_reason == ""
+    assert b._my_forced_post_this_street is True
+    assert b._my_bet == 1000
+
+
+def test_pending_gamedata_seed_migrates_legacy_archive_before_get() -> None:
+    class FakeBot:
+        def __init__(self):
+            self.opponent_model = OpponentModel()
+
+    class FakeAPI:
+        def __init__(self):
+            self._bot = FakeBot()
+            self.hands = []
+
+        def new_hand(self, **kwargs):
+            self.hands.append(kwargs)
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._my_seat = 0
+    b._seat_names = {0: "Hero", 2: "LegacyName"}
+    b._seat_uids = {0: "999", 2: "1001"}
+    b._api._bot.opponent_model._name_archive["LegacyName"] = OpponentStats(
+        hands_seen=35,
+        fold_count=9,
+    )
+    b._pending_seeds = {
+        1001: {
+            "play_times": 20,
+            "pool_entry_rate": 5000,
+            "add_before_flipping_rate": 2000,
+            "show_hand_rate": 2500,
+            "active_rate": 1000,
+        }
+    }
+
+    b._on_dealer_info(
+        {
+            "dealer": 0,
+            "start_info": [
+                {"seatid": 0, "chips": 200},
+                {"seatid": 2, "chips": 200},
+            ],
+            "gameid": "legacy-seed",
+        }
+    )
+
+    om = b._api._bot.opponent_model
+    stats = om.get(1001)
+    assert "LegacyName" not in om._name_archive
+    assert stats.hands_seen == 20
+    assert stats.fold_count == 9
+    assert om._id_to_name[1001] == "LegacyName"
+
+
+def test_pending_gamedata_seed_uses_cached_name_when_player_not_in_hand() -> None:
+    class FakeBot:
+        def __init__(self):
+            self.opponent_model = OpponentModel()
+
+    class FakeAPI:
+        def __init__(self):
+            self._bot = FakeBot()
+
+        def new_hand(self, **kwargs):
+            pass
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._my_seat = 0
+    b._seat_names = {0: "Hero"}
+    b._seat_uids = {0: "999"}
+    b._pending_seeds = {
+        1001: {
+            "name": "CachedName",
+            "data": {
+                "play_times": 20,
+                "pool_entry_rate": 5000,
+                "add_before_flipping_rate": 2000,
+                "show_hand_rate": 2500,
+                "active_rate": 1000,
+            },
+        }
+    }
+
+    b._on_dealer_info(
+        {
+            "dealer": 0,
+            "start_info": [{"seatid": 0, "chips": 200}],
+            "gameid": "cached-name-seed",
+        }
+    )
+
+    om = b._api._bot.opponent_model
+    assert om.get(1001).hands_seen == 20
+    assert om._id_to_name[1001] == "CachedName"
+
+
+def test_gamedata_fetch_without_event_loop_uses_thread_fallback(monkeypatch) -> None:
+    class FakeBot:
+        def __init__(self):
+            self.opponent_model = OpponentModel()
+
+    class FakeAPI:
+        def __init__(self):
+            self._bot = FakeBot()
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    calls = []
+
+    def fake_start(uid: int, seat: int, name: str = "") -> None:
+        calls.append((uid, seat, name))
+        b._apply_gamedata_fetch_result(
+            uid,
+            seat,
+            name,
+            {
+                "code": 0,
+                "data": {
+                    "play_times": 20,
+                    "pool_entry_rate": 5000,
+                    "add_before_flipping_rate": 2000,
+                    "show_hand_rate": 2500,
+                    "active_rate": 1000,
+                },
+            },
+        )
+
+    monkeypatch.setattr(b, "_start_gamedata_fetch_thread", fake_start)
+
+    seat_status = {
+        "seatid": 2,
+        "player": {"uid": 1001, "name": "Villain"},
+    }
+    b._trigger_gamedata_fetch(seat_status)
+    b._trigger_gamedata_fetch(seat_status)
+
+    assert calls == [(1001, 2, "Villain")]
+    om = b._api._bot.opponent_model
+    assert om.get(1001).hands_seen == 20
+    assert om._id_to_name[1001] == "Villain"
+
+
+def test_gamedata_thread_fallback_cleans_up(monkeypatch) -> None:
+    b = BotBridge()
+    calls = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    def fake_fetch(uid: int, seat: int, name: str = "") -> None:
+        entered.set()
+        release.wait(timeout=1.0)
+        calls.append((uid, seat, name))
+
+    monkeypatch.setattr(b, "_do_gamedata_fetch_sync", fake_fetch)
+
+    b._start_gamedata_fetch_thread(1001, 2, "Villain")
+    assert entered.wait(timeout=1.0)
+    threads = list(b._gamedata_threads)
+    assert len(threads) == 1
+    release.set()
+    threads[0].join(timeout=1.0)
+
+    assert calls == [(1001, 2, "Villain")]
+    assert not b._gamedata_threads
+
+
+def test_robot_snapshot_excludes_self_uid(monkeypatch) -> None:
+    b = BotBridge()
+    b._my_seat = 0
+    b._my_uid = "99"
+    b._seat_uids = {0: "99", 1: "88"}
+    b._seat_names = {0: "me", 1: "robot"}
+    monkeypatch.setattr("pf_intercept.bot._load_known_robot_uids", lambda: {"99", "88"})
+
+    b._snapshot_current_hand_robots([0, 1])
+
+    assert b._current_hand_robot_seats == {1}
+    assert b._current_hand_robot_uids == {1: "88"}
+
+
+def test_hand_card_rsp_does_not_auto_show_hero_cards() -> None:
+    class FakeAPI:
+        def __init__(self):
+            self.cards = []
+
+        def deal_hole_cards(self, cards):
+            self.cards.append(cards)
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._current_gameid = "game-1"
+
+    out = b.handle("pb.HandCardRSP", {"card1": 270, "card2": 1038})
+
+    assert b._api.cards == [["Ad", "As"]]
+    assert out is None
+
+
+def test_show_my_hole_cards_queues_two_requests_for_next_handle() -> None:
+    b = BotBridge()
+    b._current_gameid = "game-1"
+
+    assert b.show_my_hole_cards() == 2
+
+    assert b.handle("pb.RoundOverBRC", {}) == [
+        ("pb.ShowMyCardREQ", {"gameid": "game-1", "pos": 1, "flag": 1}, 0.0),
+        ("pb.ShowMyCardREQ", {"gameid": "game-1", "pos": 2, "flag": 1}, 0.05),
+    ]
+
+
+def test_show_my_card_brc_is_not_watched_but_showdown_messages_are() -> None:
+    assert "pb.ShowMyCardBRC" not in config.WATCH_S2C
+    assert "pb.ShowHandRSP" in config.WATCH_S2C
+    assert "pb.WinnerRSP" in config.WATCH_S2C
+
+
+def test_pure_bluff_river_does_not_show_hole_cards_before_action_req() -> None:
+    class FakeAPI:
+        def request_action(self, **kwargs):
+            return BotDecision(action="raise", amount=120.0)
+
+        def last_decision_diagnostics(self):
+            return {"final_purpose": "pure_bluff_river"}
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._my_seat = 0
+    b._current_gameid = "game-1"
+    b._hole_cards_count = 2
+    b._stage = 4
+    b._pot = 100
+    b._my_chips = 1000
+    b._all_seats = [0, 1]
+
+    out = b.handle("pb.ActionNotifyBRC", {"seatid": 0, "call_need_chips": 0})
+
+    assert out[0] == "pb.ActionREQ"
+    assert out[1] == {"action_type": 4, "chips": 120}
+
+
+def test_non_pure_bluff_raise_does_not_show_hole_cards() -> None:
+    class FakeAPI:
+        def request_action(self, **kwargs):
+            return BotDecision(action="raise", amount=120.0)
+
+        def last_decision_diagnostics(self):
+            return {"final_purpose": "thick_value_bet"}
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._my_seat = 0
+    b._current_gameid = "game-1"
+    b._hole_cards_count = 2
+    b._stage = 4
+    b._pot = 100
+    b._my_chips = 1000
+    b._all_seats = [0, 1]
+
+    out = b.handle("pb.ActionNotifyBRC", {"seatid": 0, "call_need_chips": 0})
+
+    assert out[0] == "pb.ActionREQ"
+    assert out[1] == {"action_type": 4, "chips": 120}
+
 
 class TestBotBridgeProfitLock:
     def _next_hand_dealer(self, bridge: BotBridge, gameid: str = "t_next"):
-        """盈利锁仓达标后需再收到一手 DealerInfo 才会注入 LeaveRoomREQ。"""
+        """Start the next hand; profit-lock no longer emits LeaveRoomREQ here."""
         return bridge.handle(
             "pb.DealerInfoRSP",
             {
@@ -125,29 +897,35 @@ class TestBotBridgeProfitLock:
                 "profit": [{"uid": "99", "chips": profit}],
             },
         )
-        assert out is None
+        assert out == ("pb.DelayLeaveRoomREQ", {"flag": True}, 0.0)
         assert b._profit_lock_deferred is not None
         assert b._profit_lock_deferred["roomid"] == rid
         assert b._profit_lock_deferred["byin_chips"] == int(100 * bb)
-        assert not b._profit_lock_award_rebuy_after_enter
-
-        out_leave = self._next_hand_dealer(b)
-        assert out_leave[0] == "pb.LeaveRoomREQ"
-        assert out_leave[1] == {"seat_reserve": bool(getattr(config, "PROFIT_LOCK_LEAVE_SEAT_RESERVE", True))}
-        assert out_leave[2] == 0.0
-        assert b._profit_lock_deferred is None
         assert b._profit_lock_reenter is not None
         assert b._profit_lock_reenter["roomid"] == rid
         assert b._profit_lock_reenter["byin_chips"] == int(100 * bb)
-        assert b._profit_lock_award_rebuy_after_enter
+        assert not b._profit_lock_award_rebuy_after_enter
+
+        out_delay = b.handle("pb.DelayLeaveRoomRSP", {"code": 0, "flag": True})
+        assert out_delay is None
+        assert b._profit_lock_deferred is not None
+        assert b._profit_lock_reenter is not None
+        assert b._profit_lock_reenter["delay_leave_confirmed"] is True
+        assert not b._profit_lock_award_rebuy_after_enter
 
         out2 = b.handle("pb.LeaveRoomRSP", {"code": 0})
-        assert out2[0] == "pb.EnterRoomREQ"
-        assert out2[1]["roomid"] == rid
-        assert out2[1]["byin_chips"] == 200
-        assert out2[1]["uid"] == 99
+        assert out2[0] == "pb.UserValueREQ"
+        assert out2[1]["type"] == 10100001
+        assert b._profit_lock_deferred is None
+        assert b._bankroll_pending_action is not None
+        assert b._bankroll_pending_action["kind"] == "profit_lock"
+        out3 = b.handle("pb.UserValueRSP", {"type": 10100001, "value": 10_000})
+        assert out3[0] == "pb.EnterRoomREQ"
+        assert out3[1]["roomid"] == rid
+        assert out3[1]["byin_chips"] == 200
+        assert out3[1]["uid"] == 99
         exp_delay = max(0.0, min(60.0, float(getattr(config, "PROFIT_LOCK_REENTER_DELAY_SEC", 2.0))))
-        assert out2[2] == exp_delay
+        assert out3[2] == exp_delay
         assert b._profit_lock_reenter is None
         assert b._profit_lock_award_rebuy_after_enter
 
@@ -177,15 +955,17 @@ class TestBotBridgeProfitLock:
             "pb.WinnerRSP",
             {"winner": [], "profit": [{"uid": "99", "chips": thr - 200}]},
         )
-        self._next_hand_dealer(b)
+        b.handle("pb.DelayLeaveRoomRSP", {"code": 0, "flag": True})
         out = b.handle(
             "pb.LeaveRoomRSP",
             {"roomid": rid, "game_type": 1},
         )
-        assert out is not None and out[0] == "pb.EnterRoomREQ"
-        assert out[1]["roomid"] == rid
-        assert out[1]["byin_chips"] == 200
-        assert len(out) == 3
+        assert out is not None and out[0] == "pb.UserValueREQ"
+        enter = b.handle("pb.UserValueRSP", {"type": 10100001, "value": 10_000})
+        assert enter is not None and enter[0] == "pb.EnterRoomREQ"
+        assert enter[1]["roomid"] == rid
+        assert enter[1]["byin_chips"] == 200
+        assert len(enter) == 3
 
     def test_leave_room_fail_cancels(self) -> None:
         b = BotBridge(max_auto_rebuy=3)
@@ -198,12 +978,40 @@ class TestBotBridgeProfitLock:
             "pb.WinnerRSP",
             {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
         )
-        self._next_hand_dealer(b)
+        b.handle("pb.DelayLeaveRoomRSP", {"code": 0, "flag": True})
         out = b.handle("pb.LeaveRoomRSP", {"code": -1})
         assert out is None
         assert b._profit_lock_reenter is None
         assert not b._profit_lock_award_rebuy_after_enter
         assert b._max_auto_rebuy == 3
+        assert b._bankroll_samples == []
+
+    def test_enter_room_rsp_before_leave_success_does_not_award(self) -> None:
+        b = BotBridge(max_auto_rebuy=3)
+        b._my_uid = "99"
+        self._bootstrap_table(b)
+        b._uid_to_seat["99"] = 0
+        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * 2.0)
+        b.handle(
+            "pb.WinnerRSP",
+            {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
+        )
+
+        out = b.handle(
+            "pb.EnterRoomRSP",
+            {
+                "code": 0,
+                "roomid": 20242379,
+                "game_type": 10010101,
+                "room_info": {"bb": 2.0, "sb": 1.0, "lobby_coin": 10100001},
+                "table_status": {"seat": []},
+            },
+        )
+
+        assert out is None
+        assert b._max_auto_rebuy == 3
+        assert b._bankroll_samples == []
+        assert not b._profit_lock_award_rebuy_after_enter
 
     def test_enter_room_fail_no_award(self) -> None:
         b = BotBridge(max_auto_rebuy=3)
@@ -215,8 +1023,9 @@ class TestBotBridgeProfitLock:
             "pb.WinnerRSP",
             {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
         )
-        self._next_hand_dealer(b)
-        b.handle("pb.LeaveRoomRSP", {"code": 0})
+        b.handle("pb.DelayLeaveRoomRSP", {"code": 0, "flag": True})
+        assert b.handle("pb.LeaveRoomRSP", {"code": 0})[0] == "pb.UserValueREQ"
+        assert b.handle("pb.UserValueRSP", {"type": 10100001, "value": 10_000})[0] == "pb.EnterRoomREQ"
         qs = b.handle(
             "pb.EnterRoomRSP",
             {"code": -1, "roomid": 20242379, "room_info": {"bb": 2.0}, "table_status": {"seat": []}},
@@ -229,11 +1038,44 @@ class TestBotBridgeProfitLock:
         assert b._max_auto_rebuy == 3
         assert not b._profit_lock_award_rebuy_after_enter
 
+    def test_delay_leave_fail_cancels(self) -> None:
+        b = BotBridge(max_auto_rebuy=3)
+        b._my_uid = "99"
+        self._bootstrap_table(b)
+        b._uid_to_seat["99"] = 0
+        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * 2.0)
+        out = b.handle(
+            "pb.WinnerRSP",
+            {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
+        )
+        assert out == ("pb.DelayLeaveRoomREQ", {"flag": True}, 0.0)
+        assert b.handle("pb.DelayLeaveRoomRSP", {"code": 121, "flag": False}) is None
+        assert b._profit_lock_deferred is None
+        assert b._profit_lock_reenter is None
 
-class TestProfitLockDisplayPnL:
-    """Session PnL is display-only. It accumulates at leave-success
-    (+= table_chips) and gets debited on rebuy/reenter (-= 100 BB).
-    The trigger condition is on-table chips (my_final), NOT PnL.
+    def test_next_dealer_retries_unconfirmed_delay_leave(self) -> None:
+        b = BotBridge(max_auto_rebuy=3)
+        b._my_uid = "99"
+        self._bootstrap_table(b)
+        b._uid_to_seat["99"] = 0
+        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * 2.0)
+        b.handle(
+            "pb.WinnerRSP",
+            {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
+        )
+
+        retry = self._next_hand_dealer(b)
+        assert retry == ("pb.DelayLeaveRoomREQ", {"flag": True}, 0.0)
+        assert b._profit_lock_reenter is not None
+        assert b._profit_lock_reenter["delay_leave_retry_sent"] is True
+
+        assert self._next_hand_dealer(b, gameid="t_next2") is None
+
+
+class TestBankrollSampling:
+    """Session bankroll display comes from UserValueRSP wallet samples.
+    The profit-lock trigger condition is still on-table chips (my_final), not
+    bankroll delta.
     """
 
     def _setup(self, bb: float = 2.0, room_id: int = 20242379):
@@ -244,44 +1086,141 @@ class TestProfitLockDisplayPnL:
         b._uid_to_seat["99"] = 0
         return b
 
-    def test_winning_a_hand_does_not_change_pnl(self):
-        """Per-hand profit does NOT accumulate into _session_pnl_chips.
-        PnL is booked only at leave-success + rebuy/reenter.
-        (Earlier versions tried per-hand delta; rake made it noisy.)"""
+    def test_winning_a_hand_does_not_record_bankroll_sample(self):
+        """Per-hand profit does not update the bankroll dashboard by itself."""
         b = self._setup()
-        assert b._session_pnl_chips == 0.0
+        assert b.bankroll_dashboard()["base_total_chips"] is None
         b.handle(
             "pb.WinnerRSP",
             {"winner": [], "profit": [{"uid": "99", "chips": 150}]},
         )
-        assert b._session_pnl_chips == 0.0
+        assert b.bankroll_dashboard()["base_total_chips"] is None
 
-    def test_auto_rebuy_debits_pnl(self):
-        """Hero busts → NoticeReby → auto rebuy path debits 100 BB."""
+    def test_winning_a_hand_records_bankroll_chart_point_after_baseline(self):
+        """After wallet baseline, every settled hand adds one bankroll chart point."""
+        b = self._setup()
+        b.handle("pb.UserValueRSP", {"type": 10100001, "value": 50_000})
+        out = b.handle(
+            "pb.WinnerRSP",
+            {"winner": [], "profit": [{"uid": "99", "chips": 150}]},
+        )
+        assert out is None
+        dash = b.bankroll_dashboard()
+        assert len(dash["samples"]) == 1
+        assert len(dash["hand_points"]) == 1
+        point = dash["hand_points"][0]
+        assert point["hand_no"] == b._hand_seq
+        assert point["wallet_chips"] == 50_000
+        assert point["table_chips"] == 350
+        assert point["total_chips"] == 50_350
+        assert point["delta_chips"] == 150
+        assert point["hand_delta_chips"] == 150
+        assert point["buyin_seq"] == 1
+
+    def test_bankroll_chart_points_mark_buyin_segments(self):
+        """Chart points carry buy-in sequence so the Web chart can segment sessions."""
+        b = self._setup()
+        b.handle("pb.UserValueRSP", {"type": 10100001, "value": 50_000})
+        b.handle("pb.WinnerRSP", {"winner": [], "profit": [{"uid": "99", "chips": 10}]})
+        b.handle("pb.RebyBRC", {"seatid": 0, "chips": 200})
+        b._hand_start_chips[0] = b._my_chips
+        b.handle("pb.WinnerRSP", {"winner": [], "profit": [{"uid": "99", "chips": 20}]})
+
+        points = b.bankroll_dashboard()["hand_points"]
+        assert [point["buyin_seq"] for point in points] == [1, 2]
+        assert points[-1]["table_chips"] == 430
+        assert points[-1]["hand_delta_chips"] == 20
+
+    def test_auto_rebuy_samples_bankroll_before_rebuy(self):
+        """Hero busts → NoticeReby → UserValueREQ → UserValueRSP → RebyREQ."""
         b = self._setup()
         bb = 2.0
         rebuy_chips = int(100 * bb)
-        b.handle("pb.NoticeRebyRSP", {"seatid": 0, "reby_left_time": 30})
-        assert b._session_pnl_chips == -rebuy_chips
+        out = b.handle("pb.NoticeRebyRSP", {"seatid": 0, "reby_left_time": 30})
+        assert out[0] == "pb.UserValueREQ"
+        assert b._bankroll_pending_action["kind"] == "auto_rebuy"
+        assert b._current_table_chips() == 0
 
-    def test_full_profit_lock_cycle_books_table_chips_minus_buyin(self):
-        """Full cycle: trigger → leave → reenter.
-        PnL gain = table_chips brought away − 100 BB reenter buyin."""
+        reby = b.handle("pb.UserValueRSP", {"type": 10100001, "value": 50_000})
+        assert reby == ("pb.RebyREQ", {"is_reby": True, "chips": rebuy_chips}, 0.0)
+        dash = b.bankroll_dashboard()
+        assert dash["base_total_chips"] == 50_000
+        assert dash["session_delta_chips"] == 0
+
+    def test_manual_leave_clears_table_chips_and_refreshes_wallet(self):
+        """普通离桌后 Web 资金看板不能继续显示旧桌上筹码。"""
+        b = self._setup()
+        b.handle("pb.UserValueRSP", {"type": 10100001, "value": 50_000})
+        assert b.bankroll_dashboard()["table_chips"] == 200
+
+        out = b.handle("pb.LeaveRoomRSP", {"code": 0})
+
+        assert out == ("pb.UserValueREQ", {"type": 10100001}, 0.0)
+        assert b.bankroll_dashboard()["table_chips"] == 0
+        b.handle("pb.UserValueRSP", {"type": 10100001, "value": 50_200})
+        dash = b.bankroll_dashboard()
+        assert dash["wallet_chips"] == 50_200
+        assert dash["current_total_chips"] == 50_200
+        assert dash["session_delta_chips"] == 0
+
+    def test_stand_up_brc_clears_hero_table_chips(self):
+        b = self._setup()
+        b.handle("pb.UserValueRSP", {"type": 10100001, "value": 50_000})
+
+        out = b.handle("pb.StandUpBRC", {"seatid": 0})
+
+        assert out == ("pb.UserValueREQ", {"type": 10100001}, 0.0)
+        assert b.bankroll_dashboard()["table_chips"] == 0
+
+    def test_stand_up_rsp_clears_hero_table_chips(self):
+        b = self._setup()
+        b.handle("pb.UserValueRSP", {"type": 10100001, "value": 50_000})
+
+        out = b.handle("pb.StandUpRSP", {"code": 0})
+
+        assert out == ("pb.UserValueREQ", {"type": 10100001}, 0.0)
+        assert b.bankroll_dashboard()["table_chips"] == 0
+
+    def test_other_leave_room_brc_clears_hero_table_chips(self):
+        b = self._setup()
+        b.handle("pb.UserValueRSP", {"type": 10100001, "value": 50_000})
+
+        out = b.handle("pb.OtherLeaveRoomBRC", {"uid": 99, "roomid": 20242379})
+
+        assert out == ("pb.UserValueREQ", {"type": 10100001}, 0.0)
+        assert b.bankroll_dashboard()["table_chips"] == 0
+
+    def test_empty_table_snapshot_clears_stale_hero_table_chips(self):
+        b = self._setup()
+        b.handle("pb.UserValueRSP", {"type": 10100001, "value": 50_000})
+        assert b.bankroll_dashboard()["table_chips"] == 200
+
+        b._sync_stacks_from_table_snapshot({"seat": []})
+
+        assert b.bankroll_dashboard()["table_chips"] == 0
+
+    def test_full_profit_lock_cycle_samples_after_leave_before_reenter(self):
+        """Full cycle: trigger → leave → UserValueRSP sample → reenter."""
         b = self._setup()
         bb = 2.0
         thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)   # 800 for 400 BB at BB=2
         # Bring on-table chips to exactly threshold (hero started 200).
-        b.handle(
+        out = b.handle(
             "pb.WinnerRSP",
             {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
         )
+        assert out == ("pb.DelayLeaveRoomREQ", {"flag": True}, 0.0)
         assert b._profit_lock_deferred is not None
-        # Next hand DealerInfo → LeaveRoomREQ
-        TestBotBridgeProfitLock()._next_hand_dealer(b)
-        # LeaveRoomRSP success → PnL += table_chips (= thr_chips)
-        b.handle("pb.LeaveRoomRSP", {"code": 0})
-        assert b._session_pnl_chips == thr_chips
-        # EnterRoomRSP success → buyin deducted on award path (-100 BB)
+        b.handle("pb.DelayLeaveRoomRSP", {"code": 0, "flag": True})
+        out = b.handle("pb.LeaveRoomRSP", {"code": 0})
+        assert out[0] == "pb.UserValueREQ"
+        assert b._profit_lock_deferred is None
+        assert b._bankroll_pending_action["kind"] == "profit_lock"
+        enter = b.handle("pb.UserValueRSP", {"type": 10100001, "value": 60_000})
+        assert enter[0] == "pb.EnterRoomREQ"
+        assert b._bankroll_profit_lock_count == 1
+        assert b.bankroll_dashboard()["current_total_chips"] == 60_000
+        # EnterRoomRSP success still awards one extra auto-rebuy allowance.
         b.handle(
             "pb.EnterRoomRSP",
             {
@@ -290,47 +1229,47 @@ class TestProfitLockDisplayPnL:
                 "table_status": {"seat": []},
             },
         )
-        assert b._session_pnl_chips == thr_chips - int(100 * bb)
+        assert b._max_auto_rebuy == 6
 
-    def test_trigger_uses_on_table_not_pnl(self):
-        """Regression: even if PnL is 0 (first-ever trigger), on-table
+    def test_trigger_uses_on_table_not_bankroll_sample(self):
+        """Regression: even if no bankroll baseline exists, on-table
         chips above threshold MUST fire. This is the dead-lock regression —
-        earlier code gated on PnL and the first trigger was unreachable."""
+        earlier code gated on session PnL and the first trigger was unreachable."""
         b = self._setup()
         bb = 2.0
         thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)
-        assert b._session_pnl_chips == 0.0     # starting state
+        assert b.bankroll_dashboard()["base_total_chips"] is None
         out = b.handle(
             "pb.WinnerRSP",
             {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
         )
-        assert out is None
+        assert out == ("pb.DelayLeaveRoomREQ", {"flag": True}, 0.0)
         assert b._profit_lock_deferred is not None, (
             "first-ever trigger MUST fire from on-table chips alone "
             "(dead-lock regression: trigger that gated on PnL was unreachable)"
         )
 
-    def test_trigger_ignores_negative_pnl_history(self):
-        """Even after many rebuys (PnL deep negative), if hero's on-table
-        stack crosses threshold in one lucky hand, profit_lock fires."""
+    def test_trigger_ignores_negative_bankroll_history(self):
+        """Even if sampled bankroll delta is negative, on-table threshold fires."""
         b = self._setup()
         bb = 2.0
         thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)
-        # Simulate heavy prior losses (display-only)
-        b._session_pnl_chips = -5 * int(100 * bb)    # -500 BB
+        b.handle("pb.UserValueRSP", {"type": 10100001, "value": 100_000})
+        b.handle("pb.UserValueRSP", {"type": 10100001, "value": 90_000})
+        assert b.bankroll_dashboard()["session_delta_chips"] < 0
         # But hero's on-table chips just crossed threshold.
         out = b.handle(
             "pb.WinnerRSP",
             {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
         )
-        assert out is None
+        assert out == ("pb.DelayLeaveRoomREQ", {"flag": True}, 0.0)
         assert b._profit_lock_deferred is not None, (
-            "PnL is display-only — trigger must still fire on on-table chips"
+            "bankroll display is separate — trigger must still fire on on-table chips"
         )
 
 
-def test_enter_room_syncs_hand_start_chips_from_table() -> None:
-    """重进房后必须用 table_status.hand_chips 覆盖 DealerInfo 留下的 _hand_start_chips。"""
+def test_enter_room_syncs_current_and_start_chips_from_table() -> None:
+    """重进房后 hand_chips 是当前筹码，begin_chips 是 WinnerRSP.profit 结算基准。"""
     b = BotBridge(max_auto_rebuy=3)
     b._my_uid = "10086"
     b._table_room_id = 1
@@ -349,13 +1288,14 @@ def test_enter_room_syncs_hand_start_chips_from_table() -> None:
                         "seatid": 5,
                         "player": {"uid": "10086", "name": "me"},
                         "hand_chips": "100000",
+                        "begin_chips": "120000",
                     },
                 ],
             },
         },
     )
     assert b._my_seat == 5
-    assert b._hand_start_chips[5] == 100000
+    assert b._hand_start_chips[5] == 120000
     assert b._seat_chips[5] == 100000
 
 
@@ -402,6 +1342,69 @@ def test_enter_room_uses_sngroom_info_blinds_when_room_info_empty() -> None:
     assert b._api is not None
     assert b._api.big_blind == 50.0
     assert b._api.small_blind == 25.0
+    assert b._api._runtime_calibration_recorder is None
+    assert b._api._runtime_collection_skip_reason == "sng"
+
+
+def test_sng_and_friend_rooms_disable_runtime_collection() -> None:
+    b = BotBridge(max_auto_rebuy=3)
+    b._my_seat = 0
+    b.handle(
+        "pb.EnterRoomRSP",
+        {
+            "code": 0,
+            "roomid": 20399792,
+            "game_type": 10050301,
+            "room_info": {},
+            "sngroom_info": {"blind_level": 1, "sb": "25", "bb": "50"},
+            "table_status": {"seat": []},
+        },
+    )
+    b.handle(
+        "pb.DealerInfoRSP",
+        {
+            "dealer": 0,
+            "small_blind": 25,
+            "big_blind": 50,
+            "start_info": [{"chips": "1000"}, {"seatid": 1, "chips": "1000"}],
+            "gameid": "sng1",
+        },
+    )
+
+    assert b._skip_runtime_collection is True
+    assert b._skip_runtime_collection_reason == "sng"
+    assert b._api is not None
+    assert b._api._runtime_calibration_recorder is None
+
+    b.handle(
+        "pb.EnterRoomRSP",
+        {
+            "code": 0,
+            "roomid": 200001,
+            "game_type": 20010103,
+            "room_info": {"bb": 2.0, "sb": 1.0},
+            "table_status": {"seat": []},
+        },
+    )
+
+    assert b._skip_runtime_collection is True
+    assert b._skip_runtime_collection_reason == "friend_room"
+    assert b._api._runtime_calibration_recorder is None
+
+    b.handle(
+        "pb.EnterRoomRSP",
+        {
+            "code": 0,
+            "roomid": 20242379,
+            "game_type": 10010101,
+            "room_info": {"bb": 2.0, "sb": 1.0},
+            "table_status": {"seat": []},
+        },
+    )
+
+    assert b._skip_runtime_collection is False
+    assert b._skip_runtime_collection_reason == ""
+    assert b._api._runtime_calibration_recorder is not None
 
 
 def test_blind_status_updates_sng_blinds_from_cached_schedule() -> None:
@@ -629,7 +1632,9 @@ def test_sng_suppresses_bot_notifications(monkeypatch) -> None:
     b._check_hand_swing(2000)
     out = b.handle("pb.NoticeRebyRSP", {"seatid": 0, "reby_left_time": 30})
 
-    assert out is not None and out[0] == "pb.RebyREQ"
+    assert out is not None and out[0] == "pb.UserValueREQ"
+    reby = b.handle("pb.UserValueRSP", {"type": 10100001, "value": 50_000})
+    assert reby is not None and reby[0] == "pb.RebyREQ"
     assert notified == []
 
 
@@ -700,51 +1705,58 @@ def test_hand_swing_includes_last_hand_detail(monkeypatch) -> None:
     b._my_seat = 0
     b._bb = 50.0
     b._hand_start_chips[0] = 100_000
+    b._hand_seq = 12
     b._api = FakeAPI()
 
     b._check_hand_swing(1_000)
 
     assert notified[0][1]["hand_detail"] == "手牌: A♠ A♥\n行动:\n翻前: 我加10bb"
+    assert notified[0][1]["hand_no"] == 12
+    assert "game_id" not in notified[0][1]
 
 
-def test_auto_collect_current_hand_calls_collcard_once(monkeypatch) -> None:
+def test_auto_collect_special_hand_calls_collcard(monkeypatch) -> None:
     import pf_intercept.bot as bot_mod
 
     calls = []
     monkeypatch.setattr(
         bot_mod,
         "_sync_collect_game",
-        lambda gameid, *, roomid=0, tid=1, reason="": calls.append(
-            (gameid, roomid, tid, reason)
-        ),
+        lambda gameid, **kwargs: calls.append((gameid, kwargs)) or {"code": 0},
     )
 
     b = BotBridge(max_auto_rebuy=3)
-    b._current_gameid = "g123"
+    b._current_gameid = "g-special"
     b._table_room_id = 42
-    b._table_tid = 7
+    b._table_tid = 1
 
     assert b._maybe_auto_collect_current_hand(["四条"]) is True
-    assert b._maybe_auto_collect_current_hand(["盈利50.0BB"]) is False
-    assert calls == [("g123", 42, 7, "四条")]
+    assert calls == [
+        (
+            "g-special",
+            {"roomid": 42, "tid": 1, "reason": "四条"},
+        )
+    ]
 
 
-def test_special_rooms_skip_auto_collect(monkeypatch) -> None:
+def test_auto_collect_special_hand_skips_sng_and_friend(monkeypatch) -> None:
     import pf_intercept.bot as bot_mod
 
     calls = []
     monkeypatch.setattr(
         bot_mod,
         "_sync_collect_game",
-        lambda gameid, *, roomid=0, tid=1, reason="": calls.append(gameid),
+        lambda gameid, **kwargs: calls.append((gameid, kwargs)) or {"code": 0},
     )
 
-    for attr in ("_is_sng_room", "_is_friend_room"):
-        b = BotBridge(max_auto_rebuy=3)
-        b._current_gameid = "g123"
-        setattr(b, attr, True)
-        assert b._maybe_auto_collect_current_hand(["四条"]) is False
+    b = BotBridge(max_auto_rebuy=3)
+    b._current_gameid = "g-sng"
+    b._is_sng_room = True
+    assert b._maybe_auto_collect_current_hand(["葫芦"]) is False
 
+    b._is_sng_room = False
+    b._is_friend_room = True
+    assert b._maybe_auto_collect_current_hand(["皇家同花顺"]) is False
     assert calls == []
 
 
@@ -753,8 +1765,100 @@ def test_profit_lock_threshold_in_config() -> None:
     assert config.PROFIT_LOCK_BB_THRESHOLD >= 1
 
 
-def test_room_escape_two_busts_then_quickstart() -> None:
+def test_runtime_settings_update_profit_lock_and_decision_engine(monkeypatch) -> None:
+    monkeypatch.setattr(config, "PROFIT_LOCK_BB_THRESHOLD", 400)
+    monkeypatch.setattr(config, "DECISION_ENGINE", "local")
+    monkeypatch.setattr(config, "PREFLOP_STICKY_POOL_ADJUST", True)
+    b = BotBridge(max_auto_rebuy=3)
+    b._bb = 10000.0
+
+    settings = b.update_runtime_settings(
+        profit_lock_bb=250,
+        decision_engine="g5_all",
+        preflop_sticky_pool_adjust=False,
+    )
+
+    assert b._max_auto_rebuy == 3
+    assert config.PROFIT_LOCK_BB_THRESHOLD == 250
+    assert config.DECISION_ENGINE == "g5_all"
+    assert config.PREFLOP_STICKY_POOL_ADJUST is False
+    assert settings["profit_lock_bb"] == 250
+    assert settings["decision_engine"] == "g5_all"
+    assert settings["preflop_sticky_pool_adjust"] is False
+    assert settings["profit_lock_chips"] == 2_500_000
+
+
+def test_runtime_settings_applies_decision_engine_to_existing_api(monkeypatch) -> None:
+    monkeypatch.setattr(config, "DECISION_ENGINE", "local")
+    b = BotBridge(max_auto_rebuy=3)
+
+    class Api:
+        def __init__(self) -> None:
+            self.values: list[str] = []
+
+        def set_decision_engine(self, value: str) -> dict:
+            self.values.append(value)
+            return {"requested": value}
+
+        def decision_engine_status(self) -> dict:
+            return {"requested": self.values[-1] if self.values else "local"}
+
+    api = Api()
+    b._api = api  # type: ignore[assignment]
+
+    settings = b.update_runtime_settings(decision_engine="g5")
+
+    assert api.values == ["g5"]
+    assert settings["decision_engine"] == "g5"
+    assert settings["decision_engine_status"] == {"requested": "g5"}
+
+
+def test_runtime_settings_applies_preflop_sticky_switch_to_existing_api(monkeypatch) -> None:
+    monkeypatch.setattr(config, "PREFLOP_STICKY_POOL_ADJUST", True)
+    b = BotBridge(max_auto_rebuy=3)
+
+    class Preflop:
+        sticky_pool_adjust = True
+
+    class Bot:
+        preflop = Preflop()
+
+    class Api:
+        _bot = Bot()
+
+        def decision_engine_status(self) -> dict:
+            return {}
+
+    b._api = Api()  # type: ignore[assignment]
+
+    settings = b.update_runtime_settings(preflop_sticky_pool_adjust=False)
+
+    assert config.PREFLOP_STICKY_POOL_ADJUST is False
+    assert b._api._bot.preflop.sticky_pool_adjust is False  # type: ignore[union-attr]
+    assert settings["preflop_sticky_pool_adjust"] is False
+
+
+def test_runtime_settings_accepts_cfr_decision_engine(monkeypatch) -> None:
+    monkeypatch.setattr(config, "DECISION_ENGINE", "local")
+    b = BotBridge(max_auto_rebuy=3)
+
+    settings = b.update_runtime_settings(decision_engine="cfr")
+
+    assert config.DECISION_ENGINE == "cfr"
+    assert settings["decision_engine"] == "cfr"
+
+
+def test_room_escape_two_busts_then_quickstart(monkeypatch) -> None:
     """连续破产 2 次（仍可自动续入）：第二弹离桌并以 QuickStart 换桌。"""
+    import pf_intercept.bot as bot_mod
+
+    notified = []
+    monkeypatch.setattr(
+        bot_mod,
+        "notify",
+        lambda event, **fields: notified.append((event, fields)),
+    )
+
     b = BotBridge(max_auto_rebuy=5)
     b._my_seat = 0
     b._bb = 1000.0
@@ -763,16 +1867,46 @@ def test_room_escape_two_busts_then_quickstart() -> None:
     b._session_lobby_coin = 10100001
     r1 = b.handle("pb.NoticeRebyRSP", {"seatid": 0, "reby_left_time": 30})
     assert r1 is not None
-    assert r1[0] == "pb.RebyREQ"
+    assert r1[0] == "pb.UserValueREQ"
+    reby = b.handle("pb.UserValueRSP", {"type": 10100001, "value": 1_000_000})
+    assert reby[0] == "pb.RebyREQ"
     assert b._room_escape_bust_count == 1
     assert b._auto_rebuy_done == 1
     r2 = b.handle("pb.NoticeRebyRSP", {"seatid": 0, "reby_left_time": 30})
     assert r2 is not None
     assert r2[0] == "pb.LeaveRoomREQ"
     assert r2[1]["seat_reserve"] is False
-    assert b._room_escape_reenter == {"quickstart": True}
+    assert b._auto_rebuy_done == 2
+    assert b._room_escape_reenter == {
+        "quickstart": True,
+        "bust_count": 2,
+        "bust_need": 2,
+        "byin_chips": 100_000,
+        "room_id": 42,
+        "big_blind": 1000,
+        "rebuy_window_sec": 30,
+    }
+    assert [event for event, _fields in notified] == ["auto_rebuy"]
     r3 = b.handle("pb.LeaveRoomRSP", {"code": 0})
     assert r3 is not None
-    assert r3[0] == "pb.QuickStartREQ"
-    assert r3[1]["byin_chips"] == 100_000
+    assert r3[0] == "pb.UserValueREQ"
+    r4 = b.handle("pb.UserValueRSP", {"type": 10100001, "value": 900_000})
+    assert notified[-1][0] == "room_escape"
+    assert notified[-1][1] == {
+        "bust_count": 2,
+        "bust_need": 2,
+        "byin_chips": 100_000,
+        "room_id": 42,
+        "big_blind": 1000,
+        "rebuy_window_sec": 30,
+        "current_total_chips": 900_000,
+        "wallet_chips": 900_000,
+        "table_chips": 0,
+        "session_delta_chips": -100_000,
+        "session_delta_bb": -100.0,
+    }
+    assert r4 is not None
+    assert r4[0] == "pb.QuickStartREQ"
+    assert r4[1]["byin_chips"] == 100_000
     assert b._room_escape_reenter is None
+    assert b._bankroll_room_escape_count == 1

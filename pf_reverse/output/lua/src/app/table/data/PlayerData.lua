@@ -3,6 +3,8 @@ local P = class("PlayerData")
 function P:ctor(index)
     self.index = index
     self.seatid = index
+    self.seat_index = index
+    self.show_index = index -- 显示在几号位
     self.on_seat = false
     self.chips = 0
     self.begin_chips = 0
@@ -29,6 +31,8 @@ function P:ctor(index)
 
     self.seat_reserve = false   -- setting out
 
+    self.equally_rate = 0   -- 平局率，百分比表示
+    self.last_equally_rate = 0
     self.win_rate = 0 -- 胜率，百分比表示
     self.last_win_rate = 0
 
@@ -37,11 +41,16 @@ function P:ctor(index)
 end
 
 function P:resetInfo(info, data)
+    if data:isMTT() and info.seat_index then
+        self.seat_index = info.seat_index + 1
+    end
 	self.chips = info.hand_chips or 0
     self.default_byin = info.default_byin or 0
 	self.seat_reserve = info.seat_reserve or false
 
 	self.bet_chip = info.destop_chips or 0
+    self.equally_rate = 0
+    self.last_equally_rate = 0
     self.win_rate = 0
     self.last_win_rate = 0
     self.begin_chips = info.begin_chips or self.chips
@@ -59,7 +68,7 @@ function P:resetInfo(info, data)
     else
         self.action_type = POKER_ACTION.SITED
     end
-	self.has_card = info.has_card
+	self:setHasCard(info.has_card)
 	if GF.isFoldAction(self.action_type) or (self.action_type == POKER_ACTION.NONE and self.last_action_type == POKER_ACTION.FOLD) then
 		self.is_fold = true
 	else
@@ -94,12 +103,21 @@ function P:resetBriefInfo(brief)
         self.role_id = brief.role_id
         self.skin_id = brief.skin_id
         self.user_type = brief.user_type
+        self.card_back = brief.card_back
+        if self.card_back == nil or self.card_back == 0 then
+            self.card_back = ItemModel:getDefaultDecoration(GPropKind.CardBack)
+        end
         if brief.animations then
             for k, animInfo in pairs(brief.animations) do
                 if animInfo.ftype == ACTION_TYPE.AllInEff then
                     self.allin_eff = animInfo.item_id
                 elseif animInfo.ftype == ACTION_TYPE.NameplateEff then
                     self.nameplate_eff = animInfo.item_id
+                elseif animInfo.ftype == ACTION_TYPE.CardFace then
+                    self.card_front = animInfo.item_id
+                    if self.card_front == nil or self.card_front == 0 then
+                        self.card_front = ItemModel:getDefaultDecoration(GPropKind.CardFace)
+                    end
                 end
             end
         end
@@ -115,13 +133,15 @@ function P:resetBriefInfo(brief)
         self.user_type = 0
         self.allin_eff = 0
         self.nameplate_eff = 0
+        self.card_front = 0
+        self.card_back = 0
     end
 end
 
 function P:resetSelfInfo()
 	self.uid = PlayerModel:getUid()
     if PlayerModel:getName() ~= "" then
-	    self.name = PlayerModel:getName()
+	    self.name = PlayerModel:getName(true)
 	    self.avatar = PlayerModel:getAvatar()
 	    self.gender = PlayerModel:getGender()
         self.vip_level = 0
@@ -131,7 +151,7 @@ end
 
 -- 清除手牌
 function P:clearCard()
-    self.has_card = false
+    self:setHasCard(false)
     self.hand_cards = nil
     self.is_fold = false
     self.bet_chip = 0
@@ -143,7 +163,7 @@ function P:clearCard()
 end
 
 function P:leaveFold()
-    self.has_card = false
+    self:setHasCard(false)
     self.hand_cards = nil
     self.is_fold = true
     self.action_type = POKER_ACTION.LEAVE_FOLD
@@ -172,7 +192,7 @@ function P:getPlayData()
 end
 
 function P:setPlayData(d)
-    self.has_card = d.has_card
+    self:setHasCard(d.has_card)
     self.is_fold = d.is_fold
     self.hand_cards = d.hand_cards
     self.bet_chip = d.bet_chip
@@ -186,7 +206,20 @@ function P:isAllin()
 end
 
 function P:isMe()
-    return self.uid == PlayerModel:getUid()
+    -- return self.uid == PlayerModel:getUid()
+    return self.seatid == GameModel.data:getMyPosition()
+end
+
+function P:getSeatIndex()
+    return self.seat_index
+end
+
+function P:setHasCard(flag)
+    self.has_card = flag
+end
+
+function P:isHasCardData()
+    return self.has_card and self.hand_cards and self.hand_cards[1] and self.hand_cards[1] > 0
 end
 
 return P

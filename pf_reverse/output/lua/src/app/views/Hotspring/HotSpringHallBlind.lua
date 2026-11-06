@@ -25,7 +25,7 @@ end
 
 function P:onShow()
     P.super.onShow(self)
-    bee.setTextGold(self.TextCount, _N(PlayerModel:getGold()))
+    bee.setTextGold(self.TextCount, _N2(PlayerModel:getGold()))
 end
 
 return P

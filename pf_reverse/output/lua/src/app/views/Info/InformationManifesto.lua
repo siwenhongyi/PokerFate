@@ -1,4 +1,4 @@
-local P = class("InformationManifesto", UiBase)
+local P = class("InformationManifesto", UiDialog)
 
 function P:onAwake()
     self.AnimRoot = self:find("AnimRoot")
@@ -6,6 +6,8 @@ function P:onAwake()
 
     self.TextNum = self:find("TextNum", self.Panel)
     self.InputFieldCxt = self:find("InputFieldCxt", self.Panel)
+
+    bee.checkInputField(self.InputFieldCxt, _T("LAB_INFO_038"))
 
     bee.addClick(self:find("CloseButton", self.Panel), function()
         self:hideUI()

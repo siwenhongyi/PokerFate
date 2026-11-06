@@ -262,8 +262,6 @@ async def _run(skip_mitmweb: bool, skip_dns: bool, proxy_argv: list[str]) -> Non
     await proxy_main(
         max_auto_rebuy=args.max_auto_rebuy,
         profit_lock_bb=args.profit_lock_bb,
-        spoof_role_id=args.role_id,
-        spoof_skin_id=args.skin_id,
         use_range_equity=(args.equity_mode == "range"),
     )
 

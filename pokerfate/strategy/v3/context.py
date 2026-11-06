@@ -66,9 +66,8 @@ class BoardSignals:
 class VillainStats:
     """Flattened opponent statistics needed by purpose triggers.
 
-    不含 player_type / pwi 等聚合字段：决策层完全由原子连续指标驱动；
-    玩家类型标签与 pwi 聚合分仅在 log 路径展示（分别由
-    OpponentStats.player_type() 与 pwi() 方法直接提供）。
+    不含 player_type / pwi 等聚合字段：决策层完全由原子连续指标驱动。
+    玩家类型标签只保留在 OpponentStats 的分类方法和相关测试里，不进入决策上下文。
     """
     vpip: float = 0.0
     pfr: float = 0.0
@@ -107,7 +106,13 @@ class DecisionCtx:
     num_opponents: int = 1
     pot: float = 0.0
     to_call: float = 0.0
+    # Hero's own remaining stack. Used as the absolute physical maximum.
     stack: float = 0.0
+    # Effective stack against the current sizing target.  This can be much
+    # smaller than hero's stack when the main opponent is short.  SPR already
+    # uses this value upstream; calibrator uses it for stack-off sizing so
+    # low-SPR value bets do not get compressed into tiny geometric bets.
+    effective_stack: float = 0.0
     big_blind: float = 2.0
     spr: float = 8.0
     pot_odds: float = 0.0

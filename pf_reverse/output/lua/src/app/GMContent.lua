@@ -15,6 +15,9 @@ GMContent=
 			LoginModel:guestLoginTest(args[1])
 		end
 	end},
+	{examples="#setIsEventWhite", notes="活动白名单", cb = function(args)
+		PlayerModel:setIsEventWhite(true)
+	end},
 	{examples="#addGold 10000000", notes="增加金币", cb = function(args)
 		local host = string.replace(UrlManager:getServerUrl(), "ws://", "")
 		local url = "http://" .. string.split(host, ":")[1] .. ":8005" .. "/?"
@@ -160,18 +163,10 @@ GMContent=
 		tpl_constdata.ScrapBlindRate = 1
 		tpl_constdata.ScrapRecoverBlindRate = 1
 	end},
-	-- {examples="#showAndroidInfo path", notes="显示Android特征(系统文件名)", cb = function(args)
-	-- 	print("CS.SdkHelper.getBrand: ", CS.SdkHelper.getBrand())
-	-- 	print("CS.SdkHelper.getModel: ", CS.SdkHelper.getModel())
-	-- 	print("CS.SdkHelper.getFingerprint: ", CS.SdkHelper.getFingerprint())
-	-- 	print("CS.SdkHelper.getManufacturer: ", CS.SdkHelper.getManufacturer())
-	-- 	print("CS.SdkHelper.getBoard: ", CS.SdkHelper.getBoard())
-	-- 	print("CS.SdkHelper.getProduct: ", CS.SdkHelper.getProduct())
-	-- 	print("CS.SdkHelper.getOs: ", CS.SdkHelper.getOs())
-	-- 	print("CU.SystemInfo.operatingSystem: ", CU.SystemInfo.operatingSystem)
-	-- 	print("CU.SystemInfo.deviceModel: ", CU.SystemInfo.deviceModel)
-	-- 	if args[1] ~= "path" then
-	-- 		print("CS.SdkHelper.isSysFileExist: ", tostring(CS.SdkHelper.isSysFileExist(args[1])))
-	-- 	end
-	-- end},
+	{examples="#Emoji 1 2 1", notes="局内表情测试 发送位,接收位,表情id", cb = function(args)
+		bee.emit("evt_IngameEmojiTest", {sid = tonumber(args[1]), rid = tonumber(args[2]), id = tonumber(args[3])})
+	end},
+	{examples="#setLimitView", notes="显示和谐资源", cb = function(args)
+		bee.isLimitView = true
+	end},
 }

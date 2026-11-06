@@ -25,8 +25,13 @@ require "ui.init"
 require "app.config"
 require "manager.LanguageManager"
 LanguageManager:init()
+require "appload.Apploader"
 
 local HOT_VERSION = "1.0.0"
+
+if AppLoader:isUseSubPackage() then
+	HOT_VERSION = "1.0.1"
+end
 
 function P:checkVersion(isWhite)
 	self:_loadVersionInfo(isWhite, function (data) --http get 对比服务端json配置
@@ -34,6 +39,8 @@ function P:checkVersion(isWhite)
 		if bee.isAndroid then
 			if G_CHNL_ID == 5 then
 				self:checkDownload(data.android)
+			elseif G_CHNL_ID == 7 then
+				self:checkDownload(data.android_qoo or data.android_official)
 			else
 				self:checkDownload(data.android_official)
 			end
@@ -74,6 +81,8 @@ function P:checkDownload(data, force)
 		G_REMOTE_VERSION = data.res
 	end
 	local fullVer = G_APP_VERSION
+	bee.isLimitView = data.limit_ver == fullVer
+	LocalStore:setBoolForKey("pf_limit_view", bee.isLimitView)
 	print("[AppLoadRes] checkDownload", json.encode(data), fullVer, data.ver)
 	local c1 = self:compareVer(fullVer, data.ver)
 	if -1 == c1 then
@@ -99,6 +108,7 @@ function P:checkDownload(data, force)
 	if not force then
 		self:checkResDownload(data)
 	end
+	bee.emit("evt_refreshLimitView", bee.isLimitView)
 	return false
 end
 
@@ -129,76 +139,106 @@ end
 
 function P:checkResDownload(data)
 	if 0 <= self:compareVer(G_UPDATE_VERSION, data.res) then
-		self:onUpdateFinish(false)
+		if AppLoader:isUseSubPackage() then
+			self:checkSubpackageDownload(data)
+		else
+			self:onUpdateFinish(false)
+		end
 		return
 	end
 	
 	self._downloadUrl = data.url .. "/" .. data.res
 	local url = self:getRemoteUrl() .. self._downloadUrl
 	if not self._isSlient then
-		CS.AppLoader.Instance:DoDownLoad(url, onComplete, onProgress, function(size)
-        	bee.logEvent("login-update")
-			self.downSize = size
-			self.forceUpdate = false
-			local button = 2
-			if -1 == self:compareVer(G_UPDATE_VERSION, data.min_res) then	-- 要强制更新
-				button = 1
-				self.forceUpdate = true
-			end
-			local params =
-			{
-				button = button,
-				title = _T("LAB_UPDATE_TITILE_1"),
-				text = _F("LAB_UPDATE_TIPS_2", "<color=#EC0B7A>" .. tostring(self:getMB(size)) .. "</color> MB"),
-				surStr = _T("LAB_UPDATE_BTN_3"),
-				cancelStr = _T("LAB_UPDATE_BTN_1"),
-				noClose = button == 1,
-				onSure = function()
-					if bee.isInHome() then
-						G_DOWNLOAD_REMOTE = true
-						bee.enterScene("StartScene")
-						return
-					end
-					self:startDownload()
-        			bee.logEvent("login-update-immediately")
-					CS.SdkHelper.setScreenSleep(false)
-				end,
-				onCancel = function()
-					self:onUpdateFinish(false)
-        			bee.logEvent("login-update-cancel")
-				end
-			}
-			
-			if G_CHECK_FORCE_UPDATE then
-				G_CHECK_FORCE_UPDATE = nil
-				if not self.forceUpdate then
-					if G_CHECK_FORCE_UPDATE_NEEDREDDOT then
-						G_CHECK_FORCE_UPDATE_NEEDREDDOT = nil
-						RedManager:addTagWithNum(1, RedTag.UpdateTag)
-					end
-					bee.emit("evt_refreshUpdateInfo")
+		self:_checkResDownload(data, url, false)
+	else
+		AppLoader:DoSlientDownload(url, onComplete, onProgress)
+	end
+end
+
+-- 检查子包下载
+function P:checkSubpackageDownload(data)
+	local app_update_version = LocalStore:getStringForKey("app_update_version")
+	local need_check = false
+	if not app_update_version or "" == app_update_version or self:compareVer(app_update_version, G_APP_VERSION) < 0 then
+		need_check = true
+	end
+	if not need_check then
+		self:onUpdateFinish(false)
+		return
+	end
+
+	self._downloadUrl = data.url .. "/" .. G_APP_VERSION
+	local url = self:getRemoteUrl() .. self._downloadUrl
+	AppLoader:SetHost(url)
+	
+	self:_checkResDownload(data, url, true, "DoDownloadPackage")
+end
+
+function P:_checkResDownload(data, url, force, fnName)
+	fnName = fnName or "DoDownLoad"
+	AppLoader[fnName](AppLoader, url, onComplete, onProgress, function(size)
+		bee.logEvent("login-update")
+		self.downSize = size
+		self.forceUpdate = false
+		local button = 2
+		if force or -1 == self:compareVer(G_UPDATE_VERSION, data.min_res) then	-- 要强制更新
+			button = 1
+			self.forceUpdate = true
+		end
+		local params =
+		{
+			button = button,
+			title = _T("LAB_UPDATE_TITILE_1"),
+			text = _F("LAB_UPDATE_TIPS_2", "<color=#EC0B7A>" .. tostring(self:getMB(size)) .. "</color> MB"),
+			surStr = _T("LAB_UPDATE_BTN_3"),
+			cancelStr = _T("LAB_UPDATE_BTN_1"),
+			noClose = button == 1,
+			onSure = function()
+				if bee.isInHome() then
+					G_DOWNLOAD_REMOTE = true
+					bee.enterScene("StartScene")
 					return
 				end
-				params.inPop = true
+				self:startDownload()
+				bee.logEvent("login-update-immediately")
+				CS.SdkHelper.setScreenSleep(false)
+			end,
+			onCancel = function()
+				self:onUpdateFinish(false)
+				bee.logEvent("login-update-cancel")
 			end
-			UiManager:showUI("UpdateVersion", params)
-		end)
-	else
-		CS.AppLoader.Instance:DoSlientDownload(url, onComplete, onProgress)
-	end
+		}
+		
+		if G_CHECK_FORCE_UPDATE then
+			G_CHECK_FORCE_UPDATE = nil
+			if not self.forceUpdate then
+				if G_CHECK_FORCE_UPDATE_NEEDREDDOT then
+					G_CHECK_FORCE_UPDATE_NEEDREDDOT = nil
+					RedManager:addTagWithNum(1, RedTag.UpdateTag)
+				end
+				bee.emit("evt_refreshUpdateInfo")
+				return
+			end
+			params.inPop = true
+		end
+		UiManager:showUI("UpdateVersion", params)
+	end)
 end
 
 function P:startDownload()
 	if self._downloadUrl and bee.checkVersion("1.2.9") then
 		self:nextRemoteUrl()
-		CS.AppLoader.SetHost(self:getRemoteUrl() .. self._downloadUrl)
+		AppLoader:SetHost(self:getRemoteUrl() .. self._downloadUrl)
 	end
-	CS.AppLoader.Instance:StartDownload(onComplete, onProgress)
+	bee.emit("evt_remote_res_start")
+	AppLoader:StartDownload(onComplete, onProgress)
 end
 
 -- isFail 是否更新失败
 function P:onUpdateFinish(isUpdate, isFail)
 	print("===== gggggggggg onUpdateFinish", isUpdate, isFail)
+	self._isCheckUpdate = nil
 	if self._isSlient then
 		if isUpdate then
 			bee.needReloadGame = true
@@ -207,6 +247,7 @@ function P:onUpdateFinish(isUpdate, isFail)
 	end
 	if isUpdate then
         bee.logEvent("login-update-success")
+		LocalStore:setStringForKey("app_update_version", G_APP_VERSION)
 		CS.AppLoader.ExecuteSlient(false)
 		-- print_func_ref_by_csharp()
 		bee.enterScene("StartScene")
@@ -296,11 +337,16 @@ function P:getMB(size)
 	return math.floor(size / (1024 * 1024) * 100) / 100
 end
 
+function P:isInCheckUpdate()
+	return self._isCheckUpdate
+end
+
 function P:checkUpdate(isSlient, isWhite, cb, failCb)
 	print("[AppLoadRes] checkUpdate", CS.AppLoader.isReload, isSlient)
 	self._isSlient = isSlient
 	self._updateCb = cb
 	self._failCb = failCb
+	self._isCheckUpdate = true
 	-- if CS.AppLoader.isReload then
 	-- 	if cb then cb() end
 	-- 	self._updateCb = nil
@@ -381,7 +427,7 @@ function P:_tryDownloadPackage(index)
 		else
 			url = "StandaloneWindows64"
 		end
-		CS.AppLoader.Instance:DoDownloadSubPackage(self:getRemoteUrl() .. url .. "/" .. G_APP_VERSION .. "_sub", d.id, function(status)
+		AppLoader:DoDownloadSubPackage(self:getRemoteUrl() .. url .. "/" .. G_APP_VERSION .. "_sub", d.id, function(status)
 			if "none" == status then
 				self["_isCheckPackage" .. index] = nil
 			else

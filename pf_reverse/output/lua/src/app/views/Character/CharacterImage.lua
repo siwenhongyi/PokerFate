@@ -3,8 +3,32 @@ local P = class("CharacterImage", Object)
 function P:onAwake()
     self.ImageRole = self:find("ImageRole")
     self.RoleSpine = self:find("RoleSpine")
+    self.EffTip = self:find("EffTip")
+    if self.EffTip then
+        self.EffTip:SetActive(false)
+    end
+    self._effShowFlag = true
 
     self._roleAnim = nil
+end
+
+function P:setShowReal(flag)
+    self._showReal = flag
+end
+
+function P:setShowInMask(flag)
+    if self._roleSpine then
+        local Mask = bee.find("Mask", self._roleSpine)
+        if Mask then
+            Mask:SetActive(true)
+            local Image = bee.find("Image", self._roleSpine)
+            local Spine = bee.find("Spine", self._roleSpine)
+            local ImageFg = bee.find("ImageFg", self._roleSpine)
+            Image.transform:SetParent(Mask.transform)
+            Spine.transform:SetParent(Mask.transform)
+            ImageFg.transform:SetParent(Mask.transform)
+        end
+    end
 end
 
 -- 初始化交互
@@ -53,6 +77,101 @@ function P:initSpecialInteraction(callback)
             end)
         end
     end
+    return self._btnList
+end
+
+-- 可点击部位提示
+function P:beginSpecialInteractionTips()
+    if not self.EffTip then
+        return
+    end
+    if not self._btnList or not next(self._btnList) then
+        return
+    end
+    if not self._skinData.special_click_voice then
+        return
+    end
+
+    if self._firstTipTag then
+        scheduler:removeTag(self._firstTipTag)
+        self._firstTipTag = nil
+    end
+    if self._tipsTag then
+        scheduler:removeTag(self._tipsTag)
+        self._tipsTag = nil
+    end
+    if self._stopTipTag then
+        scheduler:removeTag(self._stopTipTag)
+        self._stopTipTag = nil
+    end
+
+    if not self._skinEffList then
+        self._skinEffList = {}
+        for i = 1, #self._skinData.special_click_voice, 2 do
+            table.insert(self._skinEffList, self._skinData.special_click_voice[i])
+        end
+    end
+
+    self._effTipsMaxIndex = #self._skinEffList
+    if not self._effTipsIndex then
+        self._effTipsIndex = 1
+    end
+
+    self._firstTipTag = self:once(1, function()
+        self._effShow = true
+
+        local posObj1 = self._btnList[self._skinEffList[self._effTipsIndex]]
+        if posObj1 then
+            self.EffTip:SetActive(self._effShowFlag)
+            self.EffTip.transform.position = posObj1.transform.position
+        else
+            self.EffTip:SetActive(false)
+        end
+
+        self._tipsTag = self:schedule(5, function()
+            self._effTipsIndex = self._effTipsIndex + 1
+            if self._effTipsIndex > self._effTipsMaxIndex then
+                self._effTipsIndex = 1
+            end
+
+            local posObj = self._btnList[self._skinEffList[self._effTipsIndex]]
+            if posObj then
+                self.EffTip.transform.position = posObj.transform.position
+                self.EffTip:SetActive(self._effShowFlag)
+            else
+                self.EffTip:SetActive(false)
+            end
+        end)
+    end)
+end
+
+-- 停止可点击部位提示
+function P:stopSpecialInteractionTips()
+    if self._firstTipTag then
+        scheduler:removeTag(self._firstTipTag)
+        self._firstTipTag = nil
+    end
+    if self._tipsTag then
+        scheduler:removeTag(self._tipsTag)
+        self._tipsTag = nil
+    end
+    if self._stopTipTag then
+        scheduler:removeTag(self._stopTipTag)
+        self._stopTipTag = nil
+    end
+    self:setEffTipShow(false)
+end
+
+function P:setEffTipShow(flag)
+    if not self.EffTip then
+        return
+    end
+    self._effShowFlag = flag
+    if not flag then
+        self.EffTip:SetActive(false)
+    else
+        self.EffTip:SetActive(self._effShow)
+    end
 end
 
 -- 初始化部件
@@ -97,10 +216,43 @@ function P:resetAccessoriesFlag()
     end
 end
 
+function P:getSpineClickBtn()
+    local SpineClick = self:find("SpineClick", self._roleSpine)
+    if SpineClick then
+        self.RoleSpine:GetComponent("Image").enabled = false
+        self.RoleSpine:GetComponent("Button").enabled = false
+        return SpineClick
+    else
+        self.RoleSpine:GetComponent("Image").enabled = true
+        self.RoleSpine:GetComponent("Button").enabled = true
+        return self.RoleSpine
+    end
+end
+
+function P:initSpineClick(callback)
+    if not callback then
+        return
+    end
+    
+    local clickBtn = self:getSpineClickBtn()
+    bee.removeAllClick(clickBtn)
+    bee.addClick2(clickBtn, function()
+        callback()
+    end)
+end
+
+function P:removeSpineClick()
+    bee.removeAllClick(clickBtn)
+    bee.addClick2(clickBtn, function()
+        callback()
+    end)
+end
+
 -- 初始化大厅交互语音
 function P:initLobbyClickVoice(callback)
-    bee.removeAllClick(self.RoleSpine)
-    bee.addClick2(self.RoleSpine, function()
+    local clickBtn = self:getSpineClickBtn()
+    bee.removeAllClick(clickBtn)
+    bee.addClick2(clickBtn, function()
         if self._isSpecialInteract then
             -- 交互动作过程中不允许交互
             return
@@ -244,12 +396,24 @@ function P:switchIdle()
     self._isSpecialInteract = false
 end
 
+function P:getShowSkinData(skin)
+    return GF.getShowSkinData(skin, self._showReal)
+    -- if not SettingModel:isShowSkin() and skin.kind ~= SKIN_KIND.NORMAL and not self._showReal then
+    --     for _, v in ipairs(get_tpl_subKey(tpl_character_skin_list, "role", skin.role)) do
+    --         if v.kind == SKIN_KIND.NORMAL then
+    --             return v
+    --         end
+    --     end
+    -- end
+    -- return skin
+end
+
 function P:setRole(role, use_image_with_bg, allinAmin)
     self._btnList = nil
     self:hideBubble()
     self._role = role
     if self._role then
-        local skin = role:getSkinData()
+        local skin = self:getShowSkinData(role:getSkinData())
         self._skinData = skin
         local anim = skin and skin.movie
         if allinAmin then
@@ -321,6 +485,7 @@ end
 
 function P:setSkin(skinData, use_image_with_bg, allinAmin)
     self:hideBubble()
+    skinData = self:getShowSkinData(skinData)
     self._skinData = skinData
     local anim = skinData.movie
     if allinAmin then
@@ -337,21 +502,23 @@ function P:setSkin(skinData, use_image_with_bg, allinAmin)
                 self._roleSpine.transform:SetParent(self.RoleSpine.transform, false)
                 self._roleSpine.transform.localPosition = bee.v3zero
 
-                local Image = self:find("Image", self._roleSpine)
-                if Image then
-                    if use_image_with_bg then
-                        Image:SetActive(true)
-                    else
-                        Image:SetActive(false)
-                    end
+            end
+        end
+        if self._roleSpine then
+            local Image = self:find("Image", self._roleSpine)
+            if Image then
+                if use_image_with_bg then
+                    Image:SetActive(true)
+                else
+                    Image:SetActive(false)
                 end
-                local ImageFg = self:find("ImageFg", self._roleSpine)
-                if ImageFg then
-                    if use_image_with_bg then
-                        ImageFg:SetActive(true)
-                    else
-                        ImageFg:SetActive(false)
-                    end
+            end
+            local ImageFg = self:find("ImageFg", self._roleSpine)
+            if ImageFg then
+                if use_image_with_bg then
+                    ImageFg:SetActive(true)
+                else
+                    ImageFg:SetActive(false)
                 end
             end
         end
@@ -386,6 +553,8 @@ function P:setSkin(skinData, use_image_with_bg, allinAmin)
 end
 
 function P:setSkinImage(skinData, use_image_with_bg)
+    skinData = self:getShowSkinData(skinData)
+    self._skinData = skinData
     self:removeRoleSpine()
     if use_image_with_bg and skinData.image_with_bg then
         bee.setIcon(self.ImageRole, skinData.image_with_bg, true)
@@ -409,12 +578,48 @@ function P:setSkinImage(skinData, use_image_with_bg)
     end
 end
 
+function P:setSkinRotate(flag)
+    if not self._skinData then
+        return
+    end
+    if false ~= flag then
+        if self._skinData.spine_rotation then
+            if self._roleSpine then
+                self.RoleSpine.transform.localEulerAngles = bee.v3(0, 0, self._skinData.spine_rotation)
+            else
+                self.ImageRole.transform.localEulerAngles = bee.v3(0, 0, self._skinData.spine_rotation)
+            end
+        else
+            self.RoleSpine.transform.localEulerAngles = bee.v3zero
+            self.ImageRole.transform.localEulerAngles = bee.v3zero
+        end
+    else
+        self.RoleSpine.transform.localEulerAngles = bee.v3zero
+        self.ImageRole.transform.localEulerAngles = bee.v3zero
+    end
+end
+
 function P:setImage(img)
     self:removeRoleSpine()
     bee.setIcon(self.ImageRole, img, true)
 end
 
+function P:setImageEnable(use_image_with_bg)
+    if self._roleSpine then
+        local Image = self:find("Image", self._roleSpine)
+        if Image then
+            Image:GetComponent("Image").enabled = use_image_with_bg
+        end
+    end
+end
+
 function P:removeRoleSpine()
+    if self.EffTip then
+        self.EffTip:SetActive(false)
+        self._effTipsIndex = nil
+        self._effShowFlag = true
+    end
+
     if self._roleSpine then
         CU.GameObject.Destroy(self._roleSpine)
         self._roleSpine = nil
@@ -456,6 +661,9 @@ function P:playScrap()
     self:hideBubble()
     self:resetAccessoriesFlag()
     if self._roleSpine then
+        if self._skinData then
+            bee.invoke(self._roleSpine, "setSkinId", self._skinData.id)
+        end
         bee.invoke(self._roleSpine, "playScrap")
     end
 end

@@ -60,7 +60,13 @@ function P:__setValue(value)
             end
         end
     else
-        if self._stepIdx == 1 and step ~= self._curStep then
+        if self._stepIdx == 1 and step > self._curStep and step > self._curStep2 then
+            self:_setStep(self._curStep2, step)
+            self._stepIdx = 2
+        elseif self._stepIdx == 2 and step < self._curStep and step < self._curStep2 then
+            self:_setStep(step, self._curStep)
+            self._stepIdx = 1
+        elseif self._stepIdx == 1 and step ~= self._curStep then
             self:_setStep(step, self._curStep2)
         elseif self._stepIdx == 2 and step ~= self._curStep2 then
             self:_setStep(self._curStep, step)

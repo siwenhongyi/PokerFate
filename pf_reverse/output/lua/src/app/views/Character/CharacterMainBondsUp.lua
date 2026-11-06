@@ -83,6 +83,7 @@ function P:onShow()
         -- bee.invoke(self.CharacterImage, "setRole", self._role, true)
         local roleImage = CharacterModel:getRoleImage()
         roleImage.transform:SetParent(self.CharacterImage.transform, false)
+        bee.invoke(roleImage, "setShowReal", true)
         bee.invoke(roleImage, "setRole", self._role, true)
     end
     self:initInfos()

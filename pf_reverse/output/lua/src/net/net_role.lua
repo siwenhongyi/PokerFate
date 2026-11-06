@@ -5,8 +5,10 @@ function net:RoleListRSP(msg)
     CharacterModel.send_gift_cnt = msg.send_gift_cnt
     -- CharacterModel.using_role_id = msg.using_role_id
     CharacterModel:setOwnedSkinIds(msg.owned_skin_ids)
+    CharacterModel:getRoleThemeStory()
+    CharacterModel:reqAllTaskList()
     -- 角色数据返回后再请求装饰方案
-    PlayerModel:requestDecorationScheme()
+    DecorationModel:requestDecorationScheme()
 
     bee.emit("evt_refreshLobbyRole")
 end
@@ -70,6 +72,9 @@ function net:RoleBondChangeRSP(msg)
     end
 end
 
+function net:RoleOverBondChangeRSP(msg)
+end
+
 function net:RoleAwakenRSP(msg)
     if 0 == msg.code then
         local r = CharacterModel:getRole(msg.role_id)
@@ -87,6 +92,7 @@ function net:RoleUnlockRSP(msg)
     end
     CharacterModel:addRole(msg.role_info)
     CharacterModel:setNewRole(msg.role_info.role_id)
+    CharacterModel:reqRoleTaskList(msg.role_info.role_id)
 end
 
 function net:SkinUnlockRSP(msg)

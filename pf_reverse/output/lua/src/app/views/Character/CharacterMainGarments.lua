@@ -23,7 +23,10 @@ function P:onAwake()
     self.EUButton = self:find("EU/EUButton", Garments)
     self.EquipButton = self:find("EU/EquipButton", Garments)
     self.UseButton = self:find("UseButton", Garments)
+    self.FixButton = self:find("FixButton", Garments)
     self.ClaimButton = self:find("ClaimButton", Garments)
+
+    self.ReGuideButton = self:find("ReGuideButton", self.LeftTop)
 
     self.GarmentTag = self:find("GarmentTag", Garments)
     self.GarmentTags = {
@@ -47,8 +50,20 @@ function P:onAwake()
 
     bee.addClick(self.WearButton, function()
         Game:playSound("ui_button_confirm")
+        --- self._old_skin_id = self._role:getUsingSkin()
+        --- CharacterModel:changeUsingSkin(self._skins[self._selectIndex].id)
+        -- local skinId = self._skins[self._selectIndex].id
+        -- local scheme = DecorationModel:getInGameSchemeInfoById(DecorationModel:getInGameSpecifySchemeId())
+        -- self._old_skin_id = scheme.skin_id[1]
+        -- DecorationModel:useInGameSkin(skinId)
         self._old_skin_id = self._role:getUsingSkin()
-        CharacterModel:changeUsingSkin(self._skins[self._selectIndex].id)
+        local skinId = self._skins[self._selectIndex].id
+        Net:sendReq("pb.SwitchRoleSkinREQ", {
+            role_id = self._role.role_id,
+            new_skin_id = skinId,
+        }, function ()
+            DecorationModel:useInGameSkin(skinId)
+        end)
         bee.logEvent("character-wardrobe-wear", self._skins[self._selectIndex].id)
         self._tag = 1
     end)
@@ -76,8 +91,17 @@ function P:onAwake()
 
     bee.addClick(self.EUButton, function()
         Game:playSound("ui_button_confirm")
+        --- self._old_skin_id = self._role:getUsingSkin()
+        --- CharacterModel:changeUsingSkin(self._skins[self._selectIndex].id)
         self._old_skin_id = self._role:getUsingSkin()
-        CharacterModel:changeUsingSkin(self._skins[self._selectIndex].id)
+        local skinId = self._skins[self._selectIndex].id
+        Net:sendReq("pb.SwitchRoleSkinREQ", {
+            role_id = self._role.role_id,
+            new_skin_id = skinId,
+        }, function ()
+            DecorationModel:useInGameSkin(skinId)
+        end)
+
         bee.logEvent("character-wardrobe-equip-use", self._skins[self._selectIndex].id)
         self._tag = 2
     end)
@@ -95,10 +119,24 @@ function P:onAwake()
 
     bee.addClick(self.UseButton, function()
         Game:playSound("ui_button_confirm")
+        -- self._old_skin_id = self._role:getUsingSkin()
+        -- CharacterModel:changeUsingSkin(self._role:getUsingSkin())
+        local skinId = self._skins[self._selectIndex].id
+        -- local scheme = DecorationModel:getInGameSchemeInfoById(DecorationModel:getInGameSpecifySchemeId())
         self._old_skin_id = self._role:getUsingSkin()
-        CharacterModel:changeUsingSkin(self._role:getUsingSkin())
-        bee.logEvent("character-wardrobe-use", self._skins[self._selectIndex].id)
+        DecorationModel:useInGameSkin(skinId)
+        bee.logEvent("character-wardrobe-use", skinId)
         self._tag = 4
+    end)
+
+    bee.addClick(self.FixButton, function ()
+        Game:playSound("ui_button_confirm")
+        ItemModel:jumpView(13002, nil, function ()
+            if not bee.isNull(self.node) then
+                self:refreshUI()
+            end
+        end)
+        bee.logEvent("style-preset-skin-change", self._skins[self._selectIndex].id)
     end)
 
     bee.addClick(self.ClaimButton, function()
@@ -111,7 +149,7 @@ function P:onAwake()
                 ItemModel:jumpView(skin.accesses[1] or 0, skin.role)
             end
         else
-            if skin.kind == SKIN_KIND.AWAKEN then
+            if skin.kind == SKIN_KIND.AWAKEN or skin.kind == SKIN_KIND.SECOND_AWAKEN then
                 UiManager:showTip({
                     text = _T("LAB_CHAR_118"),
                     button = 1,
@@ -152,6 +190,13 @@ function P:onAwake()
         Game:playSound("ui_button_confirm")
         UiManager:showUI("CharacterView", {data = self._role, skin = self._skins[self._selectIndex]})
         bee.logEvent("character-preview-illustrator")
+    end)
+    bee.addClick(self.ReGuideButton, function()
+        Game:playSound("ui_button_confirm")
+        self.ListGarments:changeScrollInertia(function ()
+            self.ListGarments:moveToYItem(1, false)
+            GuideManager:startSystemGuide(5001, 0, true)
+        end)
     end)
 
     self._nodeCache = NodeCache:create()
@@ -256,16 +301,31 @@ end
 function P:refreshSkinItem(data, item)
     self._SkinNodes[item] = data
     local isOwned = self._role:isOwnedSkin(data.id)
-    if data.id == self._role:getUsingSkin() then
-        local skin = self._skins[self._selectIndex]
-        if data.role == CharacterModel:getUsingRoleId() or skin.id ~= data.id then
-            self:find("In use", item):SetActive(true)
-        else
-            self:find("In use", item):SetActive(false)
-        end
+
+    local isRandom = DecorationModel:isInGameSchemeRandom()
+    local useTag = self:find("In use", item)
+    local randomTag = self:find("In random", item)
+    if not isRandom then
+        local isUsing = DecorationModel:checkSkinInScheme(SchemeTag.Ingame, true, data.id)
+        useTag:SetActive(isUsing)
+        randomTag:SetActive(false)
     else
-        self:find("In use", item):SetActive(false)
+        local inRandom = DecorationModel:checkSkinInScheme(SchemeTag.Ingame, false, data.id)
+        useTag:SetActive(false)
+        randomTag:SetActive(inRandom)
     end
+
+    -- if data.id == self._role:getUsingSkin() then
+    --     local skin = self._skins[self._selectIndex]
+    --     if data.role == CharacterModel:getUsingRoleId() or skin.id ~= data.id then
+    --         self:find("In use", item):SetActive(true)
+    --     else
+    --         self:find("In use", item):SetActive(false)
+    --     end
+    -- else
+    --     self:find("In use", item):SetActive(false)
+    -- end
+
     bee.setText(self:find("TextName", item), _T(data.name))
     self:refreshImageSkin(self:find("On/Mask/ImageSkin", item), data)
     self:refreshImageSkin(self:find("Off/Mask/ImageSkin", item), data)
@@ -350,6 +410,7 @@ function P:refreshSelectSkinInfo()
         self.WearButton:SetActive(false)
         self.EU:SetActive(false)
         self.UseButton:SetActive(false)
+        self.FixButton:SetActive(false)
         local jump = tpl_Jump_path[skin.accesses[1]]
         if skin.kind == SKIN_KIND.NORMAL then
             if ItemModel:isCanJump(skin.accesses, skin.role) then
@@ -373,6 +434,20 @@ function P:refreshSelectSkinInfo()
             else
                 self:showGarmentTag(4)
             end
+        elseif skin.kind == SKIN_KIND.SECOND_AWAKEN then
+            local r = CharacterModel:getRole(skin.role)
+            local roleData = tpl_character[skin.role]
+            if not r and roleData and ItemModel:isCanJump(roleData.accesses, roleData.id) then
+                self:showGarmentTag(0)
+                self.ClaimButton:SetActive(true)
+                bee.setText(self:find("TextFrom", self.ClaimButton), _T(jump.name))
+            elseif r and ItemModel:isCanJump(skin.accesses, skin.id) then
+                self:showGarmentTag()
+                self.ClaimButton:SetActive(true)
+                bee.setText(self:find("TextFrom", self.ClaimButton), _T(jump.name))
+            else
+                self:showGarmentTag(4)
+            end
         else
             if ItemModel:isCanJump(skin.accesses, skin.id) then
                 self:showGarmentTag()
@@ -382,35 +457,71 @@ function P:refreshSelectSkinInfo()
                 self:showGarmentTag(4)
             end
         end 
-    elseif skin.id == self._role:getUsingSkin() then
-        self.WearButton:SetActive(false)
-        self.EU:SetActive(false)
-        self.UseButton:SetActive(false)
-        if skin.role == CharacterModel:getUsingRoleId() then
-            self:showGarmentTag(1)
-        else
-            self:showGarmentTag()
-            self.UseButton:SetActive(true)
-        end
-    else
+    else --if skin.id == self._role:getUsingSkin() then
+
         if self._role.locked then
             self.WearButton2:SetActive(true)
             self.WearButton:SetActive(false)
             self.EU:SetActive(false)
             self.UseButton:SetActive(false)
+            self.FixButton:SetActive(false)
             self:showGarmentTag()
         else
             self.WearButton:SetActive(false)
             self.EU:SetActive(false)
             self.UseButton:SetActive(false)
+            self.FixButton:SetActive(false)
             self:showGarmentTag()
-
-            if skin.role == CharacterModel:getUsingRoleId() then
-                self.WearButton:SetActive(true)
+            
+            local isRandom = DecorationModel:isInGameSchemeRandom()
+            if not isRandom then
+                local isUsing = DecorationModel:checkSkinInScheme(SchemeTag.Ingame, true, skin.id)
+                if isUsing then
+                    self:showGarmentTag(1)
+                else
+                    -- local curUsingSkin = self._role:getUsingSkin()
+                    local scheme = DecorationModel:getInGameSchemeInfoById(DecorationModel:getInGameSpecifySchemeId())
+                    local skinId = scheme.skin_id[1]
+                    local usingSkinCfg = tpl_character_skin[skinId]
+                    if usingSkinCfg.role == skin.role then
+                        self.WearButton:SetActive(true)
+                    else
+                        if self._role:getUsingSkin() == skin.id then
+                            self.UseButton:SetActive(true)
+                        else
+                            self.EU:SetActive(true)
+                        end
+                    end
+                end
             else
-                self.EU:SetActive(true)
+                self.FixButton:SetActive(true)
             end
+            -- self.WearButton:SetActive(false)
+            -- self.EU:SetActive(false)
+            -- self.UseButton:SetActive(false)
+            -- self.FixButton:SetActive(false)
+            -- self:showGarmentTag()
+
+            -- if skin.role == CharacterModel:getUsingRoleId() then
+            --     self.WearButton:SetActive(true)
+            -- else
+            --     if DecorationModel:isInGameSchemeRandom() then
+            --         self.WearButton:SetActive(true)
+            --     else
+            --         self.EU:SetActive(true)
+            --     end
+            -- end
         end
+    
+        
+        -- if skin.role == CharacterModel:getUsingRoleId() then
+        --     self:showGarmentTag(1)
+        -- else
+        --     self:showGarmentTag()
+        --     self.UseButton:SetActive(true)
+        -- end
+    -- else
+        
     end
     if self.GarmentsNotOwned then
         self.GarmentsNotOwned:SetActive(not self._role:isOwnedSkin(skin.id))
@@ -484,14 +595,14 @@ function P:refreshItems(offsetX)
     end
 end
 
-function P:evt_updateScheme(msg)
+function P:evt_updateInGameScheme()
     self.ListGarments:refreshShowingUi()
     self:refreshSelectSkinInfo()
-    if self._tag == 2 then
-        UiManager:showToast(_T("LAB_CHAR_104"))
-    elseif self._tag == 4 then
-        UiManager:showToast(_T("LAB_CHAR_103"))
-    end
+    -- if self._tag == 2 then
+    --     UiManager:showToast(_T("LAB_CHAR_103"))
+    -- elseif self._tag == 4 then
+    --     UiManager:showToast(_T("LAB_CHAR_104"))
+    -- end
 end
 
 function P:evt_SwitchRoleSkinRSP(msg)
@@ -512,6 +623,8 @@ function P:garmentGuide()
     GuideManager:startSystemGuide(5001, 0.65)
 end
 function P:evt_refresh_character_pos()
+    self.ListGarments:moveToYItem(self._selectIndex)
+
     local cfg = tpl_guide[5001]
     local point = bee.find(cfg.show_ui[1], UiManager:getUiRoot())
     for k,v in pairs(self._SkinNodes) do

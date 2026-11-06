@@ -42,6 +42,9 @@ function P:onAwake()
         self:find("Item1", self.Views[2]),
         self:find("Item2", self.Views[2]),
         self:find("Item3", self.Views[2]),
+        self:find("Item4", self.Views[2]),
+        self:find("Item5", self.Views[2]),
+        self:find("Item6", self.Views[2]),
     }
 
     self.BlindList = self:find("BlindList", self.Views[3])
@@ -53,6 +56,7 @@ function P:onAwake()
             if isOn then
                 self:showView(k)
 		        Game:playSound("ui_tab_switch_1")
+                bee.logEvent("tournament-sng-detail-type", GameModel.data.room_info.tour_id or 0, k)
             end
         end)
     end
@@ -72,11 +76,21 @@ function P:onAwake()
     self.ListBlind:setRefreshFunc(function(data, item)
         self:refreshBlindItem(data, item)
     end)
+
+    if GameModel.data:isFriendSNG() then
+        self:find("Iteam2", self.Views[1]):SetActive(false)
+        self:find("Iteam3", self.Views[1]):SetActive(false)
+        self:find("Iteam4", self.Views[1]):SetActive(false)
+    end
 end
 
 function P:onShow()
     self.transform.localPosition = bee.v3zero
     Net:sendReq("pb.TourRoomDetailREQ", {})
+
+    for i = GameModel.data:getSeatNum() + 1, #self.RankItems do
+        self.RankItems[i]:SetActive(false)
+    end
 
     self.ListBlind:setDatas(GameModel.data:getBlindList())
 
@@ -114,7 +128,7 @@ end
 
 function P:getBlindText(sb, bb, ante)
     if ante and ante > 0 then
-        return _F("{p1}({p2})", _N(sb) .. "/" .. _N(bb), _N(ante))
+        return _F("{p1} ({p2})", _N(sb) .. "/" .. _N(bb), _N(ante))
     else
         return _F("{p1}", _N(sb) .. "/" .. _N(bb))
     end
@@ -157,11 +171,12 @@ function P:refreshBlindItem(data, item)
 
     self:find("tournament_sng_details_blind_list_frame_01", item):SetActive(data.blind_level % 2 == 1)
     self:find("tournament_sng_details_blind_list_frame_02", item):SetActive(data.blind_level % 2 == 0)
+    self:find("tournament_mttlist_img_xuanzhong", item):SetActive(GameModel.data:getBlindLevel() == data.blind_level)
 end
 
 function P:refreshRankList(msg)
     for k, v in ipairs(msg.rank_list) do
-        bee.setTextCut(self:find("TextName", self.RankItems[k]), v.brief.name, 210)
+        bee.setTextCut(self:find("TextName", self.RankItems[k]), GF.getOtherName(v.brief.name, v.seat_index + 1, v.brief.uid), 210)
         bee.setText(self:find("TextGold", self.RankItems[k]), v.chips)
 
         self:find("tournament_ingame_rank_frame_04", self.RankItems[k]):SetActive(v.brief.uid == PlayerModel:getUid())
@@ -173,7 +188,7 @@ function P:evt_TourRoomRankRefreshBRC(msg)
 end
 
 function P:evt_TourRoomDetailRSP(msg)
-    bee.setText(self.TextRank, msg.my_rank)
+    bee.setText(self.TextRank, msg.my_rank > 0 and msg.my_rank or "-")
 
     self:refreshRankList(msg)
 

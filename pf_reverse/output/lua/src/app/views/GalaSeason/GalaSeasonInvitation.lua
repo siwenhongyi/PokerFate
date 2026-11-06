@@ -74,7 +74,7 @@ function P:refreshItem(item, item_id)
         bee.addClick(item, function()
             StoryModel.storyData = storyData
             bee.logEvent("galaseason-plot_play", storyData.id, storyData.group)
-            UiManager:showUI("Story", {name = storyData.res, StoryRecord = "GalaSeasonLog", StorySkip = "GalaSeasonPlot", hideCb = function()
+            UiManager:showUI("Story", {name = storyData.res, StoryRecord = "GalaSeasonLog", StorySkip = "GalaSeasonPlot", themeStory = true, hideCb = function()
                 local ret = ThemeModel:reqPlotReward(storyData.id, function()
                     -- self:find("hotspring_get_mask", Ani_root):SetActive(true)
                     self:refreshItem(item, item_id)

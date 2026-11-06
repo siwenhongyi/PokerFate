@@ -4,7 +4,6 @@ UiFullView = P
 
 function P:ctor(params)
     P.super.ctor(self, params)
-	self._openAnim, self._closeAnim = "UI_1_" .. self.__cname .. "_into", "UI_1_" .. self.__cname .. "_back"
 end
 
 function P:preShow()

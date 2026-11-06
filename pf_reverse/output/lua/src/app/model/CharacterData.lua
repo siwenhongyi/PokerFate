@@ -24,11 +24,22 @@ function P:getName()
 end
 
 function P:isAwaken()
-    return self:getBondLevel() == Config.AWAKEN_LEVEL + 1
+    return self:getBondLevel() >= Config.AWAKEN_LEVEL + 1
 end
 
 function P:isCanAwaken()
     return self:getBondLevel() == Config.AWAKEN_LEVEL
+end
+
+-- 是否可二次契约
+function P:isCanSecondAwaken()
+    local bondDatas = get_tpl_subKey(tpl_character_bond_list, "role", self.role_id)
+    return bondDatas[Config.SECOND_AWAKEN_LEVEL] ~= nil
+end
+
+-- 是否已二次契约
+function P:isSecondAwaken()
+    return self:getBondLevel() >= Config.SECOND_AWAKEN_LEVEL
 end
 
 function P:getBondLevel()
@@ -82,6 +93,11 @@ function P:getOwnedSkins()
         end
     end
     return skins
+end
+
+-- 拥有皮肤数量
+function P:getOwnSkinCount()
+    return #self.skin_info.owned_skin_ids
 end
 
 function P:setUsingSkin(skin_id)

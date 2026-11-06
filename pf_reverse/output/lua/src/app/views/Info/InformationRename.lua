@@ -10,6 +10,8 @@ function P:onAwake()
     self.Item1 = self:find("Item1", self.Panel)
     self.TextNum = self:find("TextNum", self.Item1)
 
+    bee.checkInputField(self.InputFieldName, _T("LAB_INFO_015"))
+
     bee.addClick(self:find("CloseButton", self.Panel), function()
         self:hideUI()
     end)

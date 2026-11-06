@@ -22,6 +22,7 @@ from typing import Dict, List, Optional
 from pokerfate.core.card import Card, Suit
 from pokerfate.core.position import normalize_position
 from pokerfate.strategy import preflop as _pf
+from pokerfate.strategy.range_v2 import hand_combo_map as hcm
 from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards
 
 log = logging.getLogger(__name__)
@@ -203,6 +204,62 @@ def _reach_prob(
         prob *= _action_prob(bucket, 'turn', action, is_pfr, had_flop_bet=had_flop_bet)
 
     return prob
+
+
+def _combo_index(combo: List[Card]) -> int:
+    c1 = hcm.card_to_int(combo[0])
+    c2 = hcm.card_to_int(combo[1])
+    return hcm.COMBO_TO_IDX[tuple(sorted((c1, c2)))]
+
+
+def combo_weights(
+    position: str,
+    facing: str,
+    board: List[Card],
+    hero_known_cards: Optional[List[Card]] = None,
+    my_prev_actions: Optional[Dict[str, str]] = None,
+    is_pfr: bool = False,
+    force_include_cards: Optional[List[Card]] = None,
+) -> List[float]:
+    """Return 1326 combo weights for hero's public reach range.
+
+    这个接口给 realtime CFR 使用：hero 的 range 只按公共牌做 card removal，
+    不用真实底牌过滤其它 hero combos。真实底牌只用于从 solver 输出策略表里
+    取当前 combo 的行动；如果真实 combo 不在启发式翻前范围里，会以极小权重
+    注入，避免 solver 返回里找不到当前手牌。
+
+    `hero_known_cards` 保留为兼容参数；这里不会把它当 blocker 使用。
+    """
+    del hero_known_cards
+
+    hero_range = _range_for(position, facing)
+    board_blockers = set(board or [])
+    weights = [0.0] * len(hcm.ALL_COMBOS)
+    positive_weights: List[float] = []
+
+    for cat in hero_range:
+        for combo in _combos_for_category(cat):
+            if combo[0] in board_blockers or combo[1] in board_blockers:
+                continue
+            weight = _reach_prob(combo, board, my_prev_actions or {}, is_pfr)
+            if weight <= 1e-9:
+                continue
+            idx = _combo_index(combo)
+            weights[idx] += weight
+            positive_weights.append(weight)
+
+    if force_include_cards and len(force_include_cards) >= 2:
+        combo = list(force_include_cards[:2])
+        if combo[0] not in board_blockers and combo[1] not in board_blockers:
+            idx = _combo_index(combo)
+            if weights[idx] <= 1e-12:
+                floor = min(positive_weights) * 0.25 if positive_weights else 1.0
+                weights[idx] = max(1e-6, floor)
+
+    total_w = sum(weights)
+    if total_w <= 1e-15:
+        return weights
+    return [w / total_w for w in weights]
 
 
 def distribution(

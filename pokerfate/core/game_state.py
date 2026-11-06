@@ -3,7 +3,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 class Street(Enum):
@@ -66,6 +66,9 @@ class GameState:
     big_blind: float = 1.0
     small_blind: float = 0.5
     current_player_idx: int = 0
+    # Authoritative positions from the table reader / upstream API when
+    # available. Seat order + dealer_id is only a fallback for legacy callers.
+    player_positions: Dict[int, str] = field(default_factory=dict)
     # Uniform shape: (player_id, Action, street) with street in {"preflop","flop","turn","river"}.
     action_history: list = field(default_factory=list)
     street_action_count: int = 0  # actions taken this street
@@ -121,7 +124,13 @@ class GameState:
 
     def position_of(self, player: Player) -> str:
         """Return position label for the player."""
+        explicit = str(self.player_positions.get(player.player_id) or "").strip()
+        if explicit:
+            return explicit
+
         n = len(self.players)
+        if n <= 0:
+            return 'MP'
         # Use list index, NOT player_id — player_id may be non-contiguous
         try:
             idx = next(i for i, p in enumerate(self.players)
@@ -151,6 +160,26 @@ class GameState:
             return labels[dist]
         return 'MP'
 
+    @staticmethod
+    def _postflop_position_rank(position: str) -> Optional[float]:
+        pos = str(position or "").strip()
+        ranks = {
+            'SB': 0.0,
+            'BB': 1.0,
+            'UTG': 2.0,
+            'UTG+1': 3.0,
+            'UTG1': 3.0,
+            'MP': 4.0,
+            'UTG+2': 4.0,
+            'UTG2': 4.0,
+            'LJ': 5.0,
+            'HJ': 6.0,
+            'CO': 7.0,
+            'BTN': 8.0,
+            'BU': 8.0,
+        }
+        return ranks.get(pos)
+
     def is_ip(self, player: Player) -> bool:
         """True if player acts last (in position) postflop.
 
@@ -162,6 +191,21 @@ class GameState:
         active = [p for p in self.players if not p.is_folded]
         if len(active) < 2:
             return False
+
+        explicit_ranks = []
+        for p in active:
+            rank = self._postflop_position_rank(self.player_positions.get(p.player_id, ""))
+            if rank is None:
+                explicit_ranks = []
+                break
+            explicit_ranks.append((rank, p.player_id))
+        if explicit_ranks:
+            max_rank = max(rank for rank, _pid in explicit_ranks)
+            player_rank = self._postflop_position_rank(
+                self.player_positions.get(player.player_id, "")
+            )
+            return player_rank is not None and player_rank == max_rank
+
         btn = self.dealer_pos % len(self.players)
         latest_active = None
         for i in range(len(self.players) - 1, -1, -1):

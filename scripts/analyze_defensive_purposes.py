@@ -14,10 +14,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-try:
-    from scripts.hero_name import load_hero_name
-except ModuleNotFoundError:
-    from hero_name import load_hero_name
+from scripts.hero_name import load_hero_names
 
 
 DEF_PURPOSES = {
@@ -384,7 +381,7 @@ def main() -> None:
     ap.add_argument("--log", type=Path, required=True)
     ap.add_argument("--out", type=Path, default=Path("/tmp/pokerfate_defensive_purposes.json"))
     args = ap.parse_args()
-    hero_name = load_hero_name()
+    hero_name = load_hero_names().current
     summary = analyze_log(args.log, hero_name)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

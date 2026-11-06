@@ -70,43 +70,76 @@ function P:setData(data, layer)
     end
 end
 
+function P:playUIEffect(name, parent, localPos, autoRemoveDt, noCache,layer)
+    if self.layer then
+        return self.layer:playUIEffect(name, parent, localPos, autoRemoveDt, noCache)
+    end
+    return nil
+end
+
+function P:putEffectItem(eft)
+    if self.layer then
+        self.layer:putEffectItem(eft)
+    end
+end
+
 function P:getBigBlind()
     return self.bb
 end
 
 function P:getReplayTitle(data)
     local subTitle = _N(data.small_blind) .. "/" .. _N(data.big_blind)
+    if (data.ante and data.ante ~= 0) then
+        subTitle = subTitle .. " (" .. _N(data.ante) .. ")"
+    end
     if data.tour_name and "" ~= data.tour_name then
         return data.tour_name .. "-" .. subTitle .. "-" .. TimeHelp:getDateTimeStr(data.game_start_time)
     end
     if GF.isTrainingGame(data.game_type) then
         subTitle = _T("LAB_GAME_053")
     end
-    return GF.getGameTypeName(data.game_type) .. "-" .. subTitle .. "-" .. TimeHelp:getDateTimeStr(data.game_start_time)
+    return GF.getGameTypeName(data.game_type, true) .. "-" .. subTitle .. "-" .. TimeHelp:getDateTimeStr(data.game_start_time)
 end
 
 function P:getReplayList(cb)
-    Net:post("/collCard/list", {t = 1, lang = LAN:getLanguage()}, function(data)
-        if 0 == data.code then
-            if data.list then
-                PlayerModel:setCurRecord(data.total)
-            else
-                PlayerModel:setCurRecord(0)
-            end
+    RecordDataModel:fetchCollectList(nil, function(ok, list, total)
+        if ok then
+            PlayerModel:setCurRecord(total or 0)
         end
-        if cb then cb(data) end
+        if cb then cb({code = ok and 0 or -1, list = list, total = total}) end
     end)
 end
 
+function P:saveReplay(gameid, cb, roomid, tid)
+    if PlayerModel:getCurRecord() >= PlayerModel:getRecordNum() then
+        GameModel:getReplayList(function(d)
+            if 0 == d.code then
+                if d.list and #d.list > 0 then
+                    local delData = d.list[#d.list]
+                    UiManager:showTip({
+                        text = _F("LAB_DEL_PLAYBACK_TIP5", GameModel:getReplayTitle(delData)),
+                        sureStr = _T("LAB_SAVE"),
+                        cancelStr = _T("LAB_DEL_PLAYBACK_TIP6"),
+                        onSure = function()
+                            RecordDataModel:replaceCollect(delData.gameid, gameid, function(ok)
+                                if cb then cb(ok, delData.gameid) end
+                            end, roomid, tid)
+                        end,
+                        onCancel = function()
+                        end,
+                    })
+                end
+            end
+        end)
+    else
+        RecordDataModel:addCollect(gameid, function(ok)
+            if cb then cb(ok) end
+        end, roomid, tid)
+    end
+end
+
 function P:deleteReplay(gameid, cb)
-    Net:post("/collCard/update", {
-        del_id = gameid,
-    }, function(d)
-        if 0 == d.code then
-            PlayerModel:setCurRecord(#d.gameids)
-        end
-        if cb then cb(d) end
-    end)
+    RecordDataModel:removeCollect(gameid, cb)
 end
 
 function P:reqGetRoomDataREQ()
@@ -133,7 +166,8 @@ end
 
 function P:getAllinUiName(item_id)
     if not item_id then
-        item_id = PlayerModel:getAllInEff()
+        local scheme = DecorationModel:getInGameCurScheme()
+        item_id = scheme.all_in_animation
     end
     if tpl_props[item_id] then
         return tpl_all_in_anim[tpl_props[item_id].mapId].eff
@@ -143,15 +177,31 @@ end
 
 function P:getAllinEffectName(kind, item_id)
     if not item_id then
-        item_id = PlayerModel:getNameplateEff()
+        local scheme = DecorationModel:getInGameCurScheme()
+        item_id = scheme.show_card
     end
     if kind > 3 then
         kind = 1
     end
+    local eff_bg = nil
     if tpl_props[item_id] then
-        return tpl_nameplate_anim[tpl_props[item_id].mapId].eff .. "_" .. kind
+        local d = tpl_nameplate_anim[tpl_props[item_id].mapId]
+        if d.eff_bg then
+            eff_bg = d.eff_bg .. "_" .. kind
+        end
+        return d.eff .. "_" .. kind, eff_bg
     end
-    return "Prefab/PKTable/Eff_Allin_fire_" .. "_" .. kind
+    return "Prefab/PKTable/Eff_Allin_fire" .. "_" .. kind, eff_bg
+end
+
+function P:getAllinShowName(item_id)
+    if item_id then
+        local d = tpl_props[item_id]
+        if d and tpl_open_anim[d.mapId] then
+            return tpl_open_anim[d.mapId].eff
+        end
+    end
+    return tpl_open_anim_list[1].eff
 end
 
 function P:isAutoSwitchTable()
@@ -185,26 +235,53 @@ function P:switchTable(fromMenu)
         default_byin = info.default_byin,
         wait_blind = not LocalStore:getBoolForKey("poker_pay_bb_byin", true),
         ip = PlayerModel:getIP(),
+        scheme = GameModel.data:getIngameScheme(),
     }
+    d.scheme.role_id = tpl_character_skin[d.scheme.skin_id].role
     if GameModel.data:isPlaying() and GameModel.data:isMePlaying() and not GameModel.data:isMeFold() then
-        UiManager:showTip({
-            text = _T("LAB_GAME_047"),
-            onSure = function()
-                d.byin_chips = info.chips
-                Net:sendReq("pb.LeaveRoomREQ", {
-                    client_str = json.encode(d)
-                })
-            end
-        })
+        -- UiManager:showTip({
+        --     text = _T("LAB_GAME_047"),
+        --     onSure = function()
+        --         d.byin_chips = info.chips
+        --         Net:sendReq("pb.LeaveRoomREQ", {
+        --             client_str = json.encode(d)
+        --         })
+        --     end
+        -- })
+        UiManager:showToast(_T("LAB_GAME_090"))
         if fromMenu then
             bee.logEvent("ingame-menu-switch-ongoing", GameModel.data:getGameType(), GameModel.data:getRoomId())
         end
     else
         Net:sendReq("pb.LeaveRoomREQ", {
-            client_str = json.encode(d)
+            client_str = json.encode(d),
+            is_switch_room = true,
         })
         if fromMenu then
             bee.logEvent("ingame-menu-switch-before", GameModel.data:getGameType(), GameModel.data:getRoomId())
+        end
+    end
+end
+
+function P:playSitdownVoice(skin_id)
+    local skin = tpl_character_skin[skin_id]
+    if skin and not self.data:isSNG() and not self.data:isMTT() and not self.data:isFriendSNG() then
+        if skin.kind == SKIN_KIND.AWAKEN then
+            Game:playRoleInVoice(skin.role, ROLE_VOICE.take_a_seat_awakened)
+        elseif skin.kind == SKIN_KIND.SECOND_AWAKEN then
+        	Game:playRoleInVoice(skin.role, ROLE_VOICE.take_a_seat_awakened2)
+        else
+            local voice_id = ROLE_VOICE.take_a_seat
+            if skin.kind ~= SKIN_KIND.NORMAL then
+                local ds = get_tpl_subKey(tpl_chat_list, "role", skin.role)
+                for _, v in ipairs(ds) do
+                    if v.skin_voice == skin_id and v.key == ROLE_VOICE.take_a_seat_skin then
+                        voice_id = v.key
+                        break
+                    end
+                end
+            end
+            Game:playRoleInVoice(skin.role, voice_id)
         end
     end
 end

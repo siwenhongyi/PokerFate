@@ -24,6 +24,10 @@ from pokerfate.core.config import MIN_HANDS_FOR_CLASSIFICATION
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
 from pokerfate.strategy.range_v2 import hand_categorizer as hcat
 from pokerfate.strategy.range_v2.blocker import blocker_weights
+from pokerfate.strategy.range_v2.empirical_model import (
+    empirical_action_likelihood,
+    population_rate,
+)
 
 # ---------------------------------------------------------------------------
 # Context passed to the likelihood function
@@ -43,6 +47,12 @@ class ActionContext:
     bet_ratio: float = 0.0
     # True = this raise is over someone's bet (re-raise / CR); False = first bet
     is_raise_over: bool = False
+    # Whether the acting opponent is in position among currently active players.
+    is_ip: bool = False
+    # Normalized preflop action label for calibration features only.
+    preflop_action_type: str = ""
+    # Table big blind, used only for bb-specific empirical priors.
+    big_blind: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -57,20 +67,23 @@ class PlayerProfile:
     """
     name: str = ""
     hands_seen: int = 0
-    vpip: float = 0.35
-    pfr: float = 0.20
+    flop_seen_count: int = 0
+    showdown_count: int = 0
+    showdown_win_count: int = 0
+    vpip: float = population_rate('vpip', 0.35)
+    pfr: float = population_rate('pfr', 0.20)
     af: float = 2.0
-    three_bet_pct: float = 0.06
-    fold_to_3bet: float = 0.55
-    fold_to_cbet: float = 0.45
+    three_bet_pct: float = population_rate('three_bet', 0.06)
+    fold_to_3bet: float = population_rate('fold_to_3bet', 0.55)
+    fold_to_cbet: float = population_rate('fold_to_cbet', 0.45)
     fold_to_cbet_opps: int = 0
-    wtsd: float = 0.25
-    wmsd: float = 0.50
-    flop_afq: float = 0.45
-    turn_afq: float = 0.40
-    river_afq: float = 0.35
-    river_fold_rate: float = 0.35
-    river_bet_freq: float = 0.35
+    wtsd: float = population_rate('wtsd', 0.25)
+    wmsd: float = population_rate('wmsd', 0.50)
+    flop_afq: float = population_rate('flop_afq', 0.45)
+    turn_afq: float = population_rate('turn_afq', 0.40)
+    river_afq: float = population_rate('river_afq', 0.35)
+    river_fold_rate: float = population_rate('river_fold_rate', 0.35)
+    river_bet_freq: float = population_rate('river_bet_frequency', 0.35)
     bluff_win_rate: float = 0.0
     bet_win_count: int = 0
     river_bet_count: int = 0
@@ -181,8 +194,9 @@ _CAT_IDX_AIR = _CAT_IDX['air']
 # ---------------------------------------------------------------------------
 # Issue K (2026-04-21 gameplay analysis hand 26 + hand 68): the original
 # single SIZING_CATEGORY_ADJ table assumed villain range is ALWAYS polarized
-# at large/overbet sizings (nuts + bluff, no medium). That's true for regs
-# and solver-style players but WRONG for fish/whale/station — they use
+# at large/overbet sizings (nuts + bluff, no medium). That's true for
+# solver-style low-gap/high-aggression profiles but wrong for loose-passive
+# profiles — they use
 # merged ranges (value + medium + some bluff) even at large sizes.
 #
 # Two base tables; real adjustment interpolates by a continuous
@@ -191,7 +205,8 @@ _CAT_IDX_AIR = _CAT_IDX['air']
 # thresholded derivatives of these same metrics and introduce artificial
 # jumps at boundaries (the "label异化特征" problem).
 
-# Polarized table: derived from PioSolver / MDF. Accurate for regs.
+# Polarized table: derived from PioSolver / MDF. Accurate for low-gap,
+# higher-aggression profiles.
 # Large/overbet: villain nuts ↑, medium ↓ hard, air ↑.
 SIZING_CATEGORY_ADJ_POLARIZED: Dict[str, Dict[str, float]] = {
     'tiny': {       # <40% pot: blocking bet / probe
@@ -216,22 +231,22 @@ SIZING_CATEGORY_ADJ_POLARIZED: Dict[str, Dict[str, float]] = {
     },
 }
 
-# Merged table: for non-polarizing players (fish / whale / calling station).
-# Large sizing from fish is "I think I have something" — range is
+# Merged table: for non-polarizing loose-passive profiles.
+# Large sizing from these profiles is often "I think I have something" — range is
 # value + medium, rarely pure bluff, rarely pure nuts.
 # Sources:
-#   - Upswing Lab "Exploitation Against Calling Stations": fish large bets
+#   - Upswing Lab "Exploitation Against Calling Stations": loose-passive large bets
 #     are 5-15% nuts, 30-40% strong, 40-50% medium, 5-10% bluff (~uniform).
 #   - Janda 2015 ch.3-4: merged range = value + medium + occasional bluff.
 #   - PokerTracker Analytics (public) on VPIP>40% large-bet composition.
 # Multipliers: pulled toward 1.0 (neutral) vs polarized; nuts/air no longer
 # spike, medium not crushed.
 SIZING_CATEGORY_ADJ_MERGED: Dict[str, Dict[str, float]] = {
-    'tiny': {       # fish tiny bet: similar to probe — slight medium lean
+    'tiny': {       # loose-passive tiny bet: similar to probe — slight medium lean
         'nuts': 0.8, 'strong': 1.0, 'medium': 1.2,
         'draw': 1.1, 'weak_draw': 1.0, 'air': 0.9,
     },
-    'small': {      # fish half-pot: near-flat likelihood
+    'small': {      # loose-passive half-pot: near-flat likelihood
         'nuts': 0.95, 'strong': 1.0, 'medium': 1.05,
         'draw': 1.0, 'weak_draw': 0.95, 'air': 0.95,
     },
@@ -239,25 +254,25 @@ SIZING_CATEGORY_ADJ_MERGED: Dict[str, Dict[str, float]] = {
         'nuts': 1.0, 'strong': 1.0, 'medium': 1.0,
         'draw': 1.0, 'weak_draw': 1.0, 'air': 1.0,
     },
-    'large': {      # fish large bet: merged — medium NOT crushed
+    'large': {      # loose-passive large bet: merged — medium NOT crushed
         # 2026-04-23：air 从 0.85 压到 0.60。原 0.85 让 air 和 medium 系数
-        # 几乎相同（0.85 vs 0.85），违背 "fish pot-size barrel 极少 bluff"
-        # 的经验（Upswing 实证 fish large bet 5-10% bluff，40-50% medium）。
-        # 实战 -10BB QQ 个案：fish pot-size 双街 barrel → tracker 窄化出
+        # 几乎相同（0.85 vs 0.85），违背 "loose-passive pot-size barrel 极少 bluff"
+        # 的经验（Upswing 实证 loose-passive large bet 5-10% bluff，40-50% medium）。
+        # 实战 -10BB QQ 个案：loose-passive pot-size 双街 barrel → tracker 窄化出
         # 坚果 58%，实际 villain 只拿一对，hero 错弃 QQ。0.60 介于 overbet
-        # 的 0.50 和旧 0.85 之间，既压制 air 又承认 fish 在 large 比 overbet
+        # 的 0.50 和旧 0.85 之间，既压制 air 又承认 large 比 overbet
         # 更可能（非最纯 polar）有诈唬成分。
         'nuts': 1.10, 'strong': 1.0, 'medium': 0.85,
         'draw': 0.85, 'weak_draw': 0.70, 'air': 0.60,
     },
-    'overbet': {    # fish overbet: still merged, slight tilt toward value
-        # 2026-04-23：air 从 1.10 改到 0.50。之前 1.10 和注释 "fish 5-10% bluff"
+    'overbet': {    # loose-passive overbet: still merged, slight tilt toward value
+        # 2026-04-23：air 从 1.10 改到 0.50。之前 1.10 和注释 "5-10% bluff"
         # 矛盾（Upswing 实证极低 bluff，系数应压制 air 而不是略放大）。1.10 导致
-        # 实战中 fish 4.6x pot donk 的窄化后 range 仍然 46% air，hero 用中等牌
+        # 实战中 loose-passive 4.6x pot donk 的窄化后 range 仍然 46% air，hero 用中等牌
         # 做 bluff-catch 按"air 高比例"算出的 equity 虚高（H33 -54BB 个案：
-        # 88 vs fish 4.6x pot donk，equity 显示 49%，真实 ~30%，44% pot odds
+        # 88 vs loose-passive 4.6x pot donk，equity 显示 49%，真实 ~30%，44% pot odds
         # 下应弃牌但 call 了）。0.5 把 air likelihood 压到约 baseline 的一半，
-        # 符合 fish 极低诈唬频率。
+        # 符合低诈唬频率。
         'nuts': 1.25, 'strong': 0.95, 'medium': 0.65,
         'draw': 0.70, 'weak_draw': 0.50, 'air': 0.50,
     },
@@ -285,8 +300,8 @@ def _sizing_bucket(bet_ratio: float) -> str:
 def _polarization_index(profile: 'PlayerProfile') -> float:
     """Continuous polarization index ∈ [0.0, 1.0].
 
-    0.0 = fully merged (fish/whale behaviour — bet range is value+medium)
-    1.0 = fully polarized (reg/solver — bet range is nuts+bluff, no medium)
+    0.0 = fully merged (loose-passive behaviour — bet range is value+medium)
+    1.0 = fully polarized (solver-style behaviour — bet range is nuts+bluff, no medium)
 
     Built from LOW-LEVEL stats (AF, WTSD, VPIP) — NOT player_type labels.
     Labels are thresholded buckets of the same underlying metrics and
@@ -294,10 +309,10 @@ def _polarization_index(profile: 'PlayerProfile') -> float:
     station' but 54.9% isn't). Continuous interpolation avoids this.
 
     Weights:
-      AF     (50%): primary polarization signal. AF<1.5 → fish/whale
-                    (merged); AF>2.5 → aggressive reg (polarized).
+      AF     (50%): primary polarization signal. AF<1.5 → passive
+                    (merged); AF>2.5 → high-aggression profile (polarized).
       WTSD   (30%): high WTSD → shows weak hands = merged; low = polarized.
-      VPIP   (20%): tie-breaker. High VPIP → loose fish → merged.
+      VPIP   (20%): tie-breaker. High VPIP → loose profile → merged.
     """
     # Cold start: no data → default to mid-polarization (conservative —
     # don't over-assume either direction when below MIN_HANDS_FOR_CLASSIFICATION).
@@ -327,13 +342,13 @@ def _sizing_adj_for(bucket: str, profile: 'PlayerProfile') -> Dict[str, float]:
     """Return the per-category sizing adjustment for this bucket/player.
 
     Linearly interpolates between MERGED and POLARIZED tables by the
-    continuous `polarization_index`. A player halfway between fish and reg
+    continuous `polarization_index`. A player halfway between loose-passive and polarized
     gets an adjustment halfway between the two tables, not a hard bucket
     change.
 
-    2026-04-23：unknown 对手（hands_seen < MIN）把偏离 1.0 的幅度阻尼 50%。
-    引用 BlackRain79：未知对手不应按激进先验处理（可能是 whale 也可能是
-    reg），sizing 信号本身可靠，但从"什么类型玩家"这层 prior 太弱——把
+    2026-04-23：冷启动对手（hands_seen < MIN）把偏离 1.0 的幅度阻尼 50%。
+    冷启动对手不应按激进先验处理（可能是极松被动也可能是
+    高攻击），sizing 信号本身可靠，但从行为画像这层 prior 太弱——把
     polar/merged 的任何调整向中性 1.0 拉回一半，避免冷启动 + 连续 barrel
     组合下的过度窄化。样本足够后自动恢复全强度。
     """
@@ -530,6 +545,29 @@ class ActionModel:
         conf = _confidence('af', prof.hands_seen)
         result = conf * adjusted + (1.0 - conf) * gto_freqs
 
+        empirical = empirical_action_likelihood(action, street, ctx, prof)
+        if empirical is not None:
+            empirical_freq, blend, _key, _n = empirical
+            empirical_per_cat = np.array(
+                [
+                    _clip(float(empirical_freq[c]), 0.01, 0.99)
+                    if c in empirical_freq else 0.0
+                    for c in _CAT_ORDER
+                ],
+                dtype=np.float64,
+            )
+            empirical_present = np.array(
+                [c in empirical_freq for c in _CAT_ORDER],
+                dtype=bool,
+            )
+            empirical_arr = empirical_per_cat[cat_idx]
+            empirical_present_arr = empirical_present[cat_idx]
+            if action != 'fold':
+                strong_mask = (cat_idx == _CAT_IDX['nuts']) | (cat_idx == _CAT_IDX['strong'])
+                empirical_arr = np.where(strong_mask, np.maximum(empirical_arr, result), empirical_arr)
+            empirical_blended = (1.0 - blend) * result + blend * empirical_arr
+            result = np.where(empirical_present_arr, empirical_blended, result)
+
         # Showdown learner override (vectorized blend)
         if self.showdown_learner is not None and prof.name:
             learned = self.showdown_learner.get_learned_freq(
@@ -598,6 +636,22 @@ class ActionModel:
             adjusted = _clip(gto_freq * scale, 0.01, 0.99)
             conf = _confidence('af', prof.hands_seen)
             result[idx] = conf * adjusted + (1 - conf) * gto_freq
+
+        empirical = empirical_action_likelihood(action, street, ctx, prof)
+        if empirical is not None:
+            empirical_freq, blend, _key, _n = empirical
+            for idx in range(1326):
+                cat = categories[idx]
+                if street == 'river' and cat in ('draw', 'weak_draw'):
+                    cat = 'air'
+                if cat in empirical_freq:
+                    empirical_value = _clip(float(empirical_freq[cat]), 0.01, 0.99)
+                    if action != 'fold' and cat in ('nuts', 'strong'):
+                        empirical_value = max(empirical_value, result[idx])
+                    result[idx] = (
+                        (1.0 - blend) * result[idx]
+                        + blend * empirical_value
+                    )
 
         if self.showdown_learner is not None and prof.name:
             learned = self.showdown_learner.get_learned_freq(
@@ -716,10 +770,11 @@ class ActionModel:
             # 每个 category 由直接相关的统计量独立驱动，不互相污染。
             #
             # air: 由 bluff_win_rate 驱动（诈唬倾向的直接度量）
-            #   GTO 基线 bluff rate ≈ 25%；whale ≈ 5%、maniac ≈ 45%。
+            #   基线来自持久化对手池；低诈唬 profile 更低，高诈唬 profile 更高。
             #   样本不足 (<5) 时不调整，用 GTO 默认。
             if prof.bet_win_count >= 5:
-                air_mult = _clip(prof.bluff_win_rate / 0.25, 0.2, 2.0)
+                bluff_base = max(0.05, population_rate('bluff_win_rate', 0.25))
+                air_mult = _clip(prof.bluff_win_rate / bluff_base, 0.2, 2.0)
                 scales['air'] *= air_mult
                 scales['weak_draw'] *= _clip(air_mult, 0.4, 1.5)
 
@@ -736,7 +791,7 @@ class ActionModel:
                 scales['weak_draw'] *= _clip(medium_mult * 0.6, 1.0, 1.5)
 
             # Bet sizing adjustment (postflop only, first-bet only — see docstring).
-            # Issue K: interpolate between MERGED (fish) and POLARIZED (reg)
+            # Issue K: interpolate between MERGED and POLARIZED
             # tables by continuous polarization_index from AF/WTSD/VPIP.
             if bet_ratio > 0 and street != 'preflop':
                 bucket = _sizing_bucket(bet_ratio)
@@ -746,7 +801,8 @@ class ActionModel:
 
         elif action == 'call':
             # WTSD high → calls more with all categories
-            wtsd_scale = _clip(prof.wtsd / 0.25, 0.5, 2.5)
+            wtsd_base = max(0.05, population_rate('wtsd', 0.25))
+            wtsd_scale = _clip(prof.wtsd / wtsd_base, 0.5, 2.5)
             for cat in scales:
                 scales[cat] = wtsd_scale
 
@@ -769,7 +825,11 @@ class ActionModel:
             # aggression，不是 air flat call）不走这条路。
             gap = prof.vpip - prof.pfr
             if prof.wtsd >= 0.30 and gap > 0.20:
-                looseness = _clip(min(prof.wtsd / 0.25, gap / 0.20), 1.0, 2.0)
+                wtsd_base = max(0.05, population_rate('wtsd', 0.25))
+                # This branch is a safety guard against over-narrowing passive
+                # callers.  Population WTSD can be higher than the original
+                # guard baseline, but that must not weaken the protection.
+                looseness = _clip(min(prof.wtsd / min(wtsd_base, 0.25), gap / 0.20), 1.0, 2.0)
                 scales['air'] *= looseness * 2.0
                 scales['weak_draw'] *= looseness * 1.5
                 scales['draw'] *= looseness * 1.2
@@ -787,8 +847,9 @@ class ActionModel:
             )
             if trap_prior:
                 # 插值：wtsd 越高（或 vpip 越高）trap 越可能，nuts 增幅越大
+                wtsd_base = max(0.05, population_rate('wtsd', 0.25))
                 trap_strength = _clip(
-                    max(prof.wtsd / 0.40, prof.vpip / 0.60), 1.0, 1.8
+                    max(prof.wtsd / max(0.40, wtsd_base), prof.vpip / 0.60), 1.0, 1.8
                 )
                 scales['nuts'] *= trap_strength
                 scales['strong'] *= (1.0 + (trap_strength - 1.0) * 0.7)
@@ -797,16 +858,18 @@ class ActionModel:
             if street == 'flop' and prof.fold_to_cbet_opps >= 60:
                 # Direct fold_to_cbet application
                 ftc = prof.fold_to_cbet
+                ftc_base = max(0.05, population_rate('fold_to_cbet', 0.45))
                 # Strong hands don't fold regardless; weak hands fold more
                 scales['nuts'] = 0.05
                 scales['strong'] = 0.1
-                scales['medium'] = _clip(ftc / 0.45, 0.5, 2.0)
-                scales['draw'] = _clip(ftc * 0.7 / 0.45, 0.3, 1.5)
-                scales['weak_draw'] = _clip(ftc * 1.2 / 0.45, 0.5, 2.5)
-                scales['air'] = _clip(ftc * 1.4 / 0.45, 0.7, 3.0)
+                scales['medium'] = _clip(ftc / ftc_base, 0.5, 2.0)
+                scales['draw'] = _clip(ftc * 0.7 / ftc_base, 0.3, 1.5)
+                scales['weak_draw'] = _clip(ftc * 1.2 / ftc_base, 0.5, 2.5)
+                scales['air'] = _clip(ftc * 1.4 / ftc_base, 0.7, 3.0)
             elif street == 'river' and prof.river_facing_bet_opps >= 30:
                 river_fold = prof.river_fold_rate
-                rf_scale = _clip(river_fold / 0.35, 0.5, 2.0)
+                river_fold_base = max(0.05, population_rate('river_fold_rate', 0.35))
+                rf_scale = _clip(river_fold / river_fold_base, 0.5, 2.0)
                 scales['nuts'] = 0.05
                 scales['strong'] = 0.2
                 for cat in ('medium', 'draw', 'weak_draw', 'air'):

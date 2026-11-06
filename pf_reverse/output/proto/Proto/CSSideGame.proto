@@ -50,6 +50,22 @@ message PushGiftRSP
 	optional int32 game_type = 3;
     optional int64 end_time = 4;
 }
+
+
+//推送超值礼包
+message PushRoomGiftREQ
+{
+
+}
+//推送超值礼包
+message PushRoomGiftRSP
+{
+    optional int32 code = 1;
+    optional int32 gift_id = 2;//推送礼包id
+    optional int64 end_time = 3;
+    optional int32 game_type = 4;
+}
+
 //小游戏获取历史记录
 message GetSideGameHisRecordREQ
 {

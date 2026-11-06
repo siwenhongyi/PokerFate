@@ -11,8 +11,9 @@ function P:ctor()
 	self._autoAdapt = false
 	self._needShowAnim = true
 
-	self._watiStart = true 	-- 等待 onStart 完成
 	self._isMute = nil 	-- 是否静音
+
+	self._openAnim, self._closeAnim = "UI_1_" .. self.__cname .. "_into", "UI_1_" .. self.__cname .. "_back"
 end
 
 local offsetMax, offsetMin = nil, nil
@@ -198,9 +199,17 @@ function P:hideUIForce()
 end
 
 function P:checkHideAnim(cb)
-	if not bee.isNull(self.animator) and self._closeAnim ~= "" then
+	local name = self._closeAnim
+	if not bee.isNull(self.animator) and name ~= "" then
+		if not name then
+			name = "UI_common_notice_back"
+		else
+			if 0 == CS.AnimatorManager.Instance:GetAnimationTimes(self.animator, name) then
+				name = "UI_common_notice_back"
+			end
+		end
 		if AnimationMgr then
-			AnimationMgr:playAnimator(self.animator, self._closeAnim or "UI_common_notice_back")
+			AnimationMgr:playAnimator(self.animator, name)
 		else
 			if cb then cb() end
 			self:setHiding(false)
@@ -212,8 +221,8 @@ function P:checkHideAnim(cb)
 	
 	local dt = 0
 	-- ui 准备被隐藏，返回所需要的动画时间, 子类有其他动画时可复写
-	if not bee.isNull(self.animator) and self._closeAnim ~= "" then
-		dt = self:getAnimatorLength(self.animator, self._closeAnim or "UI_common_notice_back")
+	if not bee.isNull(self.animator) and name ~= "" then
+		dt = self:getAnimatorLength(self.animator, name)
 	end
 	if dt and dt > 0 then
 		self:once(dt, function() 
@@ -248,6 +257,10 @@ function P:getRootSortingOrder(offset)
 		return canvas.sortingOrder + offset
 	end
 	return UiManager.sortingIndex * 20 + offset
+end
+
+function P:onBtClose()
+    self:hideUI()
 end
 
 return P

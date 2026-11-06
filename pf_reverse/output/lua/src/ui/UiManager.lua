@@ -6,6 +6,8 @@ local P = {
 	sortingIndex = 1,	-- canvas 排序序号
 
 	_ui_config = nil,	-- ui 的配置表 {key = name, view = prefab, src = lua, adapt = 是否自适配}
+	
+	_uiTipPop = {"TournamentSNGhint"},  --顶层提示UI
 }
 UiManager = P
 
@@ -31,8 +33,10 @@ function P:bindCurUi(clsName)
 		clsName = clsName or self.clsName
 		local cfg = nil
 		if clsName == "PKTable3D" then
-			if GameModel.data and GameModel.data:isSNG() and not GameModel.data:isRecord() then
+			if GameModel.data and (GameModel.data:isSNG() or GameModel.data:isFriendSNG()) and not GameModel.data:isRecord() then
 				clsName = "PKTable3DSNG"
+			elseif GameModel.data and GameModel.data:isMTT() and not GameModel.data:isRecord() then
+				clsName = "PKTable3DMTT"
 			end
 		end
 		if self._ui_config and self._ui_config[clsName] then
@@ -140,7 +144,12 @@ function P:invoke(funcName)
 	end
 end
 
+function P:setShowingScene()
+	self._showingScene = true
+end
+
 function P:showScene(name)
+	self._showingScene = nil
 	if name then
 		local scene = require("app.scenes." .. name);
 		if scene then
@@ -214,7 +223,7 @@ function P:resizeBuffers(scaleW, scaleH)
 end
 
 function P:_resetScreenMatch(canvas)
-	if canvas and self.screenMatchValue then
+	if not bee.isNull(canvas) and self.screenMatchValue then
 		local cmp = canvas:GetComponent("CanvasScaler")
 		if cmp then
 			cmp.matchWidthOrHeight = self.screenMatchValue
@@ -242,7 +251,7 @@ function P:_showUI(obj, uiName, params)
 					root = self:getPopRoot()
 					if bee.isEditor then
 						if bee.existTask()  then
-							if (not params or not params.fromTask) and uiName ~= "GMLayer" and uiName ~= "MainLockTouch" then
+							if (not params or not params.fromTask) and uiName ~= "GMLayer" and uiName ~= "MainLockTouch" and uiName ~= "views/Toast" then
 								printError("打开窗口"..uiName.."时发现队列里面有任务执行中")
 							end
 						end
@@ -313,7 +322,7 @@ end
 
 -- 显示 ui，params.inMain: 是否显示在主相机下（非ui）
 function P:showUI(uiName, params)
-	if bee.isNull(CS.GameMain.Instance) then return end
+	if self._showingScene or bee.isNull(CS.GameMain.Instance) then return end
 	
 	if not params or not params.multi then
 		local ui = self._uiList[uiName]
@@ -459,8 +468,13 @@ function P:hideUIForce(uiName)
 	end
 end
 
-function P:hideAllUI(except_dict)
+function P:hideAllUI(except_dict, includePop)
 	local hide_dict = {}
+	if includePop then
+		for _,v in pairs(self._uiTipPop) do
+			table.insert(except_dict, v)
+		end
+	end
 	if except_dict then
 		for _, v in ipairs(except_dict) do
 			except_dict[v] = true
@@ -502,10 +516,10 @@ function P:isTopUI(node)
 end
 
 function P:showToast(text, pos, force, isSilence)
-	local view = self:getUI("views/Toast")
-    if view then
-		self:hideUI("views/Toast")
-	end
+	-- local view = self:getUI("views/Toast")
+    -- if view then
+	-- 	self:hideUI("views/Toast")
+	-- end
 	self:showUI("views/Toast", {text = text, pos = pos, isForce = force, isSilence = isSilence})
 end
 

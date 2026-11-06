@@ -11,6 +11,7 @@ function P:ctor()
     self._roles = {}
     self._curData = nil
     self._curIndex = 1
+    self._selectData = {}
 end
 
 function P:afterInit()
@@ -26,6 +27,7 @@ end
 function P:setStoryData(data)
     self._curData = data
     self._curIndex = 1
+    self._selectData = {}
 end
 
 function P:getCurIndex()
@@ -34,6 +36,14 @@ end
 
 function P:setCurIndex(index)
     self._curIndex = index
+end
+
+function P:getSelectData()
+    return self._selectData
+end
+
+function P:setSelectData(tab)
+    table.insert(self._selectData, tab)
 end
 
 function P:getTalkName(data)
@@ -258,6 +268,16 @@ function P:createRole(roleId, data)
         if d.spine_res then
             local obj = bee.createObj(d.spine_res)
             if obj then
+                if d.Imagebg == 1 then
+                    local Image = bee.find("Image", obj)
+                    if Image then
+                        Image:SetActive(true)
+                    end
+                    local ImageFg = bee.find("ImageFg", obj)
+                    if ImageFg then
+                        ImageFg:SetActive(true)
+                    end
+                end
                 return require("app.Story.StoryRole"):create(roleId, obj, data)
             end
         elseif d.avatar then

@@ -325,7 +325,7 @@ function P:deleteApply(uid)
 	end)
 end
 
-function P:blockFriend(uid)
+function P:blockFriend(uid, cb)
 	Net:post("/friend/blocked", {friend_uid = uid, blocked = true}, function(data)
 		if data.code ~= 0 then
 			return
@@ -333,6 +333,9 @@ function P:blockFriend(uid)
 		self:requestFriendList()
 		self:requestBlockedList()
 		self:requestApplyFriendList()
+		if cb then
+			cb(data)
+		end
 	end)
 end
 

@@ -29,12 +29,9 @@ function P:onAwake()
         end
         self:hideUI()
     end)
-    bee.addClick(self:find("CloseButton", self.Panel), function()
-        if self._params and self._params.isSetReby then
-        else
-            Net:sendReq("pb.LeaveRoomREQ", {})
-        end
-        self:hideUI()
+    self.CloseButton = self:find("CloseButton", self.Panel)
+    bee.addClick(self.CloseButton, function()
+        self:onBtClose()
     end)
     bee.addClick(self.MinusButton, function()
         self.ByinSlider:setCurStep(self.ByinSlider:getCurStep() - 1, true)
@@ -103,5 +100,12 @@ function P:evt_TableGameOverRSP()
     end
 end
 
+function P:onBtClose()
+    if self._params and self._params.isSetReby then
+    else
+        Net:sendReq("pb.LeaveRoomREQ", {})
+    end
+    self:hideUI()
+end
 
 return P

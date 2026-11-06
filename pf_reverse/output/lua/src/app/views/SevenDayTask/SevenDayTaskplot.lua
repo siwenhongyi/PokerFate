@@ -10,10 +10,7 @@ function P:onAwake()
 	self.CloseButton = self:find("CloseButton", Center)
 
 	bee.addClick(self.CloseButton, function()
-		if self._params.closeCb then
-			self._params.closeCb()
-		end
-		self:hideUI()
+		self:onBtClose()
 	end)
 	bee.addClick2(self:find("common_panel_mask_80", Center), function()
 		if self._params.closeCb then
@@ -29,6 +26,13 @@ function P:onStart()
 	local stageCfg = tpl_seven_day_tasks_stage[self._params.id]
 	bee.setText(self.ContentText, _T(stageCfg.plot_text))
 	bee.setText(self.TimeText, _T(stageCfg.plot_time))
+end
+
+function P:onBtClose()
+	if self._params.closeCb then
+		self._params.closeCb()
+	end
+	self:hideUI()
 end
 
 return P

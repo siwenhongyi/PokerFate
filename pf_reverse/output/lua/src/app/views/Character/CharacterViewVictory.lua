@@ -22,6 +22,7 @@ end
 function P:onShow()
     self._role = self._params.data or self._params.role
     self._skin = self._params.skin
+    bee.invoke(self.CharacterImage, "setShowReal", true)
     if self._skin then
         bee.invoke(self.CharacterImage, "setSkin", self._skin, true, true)
     else

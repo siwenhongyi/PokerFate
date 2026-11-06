@@ -44,22 +44,39 @@ function M.getCardInfoDict(code)
 	return {n = n, s = s}
 end
 
-function M.getCardImageByCode(code, itemId)
+function M.getCardImageByCode(code, scheme)
 	if code == Config.JOKER_CARD then
 		return Config.IMAGE.CARD_JOKER
 	elseif 0 == code or not code then
 		-- return "Card[card_back]"
-		return PlayerModel:getCurCardBackImage()
+		if GameModel.data then
+			return DecorationModel:getCurCardBackImage(GameModel.data:getIngameScheme())
+		end
+		return DecorationModel:getCurCardBackImage(scheme)
 	end
 	local number, color = M.getCardNumberSuit(code)
-	return M.getCardImage(number, color, itemId)
+	return M.getCardImage(number, color, scheme)
 end
 
-function M.getCardImage(number, color, itemId)
-	if not itemId then
-		itemId = PlayerModel:getCardFace()
+function M.getCardImage(number, color, scheme)
+	local faceId = 0
+	if GameModel.data then
+		faceId = DecorationModel:getCurCardFace(GameModel.data:getIngameScheme())
+	else
+		faceId = DecorationModel:getCurCardFace(scheme)
 	end
-	local cfg = tpl_card[tpl_props[itemId].mapId]
+	local cfg = tpl_card[faceId]
+	return string.format("Card[" .. cfg.image .."_%s_%s]", color, number)
+end
+
+function M.getCardImageByCode2(code, faceId, backId)
+	if code == Config.JOKER_CARD then
+		return Config.IMAGE.CARD_JOKER
+	elseif 0 == code or not code then
+		return tpl_card_back[backId].image
+	end
+	local number, color = M.getCardNumberSuit(code)
+	local cfg = tpl_card[faceId]
 	return string.format("Card[" .. cfg.image .."_%s_%s]", color, number)
 end
 
@@ -84,11 +101,23 @@ function M.isOmahaGame(gameType)
 end
 
 function M.isAllinPoker(gameType)
-	return gameType == GAME_GAME_TYPE.LOBBY_HOLDEM_ALLIN
+	return gameType == GAME_GAME_TYPE.LOBBY_HOLDEM_ALLIN or gameType == GAME_GAME_TYPE.TRAINING_HOLDEM_ALLIN
 end
 
 function M.isFriendsRoom(gameType)
+	return M.isFriendPoker(gameType) or M.isFriendOmaha(gameType) or M.isFriendSNG(gameType)
+end
+
+function M.isFriendPoker(gameType)
 	return gameType == GAME_GAME_TYPE.FRIEND_HOLDEM_GAME
+end
+
+function M.isFriendOmaha(gameType)
+	return gameType == GAME_GAME_TYPE.FRIEND_OMAHA_GAME
+end
+
+function M.isFriendSNG(gameType)
+	return gameType == GAME_GAME_TYPE.FRIEND_SNG_GAME
 end
 
 function M.isSNG(gameType)
@@ -99,8 +128,12 @@ function M.isMTT(gameType)
 	return gameType == GAME_GAME_TYPE.MTT_HOLDEM_GAME or gameType == GAME_GAME_TYPE.MTT_OMAHA_GAME
 end
 
+function M.isTournament(gameType)
+	return M.isSNG(gameType) or M.isMTT(gameType)
+end
+
 function M.isTrainingGame(gameType)
-	return gameType == GAME_GAME_TYPE.TRAINING_HOLDEM_GAME or gameType == GAME_GAME_TYPE.TRAINING_OMAHA_GAME or gameType == GAME_GAME_TYPE.SNG_TRAIN_GAME
+	return gameType == GAME_GAME_TYPE.TRAINING_HOLDEM_GAME or gameType == GAME_GAME_TYPE.TRAINING_OMAHA_GAME or gameType == GAME_GAME_TYPE.SNG_TRAIN_GAME or gameType == GAME_GAME_TYPE.TRAINING_HOLDEM_ALLIN
 end
 
 function M.getGameTypeName(gameType, showRealName)
@@ -112,8 +145,21 @@ function M.getGameTypeName(gameType, showRealName)
 		return _T("LAB_SNG")
 	elseif showRealName and M.isMTT(gameType) then
 		return _T("LAB_MTT")
-	elseif showRealName and M.isFriendsRoom(gameType) then
-		return _T("LAB_FRIROOM_001")
+	elseif M.isFriendPoker(gameType) then
+		if showRealName then
+			return _T("LAB_FRIROOM_052")
+		end
+		return _T("LAB_POKER_GAME")
+	elseif M.isFriendOmaha(gameType) then
+		if showRealName then
+			return _T("LAB_FRIROOM_053")
+		end
+		return _T("LAB_OMAHA")
+	elseif M.isFriendSNG(gameType) then
+		if showRealName then
+			return _T("LAB_FRIROOM_054")
+		end
+		return _T("LAB_SNG")
 	end
 	return _T("LAB_POKER_GAME")
 end
@@ -141,8 +187,19 @@ function M.getTableDatas(gameType)
 		return M.__tpl_table_omaha
 	elseif gameType == GAME_GAME_TYPE.FRIEND_HOLDEM_GAME then
 		return tpl_table_poker_friend
+	elseif gameType == GAME_GAME_TYPE.FRIEND_OMAHA_GAME then
+		return tpl_table_omaha_friend
 	elseif gameType == GAME_GAME_TYPE.LOBBY_HOLDEM_ALLIN then
-		return tpl_table_poker_allin
+		if not M.__tpl_table_poker_allin then
+			M.__tpl_table_poker_allin = {}
+			for _, v in ipairs(tpl_table_poker_allin_free_list) do
+				table.insert(M.__tpl_table_poker_allin, v)
+			end
+			for _, v in ipairs(tpl_table_poker_allin_list) do
+				table.insert(M.__tpl_table_poker_allin, v)
+			end
+		end
+		return M.__tpl_table_poker_allin
 	end
 	if not M.__tpl_table_poker then
 		M.__tpl_table_poker = {}
@@ -529,6 +586,52 @@ function M.dealDeepLinkParams()
 	end
 end
 
+---------------- 全局辅助函数 ---------------------
+function M.getMyName(name, seatid, uid)
+	if type(name) == "table" then
+		name, uid = name.name, name.uid
+	end
+	if uid and uid ~= PlayerModel:getUid() then
+		return M.getOtherName(name, seatid)
+	end
+	if SettingModel:isShowName() then
+		return name
+	else
+		if seatid then
+			return _F("LAB_CHAR_097", seatid)
+		end
+		return _T("LAB_SETTINGS_128")
+	end
+end
+
+function M.getOtherName(name, seatid, uid)
+	if type(name) == "table" then
+		name, uid = name.name, name.uid
+	end
+	if uid and uid == PlayerModel:getUid() then
+		return M.getMyName(name, seatid)
+	end
+	if SettingModel:isShowOther() then
+		return name
+	else
+		if seatid then
+			return _F("LAB_CHAR_097", seatid)
+		end
+		return _T("LAB_SETTINGS_128")
+	end
+end
+
+function M.getShowSkinData(skin, showReal)
+    if not SettingModel:isShowSkin() and skin.kind ~= SKIN_KIND.NORMAL and not showReal then
+        for _, v in ipairs(get_tpl_subKey(tpl_character_skin_list, "role", skin.role)) do
+            if v.kind == SKIN_KIND.NORMAL then
+                return v
+            end
+        end
+    end
+    return skin
+end
+
 ---------------- ui 工具函数 ---------------------
 function M.setTitleImage(ImageTitle, title, nativeSize, hide)
 	if not ImageTitle then return end
@@ -554,6 +657,228 @@ function M.setFrameImage(ImageFrame, frame, nativeSize)
 		bee.setIcon(ImageFrame, d.icon, nativeSize)
 	else
 		ImageFrame:SetActive(false)
+	end
+end
+
+function M.setItemIcon(parent, itemId, titleWithScale)
+	if not parent then return end
+
+	local ImageIcon = bee.find("Icon", parent)
+	local TextCount = bee.find("TextCount", parent) or bee.find("CountText", parent)
+
+	if not ImageIcon then return end
+
+	local d = tpl_props[itemId]
+	if d then
+		ImageIcon:SetActive(true)
+		bee.setIcon(ImageIcon, d.icon)
+		if d.type == GPropKind.Title then
+			local s = ImageIcon.transform.sizeDelta
+			titleWithScale = titleWithScale or 2
+			s.x = s.x * titleWithScale
+			s.y = s.x * 60 / 340
+			ImageIcon.transform.sizeDelta = s
+			if not bee.isNull(TextCount) then
+				TextCount:SetActive(false)
+			end
+		else
+			if not bee.isNull(TextCount) then
+				TextCount:SetActive(true)
+			end
+		end
+	else
+		ImageIcon:SetActive(false)
+		if not bee.isNull(TextCount) then
+			TextCount:SetActive(false)
+		end
+	end
+end
+
+-- 添加节点到列表，如果超过宽度，则循环滚动列表
+function M.addItemsToParent(parent, itemNode, items, atuoScrollData)
+	if not parent or not items then return end
+	for _, v in ipairs(items) do
+		local item = CU.GameObject.Instantiate(itemNode, parent.transform, false)
+		item:SetActive(true)
+		local prop = PropItem:create(item, v)
+        v._tween = nil
+		if not atuoScrollData then
+			prop: bindTips()
+		else
+            bee.addClick(item, function()
+                if atuoScrollData and atuoScrollData.__tween then
+                    atuoScrollData.__tween:pause()
+                end
+                UiManager:showUI("CommonItemTip", {data = v, target = bee.find("Icon", item), hideCb = function()
+                    if atuoScrollData and atuoScrollData.__tween then
+                        atuoScrollData.__tween:resume()
+                    end
+                end})
+            end, true)
+		end
+	end
+
+	if atuoScrollData then
+		bee.Tween.killByTarget(parent)
+		CS.Utils.ForceRebuildLayoutImmediate(parent)
+		local viewport = parent.transform.parent.parent
+		local s1 = parent.transform.sizeDelta
+		local s2 = viewport.sizeDelta
+		local pos = parent.transform.localPosition
+		pos.x = 0
+		parent.transform.localPosition = pos
+		if s1.x > s2.x then
+			local totalDist = s1.x - s2.x
+
+			-- 启动自动滚动动画
+			local function startAutoScroll(fromX)
+				if atuoScrollData.__tween then
+					atuoScrollData.__tween:kill()
+					atuoScrollData.__tween = nil
+				end
+				local remainDist = totalDist + fromX -- fromX 为负数
+				if remainDist <= 1 then
+					parent.transform.localPosition = pos
+					remainDist = totalDist
+				end
+				atuoScrollData.__tween = bee.tween(parent)
+				: to(remainDist / 30, {position = bee.v3(-totalDist, pos.y)})
+				: delay(1)
+				: call(function()
+					atuoScrollData.__tween = nil
+					parent.transform.localPosition = pos
+					startAutoScroll(0)
+				end)
+				-- : loop(-1)
+				: ease(DT.Ease.Linear)
+				: link(parent)
+			end
+
+			startAutoScroll(0)
+
+			-- 监听拖拽：按下暂停，松开从当前位置继续 (通过 EventTrigger)
+			-- 取消列表惯性，防止松手后继续滑动
+			local scrollRect = viewport:GetComponent("ScrollRect")
+			if scrollRect then
+				scrollRect.inertia = false
+				scrollRect.elasticity = 0
+			end
+			local scrollGo = viewport.gameObject
+			local eventTrigger = scrollGo:GetComponent(typeof(CS.UnityEngine.EventSystems.EventTrigger))
+			if not eventTrigger then
+				eventTrigger = scrollGo:AddComponent(typeof(CS.UnityEngine.EventSystems.EventTrigger))
+			end
+			eventTrigger.triggers:Clear()
+
+			local function addEvent(triggerType, callback)
+				local entry = CS.UnityEngine.EventSystems.EventTrigger.Entry()
+				entry.eventID = triggerType
+				entry.callback:AddListener(callback)
+				eventTrigger.triggers:Add(entry)
+			end
+
+			addEvent(CS.UnityEngine.EventSystems.EventTriggerType.BeginDrag, function()
+				if atuoScrollData.__tween then
+					atuoScrollData.__tween:kill()
+					atuoScrollData.__tween = nil
+				end
+			end)
+			addEvent(CS.UnityEngine.EventSystems.EventTriggerType.EndDrag, function()
+				local curX = parent.transform.localPosition.x
+				if curX > 0 then
+					curX = 0
+					parent.transform.localPosition = bee.v3(0, pos.y)
+				elseif curX < -totalDist then
+					curX = -totalDist
+					parent.transform.localPosition = bee.v3(-totalDist, pos.y)
+				end
+				startAutoScroll(curX)
+			end)
+		end
+	end
+end
+
+function M.setLobbyImage(sceneId, ImageBg, ImageFg)
+    local cfg = tpl_hall_scene[sceneId]
+    if cfg then
+        bee.removeAllChildren(ImageBg)
+        bee.removeAllChildren(ImageFg)
+        
+        if string.find(cfg.bg_image, ".png") then
+            ImageBg:GetComponent("Image").enabled = true
+            bee.setIcon(ImageBg, cfg.bg_image)
+        else
+            local obj = bee.createObj(cfg.bg_image)
+            obj.transform:SetParent(ImageBg.transform, false)
+            obj.transform.localPosition = bee.v3zero
+            ImageBg:GetComponent("Image").enabled = false
+        end
+        if cfg.fg_image then
+            ImageFg:SetActive(true)
+            if string.find(cfg.fg_image, ".png") then
+                ImageFg:GetComponent("Image").enabled = true
+                bee.setIcon(ImageFg, cfg.fg_image)
+            else
+                local obj = bee.createObj(cfg.fg_image)
+                obj.transform:SetParent(ImageFg.transform, false)
+                obj.transform.localPosition = bee.v3zero
+                ImageFg:GetComponent("Image").enabled = false
+            end
+        else
+            ImageFg:SetActive(false)
+        end
+    end
+end
+
+function M.setIllustrationImage(id, ImageBg, isForceLimit)
+	local cfg = tpl_Illustration[id]
+	if cfg then
+		bee.removeAllChildren(ImageBg)
+		local name = cfg.image
+		if isForceLimit and bee.isLimitView then
+			name = "LoginSpineKV"
+		end
+		local img = bee.getLimitViewRes(name, true)
+		if string.find(img, ".png") then
+            ImageBg:GetComponent("Image").enabled = true
+            bee.setIcon(ImageBg, img)
+        else
+            local obj = ResManager:InstantiateObject(img)
+			if obj then
+				obj.transform:SetParent(ImageBg.transform, false)
+				obj.transform.localPosition = bee.v3zero
+				ImageBg:GetComponent("Image").enabled = false
+			end
+        end
+	end
+end
+
+-- 自动滚动文本
+function M.autoScrollText(Text)
+	if bee.isNull(Text) then
+		return
+	end
+	local w = Text:GetComponent("Text").preferredWidth
+	local dis = Text.transform.parent.sizeDelta.x
+
+	bee.Tween.killByTarget(Text)
+	local pos = Text.transform.localPosition
+	pos.x = 0
+	if w > dis then
+		local len = w - dis
+		pos.x = pos.x + len / 2 + 10
+		Text.transform.localPosition = pos
+		bee.tween(Text)
+		: to(len / 50, {position = bee.v3(pos.x - len - 10, pos.y)})
+		: delay(1)
+		: call(function()
+			Text.transform.localPosition = pos
+		end)
+		: delay(1)
+		: loop(-1)
+		: link(Text)
+	else
+		Text.transform.localPosition = pos
 	end
 end
 

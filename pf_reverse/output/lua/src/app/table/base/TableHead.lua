@@ -30,12 +30,13 @@ function P:onAwake()
 	self.BgRole = self:find("BgRole")
 	self.BgName = self:find("BgName", self.BgRole)
 	self.ImageTag = self:find("ImageTag")
-	self.ImageUserType = self:find("ImageUserType", self.BgName)
+	self.ImageUserType = self:find("ImageUserType")
 	self.TextName = self:find("TextName", self.BgName)
 	self.TextLevel = self:find("TextLevel", self.BgName)
 	self.BgChip = self:find("BgChip", self.BgRole)
 	self.TextChip = self:find("TextChip", self.BgChip)
 	self.ImageBg = self:find("ImageBg", self.BgRole)
+	self.ImageFg = self:find("ImageFg", self.BgRole)
 	self.Eff_poker_role_sg = self:find("Eff_poker_role_sg", self.BgRole)
 	
 	self.Ani_role = self:find("Ani_role", self.BgRole)
@@ -44,12 +45,15 @@ function P:onAwake()
 	self.BgChat = self:find("BgChat")
 	self.BgChatPosition = self.BgChat.transform.localPosition
 	self.CountDown = self:find("Eff_Countdown")
+	self.CountDownPos = self.CountDown.transform.localPosition
 	self.ImageCD = self:find("ImageCD", self.CountDown)
 	self.TextCD = self:find("TextCD", self.CountDown)
 	self.BgFold = self:find("BgFold")
 
 	self.RoleAnimator = self.Ani_role:GetComponent("Animator")
 	self.RoleAnimator:Play("UI_poker_Role_idle")
+
+	self.ImageTagPoses = {self.ImageTag.transform.localPosition, self.ImageUserType.transform.localPosition}
 end
 
 function P:getSeatId()
@@ -66,21 +70,25 @@ end
 
 function P:setShowIndex(index, self_index, infoIndex)
 	self.show_index = index
+	self.self_index = self_index
 	self.info_index = infoIndex
 	self.BgChat.transform.localPosition = index >= self_index and self.BgChatPosition or bee.v3(-self.BgChatPosition.x, self.BgChatPosition.y)
 	local s = self.BgChat.transform.localScale
 	s.x = index >= self_index and math.abs(s.x) or - math.abs(s.x)
 	self.BgChat.transform.localScale = s
 	self:find("Eff_emoji_pop_up/Chat_Ani/ImageChat/TextChat", self.BgChat).transform.localScale = s
-	self:find("Eff_emoji_pop_up/Chat_Ani/ImageEmoji/ImageEmoji", self.BgChat).transform.localScale = s
-	if self.ImageTag then
-		local pos = self.ImageTag.transform.localPosition
-		if index >= self_index then
-			pos.x = math.abs(pos.x)
-		else
-			pos.x = -math.abs(pos.x)
-		end
-		self.ImageTag.transform.localPosition = pos
+	self:find("Eff_emoji_pop_up/Chat_Ani/ImageEmoji/ImageEmoji/Icon", self.BgChat).transform.localScale = s
+
+	self:refreshTagAndUserTypePos()
+	
+	if index >= self.self_index then
+		self.CountDown.transform.localPosition = self.CountDownPos
+	else
+		self.CountDown.transform.localPosition = bee.v3(-self.CountDownPos.x, self.CountDownPos.y, self.CountDownPos.z)
+	end
+	local info = self.data:getPlayer(self.seatid)
+	if info then
+		info.show_index = self.show_index
 	end
 end
 
@@ -115,9 +123,13 @@ function P:clearTmpNode()
 	self.tmp_nodes = {}
 end
 
-function P:isMe()
-	local info = self.data:getPlayer(self.seatid)
-	return info and info.uid == PlayerModel:getUid()
+function P:isMe(isRealMe)
+	if not isRealMe and self.seatid == self.data:getObserveSeatid() then
+		return true
+	end
+	-- local info = self.data:getPlayer(self.seatid)
+	-- return info and info.uid == PlayerModel:getUid()
+	return self.seatid == self.data:getMyPosition()
 end
 
 function P:getUid()
@@ -126,12 +138,28 @@ function P:getUid()
 	return info and info.uid
 end
 
+function P:refreshTagAndUserTypePos()
+	local index = self.show_index
+	local idx, tags = 1, {self.ImageTag, self.ImageUserType}
+	for _, v in ipairs(tags) do
+		if v and v.activeSelf then
+			local pos = self.ImageTagPoses[idx]
+			if index >= self.self_index then
+				v.transform.localPosition = pos
+			else
+				v.transform.localPosition = bee.v3(-pos.x + 6, pos.y, pos.z)
+			end
+			idx = idx + 1
+		end
+	end
+end
+
 function P:refreshName(info)
 	if not self.TextName or not info then return end
 	if not self._nameWidth then
 		self._nameWidth = 460
 	end
-	bee.setTextCut(self.TextName, info.name, self._nameWidth)
+	bee.setTextCut(self.TextName, GF.getOtherName(info, info:getSeatIndex()), self._nameWidth)
 	bee.setText(self.TextLevel, info.level)
 	local d = tpl_level[info.level] or tpl_level[1]
 	bee.setIcon(self:find("ImageLevel", self.BgName), d.icon)
@@ -146,9 +174,15 @@ function P:refreshName(info)
 			self.ImageUserType:SetActive(false)
 		end
 	end
+
+	self:refreshFriendOwner(info)
+end
+
+function P:refreshFriendOwner(info)
 	if self.ImageTag then
-		self.ImageTag:SetActive(false)
+		self.ImageTag:SetActive(self.data:isFriendsRoom() and self.data.friend_room_info.owner_uid == info.uid)
 	end
+	self:refreshTagAndUserTypePos()
 end
 
 function P:refreshLevel(is_level_up)
@@ -158,8 +192,10 @@ function P:refreshLevel(is_level_up)
 		local d = tpl_level[info.level] or tpl_level[1]
 		bee.setIcon(self:find("ImageLevel", self.BgName), d.icon)
 		if is_level_up then
-			local eft = GameModel.layer:playUIEffect("Prefab/PKTable/Eff_poker_lvup", GameModel.layer.transform, nil, 3)
-			eft.transform.position = self:find("ImageLevel", self.BgName).transform.position
+			local eft = GameModel:playUIEffect("Prefab/PKTable/Eff_poker_lvup", nil, nil, 3)
+			if eft then
+				eft.transform.position = self:find("ImageLevel", self.BgName).transform.position
+			end
 		end
 	end
 end
@@ -272,6 +308,7 @@ end
 function P:showChatMsg(content)
 	self.BgChat:SetActive(false)
 	self.BgChat:SetActive(true)
+	bee.setSortingOrder(self.BgChat, 1)
 	self:find("Eff_emoji_pop_up/Chat_Ani/ImageChat", self.BgChat):SetActive(true)
 	self:find("Eff_emoji_pop_up/Chat_Ani/ImageEmoji", self.BgChat):SetActive(false)
 	bee.setText(self:find("Eff_emoji_pop_up/Chat_Ani/ImageChat/TextChat", self.BgChat), content)
@@ -289,9 +326,10 @@ end
 function P:showEmojiMsg(id)
 	self.BgChat:SetActive(false)
 	self.BgChat:SetActive(true)
+	bee.setSortingOrder(self.BgChat, 1)
 	self:find("Eff_emoji_pop_up/Chat_Ani/ImageChat", self.BgChat):SetActive(false)
 	self:find("Eff_emoji_pop_up/Chat_Ani/ImageEmoji", self.BgChat):SetActive(true)
-	bee.setIcon(self:find("Eff_emoji_pop_up/Chat_Ani/ImageEmoji/ImageEmoji", self.BgChat), tpl_emoji[id].emoji)
+	bee.setIcon(self:find("Eff_emoji_pop_up/Chat_Ani/ImageEmoji/ImageEmoji/Icon", self.BgChat), tpl_emoji[id].emoji)
 
 	scheduler:removeTarget(self.BgChat)
 	bee.once(4, function()
@@ -392,7 +430,9 @@ function P:startProgress(duration, actionTime, vibrationEt)
 			bee.setTextOrigin(self.TextCD, math.round(duration))
 			if shockFlag and duration <= 5 then
 				shockFlag = false
-				bee.vibrate(tpl_vibrate.shock_warning)
+				if not self.data:isInObserve() then
+					bee.vibrate(tpl_vibrate.shock_warning)
+				end
 			end
 			if duration <= 0 then
 				self:tryShowThinkTime()
@@ -412,7 +452,10 @@ function P:startProgress(duration, actionTime, vibrationEt)
 	end
 	local bgEft = "Prefab/PKTable/eff_poker_role_yellow"
 	if self:isMe() then
-		bee.vibrate(tpl_vibrate.shock_action)
+		if not self.data:isInObserve() then
+			bee.vibrate(tpl_vibrate.shock_action)
+		end
+		self._bgEft = GameModel:playUIEffect(bgEft, self.ImageFg.transform, bee.v3zero, -1)
 	else
 		local player = self.data:getPlayer(self.seatid)
 		if player.user_type == USER_TYPE.Developer then
@@ -422,8 +465,8 @@ function P:startProgress(duration, actionTime, vibrationEt)
 		else
 			bgEft = "Prefab/PKTable/eff_poker_role_purple"
 		end
+		self._bgEft = GameModel:playUIEffect(bgEft, self.ImageBg.transform, bee.v3zero, -1)
 	end
-	self._bgEft = GameModel.layer:playUIEffect(bgEft, self.ImageBg.transform, bee.v3zero, -1)
 
 	if not bee.isNull(self.Eff_poker_role_sg) then
 		self.Eff_poker_role_sg:SetActive(true)
@@ -459,7 +502,7 @@ function P:stopProgress(isAnim)
 		self._cdTween = nil
 	end
 	if not bee.isNull(self._bgEft) then
-		GameModel.layer:putEffectItem(self._bgEft)
+		GameModel:putEffectItem(self._bgEft)
 		self._bgEft = nil
 	end
 	if not bee.isNull(self.Eff_poker_role_sg) then

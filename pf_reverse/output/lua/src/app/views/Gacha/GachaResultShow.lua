@@ -28,12 +28,16 @@ function P:onAwake()
 	self.TipsTextPos = self:find("TipsText/TipsTextPos", self.RoleCont)
 
 	self.SkinCont = self:find("SkinCont", self.Center)
+	self.ImgTitle1 = self:find("Title/ImgTitle1", self.SkinCont)
+	self.ImgTitle2 = self:find("Title/ImgTitle2", self.SkinCont)
 	self.SkinImage = self:find("CharacterImage", self.SkinCont)
 	self.SkinNameText = self:find("LeftBottom/NameCard/SkinNameText", self.SkinCont)
 	self.SkinRoleNameText = self:find("LeftBottom/NameCard/NameText", self.SkinCont)
 	self.WearButton = self:find("RightBottom/WearButton", self.SkinCont)
 	self.DressedText = self:find("RightBottom/DressedText", self.SkinCont)
 	self.BackButton = self:find("LeftTop/BackButton", self.SkinCont)
+	self.BubbleItem = self:find("BubbleItem", self.SkinCont)
+	self.BubbleItem:SetActive(false)
 	self.DressedText:SetActive(false)
 	
 	self.ShareCont = self:find("ShareCont", self.LeftTop)
@@ -80,6 +84,12 @@ end
 function P:setCurShow()
 	bee.stopVoice()
 	Game:stopRoleSound()
+	self._playingVoice = false
+
+	if self._bubbleTag then
+		scheduler:removeTag(self._bubbleTag)
+		self._bubbleTag = nil
+	end
 
 	if self._curShow.major_type == GMajorType.ROLE then
 		self:setCharacterShow()
@@ -117,6 +127,7 @@ function P:setCharacterShow()
 		if not self.characterCls then
         	self.characterCls = ObjectPool:getCls(self.RoleImg)
         	self.characterCls:createRoleCanvas()
+			self.characterCls:setShowReal(true)
         end
         self.characterCls:setRole(CharacterModel:getRoleData(roleCfg.id, true))
     	-- 默认皮肤
@@ -140,6 +151,7 @@ function P:setCharacterShow()
 
 			self:showTextCont()
 			Game:playRoleOutVoice(roleCfg.id, roleCfg.salute_voice)
+			self._playingVoice = true
 			self.ClickMask:SetActive(true)
 		end)
 	end)
@@ -200,24 +212,46 @@ function P:setSkinShow()
 
 		if not self.skinCharacterCls then
 			self.skinCharacterCls = ObjectPool:getCls(self.SkinImage)
+			self.skinCharacterCls:setShowReal(true)
 		end
 		self.skinCharacterCls:setRole(CharacterModel:getRoleData(roleCfg.id, true), true)
 		self.skinCharacterCls:setSkin(skinCfg, true)
 
-		if not CharacterModel:getRole(roleCfg.id) then
-			self.WearButton:SetActive(false)
-		end
+		-- if not CharacterModel:getRole(roleCfg.id) then
+		-- 	self.WearButton:SetActive(false)
+		-- end
 
-		bee.removeAllClick(self.WearButton)
-		bee.addClick(self.WearButton, function()
-			Game:playSound("ui_button_confirm")
-	        Net:sendReq("pb.SwitchRoleSkinREQ", {
-	            role_id = skinCfg.role,
-	            new_skin_id = skinCfg.id,
-	        })
-			self.WearButton:SetActive(false)
-			self.DressedText:SetActive(true)
-		end)
+		-- bee.removeAllClick(self.WearButton)
+		-- bee.addClick(self.WearButton, function()
+		-- 	Game:playSound("ui_button_confirm")
+	    --     Net:sendReq("pb.SwitchRoleSkinREQ", {
+	    --         role_id = skinCfg.role,
+	    --         new_skin_id = skinCfg.id,
+	    --     })
+			-- self.WearButton:SetActive(false)
+			-- self.DressedText:SetActive(true)
+		-- end)
+
+		self.WearButton:SetActive(false)
+
+		self.ImgTitle2:SetActive(self._curShow.isSpecial)
+		self.ImgTitle1:SetActive(not self._curShow.isSpecial)
+
+		if self._curShow.voiceKey then
+			local voiceId = tpl_chat_voice[self._curShow.voiceKey]
+			local chatList = get_tpl_subKey(tpl_chat, "role", skinCfg.role)
+			local voices = get_tpl_subKey(chatList, "key", voiceId)
+			local voiceCfg = voices[1]
+			bee.setText(self:find("BubbleText", self.BubbleItem), _T(voiceCfg.text))
+			
+			self._bubbleTag = self:once(2.7, function()
+				self.BubbleItem:SetActive(true)
+				Game:playRoleOutVoice(roleCfg.id, voiceId)
+				self._playingVoice = true
+			end)
+		else
+			self.BubbleItem:SetActive(false)
+		end
 	end)
 end
 
@@ -229,6 +263,7 @@ function P:setItemShow()
 			self:onClickClose()
 			return
 		end
+		self.ClickMask:SetActive(true)
 		local cfg = tpl_props[self._curShow.id or self._curShow.item_id]
 		for i = 1, 4 do
 			self.itemBgList[i]:SetActive(i == cfg.quality)
@@ -236,26 +271,21 @@ function P:setItemShow()
 		if cfg.type == GPropKind.Table then
 			local decoCfg = tpl_card_table[cfg.mapId]
 			bee.setIconInAtlas(self.ItemIcon, decoCfg.bg_small, true)
-			bee.setText(self.NameText, _F("LAB_PROPS_TEXT_7", _T("LAB_PROPS_TYPE_NAME_206"), _T(cfg.name)))
 		elseif cfg.type == GPropKind.LobbyScene then
 			local decoCfg = tpl_hall_scene[cfg.mapId]
 			bee.setIconInAtlas(self.ItemIcon, decoCfg.bg_small, true)
-			bee.setText(self.NameText, _F("LAB_PROPS_TEXT_7", _T("LAB_PROPS_TYPE_NAME_209"), _T(cfg.name)))
 		elseif cfg.type == GPropKind.Title then
 			bee.setIconInAtlas(self.ItemIcon, cfg.icon, true)
-			bee.setText(self.NameText, _F("LAB_PROPS_TEXT_7", _T("LAB_PROPS_TYPE_NAME_204"), _T(cfg.name)))
 		elseif cfg.type == GPropKind.AllInEff then
 			local decoCfg = tpl_all_in_anim[cfg.mapId]
 			bee.setIconInAtlas(self.ItemIcon, decoCfg.bg_small, true)
-			bee.setText(self.NameText, _F("LAB_PROPS_TEXT_7", _T("LAB_PROPS_TYPE_NAME_210"), _T(cfg.name)))
 		elseif cfg.type == GPropKind.NameplateEff then
 			local decoCfg = tpl_nameplate_anim[cfg.mapId]
 			bee.setIconInAtlas(self.ItemIcon, decoCfg.bg_small, true)
-			bee.setText(self.NameText, _F("LAB_PROPS_TEXT_7", _T("LAB_PROPS_TYPE_NAME_211"), _T(cfg.name)))
 		else
 			bee.setIconInAtlas(self.ItemIcon, cfg.icon, true)
-			bee.setText(self.NameText, _T(cfg.name))
 		end
+		bee.setText(self.NameText, _T(cfg.name))
 		self.ItemNew:SetActive(self._curShow.new)
 	end)
 end
@@ -318,6 +348,9 @@ function P:onClickNext()
 	end
 
 	self._curShow = table.remove(self._showList, 1)
+	if self._isShowCharacter then
+		Game:stopRoleSound()
+	end
 	if not self._curShow then
 		self:onClickClose()
 		return
@@ -360,10 +393,13 @@ function P:onClickClose()
 			Game:stopRoleSound()
 			self._playingVoice = nil
 		end
+		if self._bubbleTag then
+			scheduler:removeTag(self._bubbleTag)
+			self._bubbleTag = nil
+		end
 		self:hideUI(nil, true)
 	end)
 
-	bee.emit("evt_gachaOver")
 end
 
 function P:evt_shareShot()

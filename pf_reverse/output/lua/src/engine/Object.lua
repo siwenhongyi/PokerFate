@@ -7,6 +7,7 @@ function P:ctor(params)
 	self.node = nil
 	self.transform = nil
 	self._evts = nil
+	self._watiStart = true 	-- 等待 onStart 完成
 end
 
 function P:addUi(obj)
@@ -103,6 +104,10 @@ function P:schedule(dt, cb)
 		return 0
 	end
 	return bee.schedule(dt, cb, self.node)
+end
+
+function P:unscheduleAll()
+	scheduler:removeTarget(self.node)
 end
 
 -- 注册 bee 全局事件，在物体销毁时自动注销

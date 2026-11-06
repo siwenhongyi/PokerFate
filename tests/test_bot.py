@@ -53,6 +53,7 @@ class TestBotDecisions:
 
     def test_bot_postflop_with_strong_hand(self):
         bot = PokerBot(equity_iterations=300)
+        bot.set_next_decision_seed(20260517)
         gs, _ = self._make_state(
             street=Street.FLOP,
             board=cards('As', 'Kd', '2c'),
@@ -60,7 +61,7 @@ class TestBotDecisions:
             current_bet=0.0,
         )
         action = bot.decide(gs, player_id=0)
-        # With top set, should bet (not check/fold)
+        # Top set may bet immediately or check on a safe board.
         assert action.action_type in (ActionType.RAISE, ActionType.CHECK)
 
     def test_bot_postflop_facing_bet(self):
@@ -82,6 +83,46 @@ class TestBotDecisions:
         action = bot.decide(gs, player_id=0)
         # Should call or raise (not fold) with top set
         assert action.action_type != ActionType.FOLD
+
+    def test_effective_call_context_caps_uncallable_overbet(self):
+        p0 = Player(0, 'Hero', 50.0, cards('Ac', 'Ad'))
+        p1 = Player(1, 'Villain', 200.0, cards('7c', '2d'))
+        p1.current_bet = 70.0
+        gs = GameState(
+            players=[p0, p1],
+            street=Street.FLOP,
+            board=cards('As', 'Kd', '2c'),
+            pot=100.0,          # 30 old pot + villain's 70
+            current_bet=70.0,
+        )
+
+        raw_call, effective_call, contestable_pot, pot_odds = PokerBot._effective_call_context(gs, p0)
+
+        assert raw_call == pytest.approx(70.0)
+        assert effective_call == pytest.approx(50.0)
+        assert contestable_pot == pytest.approx(80.0)  # 30 old pot + matched 50
+        assert pot_odds == pytest.approx(50.0 / 130.0)
+
+    def test_effective_call_context_caps_multiway_side_pot_excess(self):
+        p0 = Player(0, 'Hero', 50.0, cards('Ac', 'Ad'))
+        p1 = Player(1, 'Villain1', 200.0, cards('7c', '2d'))
+        p2 = Player(2, 'Villain2', 200.0, cards('8c', '3d'))
+        p1.current_bet = 70.0
+        p2.current_bet = 70.0
+        gs = GameState(
+            players=[p0, p1, p2],
+            street=Street.FLOP,
+            board=cards('As', 'Kd', '2c'),
+            pot=170.0,          # 30 old pot + two 70 bets
+            current_bet=70.0,
+        )
+
+        raw_call, effective_call, contestable_pot, pot_odds = PokerBot._effective_call_context(gs, p0)
+
+        assert raw_call == pytest.approx(70.0)
+        assert effective_call == pytest.approx(50.0)
+        assert contestable_pot == pytest.approx(130.0)  # 30 old pot + two matched 50s
+        assert pot_odds == pytest.approx(50.0 / 180.0)
 
     def test_bot_folds_weak_hand_vs_large_bet(self):
         bot = PokerBot(equity_iterations=300)
@@ -162,6 +203,75 @@ class TestBotDecisions:
             gs, _ = self._make_state(street=street, board=board)
             action = bot.decide(gs, player_id=0)
             assert isinstance(action, Action)
+
+
+class TestPreflopBetLevelClassification:
+    def _preflop_state(self, action_history, short_current_bet: float = 0.0) -> GameState:
+        hero = Player(0, 'Royal Police', 930_000.0, cards('Ts', 'Tc'), current_bet=60_000.0)
+        three_bettor = Player(1, 'zhouking', 1_000_000.0, [], current_bet=200_000.0)
+        short_stack = Player(
+            2, 'kasyer', 0.0, [], current_bet=short_current_bet, is_all_in=True,
+        )
+        button = Player(3, 'button', 1_000_000.0, [])
+        return GameState(
+            players=[hero, three_bettor, short_stack, button],
+            dealer_pos=3,  # hero=SB, three_bettor=BB, short_stack=UTG
+            street=Street.PREFLOP,
+            pot=363_084.0,
+            current_bet=max((act.amount for _pid, act, _st in action_history), default=0.0),
+            big_blind=10_000.0,
+            small_blind=5_000.0,
+            current_player_idx=0,
+            action_history=action_history,
+        )
+
+    def test_short_all_in_below_current_bet_does_not_turn_3bet_into_4bet(self):
+        bot = PokerBot(equity_iterations=10)
+        gs = self._preflop_state(
+            [
+                (0, Action(ActionType.RAISE, 60_000.0), 'preflop'),
+                (1, Action(ActionType.RAISE, 200_000.0), 'preflop'),
+                (2, Action(ActionType.RAISE, 40_000.0), 'preflop'),
+            ],
+            short_current_bet=40_000.0,
+        )
+
+        assert [pid for _idx, pid, _act in bot._effective_preflop_raises(gs)] == [0, 1]
+        assert bot._classify_preflop_action(gs, gs.players[0]) == ('3bet', 200_000.0)
+        assert bot._primary_raiser_id(gs, gs.players[0]) == 1
+        assert bot._primary_raiser_position(gs, gs.players[0]) == 'BB'
+
+    def test_insufficient_all_in_raise_does_not_turn_3bet_into_4bet(self):
+        bot = PokerBot(equity_iterations=10)
+        gs = self._preflop_state(
+            [
+                (0, Action(ActionType.RAISE, 60_000.0), 'preflop'),
+                (1, Action(ActionType.RAISE, 200_000.0), 'preflop'),
+                (2, Action(ActionType.RAISE, 250_000.0), 'preflop'),
+            ],
+            short_current_bet=250_000.0,
+        )
+
+        assert [pid for _idx, pid, _act in bot._effective_preflop_raises(gs)] == [0, 1]
+        assert bot._classify_preflop_action(gs, gs.players[0]) == ('3bet', 200_000.0)
+        assert bot._primary_raiser_id(gs, gs.players[0]) == 1
+        assert bot._primary_raiser_position(gs, gs.players[0]) == 'BB'
+
+    def test_full_raise_after_3bet_still_classifies_as_4bet(self):
+        bot = PokerBot(equity_iterations=10)
+        gs = self._preflop_state(
+            [
+                (0, Action(ActionType.RAISE, 60_000.0), 'preflop'),
+                (1, Action(ActionType.RAISE, 200_000.0), 'preflop'),
+                (2, Action(ActionType.RAISE, 360_000.0), 'preflop'),
+            ],
+            short_current_bet=360_000.0,
+        )
+
+        assert [pid for _idx, pid, _act in bot._effective_preflop_raises(gs)] == [0, 1, 2]
+        assert bot._classify_preflop_action(gs, gs.players[0]) == ('4bet', 360_000.0)
+        assert bot._primary_raiser_id(gs, gs.players[0]) == 2
+        assert bot._primary_raiser_position(gs, gs.players[0]) == 'UTG'
 
 # ---------------------------------------------------------------------------
 # Range Estimator Tests (Libratus-inspired range compression)
@@ -250,6 +360,70 @@ class TestRangeEstimator:
 
 class TestTinyBetValueRaise:
     """Facing tiny bets: raise when range equity is strong, call when marginal."""
+
+    def test_build_ctx_caps_short_stack_overbet_pot_odds(self):
+        strat = PostflopStrategy()
+        board = [Card.from_str(c) for c in ['7s', '9d', 'Qc']]
+        ctx = strat._build_ctx(
+            equity=0.40,
+            pot=100.0,          # 30 old pot + villain's 70
+            to_call=70.0,
+            stack=50.0,
+            board=board,
+            is_ip=True,
+            street='flop',
+            facing_bet=True,
+            num_opponents=1,
+            big_blind=2.0,
+            spr=1.0,
+            opponent_af=1.5,
+            opponent_fold_rate=0.45,
+            fold_to_cbet=None,
+            value_only=False,
+            position='BTN',
+            nut_advantage=0.0,
+            is_delayed_cbet=False,
+            opponent_checked_back=False,
+            last_bet_frac=0.0,
+            villain_nuts_pct=0.0,
+            hole_cards=[Card.from_str('Ac'), Card.from_str('Kd')],
+        )
+
+        assert ctx.to_call == pytest.approx(50.0)
+        assert ctx.pot == pytest.approx(80.0)
+        assert ctx.pot_odds == pytest.approx(50.0 / 130.0)
+
+    def test_build_ctx_zero_stack_cannot_call(self):
+        strat = PostflopStrategy()
+        board = [Card.from_str(c) for c in ['7s', '9d', 'Qc']]
+        ctx = strat._build_ctx(
+            equity=0.40,
+            pot=100.0,
+            to_call=70.0,
+            stack=0.0,
+            board=board,
+            is_ip=True,
+            street='flop',
+            facing_bet=True,
+            num_opponents=1,
+            big_blind=2.0,
+            spr=0.0,
+            opponent_af=1.5,
+            opponent_fold_rate=0.45,
+            fold_to_cbet=None,
+            value_only=False,
+            position='BTN',
+            nut_advantage=0.0,
+            is_delayed_cbet=False,
+            opponent_checked_back=False,
+            last_bet_frac=0.0,
+            villain_nuts_pct=0.0,
+            hole_cards=[Card.from_str('Ac'), Card.from_str('Kd')],
+        )
+
+        assert ctx.to_call == pytest.approx(0.0)
+        assert ctx.pot == pytest.approx(30.0)
+        assert ctx.pot_odds == pytest.approx(0.0)
 
     def test_build_ctx_keeps_mc_and_range_equity_separate(self):
         strat = PostflopStrategy()

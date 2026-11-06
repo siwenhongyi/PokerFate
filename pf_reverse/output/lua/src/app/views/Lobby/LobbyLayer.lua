@@ -4,7 +4,7 @@ function P:onAwake()
 	self._openAnim, self._closeAnim = "UI_1_LobbyLayer_into", "UI_1_LobbyLayer_back"
 
     self.AnimRoot = self:find("AnimRoot")
-    local Center = self:find("Center", self.AnimRoot)
+    self.Center = self:find("Center", self.AnimRoot)
     local LeftTop = self:find("LeftTop", self.AnimRoot)
     local RightTop = self:find("RightTop", self.AnimRoot)
     local Right = self:find("Right", self.AnimRoot)
@@ -12,6 +12,7 @@ function P:onAwake()
     local LeftBottom = self:find("LeftBottom", self.AnimRoot)
 
     self.ImageBg = self:find("ImageBg", self.AnimRoot)
+    self.ImageFg = self:find("ImageFg", self.AnimRoot)
     
     self.MaskFront = bee.find("UIRoot/UiCanvaPost/MaskFront")
     if not self.MaskFront then
@@ -19,9 +20,9 @@ function P:onAwake()
     end
     self.MaskFront:SetActive(false)
 
-    self.CharacterImage = self:find("CharacterImage", Center)
+    self.CharacterImage = self:find("CharacterImage", self.Center)
     self.CharacterImage:SetActive(false)
-    self.BubbleParent = self:find("BubbleParent", Center)
+    self.BubbleParent = self:find("BubbleParent", self.Center)
     self.BubbleItem = self:find("BubbleItem", self.BubbleParent)
 
     self.ShopPushButton = self:find("Left/ShopPushButton", LeftTop)
@@ -32,13 +33,15 @@ function P:onAwake()
     self.ActButton = self:find("Left/ActButton", LeftTop)
 
     self.Developmentfund = self:find("Left2/Developmentfund", LeftTop)
-    self.HotspringButton = self:find("Left2/HotspringButton", LeftTop)
-    self.GalaSeasonButton = self:find("Left2/GalaSeasonButton", LeftTop)
-    self.SchoolButton = self:find("Left2/SchoolButton", LeftTop)
-    self.BunnyGirlButton = self:find("Left2/BunnyGirlButton", LeftTop)
+    self.SoccerButton = self:find("Left2/SoccerButton", LeftTop)
+    self.DispatchButton = self:find("Left2/DispatchButton", LeftTop)
+    self.ThemeButtonPoint = self:find("Left2/ThemeButtonPoint", LeftTop)
+    self.DispatchButton:SetActive(DispatchModel:isOpenDispatch())
+
     self.SpringFestivalButton = self:find("Left2/SpringFestivalButton", LeftTop)
 
     self.QuickByButton = self:find("Left2/QuickByButton", LeftTop)
+    self.LimitPackageButton = self:find("Left2/LimitPackageButton", LeftTop)
 
     self.Character = self:find("Character", LeftTop)
     self.TextLevel = self:find("TextLevel", self.Character)
@@ -73,6 +76,7 @@ function P:onAwake()
     self.ClickMask:SetActive(false)
     self.RaycastMask = self:find("RaycastMask")
     self.RaycastMask:SetActive(true)
+    self.UIVisibleSign = false
 
     bee.addClick(self.ClickMask, function()
         self:onClickMask()
@@ -81,8 +85,8 @@ function P:onAwake()
     bee.addClick(self.CustomizationButton, function()
         self:stopRoleInteraction()
         Game:playSound("ui_button_confirm")
-        UiManager:showUI("LobbyCustomization")
-    	bee.logEvent("lobby-custom")
+        UiManager:showUI("DecorationList")
+    	bee.logEvent("style-preset-lobby")
     end)
 
     RedManager:bind(self:find("RedPoint", self.TaskButton), RedTag.Task)
@@ -101,11 +105,17 @@ function P:onAwake()
         bee.logEvent("lobby-poker")
     end)
 
+    local GameRoomRedPoint = self:find("Reddot", self.OmahaButton)
+    GameRoomRedPoint:SetActive(PlayerModel:isShowGameRoomNewPoint())
     bee.addClick(self.OmahaButton, function()
         self:stopRoleInteraction()
         Game:playSound("ui_button_confirm")
-        UiManager:showUI("OmahaBlinds", {gameType = GAME_GAME_TYPE.LOBBY_OMAHA_GAME})
-        bee.logEvent("lobby-omaha")
+        bee.logEvent("lobby-format")
+        UiManager:showUI("GamePlayRoom")
+        if GameRoomRedPoint.activeSelf then
+            GameRoomRedPoint:SetActive(false)
+            PlayerModel:setGameRoomNewPoint()
+        end
     end)
 
     bee.addClick(self.CharacterButton, function()
@@ -166,8 +176,8 @@ function P:onAwake()
     bee.addClick(self.ShopPushButton, function()
         self:stopRoleInteraction()
         Game:playSound("ui_button_confirm")
-        UiManager:showUI("ShopPushView")
-        bee.logEvent("lobby-newpresident-outfit-icon")
+        UiManager:showUI("ShopBestseller")
+        bee.logEvent("hotsell-lobby")
     end)
     bee.addClick(self.SevenDayTaskButton, function()
         self:stopRoleInteraction()
@@ -195,56 +205,25 @@ function P:onAwake()
 
     bee.addClick(self.Developmentfund, function()
         Game:playSound("ui_button_confirm")
-        bee.logEvent("developmentfund-lobby")
+        bee.logEvent("development-fund-lobby")
         self:stopRoleInteraction()
         UiManager:showUI("DevelopmentFund")
     end)
 
-    bee.addClick(self.HotspringButton, function()
+    bee.addClick(self.DispatchButton, function()
         Game:playSound("ui_button_confirm")
-        bee.logEvent("onsen-lobby")
-        if not ThemeModel:isActivityOpen() then
-            UiManager:showToast(_T("LAB_EVENT_CHECK_IN_1"))
-            self.HotspringButton:SetActive(false)
+        bee.logEvent("dispatch-lobby")
+        if not DispatchModel:isOpenDispatch() then
+            if self._dispatchTimer then
+                scheduler:removeTag(self._dispatchTimer)
+                self._dispatchTimer = nil
+            end
+            self.DispatchButton:SetActive(false)
+            UiManager:showToast(_T("LAB_THEME_ACTIVITY1_TIPS_5"))
             return
         end
         self:stopRoleInteraction()
-        UiManager:showUI("HotSpringHall")
-        bee.logEvent("lobby-hot-spring")
-    end)
-
-    bee.addClick(self.GalaSeasonButton, function()
-        Game:playSound("ui_button_confirm")
-        if not ThemeModel:isActivityOpen() then
-            UiManager:showToast(_T("LAB_EVENT_CHECK_IN_1"))
-            self.GalaSeasonButton:SetActive(false)
-            return
-        end
-        self:stopRoleInteraction()
-        UiManager:showUI("GalaSeasonMain")
-        bee.logEvent("galaseason-lobby")
-    end)
-
-    bee.addClick(self.SchoolButton, function()
-        Game:playSound("ui_button_confirm")
-        if not ThemeModel:isActivityOpen() then
-            UiManager:showToast(_T("LAB_EVENT_CHECK_IN_1"))
-            self.SchoolButton:SetActive(false)
-            return
-        end
-        self:stopRoleInteraction()
-        UiManager:showUI("SchoolMain")
-    end)
-
-    bee.addClick(self.BunnyGirlButton, function()
-        Game:playSound("ui_button_confirm")
-        if not ThemeModel:isActivityOpen() then
-            UiManager:showToast(_T("LAB_EVENT_CHECK_IN_1"))
-            self.BunnyGirlButton:SetActive(false)
-            return
-        end
-        self:stopRoleInteraction()
-        UiManager:showUI("BunnyGirl")
+        UiManager:showUI("DispatchMain")
     end)
 
     bee.addClick(self.SpringFestivalButton, function()
@@ -252,6 +231,14 @@ function P:onAwake()
         self:stopRoleInteraction()
         UiManager:showUI("SpringFestivalMain")
         bee.logEvent("springfestival-lobby")
+    end)
+
+    self.SoccerButton:SetActive(false)
+    RedManager:bind(self:find("Reddot", self.SoccerButton), RedTag.Soccer)
+    bee.addClick(self.SoccerButton, function()
+        Game:playSound("ui_button_confirm")
+        bee.logEvent("football-betting-lobby")
+        UiManager:showUI("SoccerMain")
     end)
 
     bee.addClick(self.UpdateButton, function()
@@ -296,6 +283,7 @@ function P:onAwake()
     bee.addClick(self:find("AchievementToggle", BottomToggle), function()
         self:stopRoleInteraction()
         Game:playSound("ui_button_confirm")
+        bee.logEvent("achievement-lobby")
         UiManager:showUI("AchievementMain")
     end)
     bee.addClick(self:find("ShopToggle", BottomToggle), function()
@@ -318,6 +306,11 @@ function P:onAwake()
         bee.logEvent("lobby-activity")
     end)
 
+    bee.addClick(self:find("icon_rank_01", self.Character), function()
+        Game:playSound("ui_button_confirm")
+        UiManager:showUI("Level")
+    end)
+
     local ShopRedPoint = self:find("ShopToggle/RedPoint", BottomToggle)
     RedManager:bind(ShopRedPoint, RedTag.Shop)
     local ShopNewTag = self:find("ShopToggle/NewTag", BottomToggle)
@@ -334,23 +327,25 @@ function P:onAwake()
     RedManager:bind(self:find("RedPoint", self.SevenDayTaskButton), RedTag.SevenDayTask)
     RedManager:bind(self:find("RedPoint", self.ActButton), RedTag.Activity)
     RedManager:bind(self:find("Reddot", self.CharacterButton), RedTag.Character)
-
     RedManager:bind(self:find("Reddot", self.Developmentfund), RedTag.DevelopmentFund)
-    RedManager:bind(self:find("Reddot", self.HotspringButton), RedTag.HotSpring)
-    RedManager:bind(self:find("Reddot", self.GalaSeasonButton), RedTag.GalaSeason)
-    RedManager:bind(self:find("Reddot", self.SchoolButton), RedTag.School)
-    RedManager:bind(self:find("Reddot", self.BunnyGirlButton), RedTag.BunnyGirl)
+    -- RedManager:bind(self:find("Reddot", self.DispatchButton), RedTag.Dispatch)
+
     RedManager:bind(self:find("Reddot", self.SpringFestivalButton), RedTag.SpringFestival)
     RedManager:bind(self:find("RedPoint", self.UpdateButton), RedTag.UpdateTag)
 
     self.UpdateButton:SetActive(false)
-    self.HotspringButton:SetActive(false)
-    self.GalaSeasonButton:SetActive(false)
-    self.SchoolButton:SetActive(false)
-    self.BunnyGirlButton:SetActive(false)
+    self.ThemeButtonPoint:SetActive(false)
+    -- self.HotspringButton:SetActive(false)
+    -- self.GalaSeasonButton:SetActive(false)
+    -- self.SchoolButton:SetActive(false)
+    -- self.BunnyGirlButton:SetActive(false)
+    -- self.SportsButton:SetActive(false)
+    -- self.SayakaButton:SetActive(false)
     self.SpringFestivalButton:SetActive(false)
 
-    self.ShopPushButton:SetActive(#ShopModel:getShopPushList() > 0)
+    self.ShopPushButton:SetActive(true)
+
+    self:initThemeButton()
 
     local sdtStatus = SevenDayTaskModel:getCurUnlockChapterStatus()
     self.SevenDayTaskButton:SetActive(sdtStatus and sdtStatus ~= SevenDayTaskStatus.Upload)
@@ -367,13 +362,15 @@ function P:onStart()
     end)
 
     -- 每秒检查限时活动图标是否显示或关闭
-    self._limitButtons = {
-        [self.HotspringButton] = ActivityId.HotSpring,
-        [self.GalaSeasonButton] = ActivityId.GalaSeason,
-        [self.SchoolButton] = ActivityId.School,
-        [self.BunnyGirlButton] = ActivityId.BunnyGirl,
-
-    }
+    -- self._limitButtons = {
+    --     [self.HotspringButton] = ActivityId.HotSpring,
+    --     [self.GalaSeasonButton] = ActivityId.GalaSeason,
+    --     [self.SchoolButton] = ActivityId.School,
+    --     [self.BunnyGirlButton] = ActivityId.BunnyGirl,
+    --     [self.SportsButton] = ActivityId.Sports,
+    --     [self.SayakaButton] = ActivityId.Sayaka,
+    --     [self.MatsuriButton] = ActivityId.Matsuri,
+    -- }
     self:schedule(1, function()
         self:checkActivityButtons()
     end)
@@ -388,6 +385,8 @@ function P:onShow()
     self:evt_ChangeFrameRSP()
     self:evt_ChangeTitleRSP()
     self:evt_refreshSysunlock()
+    self:evt_BetStatusUpdate()
+    self:evt_dispatchEventList()
 
 	if self.ImageUserType then
 		if USER_TYPE.Developer == PlayerModel:getUserType() then
@@ -407,8 +406,6 @@ function P:onShow()
 
     self._inBlurs = {}  -- 处于背景模糊的 ui 列表
 
-    GameModel:setData(nil, nil)
-
     self:refreshColorGame()
     self:refreshDevelopmentfund()
     self:checkActivityButtons()
@@ -421,15 +418,17 @@ function P:onShow()
     end
 
     QuickByModel:addButtonItem(self.uiName, self.QuickByButton)
+    QuickByModel:addLimitButtonItem(self.uiName, self.LimitPackageButton)
 
     -- 进入大厅后请求角色数据
     CharacterModel:requestGetSkinGameDetail()
 end
 
 function P:checkActivityButtons()
-    for k, v in pairs(self._limitButtons) do
-        k:SetActive(ActivityManager:isActivityOpen(ActivityId.Theme, v))
-    end
+    -- for k, v in pairs(self._limitButtons) do
+    --     k:SetActive(not bee.isLimitView and ActivityManager:isActivityOpen(ActivityId.Theme, v))
+    -- end
+    self.ThemeButtonPoint:SetActive(not bee.isLimitView and ActivityManager:isActivityOpen(ActivityId.Theme, ThemeModel:getThemeConfId()))
 
     local sdtStatus = SevenDayTaskModel:getCurUnlockChapterStatus()
     self.SevenDayTaskButton:SetActive(sdtStatus and sdtStatus ~= SevenDayTaskStatus.Upload)
@@ -469,19 +468,45 @@ function P:afterShow()
     end
 
     ClientDataModel:reqData()
+    
+    TournamentModel:refreshMatchingTip()
+
+    MobileNotificationsManager:checkLauncherData()
 end
 
 function P:tryAutoPop()
     SettingModel:checkAutoPop()
     if GameModel.over_bond_settle_info and GameModel.over_bond_settle_info.add_over_bond_inc > 0 then
-            bee.showUiTask("IngameFeedback", {info = GameModel.over_bond_settle_info}, nil, LOBBY_POP_PRIORITY.BondUp)
-    elseif GameModel.bond_settle_info and GameModel.bond_settle_info.win_hands > 0 then
-        if GameModel.bond_settle_info.cur_bond_level >= Config.AWAKEN_LEVEL then
-            if LocalStore:isTagValid("IngameBondsUp_fullpop_" .. CharacterModel:getUsingRoleId()) then
-                bee.showUiTask("IngameBondsUp", {info = GameModel.bond_settle_info}, nil, LOBBY_POP_PRIORITY.BondUp)
+        if GameModel.over_bond_settle_info.tpl_over_bond_inc and GameModel.over_bond_settle_info.tpl_over_bond_inc > 0 then
+            local favorSign = LocalStore:isDailyTagValidCrossDay("role_favor" .. PlayerModel:getUid(), true)
+            if favorSign then
+                bee.showUiTask("IngameFeedback", {info = GameModel.over_bond_settle_info}, nil, LOBBY_POP_PRIORITY.BondUp)
+            else
+                local num = math.floor((GameModel.over_bond_settle_info.add_over_bond_inc + GameModel.over_bond_settle_info.start_over_bond_inc) / GameModel.over_bond_settle_info.tpl_over_bond_inc)
+                if num > 0 then
+                    bee.showUiTask("BackpackClaimResult", {items = {{item_id = tpl_constdata.Affinity_Overflow_Reward[1], num = num}}}, POP_TAG.Reward, LOBBY_POP_PRIORITY.Reward)
+                    bee.runTask(POP_TAG.Reward)
+                end
             end
+        end
+    elseif GameModel.bond_settle_info and GameModel.bond_settle_info.win_hands > 0 then
+        local flag = true
+        if GameModel.over_bond_settle_info and GF.isSNG(GameModel.over_bond_settle_info.game_type) then
+            flag = LocalStore:isDailyTagValidCrossDay("IngameBondsUp_SNG", true)
         else
-            bee.showUiTask("IngameBondsUp", {info = GameModel.bond_settle_info}, nil, LOBBY_POP_PRIORITY.BondUp)
+            flag = LocalStore:isDailyTagValidCrossDay("IngameBondsUp_NORMAL", true)
+        end
+        if flag then
+            local favorSign = LocalStore:isDailyTagValidCrossDay("role_favor" .. PlayerModel:getUid(), true)
+            if favorSign then
+                if GameModel.bond_settle_info.cur_bond_level >= Config.AWAKEN_LEVEL then
+                    if LocalStore:isTagValid("IngameBondsUp_fullpop_" .. CharacterModel:getUsingRoleId()) then
+                        bee.showUiTask("IngameBondsUp", {info = GameModel.bond_settle_info}, nil, LOBBY_POP_PRIORITY.BondUp)
+                    end
+                else
+                    bee.showUiTask("IngameBondsUp", {info = GameModel.bond_settle_info}, nil, LOBBY_POP_PRIORITY.BondUp)
+                end
+            end
         end
     end
     GameModel.bond_settle_info = nil
@@ -489,6 +514,9 @@ function P:tryAutoPop()
 
     --活动礼包弹窗
     self:festivalGiftpop()
+
+    --超值礼包弹窗
+    QuickByModel:checkLimitPop()
 
     Net:sendReq("pb.BustProtectInfoREQ", {})
 
@@ -499,9 +527,6 @@ function P:tryAutoPop()
     SignInModel:checkSignIn()
     NoticeModel:tryAutoPop()
     if GameModel.summary and GameModel.summary.profit > 0 then
-        if ShopModel:isShowShopPush() then
-            bee.showUiTask("ShopPushView", {isAuto = true}, nil, LOBBY_POP_PRIORITY.ShopPush)
-        end
         if GameModel.summary.profit >= tpl_constdata.Score_Profit * GameModel:getBigBlind() then
             SdkHelper:startAppReview()
         end
@@ -541,8 +566,45 @@ function P:refreshDevelopmentfund()
     self.Developmentfund:SetActive(SettingModel:isDevelopmentfundUnlock())
 end
 
-function P:evt_updateShopLimit()
-    self.ShopPushButton:SetActive(#ShopModel:getShopPushList() > 0)
+function P:evt_getThemeIdCallback()
+    self:initThemeButton()
+end
+
+function P:initThemeButton()
+    local themeId = ThemeModel:getThemeConfId()
+    if themeId == nil then
+        return
+    end
+    if self.themeId == themeId then
+        return
+    else
+        self.themeId = themeId
+        if self.themeButton then
+            bee.destroy(self.themeButton)
+            self.themeButton = nil
+        end
+    end
+
+    local themeData = ThemeModel.ExpandData[self.themeId]
+    if themeData == nil then
+        return
+    end
+    self.themeButton = bee.createObj(themeData.path .. "/" .. themeData.lobbybtn)
+    self.themeButton.transform:SetParent(self.ThemeButtonPoint.transform, false)
+    self.themeButton.transform.localPosition = bee.v3(0, 0)
+    bee.addClick(self.themeButton, function()
+        Game:playSound("ui_button_confirm")
+        if not ThemeModel:isActivityOpen() then
+            UiManager:showToast(_T("LAB_EVENT_CHECK_IN_1"))
+            self.themeButton:SetActive(false)
+            return
+        end
+        self:stopRoleInteraction()
+        UiManager:showUI(themeData.mainview)
+        bee.logEvent("activity-theme-lobby", ThemeModel:getConfId())
+    end, true)
+
+    RedManager:bind(self:find("Reddot", self.themeButton), RedTag[themeData.reddot])
 end
 
 function P:evt_refreshLevel()
@@ -558,8 +620,8 @@ function P:evt_ExpChangeRSP()
 end
 
 function P:evt_refreshTopInfo()
-    bee.invoke(self.Gold, "setCount", _N(PlayerModel:getGold()))
-    bee.invoke(self.Ticket1, "setCount", _N(ItemModel:getItemNumById(GPropId.TicketDraw)))
+    bee.invoke(self.Gold, "setCount", _N2(PlayerModel:getGold()))
+    bee.invoke(self.Ticket1, "setCount", _N2(ItemModel:getItemNumById(GPropId.TicketDraw)))
 end
 
 function P:evt_refreshName()
@@ -578,7 +640,7 @@ function P:evt_ChangeFrameRSP(msg)
 end
 
 function P:evt_ChangeTitleRSP(msg)
-    GF.setTitleImage(self.TitleIcon, PlayerModel:getTitle())
+    GF.setTitleImage(self.TitleIcon, PlayerModel:getTitle2())
 end
 
 function P:evt_refreshLobbyMusic()
@@ -670,7 +732,7 @@ function P:evt_refreshLobbyRole()
 end
 
 function P:evt_initScheme()
-    if not PlayerModel:getCurSchemeId() then
+    if not DecorationModel:getCurLobbySchemeId() then
         Game:stopMusic()
         self.CharacterImage:SetActive(false)
         return
@@ -683,7 +745,7 @@ function P:evt_initScheme()
 end
 
 function P:evt_updateScheme(scheme)
-    if scheme and scheme.scheme_id ~= PlayerModel:getCurSchemeId() then
+    if scheme and scheme.scheme_id ~= DecorationModel:getCurLobbySchemeId() then
         return
     end
 
@@ -691,13 +753,22 @@ function P:evt_updateScheme(scheme)
     self:setLobbySceneImg()
 end
 
-function P:evt_changeScheme()
+function P:evt_privaciesSkin()
     self:setCharacterImage()
     self:setLobbySceneImg()
 end
 
+function P:evt_privaciesName()
+    self:evt_refreshName()
+end
+
+-- function P:evt_changeScheme()
+--     self:setCharacterImage()
+--     self:setLobbySceneImg()
+-- end
+
 function P:setCharacterImage()
-    local schemeInfo = PlayerModel:getCurScheme()
+    local schemeInfo = DecorationModel:getCurScheme()
     if not schemeInfo then
         return
     end
@@ -718,6 +789,14 @@ function P:setCharacterImage()
                 TaskModel:reportTask(TaskType.RoleInteraction)
             end)
             self.characterCls:initAccessoriesInteraction()
+            
+            local origin_pos = bee.v3(0, 0, 0)
+            if skinCfg.lobby_pos then
+                origin_pos.x, origin_pos.y = skinCfg.lobby_pos[1], skinCfg.lobby_pos[2]
+                self.characterCls:getRoleSpine().transform.localPosition = origin_pos
+            else
+                self.characterCls:getRoleSpine().transform.localPosition = bee.v3zero
+            end
         end
 
         self:stopRoleInteraction()
@@ -728,10 +807,23 @@ function P:setCharacterImage()
         end
     end
 
+    local avatarId = schemeInfo.avatar
+    local avatar = ""
+    if avatarId == 0 or avatarId == nil then
+        avatar = PlayerModel:getAvatarIcon()
+    else
+        avatar = tpl_props[schemeInfo.avatar].icon
+    end
+    bee.setIcon(self:find("Mask/ImageIcon", self.Avatar), avatar)
+    GF.setFrameImage(self:find("ImageFrame", self.Avatar), schemeInfo.frame)
+    GF.setTitleImage(self.TitleIcon, schemeInfo.title)
+
+    local rot = 0
     if schemeInfo.property_list and schemeInfo.property_list[1] then
         local x = schemeInfo.property_list[1] / 10
         local y = schemeInfo.property_list[2] / 10
         local size = schemeInfo.property_list[3] / 100
+        rot = schemeInfo.property_list[5] and schemeInfo.property_list[5] / 100 or 0
         self.CharacterImage.transform.localPosition = bee.v3(x, y, 0)
         self.CharacterImage.transform.localScale = bee.v3(size, size, 1)
     else
@@ -739,18 +831,21 @@ function P:setCharacterImage()
         self.CharacterImage.transform.localScale = bee.v3(PlayerModel.CharacterDefaultPosSize, PlayerModel.CharacterDefaultPosSize, 1)
     end
 
-    if skinCfg.spine_rotation then
-        self.CharacterImage.transform.localEulerAngles = bee.v3(0, 0, skinCfg.spine_rotation)
-    else
-        self.CharacterImage.transform.localEulerAngles = bee.v3zero
-    end
+    self.CharacterImage.transform.localEulerAngles = bee.v3(0, 0, rot)
+    -- if skinCfg.spine_rotation then
+    --     self.CharacterImage.transform.localEulerAngles = bee.v3(0, 0, skinCfg.spine_rotation + rot)
+    -- else
+    --     self.CharacterImage.transform.localEulerAngles = bee.v3(0, 0, rot)
+    -- end
+
+    self:setLobbySceneImg()
 end
 
 function P:setLobbyMusic()
     if self._playedLobbyBgm then
         return
     end
-    local schemeInfo = PlayerModel:getCurScheme()
+    local schemeInfo = DecorationModel:getCurScheme()
     if not schemeInfo then
         return
     end
@@ -767,7 +862,7 @@ function P:characterGreeting()
         return
     end
 
-    local schemeInfo = PlayerModel:getCurScheme()
+    local schemeInfo = DecorationModel:getCurScheme()
     if not schemeInfo then
         return
     end
@@ -779,7 +874,9 @@ function P:characterGreeting()
     bee.addTaskFunc(function()
         if role then
             local voiceCfg
-            if role:isAwaken() then
+            if role:isSecondAwaken() then
+                voiceCfg = role:getSkinData().awakened2_greet_voice
+            elseif role:isAwaken() then
                 voiceCfg = role:getSkinData().awakened_greet_voice
             else
                 voiceCfg = role:getSkinData().default_greet_voice
@@ -794,10 +891,18 @@ function P:characterGreeting()
 end
 
 function P:setLobbySceneImg()
-    local cfg = tpl_hall_scene[PlayerModel:getCurLobbyScene()]
-    if cfg then
-        bee.setIcon(self.ImageBg, cfg.bg_image)
-    end
+    local sceneId = DecorationModel:getCurLobbyScene()
+    
+    -- local schemeInfo = DecorationModel:getCurScheme()
+    -- if schemeInfo then
+    --     local skinId = schemeInfo.skin_id
+    --     local skinCfg = tpl_character_skin[skinId]
+    --     if skinCfg.lobby_item and tpl_props[skinCfg.lobby_item] then
+    --         sceneId = tpl_props[skinCfg.lobby_item].mapId
+    --     end
+    -- end
+
+    GF.setLobbyImage(sceneId, self.ImageBg, self.ImageFg)
 end
 
 function P:evt_refreshLobbyScene()
@@ -827,11 +932,16 @@ end
 
 function P:evt_try_auto_pop()
     self:once(1, function()
+        if GuideManager:isInGuide() then
+            self.RaycastMask:SetActive(false)
+            return
+        end
         self:tryAutoPop()
     end)
 end
 
 function P:evt_lan_mod()
+    self:evt_refreshName()
     self:evt_ChangeTitleRSP()
 end
 
@@ -851,7 +961,7 @@ function P:evt_refreshSysunlock()
 end
 
 function P:onClickExplosionButton()
-    local schemeInfo = PlayerModel:getCurScheme()
+    local schemeInfo = DecorationModel:getCurScheme()
     if not schemeInfo then
         return
     end
@@ -877,15 +987,25 @@ function P:onClickExplosionButton()
 end
 
 function P:onClickUIVisibleButton()
+    self.UIVisibleSign = true
+    self.CharacterImage.transform:SetParent(self.ClickMask.transform)
+    self.BubbleParent.transform:SetParent(self.ClickMask.transform)
+    self.ImageFg.transform:SetParent(self.ClickMask.transform)
+
     self:playAnimator("UI_1_LobbyLayer_back")
     self.ClickMask:SetActive(true)
 
-    local schemeInfo = PlayerModel:getCurScheme()
+    local schemeInfo = DecorationModel:getCurScheme()
     local skinCfg = tpl_character_skin[schemeInfo.skin_id]
     bee.logEvent("lobby-character-ui-click", skinCfg.id)
 end
 
 function P:onClickMask()
+    self.UIVisibleSign = false
+    self.CharacterImage.transform:SetParent(self.Center.transform)
+    self.BubbleParent.transform:SetParent(self.Center.transform)
+    self.ImageFg.transform:SetParent(self.Center.transform)
+
     self:playAnimator("UI_1_LobbyLayer_into")
     self.ClickMask:SetActive(false)
 end
@@ -899,6 +1019,100 @@ function P:stopRoleInteraction()
     end
 end
 
+function P:evt_BetStatusUpdate()
+    if SoccerGuessingModel:getBetStatus() == 0 or PlayerModel:isEventWhite() then
+        self.SoccerButton:SetActive(true)
+        if not self._soccerTimer then
+            self._soccerTimer = self:schedule(30, function()
+                SoccerGuessingModel:reqBetStatus()
+            end)
+        end
+        if SoccerGuessingModel:getBetLive() then
+            AnimationMgr:playAnim(self.SoccerButton, "UI_lobby_SoccerButton_2")
+        else
+            AnimationMgr:playAnim(self.SoccerButton, "UI_lobby_SoccerButton_1")
+        end
+    else
+        self.SoccerButton:SetActive(false)
+        if self._soccerTimer then
+            scheduler:removeTag(self._soccerTimer)
+            self._soccerTimer = nil
+        end
+    end
+end
 
+function P:evt_dispatchEventList()
+    if not DispatchModel:isOpenDispatch() then
+        if self._dispatchTimer then
+            scheduler:removeTag(self._dispatchTimer)
+            self._dispatchTimer = nil
+        end
+        self.DispatchButton:SetActive(false)
+        return
+    end
+
+    self:evt_updateLobbyDispatchAnim()
+end
+
+function P:evt_updateLobbyDispatchAnim()
+    if self._dispatchTimer then
+        scheduler:removeTag(self._dispatchTimer)
+        self._dispatchTimer = nil
+    end
+    if RedManager:isTag(RedTag.Dispatch) then
+        AnimationMgr:playAnim(self.DispatchButton, "UI_1_DispatchButton_idle03")
+    else
+        local status = DispatchModel:getDispatchIconStatus()
+        if status == DispatchModel.EventStatus.Finish then
+            AnimationMgr:playAnim(self.DispatchButton, "UI_1_DispatchButton_idle03")
+        elseif status == DispatchModel.EventStatus.Dispatching then
+            AnimationMgr:playAnim(self.DispatchButton, "UI_1_DispatchButton_idle02")
+        else
+            AnimationMgr:playAnim(self.DispatchButton, "UI_1_DispatchButton_idle01")
+        end
+    end
+    if self._dispatchTag then
+        scheduler:removeTag(self._dispatchTag)
+        self._dispatchTag = nil
+    end
+    self._dispatchTag = self:once(30, function()
+        DispatchModel:reqEventList()
+    end)
+end
+
+function P:getUIVisibleSign()
+    return self.UIVisibleSign
+end
+----------快捷键------------
+
+function P:ShortcutSetting()
+    local btn = self.SettingButton:GetComponent("Button")
+    btn.onClick:Invoke()
+end
+
+function P:ShortcutBackpack()
+    local btn = self:find("RightBottom/BottomToggle/BackpackToggle", self.AnimRoot):GetComponent("Button")
+    btn.onClick:Invoke()
+end
+
+function P:ShortcutCharacter()
+    local btn = self:find("Right/CharacterButton/CharacterButton", self.AnimRoot):GetComponent("Button")
+    btn.onClick:Invoke()
+end
+
+function P:ShortcutTask()
+    local btn = self:find("LeftTop/Left/TaskButton", self.AnimRoot):GetComponent("Button")
+    btn.onClick:Invoke()
+end
+
+function P:ShortcutMail()
+    local btn = self:find("RightTop/MailButton", self.AnimRoot):GetComponent("Button")
+    btn.onClick:Invoke()
+end
+
+function P:ShortcutShop()
+    local btn = self:find("RightBottom/BottomToggle/ShopToggle", self.AnimRoot):GetComponent("Button")
+    btn.onClick:Invoke()
+end
 
 return P

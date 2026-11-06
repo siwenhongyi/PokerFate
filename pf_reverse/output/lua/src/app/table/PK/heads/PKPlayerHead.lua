@@ -16,23 +16,51 @@ function P:onAwake()
 	self.BgBet = self:find("BgBet")
 	self.BgBet:SetActive(false)
 	self.BgAllin = self:find("BgAllin", self.BgRole)
+	self.BgAllinBg = self:find("BgAllinBg", self.BgRole)
 
 	self.BgCard = self:find("BgCard")
 	self.BgCardPostion = self.BgCard.transform.localPosition
 	self.BgStatus = self:find("BgStatus")
 	self.BgStatus:SetActive(false)
-	
+
+	bee.setSortingOrder(self.BgCard, 1)
+
+	self.switchSubType = false
 	self.Button = self:find("Button")
 	bee.addClick2(self.Button, function()
 		Game:playSound("ui_button_confirm")
-		local info = self.data:getPlayer(self.seatid)
-		UiManager:showUI("InformationMainNew", {uid = info.uid, from = "table"})
-    	bee.logEvent("ingame-profile", GameModel.data:getGameType(), GameModel.data:getRoomId())
+		self:openInformationView()
+		-- GameModel.data:isInObserve()
 	end)
 	bee.addClick2(self:find("ButtonChip"), function()
 		SettingModel:setShowBB(not SettingModel:isShowBB())
 	end)
+	self.ButtonLevel = self:find("ButtonLevel")
+	if self.ButtonLevel then
+		bee.addClick2(self.ButtonLevel, function()
+			local info = self.data:getPlayer(self.seatid)
+			if info.uid == PlayerModel:getUid() then
+				Game:playSound("ui_button_confirm")
+				UiManager:showUI("Level", {from = "table"})
+			end
+		end)
+	end
+
+	self.EmojiPoint = self:find("EmojiPoint")
 end
+
+--调起信息界面
+function P:openInformationView()
+	local info = self.data:getPlayer(self.seatid)
+	UiManager:showUI("InformationMainNew", {uid = info.uid, from = "table"})
+	bee.logEvent("ingame-profile", GameModel.data:getGameType(), GameModel.data:getRoomId())
+end
+--调起表情界面
+-- function P:openEmojiView()
+-- 	local info = self.data:getPlayer(self.seatid)
+-- 	UiManager:showUI("IngameEmoji", {playerInfo = info})
+-- end
+
 
 function P:setSeatNode(seat)
 	self._seatNode = seat
@@ -40,7 +68,16 @@ end
 
 function P:setShowIndex(index, self_index, infoIndex)
 	P.super.setShowIndex(self, index, self_index, infoIndex)
-	self.BgCard.transform.localPosition = index >= self_index and self.BgCardPostion or bee.v3(-self.BgCardPostion.x, self.BgCardPostion.y)
+	local y = self.BgCardPostion.y
+	if self.data:getSeatNum() == 6 then
+		-- 左右手的玩家手牌往下，不挡行动条
+		if index == 2 then
+			y = 5
+		elseif index == 4 then
+			y = -8
+		end
+	end
+	self.BgCard.transform.localPosition = index >= self_index and bee.v3(self.BgCardPostion.x, y) or bee.v3(-self.BgCardPostion.x, y)
 end
 
 function P:initHandCards()
@@ -57,51 +94,8 @@ end
 
 function P:refreshUI()
 	local info = self.data:getPlayer(self.seatid)
-	local skinData = tpl_character_skin[info.skin_id]
-	if skinData then
-		if self._skinData ~= skinData then
-			self._skinData = skinData
-			if self._roleSpine then
-				CU.GameObject.Destroy(self._roleSpine)
-				self._roleSpine = nil
-				self._roleSpineNode = nil
-			end
-		end
-		if skinData.table_avatar then
-			if not self._roleSpine then
-				self._roleSpine = bee.createObj(skinData.table_avatar)
-				self._roleSpine.transform:SetParent(self.ImageRole.transform, false)
-				self.ImageRole:GetComponent("Image").enabled = false
-				if not self:isMe() then
-					self._roleSpine.transform.localScale = Config.ROLE_OTHER_SCALE
-				end
-				
-				local Mask = self:find("Mask", self._roleSpine)
-				if Mask then
-					if bee.isIos or bee.isEditor then
-						-- bee.convertMaskToSoftMask(Mask)
-					end
-					self._roleMask = Mask
-					self._roleMask2 = self:find("Mask2", self._roleSpine)
-					if self._roleMask2 then
-						self._roleMask2:GetComponent("Image").raycastTarget = false
-					end
-					self._roleSpineNode = Mask.transform:GetChild(0).gameObject
-					self._roleSpinePos = self._roleSpineNode.transform.localPosition
-					bee.invoke(self._roleSpineNode, "setHideAttachments", info.skin_id)
-				end
-			end
-
-			if SettingModel:isScrapPlayer(self.data, info.uid) then
-				bee.invoke(self._roleSpineNode, "setScrap", true)
-			else
-				bee.invoke(self._roleSpineNode, "setScrap", false)
-			end
-		else
-			bee.setIcon(self.ImageRole, skinData.table_avatar_pic)
-			self.ImageRole:GetComponent("Image").enabled = true
-		end
-	end
+	self:refreshRole()
+	self._isInTopupStatus = nil
 	P.super.refreshUI(self)
 	GF.setTitleImage(self.ImageTitle, info.title, true, true)
 	self:initHandCards()
@@ -133,6 +127,84 @@ function P:refreshActionUI(instant)
 		self:stopProgress(true)
 	end
 	self:refreshFightFxUi()
+end
+
+function P:refreshRole()
+	local info = self.data:getPlayer(self.seatid)
+	local skinData = tpl_character_skin[info.skin_id]
+	if skinData then
+		skinData = GF.getShowSkinData(skinData)
+		if self._skinData ~= skinData then
+			self._skinData = skinData
+			if self._roleSpine then
+				CU.GameObject.Destroy(self._roleSpine)
+				self._roleSpine = nil
+				self._roleSpineNode = nil
+			end
+		end
+		if skinData.table_avatar then
+			if not self._roleSpine then
+				self._roleSpine = bee.createObj(skinData.table_avatar)
+				if bee.isNull(self._roleSpine) then
+					return
+				end
+				bee.invoke(self._roleSpineNode, "setSkinId", skinData.id)
+				self._roleSpine.transform:SetParent(self.ImageRole.transform, false)
+				self.ImageRole:GetComponent("Image").enabled = false
+
+				local d = tpl_character_ingame[skinData.id]
+				if d then
+					local flip_index = "flip_index" .. self.data:getSeatNum()
+					if d[flip_index] and table.indexof(d[flip_index], self.show_index) > 0 then
+						self._roleSpine.transform.localScale = bee.v3(-1, 1, 1)
+					else
+						self._roleSpine.transform.localScale = bee.v3one
+					end
+					if d.my_offset and self:isMe() then
+						self._roleSpine.transform.anchoredPosition = bee.v2(d.my_offset[1], d.my_offset[2])
+					else
+						self._roleSpine.transform.anchoredPosition = bee.v2zero
+					end
+				else
+					self._roleSpine.transform.localScale = bee.v3one
+					self._roleSpine.transform.anchoredPosition = bee.v2zero
+				end
+				
+				local Mask = self:find("Mask", self._roleSpine)
+				if Mask then
+					if bee.isIos or bee.isEditor then
+						-- bee.convertMaskToSoftMask(Mask)
+					end
+					Mask:GetComponent("Image").enabled = not self:isMe()
+					Mask:GetComponent("Mask").enabled = not self:isMe()
+					Mask:GetComponent("Image").raycastTarget = false
+					if not self:isMe() then
+						Mask.transform.sizeDelta = bee.v2(1800, 480)
+					end
+					self._roleMask = Mask
+					self._roleMask2 = self:find("Mask2", self._roleSpine)
+					if self._roleMask2 then
+						self._roleMask2:GetComponent("Image").raycastTarget = false
+
+						self._roleMask2:GetComponent("Image").enabled = not self:isMe()
+						self._roleMask2:GetComponent("Mask").enabled = not self:isMe()
+					end
+					self._roleSpineNode = Mask.transform:GetChild(0).gameObject
+					self._roleSpinePos = self._roleSpineNode.transform.localPosition
+					bee.invoke(self._roleSpineNode, "setHideAttachments", skinData.id)
+				end
+			end
+
+			if SettingModel:isScrapPlayer(self.data, info.uid) then
+				bee.invoke(self._roleSpineNode, "setScrap", true)
+			else
+				bee.invoke(self._roleSpineNode, "setScrap", false)
+			end
+		else
+			bee.setIcon(self.ImageRole, skinData.table_avatar_pic)
+			self.ImageRole:GetComponent("Image").enabled = true
+		end
+	end
 end
 
 function P:refreshEyes()
@@ -191,6 +263,9 @@ function P:refreshBet(info, instant)
 				self:refreshChip(info, 1 + tpl_constdata.IngameBetDt)
 				if dt and dt > 0 then
 					self:once(dt, function()
+						if info.action_type == POKER_ACTION.SB then
+							bee.emit("evt_hideAnteTag")
+						end
 						self:_showBetAnim(info)
 					end)
 				else
@@ -273,6 +348,9 @@ function P:foldCard()
 			if self._roleSpineNode then
 				bee.invoke(self._roleSpineNode, "pauseAnim", true)
 			end
+			if self.data:isInObserve() and self.data:isOpenObserve() then
+				bee.invoke(self._BgCard, "setCardGrep")
+			end
 		end
 		
 		bee.Tween.killByTarget(self.BgFold)
@@ -300,6 +378,8 @@ function P:playSound(key)
 		if d then
 			if key == ROLE_VOICE.all_in and d.kind == SKIN_KIND.AWAKEN then
 				key = ROLE_VOICE.all_in_awakened
+			elseif key == ROLE_VOICE.all_in and d.kind == SKIN_KIND.SECOND_AWAKEN then
+				key = ROLE_VOICE.all_in_awakened2
 			end
 			if type(key) == "table" then
 				if self:isMe() then
@@ -323,6 +403,10 @@ function P:playSound(key)
 end
 
 function P:playScrap(cb)
+	if not SettingModel:isShowScrap() then
+		if cb then cb() end
+		return
+	end
 	self._isInScraping = true
 	local info = self.data:getPlayer(self.seatid)
 	if info then
@@ -395,10 +479,13 @@ function P:stopScrap()
 end
 
 function P:playUnScrap()
+	if not SettingModel:isShowScrap() then
+		return
+	end
 	if self._roleSpineNode then
 		if bee.invoke(self._roleSpineNode, "isInScrapState") then
 			local pos = self:isMe() and bee.v3(17, 96) or bee.v3(17, 80)
-			local eft = GameModel.layer:playUIEffect("Prefab/PKTable/Eff_poker_baoyihuifu", self.transform, pos)
+			local eft = GameModel:playUIEffect("Prefab/PKTable/Eff_poker_baoyihuifu", self.transform, pos)
 			self:once(0.19, function()
 				bee.invoke(self._roleSpineNode, "stopScrap")
 			end)
@@ -425,8 +512,12 @@ function P:refreshAllin()
 		self:showAllin()
 	else
 		if not bee.isNull(self._allinEft) then
-			GameModel.layer:putEffectItem(self._allinEft)
+			GameModel:putEffectItem(self._allinEft)
 			self._allinEft = nil
+		end
+		if not bee.isNull(self._allinEftBg) then
+			GameModel:putEffectItem(self._allinEftBg)
+			self._allinEftBg = nil
 		end
 	end
 end
@@ -434,10 +525,15 @@ end
 function P:showAllin()
 	if bee.isNull(self._allinEft) then
 		local effId = self.data:getPlayer(self.seatid).nameplate_eff
+		local eff, eff_bg = nil, nil
 		if self:isMe() then
-			self._allinEft = GameModel.layer:playUIEffect(GameModel:getAllinEffectName(0, effId), self.BgAllin.transform, nil, -1)
+			eff, eff_bg = GameModel:getAllinEffectName(0, effId)
 		else
-			self._allinEft = GameModel.layer:playUIEffect(GameModel:getAllinEffectName(1 + self.data:getPlayer(self.seatid).user_type, effId), self.BgAllin.transform, nil, -1)
+			eff, eff_bg = GameModel:getAllinEffectName(1 + self.data:getPlayer(self.seatid).user_type, effId)
+		end
+		self._allinEft = GameModel:playUIEffect(eff, self.BgAllin.transform, nil, -1)
+		if eff_bg then
+			self._allinEftBg = GameModel:playUIEffect(eff_bg, self.BgAllinBg.transform, nil, -1)
 		end
 	end
 end
@@ -461,8 +557,11 @@ function P:getCollectBetToPotDt()
 end
 
 function P:flyChipsToPot(from, to, num, cb)
+	if not GameModel.layer then
+		return
+	end
 	for i = 1, num do
-		local eft = GameModel.layer:playUIEffect(self.data:getChipEft(), GameModel.layer.transform, nil, 3)
+		local eft = GameModel:playUIEffect(self.data:getChipEft(), nil, nil, 3)
 		eft.transform.position = from
 		local pos = eft.transform.localPosition
 		local ranPos = CU.Random.insideUnitCircle * 65
@@ -473,7 +572,7 @@ function P:flyChipsToPot(from, to, num, cb)
 			: to (0.533, {position = to})
 			: ease(DT.Ease.InBack)
 			: onComplete(function()
-				GameModel.layer:putEffectItem(eft)
+				GameModel:putEffectItem(eft)
 				if i == 1 then
 					cb()
 				end
@@ -553,7 +652,7 @@ function P:collectPotToHand(chips, cb)
 			minDt, maxDt = 533, 866
 		end
 		for i = 1, num do
-			local eft = GameModel.layer:playUIEffect(self.data:getChipEft(), GameModel.layer.transform, nil, 3)
+			local eft = GameModel:playUIEffect(self.data:getChipEft(), nil, nil, 3)
 			eft.transform.position = from
 			local pos = eft.transform.localPosition
 			local ranPos = CU.Random.insideUnitCircle * 65
@@ -569,15 +668,16 @@ function P:collectPotToHand(chips, cb)
 				cmp:OnComplete(function()
 					if i == 1 then
 						self:refreshChip(info, 0.2)
-						local tip = GameModel.layer:playUIEffect("views/table/PK/IngameTipChip", self.transform, bee.v3(0, 200))
+						local tip = GameModel:playUIEffect("views/table/PK/IngameTipChip", self.transform, bee.v3(0, 200))
 						if tip then
 							bee.setTextOrigin(self:find("AnimRoot/TextAdd", tip), "+" .. self.data:getBetChipsStr(chips))
 						end
+						bee.emit("evt_winner_show_light", {seatId = self.seatid})
 						if cb then
 							cb()
 						end
 					end
-					GameModel.layer:putEffectItem(eft)
+					GameModel:putEffectItem(eft)
 				end)
 			end)
 			: link()
@@ -598,23 +698,61 @@ function P:refreshSittingOut()
 	-- 别删
 end
 
+function P:_refreshAddingChips(is_adding, chips, type)
+	if self._isInTopupStatus then
+		return
+	end
+	bee.Tween.killByTarget(self.BgStatus)
+	if is_adding and self.data:getRebuyRemainTime(self.seatid) > 0 then
+		self.BgStatus:SetActive(true)
+		bee.setText(self:find("TextStatus", self.BgStatus), self.data:isMTT() and _T("LAB_TOURNAMENT_MTT_INFO79") or _T("LAB_BUYINGING"))
+	else
+		self.BgStatus:SetActive(false)
+	end
+	if type == "topup" then
+		self._isInTopupStatus = true
+		self.BgStatus:SetActive(true)
+		bee.setText(self:find("TextStatus", self.BgStatus), _F("LAB_GAME_030", _N2(chips or 0)))
+		bee.tween(self.BgStatus)
+		: delay(1)
+		: onComplete(function()
+			self._isInTopupStatus = nil
+			self.BgStatus:SetActive(false)
+		end)
+		: link()
+		: setTarget()
+	end
+end
+
 function P:refreshAddingChips(is_adding, chips, type)
 	if self.data:getRebuyRemainTime(self.seatid) > 0 then
-		local data = GF.getTableDataBySB(self.data:getGameType(), self.data:getSmallBlind())
-		if data then
-			if self.data:isFriendsRoom() then
-				UiManager:showUI("FriendsRoomByin")
-			elseif (data.min_byin or data.byin) <= PlayerModel:getGold() then
-				UiManager:showUI("LobbyByinDialog", {data = data, isReby = true})
-			else
-				if not UiManager:getUI("IngameQuickBy") then
-					QuickByModel:checkInsideGame(data.gameType, data.quick_buy)
-					-- UiManager:showUI("IngameQuickBy", {data = data, dt = self.data:getRebuyRemainTime(self.seatid)})
-				end
+		if self.data:isInObserve() then
+			self:_refreshAddingChips(is_adding, chips, type)
+			return
+		end
+		if self.data:isMTT() then
+			if not UiManager:getUI("TournamentMTTRebuy") then
+				UiManager:showUI("TournamentMTTRebuy")
 			end
 		else
-			printError("refreshAddingChips no table data for sb: " .. self.data:getSmallBlind())
+			local data = GF.getTableDataBySB(self.data:getGameType(), self.data:getSmallBlind())
+			if data then
+				if self.data:isFriendsRoom() then
+					UiManager:showUI("FriendsRoomByin")
+				elseif (data.min_byin or data.byin) <= PlayerModel:getGold() then
+					UiManager:showUI("LobbyByinDialog", {data = data, isReby = true})
+				else
+					if not UiManager:getUI("IngameQuickBy") then
+						QuickByModel:checkInsideGame(data.gameType, data.quick_buy)
+						-- UiManager:showUI("IngameQuickBy", {data = data, dt = self.data:getRebuyRemainTime(self.seatid)})
+					end
+				end
+			else
+				printError("refreshAddingChips no table data for sb: " .. self.data:getSmallBlind())
+			end
 		end
+	elseif self.data:isInObserve() then
+		self:_refreshAddingChips(is_adding, chips, type)
 	end
 end
 

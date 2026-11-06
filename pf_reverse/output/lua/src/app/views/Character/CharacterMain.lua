@@ -8,9 +8,15 @@ function P:onAwake()
     self.bg_character_bg_hellhound = self:find("bg_character_bg_hellhound", self.Center)
     self.Characters = self:find("Characters", self.Right)
     self.EmptyCharacters = self:find("Empty", self.Characters)
+    self.EmptyPos = self.EmptyCharacters.transform.localPosition
+    self.DecorationSchemeItem = self:find("DecorationSchemeItem", self.Right)
     local CharacterList = self:find("CharacterList", self.Characters)
     local Item1 = self:find("Item1", CharacterList)
     Item1:SetActive(false)
+
+    self.SpecialQuestButton = self:find("SpecialQuestButton", self.Right)
+    self.SpecialQuestIcon = self:find("SpecialQuestIcon", self.SpecialQuestButton)
+    self.SpecialQuestText = self:find("SpecialQuestText", self.SpecialQuestButton)
     
     local TabMain = self:find("TabMain", self.Left)
     self.GarmentToggle = self:find("GarmentToggle", TabMain)
@@ -18,6 +24,9 @@ function P:onAwake()
     self.BondsToggle = self:find("BondsToggle", TabMain)
     self.ImageBond = self:find("ImageBond", self.BondsToggle)
     self.TextBondLevel = self:find("TextBondLevel", self.ImageBond)
+
+    self.ReGuideButton = self:find("ReGuideButton", self.LeftTop)
+    self:switchShowGuideButton()
 
     bee.addClick(self.GarmentToggle, function()
         Game:playSound("ui_button_confirm")
@@ -92,12 +101,32 @@ function P:onAwake()
         end
     end)
 
+    bee.addClick(self.DecorationSchemeItem, function ()
+        ItemModel:jumpView(13002, nil, function ()
+            self:showList(1)
+        end)
+        bee.logEvent("style-preset-role")
+    end)
+
+    bee.addClick(self.ReGuideButton, function()
+        Game:playSound("ui_button_confirm")
+        self.CharacterList:changeScrollInertia(function ()
+            self.CharacterList:moveToYItem(1, false)
+            self:showList(1)
+            GuideManager:startSystemGuide(1001, 0, true)
+        end)
+    end)
+
+    CharacterModel:getOpenedStory()
+
     -- 任务-查看角色界面
     TaskModel:reportTask(TaskType.CheckView, TaskTargetId.Role)
 
     RedManager:bind(self:find("Reddot", self.GarmentToggle), RedTag.CharacterGarments)
     RedManager:bind(self:find("Reddot", self.FileToggle), RedTag.CharacterProfile)
     RedManager:bind(self:find("Reddot", self.BondsToggle), RedTag.CharacterBonds)
+
+    self._ItemDatas = {}
 end
 
 function P:onShow()
@@ -119,6 +148,11 @@ end
 function P:showList(index)
     self._showIndex = index
     self._selectItem = nil
+    self._selectData = nil
+    self:_refreshList()
+end
+
+function P:_refreshList()
     self._datas = nil
     if 1 == self._showIndex then
         self._datas = CharacterModel:getAllCharacters()
@@ -128,13 +162,16 @@ function P:showList(index)
         self._datas = CharacterModel:getStarredCharacters()
     end
     if #self._datas > 0 then
-        self._role = nil
+        self._role = self._selectData
     end
     for k, v in ipairs(self._datas) do
         v._sortIndex = k
     end
     self.CharacterList:setDatas(self._datas)
     self.EmptyCharacters:SetActive(0 == #self._datas)
+    if 0 == #self._datas and SCREEN_HEIGHT > DESIGN_HEIGHT then
+        self.EmptyCharacters.transform.localPosition = bee.v3(self.EmptyPos.x - (math.min(SCREEN_HEIGHT, 1440) - DESIGN_HEIGHT) / 6, self.EmptyPos.y)
+    end
     self:refreshSelect()
     
     self:_tryShowGuide()
@@ -169,6 +206,31 @@ function P:refreshBondLevel()
     end
 end
 
+function P:refreshSpecialQuest()
+    if not self._role:isCanSecondAwaken() or self._role:isSecondAwaken() then
+        self.SpecialQuestButton:SetActive(false)
+        return
+    end
+    self.SpecialQuestButton:SetActive(true)
+    bee.setIconInAtlas(self.SpecialQuestIcon, self._role.info.special_ent)
+    bee.setText(self.SpecialQuestText, _T(self._role.info.special_name))
+
+    local Newdot = self:find("Newdot", self.SpecialQuestButton)
+    Newdot:SetActive(CharacterModel:isRoleSecondAwakenNewRed(self._role.role_id))
+    local Reddot = self:find("Reddot", self.SpecialQuestButton)
+    Reddot:SetActive(CharacterModel:isWaitSecondAwaken(self._role.role_id))
+
+    bee.removeAllClick(self.SpecialQuestButton)
+    bee.addClick(self.SpecialQuestButton, function()
+        if not self._role.info.special_outfit then
+            return
+        end
+        local skinCfg = tpl_character_skin[self._role.info.special_outfit]
+        bee.logEvent("character-special-task-ent", self._role.role_id)
+        ItemModel:jumpView(skinCfg.accesses[1], nil, nil, {role = self._role})
+    end)
+end
+
 function P:refreshSelect()
     self:refreshName()
     self:refreshLeftRight()
@@ -198,8 +260,10 @@ function P:setSelectData(data, item)
     if self._selectItem then
         self:find("character_list_grid_selected", self._selectItem):SetActive(false)
     end
+
     self._role = data
     self._selectItem = item
+    self._selectData = data
     if self._selectItem then
         self:find("character_list_grid_selected", self._selectItem):SetActive(true)
     end
@@ -216,6 +280,7 @@ function P:setSelectData(data, item)
     self:refreshSelect()
     self:refreshRole()
     self:refreshBondLevel()
+    self:refreshSpecialQuest()
 
     if not CharacterModel:removeNewroleRed(self._role.role_id) then
         CharacterModel:refreshReddot(self._role.role_id)
@@ -274,17 +339,32 @@ function P:refreshCharacter(data, item)
     local d = tpl_character[data.role_id]
     local skin = CharacterModel:getRoleSkinData(data.role_id)
     bee.setIcon(self:find("Mask/ImageIcon", item), skin.ui_avatar_1)
-    self:find("tag", item):SetActive(data.role_id == CharacterModel.using_role_id)
+    local isRandom = DecorationModel:isInGameSchemeRandom()
+    local useTag = self:find("tag", item)
+    local randomTag = self:find("randomTag", item)
+    if not isRandom then
+        local isUsing = DecorationModel:checkRoleInScheme(SchemeTag.Ingame, true, data.role_id)
+        useTag:SetActive(isUsing)
+        randomTag:SetActive(false)
+    else
+        local inRandom = DecorationModel:checkRoleInScheme(SchemeTag.Ingame, false, data.role_id)
+        useTag:SetActive(false)
+        randomTag:SetActive(inRandom)
+    end
     self:find("icon_lock_02", item):SetActive(data.locked)
-    self:find("character_list_grid_selected", item):SetActive(self._selectItem == item)
+    self:find("character_list_grid_selected", item):SetActive(data == self._selectData)
+    if data == self._selectData then
+        self._selectItem = item
+    end
 
     local RedNew = self:find("RedNew", item)
     RedNew:SetActive(CharacterModel:isNewRole(data.role_id))
     local Reddot = self:find("Reddot", item)
-    Reddot:SetActive(CharacterModel:isRoleHaveNewSkin(data.role_id) or CharacterModel:isRoleCanAwakenRed(data.role_id))
+    Reddot:SetActive(CharacterModel:isRoleHaveNewSkin(data.role_id) or CharacterModel:isRoleCanAwakenRed(data.role_id) or CharacterModel:isRoleSecondAwakenNewRed(data.role_id) or CharacterModel:isWaitSecondAwaken(data.role_id))
 
     local ToggleStar = self:find("ToggleStar", item)
     ToggleStar:SetActive(not data.locked)
+    self._ItemDatas[item] = data
     if not data.locked then
         if not self._stopShowNewAnim and (CharacterModel:isPlayNewRoleAnim(data.role_id)) then
             RedNew:SetActive(false)
@@ -293,8 +373,14 @@ function P:refreshCharacter(data, item)
             ToggleStar:SetActive(false)
             self:find("icon_lock_02", item):SetActive(true)
             self:once(1, function()
+                if self._ItemDatas[item] ~= data then
+                    return
+                end
                 AnimationMgr:playUIEffect("Prefab/Character/Eff_poker_Ui_Characters_js", item.transform, nil, nil, true)
                 self:once(0.5,function()
+                    if self._ItemDatas[item] ~= data then
+                        return
+                    end
                     self:find("icon_lock_02", item):SetActive(false)
                     self:_setCharacterItemState(item, data, false)
                     ToggleStar:SetActive(true)
@@ -320,25 +406,48 @@ function P:refreshCharacter(data, item)
         self:_setCharacterItemState(item, data, true)
     end
 
-    if not self._selectItem then
+    if not self._selectData then
         self:setSelectData(data, item)
     end
 
     bee.addClick2(item, function()
         if self._role == data then
-            if data.role_id ~= CharacterModel.using_role_id then
-                if data.locked then
-                    UiManager:showToast(_T("LAB_CHAR_075"))
-                else
-                    Game:playSound("ui_button_confirm")
-                    self._old_role_id = CharacterModel.using_role_id
-                    CharacterModel:changeUsingRole(data.role_id)
-                    bee.logEvent("character-inuse", data.role_id)
-                end
+            if data.locked then
+                UiManager:showToast(_T("LAB_CHAR_075"))
             else
-                Game:playSound("ui_button_confirm")
+                local isRandom = DecorationModel:isInGameSchemeRandom()
+                if not isRandom then
+                    local isUsing = DecorationModel:checkRoleInScheme(SchemeTag.Ingame, true, data.role_id)
+                    if not isUsing then
+                        Game:playSound("ui_button_confirm")
+                        -- self._old_role_id = data.role_id
+                        -- CharacterModel:changeUsingRole(data.role_id)
+                        DecorationModel:useInGameSkin(data.skin_info.skin_id, function (oldSkin)
+                            local skinCfg = tpl_character_skin[oldSkin]
+                            self._old_role_id = skinCfg.role
+                        end)
+                        bee.logEvent("character-inuse", data.role_id)
+                    end
+                else
+                    UiManager:showToast(_T("LAB_DECOR_PLAN_TIPS_11"))
+                end
             end
-            return
+
+            -- if data.role_id ~= CharacterModel.using_role_id then
+            --     UiManager:showToast(_T("LAB_DECOR_PLAN_TIPS_11"))
+            --     -- if data.locked then
+            --     --     UiManager:showToast(_T("LAB_CHAR_075"))
+            --     -- else
+            --     --     Game:playSound("ui_button_confirm")
+            --     --     self._old_role_id = CharacterModel.using_role_id
+            --     --     CharacterModel:changeUsingRole(data.role_id)
+            --     --     bee.logEvent("character-inuse", data.role_id)
+            --     -- end
+            --     -- LAB_DECOR_PLAN_TIPS_13
+            -- else
+            --     Game:playSound("ui_button_confirm")
+            -- end
+            -- return
         else
             Game:playSound("ui_button_confirm")
         end
@@ -386,16 +495,23 @@ function P:evt_RoleSetStarRSP(msg)
     end
 end
 
-function P:evt_updateScheme(schemeInfo)
-    if not schemeInfo then
+function P:evt_updateInGameScheme(msg)
+    if msg == nil then
         return
     end
-    self.CharacterList:refreshShowingUi()
-    self:refreshRole()
 
-    if not UiManager:getUI("CharacterMainGarments") then
-        UiManager:showToast(_T("LAB_CHAR_104"))
+    if msg.modType == SchemeRandomTag.NoRandom then
+        if not UiManager:getUI("CharacterMainGarments") then
+            UiManager:showToast(_T("LAB_CHAR_104"))
+        end
     end
+
+    if msg.scheme then
+        self.CharacterList:refreshShowingUi()
+        self:refreshRole()
+    end
+
+    self:switchShowGuideButton()
 end
 
 function P:evt_SwitchRoleSkinRSP(msg)
@@ -419,6 +535,7 @@ function P:evt_role_back_to_main(name)
             if UiManager:isTopUI(self.node) then
                 self:refreshRole()
                 self:playAnimator(self._openAnim)
+                self:_refreshList()
                 CharacterModel:refreshReddot(self._role.role_id)
             end
         end)
@@ -446,6 +563,7 @@ end
 
 function P:evt_role_role_red(role_id)
     self:_refreshItemByRoleId(role_id)
+    self:refreshSpecialQuest()
 end
 
 function P:evt_role_newrole_red(role_id)
@@ -461,6 +579,20 @@ end
 
 function P:evt_role_awaken_red(role_id)
     self:_refreshItemByRoleId(role_id)
+end
+
+function P:evt_ChangeInGameSkin(data)
+    local oldSkinCfg = tpl_character_skin[data.oldSkin]
+    local curSkinCfg = tpl_character_skin[data.curSkin]
+    if oldSkinCfg and curSkinCfg and oldSkinCfg.role ~= curSkinCfg.role then
+        UiManager:showToast(_T("LAB_DECOR_PLAN_TIPS_13"))
+    end
+end
+
+function P:switchShowGuideButton()
+    local characterData = CharacterModel:getOwnedCharacters()
+    local idRandomScheme = DecorationModel:isInGameSchemeRandom()
+    self.ReGuideButton:SetActive(table.nums(characterData) >= 2 and not idRandomScheme)
 end
 
 return P

@@ -1,0 +1,21 @@
+[package]
+name = "pf_solver"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "pf_solver"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# default-features 关掉 bincode（上游 2023 年冻结，与 bincode 2.0.1 不兼容；序列化存盘我们用不到）
+postflop-solver = { git = "https://github.com/b-inary/postflop-solver", default-features = false, features = ["rayon"] }
+
+[build-dependencies]
+pyo3-build-config = "0.23"
+
+[profile.release]
+lto = "thin"

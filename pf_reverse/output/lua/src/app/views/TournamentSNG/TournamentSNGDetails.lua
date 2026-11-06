@@ -5,14 +5,13 @@ function P:onAwake()
     self.Center = self:find("Center", self.AnimRoot)
 
     self.GoldItem = self:find("RightTop/GoldItem", self.AnimRoot)
-    
+
     self.EnterButton = self:find("EnterButton", self.Center)
     self.RegisterButton = self:find("RegisterButton", self.Center)
     self.UnRegisterButton = self:find("UnRegisterButton", self.Center)
     self.LockButton = self:find("LockButton", self.Center)
 
     self.RewardButton = self:find("RewardButton", self.Center)
-
 
     local tournament_lobby_frame_01 = self:find("tournament_lobby_frame_01", self.Center)
     self.tournament_lobby_frame_01 = tournament_lobby_frame_01
@@ -38,6 +37,10 @@ function P:onAwake()
     self.BgJoinReward = self:find("BgJoinReward", tournament_sng_details_bg)
 
     self.BgRewardTag = self:find("BgRewardTag", tournament_sng_details_bg)
+
+    self.curStatus = nil
+    self.StartFx = self:find("Eff_poker_Ui_Tournament_gamestart", self.AnimRoot)
+    self.StartStatus = false
 
     self.Item = self:find("Item", tournament_sng_details_bg)
     -- 比赛状态 1进行中 2已结束
@@ -66,7 +69,9 @@ function P:onAwake()
         if not bee.checkCd("EnterRoomREQ", 2) then
             return
         end
-        Net:sendReq("pb.EnterRoomREQ", {roomid = self._data.roomid})
+        Net:sendReq("pb.EnterRoomREQ", {roomid = self.roomId}, function ()
+            TournamentModel:setMatchingSngInfo(0, 0, {}, 0)
+        end)
     end)
     bee.addClick(self.RegisterButton, function()
         Game:playSound("ui_button_confirm")
@@ -81,14 +86,20 @@ function P:onAwake()
         if not bee.checkCd("SngSignREQ", 2) then
             return
         end
-        TournamentModel:reqSngSign(self._listData, self.signItem and self.signItem.item_id or 0, function()
-            if bee.isNull(self.node) then
-                return
-            end
-            self:refreshUI()
-        end)
+        TournamentModel:reqSngSign(self._listData, self.signItem and self.signItem.item_id or 0)
     end)
     bee.addClick(self.UnRegisterButton, function()
+        Game:playSound("ui_button_confirm")
+        if not bee.checkCd("SngCancelSignREQ", 2) then
+            return
+        end
+        TournamentModel:reqSngCancelSign(TournamentModel.sng_matching_roomid, self.gameType)
+        -- TournamentModel:reqSngCancelSign(self._listData, function()
+        --     if bee.isNull(self.node) then
+        --         return
+        --     end
+        --     self:refreshUI()
+        -- end)
     end)
 end
 
@@ -98,15 +109,24 @@ function P:onShow()
 
     self._listData = self._params.data
     self._data = self._params.data
+    self.roomId = self._listData.roomid
+    self.gameType = self._listData.game_type
+    self:reqTourDetailInfo({enter = true})
+
+    self:refreshUI()
+    bee.logEvent("tournament-detail", 1, self._data.tour_id)
+end
+
+function P:reqTourDetailInfo(data)
     Net:sendReq("pb.TourDetailInfoREQ", {
         setid = self._listData.setid,
         tour_id = self._listData.tour_id, 
         roomid = self._listData.roomid, 
         game_type = self._listData.game_type, 
         lang = LAN:getLanguage()
-    })
-
-    self:refreshUI()
+    }, function (msg)
+        self:tourDetailInfoCallback(msg, data)
+    end)
 end
 
 function P:refreshUI()
@@ -218,21 +238,24 @@ function P:refreshUI()
         bee.setText(self.TextPlayerCount, "" .. self._data.cur_sign_num)
     end
 
+    local curItem = nil
     for i = 0, 5 do
         if i == self._data.style_id then
             local LabelItem = self:find("Item" .. i, self.Item)
             LabelItem:SetActive(true)
             bee.setText(self:find("TextName", LabelItem), _T(self._data.tour_name))
+            curItem = LabelItem
         else
             self:find("Item" .. i, self.Item):SetActive(false)
         end
     end
 
     local isLock = self._data.level > PlayerModel:getCurLevel()
-    self.EnterButton:SetActive(not isLock and self._data.tour_status == TOUR_STATUS.Inprocess)
-    self.RegisterButton:SetActive(not isLock and self._data.tour_status == TOUR_STATUS.Unregister)
-    self.UnRegisterButton:SetActive(not isLock and self._data.tour_status == TOUR_STATUS.Register)
-    self.RewardButton:SetActive(not isLock and self._data.tour_status == TOUR_STATUS.Finished)
+    self.EnterButton:SetActive(not isLock and self._data.tour_status == TOUR_STATUS.Inprocess and not self.StartStatus)
+    self.RegisterButton:SetActive(not isLock and self._data.tour_status == TOUR_STATUS.Unregister and not self.StartStatus)
+    self.UnRegisterButton:SetActive(not isLock and self._data.tour_status == TOUR_STATUS.Register and not self.StartStatus)
+    -- self.UnRegisterButton:SetActive(false)
+    self.RewardButton:SetActive(not isLock and self._data.tour_status == TOUR_STATUS.Finished and not self.StartStatus)
     self.LockButton:SetActive(isLock)
 
     if isLock then
@@ -261,15 +284,58 @@ function P:refreshUI()
     else
         self.BgRewardTag:SetActive(false)
     end
+
+    if not self._data.reward_img or "" == self._data.reward_img then
+        self:find("ImageIcon", self.Item):SetActive(false)
+        if curItem then
+            self:find("Icon", curItem):SetActive(true) 
+        end
+    else
+        self:find("ImageIcon", self.Item):SetActive(true)
+        -- bee.setIcon(self:find("ImageIcon", self.Item), "Common[common_blank]")
+        bee.getDownloadImage(self:find("ImageIcon", self.Item), self._data.reward_img)
+        if curItem then
+            self:find("Icon", curItem):SetActive(false) 
+        end
+    end
 end
 
-function P:evt_TourDetailInfoRSP(msg)
+function P:tourDetailInfoCallback(msg, data)
     local byin_chips = self._data.byin_chips
     self._data = msg.sng_info
     self._detailData = msg
     self._data.level = msg.level
     self._data.byin_chips = byin_chips
-    self:refreshUI()
+
+    if data and data.enter then
+        self.curStatus = self._data.tour_status
+    end
+
+    if self._data.cur_sign_num == self._data.seat_num then
+        if self.curStatus == TOUR_STATUS.Register then
+            self.curStatus = TOUR_STATUS.Inprocess
+            self._data.tour_status = TOUR_STATUS.Inprocess
+            -- bee.emit("evt_SNGAutoEnterRoom")
+
+            self.StartStatus = true
+            self.StartFx:SetActive(true)
+            bee.once(1.2, function ()
+                Net:sendReq("pb.EnterRoomREQ", {roomid = self.roomId})
+            end)
+        end
+    else
+        if data and data.status and self._data.tour_status ~= data.status then
+            self._data.tour_status = data.status
+            -- self.curStatus = data.status
+        end
+        if data and data.brcdata then
+            self._data.tour_status = self.curStatus
+        end
+    end
+
+    if not bee.isNull(self.node) then
+        self:refreshUI()
+    end
 end
 
 function P:evt_ItemChangeRSP(msg)
@@ -277,7 +343,7 @@ function P:evt_ItemChangeRSP(msg)
 end
 
 function P:evt_refreshTopInfo()
-    bee.invoke(self.GoldItem, "setCount", _N(PlayerModel:getGold()))
+    bee.invoke(self.GoldItem, "setCount", _N2(PlayerModel:getGold()))
     if self._data then
         self:refreshUI()
     end
@@ -285,6 +351,24 @@ end
 
 function P:evt_sng_not_available()
     self:hideUIForce()
+end
+
+function P:evt_SngSign(msg)
+    self.roomId = msg.roomId
+    self.curStatus = TOUR_STATUS.Register
+    self:reqTourDetailInfo({status = TOUR_STATUS.Register})
+end
+
+function P:evt_CancelSngSign()
+    self.curStatus = TOUR_STATUS.Unregister
+    self:reqTourDetailInfo({status = TOUR_STATUS.Unregister})
+end
+
+function P:evt_SngWaitingOtherEnterBRC(msg)
+    self:reqTourDetailInfo({brcdata = true})
+    if msg.roomid == self.roomId and msg.num == self._data.seat_num then
+        bee.emit("evt_SNGAutoEnterRoom")
+    end
 end
 
 return P

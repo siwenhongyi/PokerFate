@@ -1,4 +1,6 @@
-local P = {}
+local P = {
+    _roleSounds = {},   -- 正在播放的角色语音列表 {{name = name, dt = dt}}
+}
 Game = P
 
 function P:quit()
@@ -35,12 +37,40 @@ function P:playRoleInVoice(role_id, key, isReturnTime, force)
     local v = SettingModel:getRoleInVolume(role_id)
     if v <= 0 and force then v = 1 end
     if v > 0 then
-        bee.playVoice("sound/" .. role_id .. "/" .. key .. ".wav", true, v)
+        local name = "sound/" .. role_id .. "/" .. key .. ".wav"
+        if bee.isInGame() then
+            local count = 0
+            for i = #self._roleSounds, 1, -1 do
+                if self._roleSounds[i].dt <= scheduler.timeSpend then
+                    table.remove(self._roleSounds, i)
+                elseif self._roleSounds[i].name == name then
+                    bee.stopSound(self._roleSounds[i].name)
+                    table.remove(self._roleSounds, i)
+                else
+                    count = count + 1
+                end
+            end
+            if count > tpl_constdata.Character_Voice_Limt then
+                for i = 1, count - tpl_constdata.Character_Voice_Limt do
+                    local v = table.remove(self._roleSounds, 1)
+                    if v then
+                        bee.stopSound(v.name)
+                    end
+                end
+            end
+            local index = bee.playSound(name, true, v)
+            local audio = ResManager:GetSound(name)
+            if audio then
+                self._roleSounds[#self._roleSounds + 1] = {name = name, key = key, dt = audio.length + scheduler.timeSpend, index = index}
+            end
+        else
+            bee.playVoice(name, true, v)
+        end
         bee.setMixerVolume("volumeMusic", -6)
         self.volumeMusic = -6
         self._isVoicePlaying = 1
         if isReturnTime then
-            local audio = ResManager:GetSound("sound/" .. role_id .. "/" .. key .. ".wav")
+            local audio = ResManager:GetSound(name)
             if audio then
                 return audio.length
             end
@@ -88,7 +118,10 @@ function P:stopStoryVoice()
     bee.setMixerVolume("volumeMusic", 0)
 end
 
-function P:playMusic(key, volume)
+function P:playMusic(key, volume, isFadeIn)
+    self._playingLobbyTween = false
+    self._playingIngameTween = false
+
     if self._fadeInTween then
         self._fadeInTween:Kill()
         self._fadeInTween = nil
@@ -97,10 +130,7 @@ function P:playMusic(key, volume)
         self._fadeOutTween:Kill()
         self._fadeOutTween = nil
     end
-    local isFirst
-    if not self._music then
-        isFirst = true
-    end
+
     if self._music ~= key then
         self._music = key
         local d = tpl_sound[tostring(key)]
@@ -113,7 +143,7 @@ function P:playMusic(key, volume)
                 self._length = ResManager:GetSound(d.path).length
             end
 
-            if not isFirst then
+            if isFadeIn then
                 -- 切换bgm时淡入效果
                 self._fadeInTween = bee.Tween.toFloat(0, 1, 5, function(v)
                     bee.changeMusicVolume(v * volume)
@@ -126,12 +156,7 @@ function P:playMusic(key, volume)
     end
 end
 
-function P:stopMusic()
-    self._music = nil
-    self._time = nil
-    self._length = nil
-    self._lobbyBgmList = nil
-    self._lobbyBgmIndex = nil
+function P:pauseMusic()
     if self._fadeInTween then
         self._fadeInTween:Kill()
         self._fadeInTween = nil
@@ -140,6 +165,18 @@ function P:stopMusic()
         self._fadeOutTween:Kill()
         self._fadeOutTween = nil
     end
+    self._playingIngameTween = false
+    self._playingLobbyTween = false
+end
+
+function P:stopMusic()
+    self._music = nil
+    self._time = nil
+    self._length = nil
+    self._lobbyBgmList = nil
+    self._lobbyBgmIndex = nil
+    self._switchLobbyBgm = nil
+    self:pauseMusic()
     bee.stopMusic()
 end
 
@@ -148,9 +185,10 @@ function P:playLobbyBGM()
 
     local v = SettingModel:getLobbyBGMVolume()
     if v > 0 then
-        self._lobbyBgmList = PlayerModel:getCurMusicLobby()
+        self._lobbyBgmList = DecorationModel:getCurMusicLobby()
         self._lobbyBgmCount = #self._lobbyBgmList
         self._lobbyBgmIndex = nil
+        self._playingLobby = false
         self:switchLobbyBGM()
     end
 end
@@ -159,11 +197,13 @@ function P:switchLobbyBGM()
     if not self._lobbyBgmList then
         return
     end
-    if self._lobbyBgmCount > 1 then
-        self._time = 0
-        self._length = 0
+
+    local soundCfg
+    if self._lobbyBgmIndex then
+        soundCfg = tpl_sound[tostring(self._lobbyBgmList[self._lobbyBgmIndex])]
     end
-    if PlayerModel:getLobbyMusicTag() == MusicTag.Order then
+
+    if DecorationModel:getLobbyMusicTag() == MusicTag.Order then
         if self._lobbyBgmIndex then
             self._lobbyBgmIndex = self._lobbyBgmIndex + 1
             if self._lobbyBgmIndex > self._lobbyBgmCount then
@@ -172,10 +212,41 @@ function P:switchLobbyBGM()
         else
             self._lobbyBgmIndex = 1
         end
-        self:playMusic(self._lobbyBgmList[self._lobbyBgmIndex], SettingModel:getLobbyBGMVolume())
     else
-        local rand = math.random(#self._lobbyBgmList)
-        self:playMusic(self._lobbyBgmList[rand], SettingModel:getLobbyBGMVolume())
+        self._lobbyBgmIndex = math.random(#self._lobbyBgmList)
+    end
+
+    self._playingIngame = false
+    
+    if self._playingLobby and soundCfg then
+        -- 淡出效果
+        self._time = soundCfg.loop_start
+
+        self._lobbyTweenTime = 0
+        self._playingLobbyTween = true
+    else
+        if self._lobbyBgmCount > 1 then
+            self._time = 0
+            self._length = 0
+        end
+        self._playingLobby = true
+        self:playMusic(self._lobbyBgmList[self._lobbyBgmIndex], SettingModel:getLobbyBGMVolume())
+    end
+end
+
+function P:_switchLobbyTween(dt)
+    self._lobbyTweenTime = self._lobbyTweenTime + dt
+    if self._lobbyTweenTime >= 5 and self._lobbyTweenTime <= 15 then
+        local v = 1 - (self._lobbyTweenTime - 5) / 10 * 0.7
+        bee.changeMusicVolume(v * SettingModel:getLobbyBGMVolume())
+    elseif self._lobbyTweenTime > 15 and self._lobbyTweenTime < 17 then
+        bee.changeMusicVolume(0)
+    elseif self._lobbyTweenTime >= 17 then
+        self._time = 0
+        self._length = 0
+        self._lobbyTweenTime = 0
+        self._music = nil
+        self:playMusic(self._lobbyBgmList[self._lobbyBgmIndex], SettingModel:getLobbyBGMVolume())
     end
 end
 
@@ -184,8 +255,6 @@ function P:playGachaMusic()
     local v = SettingModel:getLobbyBGMVolume()
     if v > 0 then
         self:playMusic("cacha001", v)
-    else
-        self:stopMusic()
     end
 end
 
@@ -193,18 +262,89 @@ function P:playIngameBGM()
     self:stopMusic()
     local v = SettingModel:getIngameBGMVolume()
     if v > 0 then
-        self:playMusic(PlayerModel:getCurMusicBattle(), v)
+        self:playMusic(DecorationModel:getCurMusicBattle(), v)
+
+        self._ingameBgmList = DecorationModel:getCurMusicBattle(GameModel.data and GameModel.data:getIngameScheme())
+        self._ingameBgmCount = #self._ingameBgmList
+        self._ingameBgmIndex = nil
+        self:switchIngameBGM(true)
     else
         self:stopMusic()
     end
 end
 
+function P:switchIngameBGM(isFadeIn)
+    if not self._ingameBgmList then
+        return
+    end
+
+    local soundCfg
+    if self._ingameBgmIndex then
+        soundCfg = tpl_sound[tostring(self._ingameBgmList[self._ingameBgmIndex])]
+    end
+
+    if DecorationModel:getLobbyMusicTag() == MusicTag.Order then
+        if self._ingameBgmIndex then
+            self._ingameBgmIndex = self._ingameBgmIndex + 1
+            if self._ingameBgmIndex > self._ingameBgmCount then
+                self._ingameBgmIndex = 1
+            end
+        else
+            self._ingameBgmIndex = 1
+        end
+    else
+        self._ingameBgmIndex = math.random(#self._ingameBgmList)
+        self:playMusic(self._ingameBgmList[rand], SettingModel:getIngameBGMVolume())
+    end
+
+    self._playingLobby = false
+
+    if self._playingIngame and soundCfg then
+        -- 淡出效果
+        self._time = soundCfg.loop_start
+
+        self._ingameTweenTime = 0
+        self._playingIngameTween = true
+    else
+        if self._ingameBgmCount > 1 then
+            self._time = 0
+            self._length = 0
+        end
+        self._playingIngame = true
+        self._lobbyBgmVolume = SettingModel:getIngameBGMVolume()
+        self:playMusic(self._ingameBgmList[self._ingameBgmIndex], SettingModel:getIngameBGMVolume(), isFadeIn)
+    end
+end
+
+function P:_switchIngameTween(dt)
+    self._ingameTweenTime = self._ingameTweenTime + dt
+    if self._ingameTweenTime >= 5 and self._ingameTweenTime <= 15 then
+        local v = 1 - (self._ingameTweenTime - 5) / 10 * 0.7
+        self._lobbyBgmVolume = v * SettingModel:getIngameBGMVolume()
+        bee.changeMusicVolume(self._lobbyBgmVolume)
+    elseif self._ingameTweenTime > 15 and self._ingameTweenTime < 17 then
+        bee.changeMusicVolume(0)
+    elseif self._ingameTweenTime >= 17 then
+        self._time = 0
+        self._length = 0
+        self._ingameTweenTime = 0
+        self._music = nil
+        self:playMusic(self._ingameBgmList[self._ingameBgmIndex], SettingModel:getIngameBGMVolume())
+    end
+end
+
 function P:pauseBGM()
+    self:pauseMusic()
     CS.SoundManager.Instance:PauseMusic()
     self._pausedBGM = true
 end
 
 function P:resumeBGM()
+    if self._switchLobbyBgm and self._playingLobby then
+        self._switchLobbyBgm = false
+        self._lobbyBgmVolume = SettingModel:getLobbyBGMVolume()
+        self:playMusic(self._lobbyBgmList[self._lobbyBgmIndex], SettingModel:getLobbyBGMVolume())
+    end
     CS.SoundManager.Instance:UnPauseMusic()
     self._pausedBGM = false
 end
@@ -230,16 +370,26 @@ function P:onUpdate(dt)
     if self._time and not self._pausedBGM then
         self._time = self._time + dt
         if self._time > self._length then
-            self:switchLobbyBGM()
-        end
-        -- bgm淡出效果
-        if (self._length - self._time) < 5 then
-            if not self._fadeOutTween then
-                self._fadeOutTween = bee.Tween.toFloat(1, 0, 5, function(v)
-                    bee.changeMusicVolume(v * SettingModel:getLobbyBGMVolume())
-                end)
+            if bee.isInGame() then
+                self:switchIngameBGM()
+            else
+                self:switchLobbyBGM()
             end
         end
+        if self._playingLobbyTween then
+            self:_switchLobbyTween(dt)
+        end
+        if self._playingIngameTween then
+            self:_switchIngameTween(dt)
+        end
+        -- -- bgm淡出效果
+        -- if (self._length - self._time) < 5 then
+        --     if not self._fadeOutTween then
+        --         self._fadeOutTween = bee.Tween.toFloat(1, 0, 5, function(v)
+        --             bee.changeMusicVolume(v * SettingModel:getLobbyBGMVolume())
+        --         end)
+        --     end
+        -- end
     end
 end
 
@@ -252,6 +402,12 @@ function P:playLobbyMusicTween()
     if self._fadeOutTween then
         self._fadeOutTween:Kill()
         self._fadeOutTween = nil
+    end
+
+    if self._switchLobbyBgm then
+        self._switchLobbyBgm = false
+        self._lobbyBgmVolume = SettingModel:getLobbyBGMVolume()
+        self:playMusic(self._lobbyBgmList[self._lobbyBgmIndex], SettingModel:getLobbyBGMVolume())
     end
 
     CS.SoundManager.Instance:UnPauseMusic()
@@ -273,8 +429,12 @@ function P:pauseLobbyMusicTween()
         self._fadeOutTween:Kill()
         self._fadeOutTween = nil
     end
+    if not self._lobbyBgmVolume then
+        self._lobbyBgmVolume = SettingModel:getLobbyBGMVolume()
+    end
+    self._playingLobbyTween = false
     self._fadeOutTween = bee.Tween.toFloat(1, 0, 5, function(v)
-        bee.changeMusicVolume(v * SettingModel:getLobbyBGMVolume())
+        bee.changeMusicVolume(v * self._lobbyBgmVolume)
         if v <= 0 then
             CS.SoundManager.Instance:PauseMusic()
         end

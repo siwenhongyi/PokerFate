@@ -68,6 +68,10 @@ function P:onAwake()
 end
 
 function P:preShow()
+	local offsetMax = bee.v2(0, Config.UI_OFFSET_TOP)
+	local offsetMin = bee.v2(0, Config.UI_OFFSET_BOTTOM)
+	self.node.transform.offsetMax = offsetMax
+	self.node.transform.offsetMin = offsetMin
 	self:clearUiBlur()
 end
 
@@ -168,7 +172,12 @@ function P:shot()
     	self.CloseButton:SetActive(true)
 	end)
 
-    CS.Utils.CapturePartScreen(nil, CU.Screen.width, CU.Screen.height, function(tex)
+	local w, h = CU.Screen.width, CU.Screen.height
+	if Config.UI_OFFSET_TOP ~= 0 then
+		h = math.floor(1440 / SCREEN_WIDTH_SAFE * w)
+	end
+	
+    CS.Utils.CapturePartScreen(nil, w, h, function(tex)
     	if self._tex then
     		CU.GameObject.Destroy(self._tex)
     		self._tex = nil

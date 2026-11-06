@@ -24,6 +24,10 @@ function P:onAwake()
         exp_tournament = self:find('shop_vipupgrade_bg_5/exp_tournament_01', self.Content),
         friendship_tournament = self:find('shop_vipupgrade_bg_6/friendship_tournament_01', self.Content),
         recent_history_limit = self:find('shop_vipupgrade_bg_10/recent_history_limit_01', self.Content),
+        lobby_limit = self:find('shop_vipupgrade_bg_11/lobby_limit_01', self.Content),
+        ingame_limit = self:find('shop_vipupgrade_bg_12/ingame_limit_01', self.Content),
+        exp_dispatch = self:find('shop_vipupgrade_bg_13/exp_dispatch_01', self.Content),
+        friendship_dispatch = self:find('shop_vipupgrade_bg_14/friendship_dispatch_01', self.Content),
     }
     
     self.Level02Attrs = {
@@ -38,6 +42,10 @@ function P:onAwake()
         exp_tournament = self:find('shop_vipupgrade_bg_5/exp_tournament_02', self.Content),
         friendship_tournament = self:find('shop_vipupgrade_bg_6/friendship_tournament_02', self.Content),
         recent_history_limit = self:find('shop_vipupgrade_bg_10/recent_history_limit_02', self.Content),
+        lobby_limit = self:find('shop_vipupgrade_bg_11/lobby_limit_02', self.Content),
+        ingame_limit = self:find('shop_vipupgrade_bg_12/ingame_limit_02', self.Content),
+        exp_dispatch = self:find('shop_vipupgrade_bg_13/exp_dispatch_02', self.Content),
+        friendship_dispatch = self:find('shop_vipupgrade_bg_14/friendship_dispatch_02', self.Content),
     }
 
     bee.addClick(self.Upgrade, function()
@@ -83,6 +91,11 @@ function P:refreshAttrs(level, attrs)
             bee.setText(v, "0")
         end
     end
+end
+
+function P:hideUI()
+    P.super.hideUI(self)
+    bee.emit("evt_refreshVipLevel")
 end
 
 return P

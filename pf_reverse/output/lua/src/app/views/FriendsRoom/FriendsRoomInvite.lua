@@ -55,7 +55,7 @@ function P:refreshTime(dt)
 end
 
 function P:doEnterRoom()
-    if GameModel.data and not GameModel.data:isRecord() then
+    if GameModel.data and not GameModel.data:isRecord() and not GameModel.data:isRoomOver() then
         Net:sendReq("pb.LeaveRoomREQ", {
             client_str = json.encode({
                 key = "invite",

@@ -17,6 +17,7 @@ function P:onAwake()
     end)
 
     self.ClaimList = UiListEx:create(self:find("ClaimList", Center))
+    self.ClaimList:setTopBottom(10, 0)
     self.ClaimList:setWidth(130)
     self.ClaimList:setCreateFunc(function(data)
         return CU.GameObject.Instantiate(self.Item1)
@@ -57,7 +58,7 @@ function P:onShow()
                     end
                 end
             end
-            if not isShowUse then
+            if not isShowUse and ItemModel:isCanJump(v, d.id) then
                 table.insert(datas, {id = v, __kind = 1})
             end
         end
@@ -70,6 +71,14 @@ function P:refreshItem(data, item)
     bee.setText(self:find("TextName", item), _T(d.name))
     bee.setText(self:find("ClaimButton/TextGet", item), _T(d.button_text))
 
+    local Tag = self:find("Tag", item)
+    if d.tag then
+        Tag:SetActive(true)
+        bee.setText(self:find("TagText", Tag), _T(d.tag))
+    else
+        Tag:SetActive(false)
+    end
+
     bee.addClick(self:find("ClaimButton", item), function()
         ItemModel:jumpView(data.id, self._data.item_id)
         if self._params and self._params.jumpCb then
@@ -77,12 +86,19 @@ function P:refreshItem(data, item)
         end
         self:hideUI()
     end, true)
+
+    if self._params.hideBtn then
+        self:find("ClaimButton", item):SetActive(false)
+    end
 end
 
 function P:refreshUseItem(data, item)
     local d = tpl_Jump_path[data.id]
     bee.setText(self:find("TextName", item), _T(d.name))
     bee.setText(self:find("ClaimButton/TextGet", item), _T("LAB_PATH_BUTTON_TEXT_2"))
+
+    local Tag = self:find("Tag", item)
+    Tag:SetActive(false)
 
     bee.addClick(self:find("ClaimButton", item), function()
         UiManager:showUI("BackpackGift", {id = d.select, characterId = self._params.characterId})

@@ -33,6 +33,7 @@ function P:onAwake()
     end)
     bee.addClick2(self:find("Title/InfoButton", self.Panel), function()
         Game:playSound("ui_button_confirm")
+        bee.logEvent("development-fund-rule")
         table.sort(self._data.levels, function(a, b)
             return a.level < b.level
         end)
@@ -49,6 +50,7 @@ function P:onAwake()
 
     bee.addClick2(self:find("MatchButton", self.Panel), function()
         Game:playSound("ui_button_confirm")
+        bee.logEvent("development-fund-match")
         UiManager:showUI("OmahaBlinds", {gameType = GAME_GAME_TYPE.LOBBY_HOLDEM_GAME})
     end)
 
@@ -62,8 +64,18 @@ function P:onAwake()
         pos.y = pos.y - 40
         development_fund_title_en.transform.localPosition = pos
     else
-        self:find("Title/InfoButton", self.Panel).transform.localPosition = bee.v3(129, 43)
+        self:find("Title/InfoButton", self.Panel).transform.localPosition = bee.v3(129, 10)
+        local development_fund_title_en = self:find("Title/development_fund_title_en", self.Panel)
+        local pos = development_fund_title_en.transform.localPosition
+        pos.y = pos.y - 30
+        development_fund_title_en.transform.localPosition = pos
     end
+    
+    self:find("Eff_poker_Ui_Development_js01", self.Amount):SetActive(false)
+    self:find("Eff_poker_Ui_Development_js02", self.Amount):SetActive(false)
+    self:find("Eff_poker_Ui_Development_sx", self.FundLevel):SetActive(false)
+
+    TaskModel:reportTask(TaskType.CheckView, TaskTargetId.Development)
 end
 
 function P:onShow()
@@ -258,11 +270,11 @@ function P:refreshLockInfo(isLock)
     self.On:SetActive(not isLock)
     self.Bubble:SetActive(not isLock)
     if isLock then
-        bee.setText(self:find("TextNeedCount", self.Off), "" .. _N(self._data.user_flow) .. "/" .. _N(self._data.participate_conditions))
+        bee.setText(self:find("TextNeedCount", self.Off), "" .. _N2(self._data.user_flow) .. "/" .. _N2(self._data.participate_conditions))
     else
-        bee.setText(self.TextAmount, _N(self._data.user_flow))
-        bee.setText(self:find("Item/TextNum1", self.On), _N(math.floor(self._data.user_flow * self._data.rewards_lower_ratio / 10000)))
-        bee.setText(self:find("Item/TextNum2", self.On), _N(math.floor(self._data.user_flow * self._data.rewards_upper_ratio / 10000)))
+        bee.setText(self.TextAmount, _N2(self._data.user_flow))
+        bee.setText(self:find("Item/TextNum1", self.On), _N2(math.floor(self._data.user_flow * self._data.rewards_lower_ratio / 10000)))
+        bee.setText(self:find("Item/TextNum2", self.On), _N2(math.floor(self._data.user_flow * self._data.rewards_upper_ratio / 10000)))
     end
 end
 

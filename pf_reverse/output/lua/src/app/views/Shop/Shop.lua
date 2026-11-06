@@ -4,7 +4,8 @@ local SubView = {
 	[1] = {		-- 精选推荐
 		[101] = {view = "views/Shop/ShopFirstRecharge"},	-- 首充
 		[102] = {view = "views/Shop/ShopMonthlyCard"},	-- 月卡
-		[103] = {view = "views/Shop/ShopNewComerExclusive"} -- 新人专属
+		[103] = {view = "views/Shop/ShopNewComerExclusive"}, -- 新人专属
+		[104] = {view = "views/Shop/ShopSayakaExclusive"},	-- 冈田纱佳礼包
 	},
 	[2] = {view = "views/Shop/ShopSkin"},		-- 皮肤商城
 	[3] = {view = "views/Shop/ShopPackage"},	-- 特惠商城
@@ -53,6 +54,8 @@ function P:onAwake()
 	self.TabToggle = self:find("TabToggle", Left)
 	self.TabToggle:SetActive(false)
 
+	self.LoadingMask = self:find("LoadingMask", self.AnimRoot)
+
 	self._currencyObjList = {}
 
 	RedManager:bind(self:find("VIPButton/common_reddot_01", Left), RedTag.VipClaimNum)
@@ -69,12 +72,19 @@ function P:onStart()
 		Game:playSound("ui_shop_open")
 	end
 
-	self:initToggleList()
-	self:initTopTabList()
+	if ShopModel:getIsInitShopLimitList() then
+		self.LoadingMask:SetActive(false)
+		self:initToggleList()
+		self:initTopTabList()
 
-	self:refreshTopTab()
-	
-	ShopModel:initInfo()
+		self:refreshTopTab()
+	else
+		self.LoadingMask:SetActive(true)
+		self.TopTabScrollView:SetActive(false)
+		self.ToggleScrollView:SetActive(false)
+
+		ShopModel:initInfo()
+	end
 end
 
 function P:evt_refreshTopInfo()
@@ -98,7 +108,22 @@ function P:evt_SkinUnlockRSP()
 	end
 end
 
+function P:evt_updateNewItem()
+	if self._curSubViewCls then
+		self._curSubViewCls:refreshUI()
+	end
+end
+
 function P:evt_updateShopLimit()
+	if self.LoadingMask.activeSelf then
+		self.LoadingMask:SetActive(false)
+	end
+	if not self.tabtoggleList then
+		self:initToggleList()
+	end
+	if not self.topTabList then
+		self:initTopTabList()
+	end
 	if self._curSubViewCls then
 		self._curSubViewCls:refreshUI()
 	end
@@ -111,6 +136,7 @@ function P:evt_updateShopPid()
 end
 
 function P:initToggleList()
+	self.ToggleScrollView:SetActive(true)
 	self.tabtoggleList = UiListEx:create(self.ToggleScrollView)
 	self.tabtoggleList:setCreateFunc(function()
 		return CU.GameObject.Instantiate(self.TabToggle)
@@ -141,6 +167,7 @@ function P:refreshTabToggle()
 end
 
 function P:initTopTabList()
+	self.TopTabScrollView:SetActive(true)
 	self.topTabList = UiListEx:create(self.TopTabScrollView)
 	self.topTabList:setCreateFunc(function()
 		return CU.GameObject.Instantiate(self.TopTabToggle)
@@ -240,6 +267,14 @@ function P:setTopTab(item, data)
 		RedManager:bind(TimeLeftTag, RedTag.DecorateTimeLimit, data.shop_type)
 	else
 		TimeLeftTag:SetActive(false)
+	end
+	
+	local HotTag = self:find("HotTag", item)
+	if data.tag_tips then
+		HotTag:SetActive(true)
+		bee.setIconInAtlas(HotTag, _I(data.tag_tips), true)
+	else
+		HotTag:SetActive(false)
 	end
 
 	bee.removeValueChanged(item)
@@ -362,7 +397,8 @@ function P:setCurrencyItem(currency, data)
 	
 	local propCfg = tpl_props[data.id]
 	bee.setIconInAtlas(ItemIcon, propCfg.icon)
-	bee.setTextGold(CountText, _N(ItemModel:getItemNumById(data.id)))
+	local itemNum = ItemModel:getItemNumById(data.id)
+	bee.setTextGold(CountText, _N2(itemNum))
 	AddButton:SetActive(data.isAdd ~= 0)
 
 	bee.removeAllClick(item)
@@ -371,7 +407,7 @@ function P:setCurrencyItem(currency, data)
 			return
 		end
 		bee.logEvent("shop-add", tpl_shop_page[self._selectTopTab].shop_type, data.id)
-		ItemModel:jumpView(data.isAdd)
+		UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(propCfg.id, true)})
 	end)
 	bee.addClick(self:find("ItemIcon", item), function()
         UiManager:showUI("CommonItemTip", {data = ItemModel:getItem(data.id, true), target = self:find("ItemIcon", item)})

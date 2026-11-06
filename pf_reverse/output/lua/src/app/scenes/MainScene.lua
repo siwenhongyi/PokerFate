@@ -14,6 +14,11 @@ function P:ctor()
 		ResManager:ReleaseHandles()
 	--end
 
+	if bee.getWaitingScene() then
+	else
+    	GameModel:setData(nil, nil)
+	end
+
 	local params = bee.getSceneParams()
 	if params and params.onEnter then
 		params.onEnter()
@@ -30,12 +35,16 @@ function P:ctor()
 	if params and params.info then
 		if params.info.key == "tournament" then
 			UiManager:showUI("TournamentLobby", {kind = params.info.kind})
+		elseif params.info.key == "tournamentDetail" then
+			UiManager:showUI("TournamentLobby", {kind = params.info.kind, tour_id = params.info.tour_id, })
 		end
 	end
 
 	if params then
 		if params.afterShow then
-			params.afterShow()
+			bee.once(-1, function()
+				params.afterShow()
+			end)
 		end
 	end
 	

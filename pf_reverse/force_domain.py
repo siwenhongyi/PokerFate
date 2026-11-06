@@ -1,7 +1,6 @@
 """
 mitmproxy addon: 过滤登录响应中的 IP 直连服务器，保留所有域名服务器。
-将第一个可用域名服务器写入 pf_intercept/discovered_server.json，
-供 pf_intercept/proxy.py 启动时读取。
+将第一个可用域名服务器写入 data/discovered_server.json。
 
 用法:
     mitmweb --ignore-hosts "aliyuncs.com|miui.com" -s pf_reverse/force_domain.py
@@ -19,10 +18,17 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 from pf_intercept.config import PREFERRED_WSS_HOSTS, SERVER_WSS_PORT  # single source of truth
 
-_DISCOVERED_FILE = _REPO_ROOT / "pf_intercept" / "discovered_server.json"
+_DISCOVERED_FILE = _REPO_ROOT / "data" / "discovered_server.json"
+_ORIGINAL_RESPONSE_FILE = _REPO_ROOT / "data" / "force_domain_original_response.json"
+_SELECTED_ROUTE_FILE = _REPO_ROOT / "data" / "selected_route.json"
 _TOKEN_FILE = _REPO_ROOT / "data" / "auth_token.txt"
 _IP_PATTERN = re.compile(r"wss?://\d+\.\d+\.\d+\.\d+")
 _PREFERRED_HOSTS = set(PREFERRED_WSS_HOSTS)
+
+
+def _http_host_header(host: str, scheme: str, port: int) -> str:
+    default_port = 443 if scheme == "https" else 80
+    return host if port == default_port else f"{host}:{port}"
 
 
 def _extract_ws_host(server_host: str) -> str:
@@ -40,6 +46,72 @@ def _extract_port(server_host: str) -> int:
 
 
 class ForceDomain:
+    def __init__(self) -> None:
+        self._route_mtime: float | None = None
+        self._route: dict | None = None
+
+    def _load_selected_route(self) -> dict | None:
+        try:
+            mtime = _SELECTED_ROUTE_FILE.stat().st_mtime
+        except FileNotFoundError:
+            self._route_mtime = None
+            self._route = None
+            return None
+        except Exception as e:
+            print(f"[force_domain] 读取线路文件失败: {e}")
+            return self._route
+
+        if self._route is not None and self._route_mtime == mtime:
+            return self._route
+
+        try:
+            route = json.loads(_SELECTED_ROUTE_FILE.read_text(encoding="utf-8"))
+        except Exception as e:
+            print(f"[force_domain] 解析线路文件失败: {e}")
+            return self._route
+
+        self._route_mtime = mtime
+        self._route = route if isinstance(route, dict) else None
+        return self._route
+
+    def request(self, flow: http.HTTPFlow) -> None:
+        # The client keeps using the domain from the login response. When the
+        # WSS proxy has selected a faster server entry, mirror that entry for
+        # HTTP APIs while preserving the client-visible Host header.
+        if flow.request.host not in _PREFERRED_HOSTS:
+            return
+
+        route = self._load_selected_route()
+        if not route:
+            return
+
+        scheme = route.get("http_scheme")
+        upstream_host = route.get("http_upstream_host")
+        port = route.get("http_port")
+        if scheme not in ("http", "https") or not upstream_host or not port:
+            return
+
+        original_host = flow.request.host
+        try:
+            flow.request.scheme = str(scheme)
+            flow.request.host = str(upstream_host)
+            flow.request.port = int(port)
+            if route.get("mode") == "ip":
+                flow.request.headers["Host"] = _http_host_header(
+                    str(upstream_host),
+                    str(scheme),
+                    int(port),
+                )
+            else:
+                flow.request.headers["Host"] = original_host
+            print(
+                "[force_domain] HTTP route "
+                f"{original_host} -> {scheme}://{upstream_host}:{port} "
+                f"(mode={route.get('mode')})"
+            )
+        except Exception as e:
+            print(f"[force_domain] HTTP route 改写失败: {e}")
+
     def response(self, flow: http.HTTPFlow) -> None:
         # Log every response so we can see if this addon is running at all.
         print(f"[force_domain] {flow.response.status_code} {flow.request.url[:120]}")
@@ -89,16 +161,31 @@ class ForceDomain:
             print(f"[force_domain] 无满足条件的服务器（需在证书范围内且端口={SERVER_WSS_PORT}），不修改")
             return
 
-        # Keep preferred domain servers in response (domain hijack mode).
-        data["server"]["server"] = domain_servers
-        flow.response.content = json.dumps(data).encode()
+        # Save the untouched response just before rewriting the server list.
+        try:
+            _ORIGINAL_RESPONSE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _ORIGINAL_RESPONSE_FILE.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            print(f"[force_domain] 原始响应已写入 {_ORIGINAL_RESPONSE_FILE.name}")
+        except Exception as e:
+            print(f"[force_domain] 原始响应写入失败: {e}")
 
-        print(f"[force_domain] 原始 {len(servers)} 个服务器，保留 {len(domain_servers)} 个优先域名服务器:")
-        for s in domain_servers:
-            print(f"  {s.get('server_host')}")
+        # Client-facing response stays domain based. Use plain HTTP here so the
+        # addon / local passthrough can pair HTTP with the WSS route internally.
+        client_server = dict(domain_servers[0])
+        visible_host = _extract_ws_host(client_server.get("server_host", ""))
+        client_server["server_host"] = f"wss://{visible_host}:{SERVER_WSS_PORT}"
+        client_server["http_host"] = f"http://{visible_host}/"
+        data["server"]["server"] = [client_server]
+        flow.response.content = json.dumps(data, ensure_ascii=False).encode()
 
-        # 取第一个写入 discovered_server.json，proxy.py 启动时读取
-        chosen = domain_servers[0]["server_host"]
+        print(f"[force_domain] 原始 {len(servers)} 个服务器，返回域名服务器:")
+        print(f"  {client_server.get('server_host')}  http={client_server.get('http_host')}")
+
+        # 取第一个写入 discovered_server.json，方便排查服务端下发情况。
+        chosen = client_server["server_host"]
         try:
             _DISCOVERED_FILE.write_text(json.dumps({"server_host": chosen}))
             print(f"[force_domain] 首选服务器: {chosen}  → {_DISCOVERED_FILE.name}")

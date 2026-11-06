@@ -36,6 +36,8 @@ import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
+from scripts.replay_and_compare import summarize
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -126,8 +128,6 @@ def merge_summaries(shard_results: list[dict]) -> dict:
     for s in shard_results:
         if 'rows' in s:
             all_rows.extend(s['rows'])
-    # 直接复用 replay_and_compare.summarize，因为它接受 rows 列表
-    from scripts.replay_and_compare import summarize
     return summarize(all_rows)
 
 
@@ -140,7 +140,7 @@ def main() -> None:
                     help=f'分片数（默认 cpu_count - 2 = {_default_shards()}）')
     ap.add_argument('--seed', type=int, default=42)
     ap.add_argument('--env', action='append', default=[],
-                    help='ENV 覆盖（KEY=VAL），可多次。例：--env PF_BASELINE_THRESH=0.5')
+                    help='ENV 覆盖（KEY=VAL），可多次。例：--env PF_POSTFLOP_PROFIT_EXPAND_V1=1')
     ap.add_argument('--out', type=Path,
                     help='将合并的 per-decision rows 写到此 jsonl')
     args = ap.parse_args()

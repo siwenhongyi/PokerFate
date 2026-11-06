@@ -16,7 +16,9 @@ function P:onAwake()
         self:hideUI()
         StoryModel:skipStory()
         Game:playSound("ui_button_confirm")
-        bee.logEvent("onse-plot_skip_all", self._params.hotSpringdata.id, self._params.hotSpringdata.group, self._params.curData._index or 1)
+        if self._params and ThemeModel:checkStory(self._params.jsonName) then
+            bee.logEvent("onse-plot_skip_all", self._params.hotSpringdata.id, self._params.hotSpringdata.group, self._params.curData._index or 1)
+        end
     end)
     bee.addClick2(self:find("AnimRoot/common_panel_mask_70"), function()
         self:hideUI()

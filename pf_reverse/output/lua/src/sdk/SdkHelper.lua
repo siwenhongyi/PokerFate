@@ -3,6 +3,19 @@ local P = {
 SdkHelper = P
 
 local function guid()
+    -- 优先用 C# Guid.NewGuid()（密码学级随机，保证唯一）。
+    local id = nil
+	if bee.checkVersion("1.6.11") then
+		id = CS.SdkHelper.generateGUID()
+	end
+    if id and id ~= "" then
+        return id
+    end
+
+    -- 纯 Lua 兜底：修复 math.randomseed(os.time()) 秒级种子导致的"同秒启动 → 相同随机序列 → 串号"问题。
+    -- 用 秒*1000 + 进程毫秒 组合播种，让同一秒启动的不同设备也能得到不同序列。
+    math.randomseed(os.time() * 1000 + math.floor(os.clock() * 1000))
+
     local seed={'1','2','3','4','5','6','7','8','9','a','b','c','d','e','f','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z'}
     local tb={}
     for i=1,32 do
@@ -43,13 +56,34 @@ function P:changeABFlag(flag)
 	end
 end
 
+-- 已知串号（同一随机种子重复生成）的设备号黑名单。
+-- 命中黑名单的设备会在下次启动重新生成唯一 ID。
+-- 从服务器端数据分析出新的高频重复 ID 后，直接往这里追加即可（注意大小写）。
+local KNOWN_INVALID_IDS = {
+    "1e4a1b03d1b6cd8a174a826f76e009f4",
+    "1E4A1B03D1B6CD8A174A826F76E009F4",
+    "tpmr3ocr-fl42-zp6z-adip-lth7o8m5ul1u",
+}
+
+function P:isInvalidId(id)
+	if not id or "" == id or id == "00000000-0000-0000-0000-000000000000" or id == "02:00:00:00:00:00" or id == "0000000000000000" then
+		return true
+	end
+	for i = 1, #KNOWN_INVALID_IDS do
+		if id == KNOWN_INVALID_IDS[i] then
+			return true
+		end
+	end
+	return false
+end
+
 function P:getDeviceID()
     local id = LocalStore:getStringForKey("device_id")
-    if not id or "" == id or id == "00000000-0000-0000-0000-000000000000" or id == "02:00:00:00:00:00" then
+    if self:isInvalidId(id) then
         id = CS.SdkHelper.getDeviceID()
-        if not id or "" == id or id == "00000000-0000-0000-0000-000000000000" or id == "02:00:00:00:00:00" then
+        if self:isInvalidId(id) then
             id = CU.SystemInfo.deviceUniqueIdentifier--guid()
-			if not id or "" == id or id == "00000000-0000-0000-0000-000000000000" or id == "02:00:00:00:00:00" then
+			if self:isInvalidId(id) then
 				id = guid()
 			end
         end
@@ -104,6 +138,16 @@ function P:getToken()
 	local token = nil
 	if bee.checkVersion("1.2.12") then
 		token = CS.ThirdManager.Instance:getToken()
+	end
+	return token
+end
+
+function P:getPushToken()
+	local token =  CS.MobileNotificationsMgr.Instance:GetToken()
+	if "" == token then
+		token = LocalStore:getStringForKey("pf_push_token")
+	else
+		LocalStore:setStringForKey("pf_push_token", token)
 	end
 	return token
 end

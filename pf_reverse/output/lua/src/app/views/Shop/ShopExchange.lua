@@ -128,16 +128,16 @@ function P:setExchangeItem(item, data, isInit, index)
 		LimitText:SetActive(false)
 	elseif cfg.limit_type == SHOP_LIMIT_TYPE.DAILY then
 		LimitText:SetActive(true)
-		bee.setText(LimitText, _T("LAB_SHOP_COMMON_11") .. ":" .. data.buyCount .. "/" .. cfg.limit_count)
+		bee.setText(LimitText, _F("LAB_SHOP_COMMON_42", data.buyCount, cfg.limit_count))
 	elseif cfg.limit_type == SHOP_LIMIT_TYPE.WEEKLY then
 		LimitText:SetActive(true)
-		bee.setText(LimitText, _T("LAB_SHOP_COMMON_12") .. ":" .. data.buyCount .. "/" .. cfg.limit_count)
+		bee.setText(LimitText, _F("LAB_SHOP_COMMON_43", data.buyCount, cfg.limit_count))
 	elseif cfg.limit_type == SHOP_LIMIT_TYPE.MONTHLY then
 		LimitText:SetActive(true)
-		bee.setText(LimitText, _T("LAB_SHOP_COMMON_13") .. ":" .. data.buyCount .. "/" .. cfg.limit_count)
+		bee.setText(LimitText, _F("LAB_SHOP_COMMON_44", data.buyCount, cfg.limit_count))
 	elseif cfg.limit_type == SHOP_LIMIT_TYPE.PERMANENT then
 		LimitText:SetActive(true)
-		bee.setText(LimitText, _T("LAB_SHOP_COMMON_14") .. ":" .. data.buyCount .. "/" .. cfg.limit_count)
+		bee.setText(LimitText, _F("LAB_SHOP_COMMON_45", data.buyCount, cfg.limit_count))
 	else
 		LimitText:SetActive(false)
 	end
@@ -162,7 +162,8 @@ function P:setExchangeItem(item, data, isInit, index)
 	local preViewType, itemData
 	if exchange.major_type == GMajorType.PROP then
 		itemData = ItemModel:getItem(exchange.id, true)
-		if itemData.type == GPropKind.CardBack or itemData.type == GPropKind.Table or itemData.type == GPropKind.Title or itemData.type == GPropKind.CardFace then
+		if itemData.type == GPropKind.CardBack or itemData.type == GPropKind.Table or itemData.type == GPropKind.Title 
+			or itemData.type == GPropKind.CardFace or itemData.type == GPropKind.Illustration then
 			preViewType = 1
 		elseif itemData.type == GPropKind.MusicLobby or itemData.type == GPropKind.MusicTable then
 			preViewType = 2
@@ -179,7 +180,11 @@ function P:setExchangeItem(item, data, isInit, index)
 	local viewFunc = function()
 		bee.logEvent("shop-goods-preview", cfg.shop_type, cfg.id)
 		if preViewType == 1 then
-			UiManager:showUI("BackpackPreview", {data = itemData})
+			if itemData.type == GPropKind.Illustration then
+				UiManager:showUI("BackpackIllustrationPreview", {data = itemData, list = {itemData}})
+			else
+				UiManager:showUI("BackpackPreview", {data = itemData})
+			end
 		elseif preViewType == 2 then
 			UiManager:showUI("BackpackMusic", {data = itemData, list = self._musics, cb = function(d)
 				if d.item_id ~= itemData.item_id then
@@ -238,6 +243,7 @@ function P:refreshUI()
 	if not self.exchangeList then
 		return
 	end
+	
 	local datas = ShopModel:getShopExchangeList(self.shop_type)
 	self.exchangeList:setDatas(datas)
 end

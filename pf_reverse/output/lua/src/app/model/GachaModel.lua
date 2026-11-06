@@ -13,6 +13,7 @@ end
 function P:afterLogin()
 	self._cardPoolList = {}
 	self._cardPoolMap = {}
+    self._cardPoolSkin = {}
 end
 
 function P:initGachaPoolList(force, checkIsNewPool)
@@ -70,6 +71,7 @@ function P:initGachaPoolList(force, checkIsNewPool)
             self._cosmetic_rate[v.pool_id] = v.cosmetic_rate
             self._item_rate[v.pool_id] = v.item_rate
 			self._cardPoolMap[v.pool_id] = self:setCardPoolList(v)
+            self._cardPoolSkin[v.pool_id] = v.character_skin_id
 		end
 
         bee.emit("evt_gachaUpdate", {isNew = isNewCardPool})
@@ -258,11 +260,24 @@ function P:getCardPoolEndTime(id)
     return 0
 end
 
+-- 获取卡池展示的皮肤
+function P:getCardPoolShowSkin(id)
+    return self._cardPoolSkin[id]
+end
+
 -- 跨天
 function P:evt_serverTimeCrossDay()
     bee.once(math.random(1, 60), function()
         self:initGachaPoolList(true, true)
     end)
+end
+
+function P:setShowDrawNotice()
+    LocalStore:isDailyTagValidCrossDay("draw_notice" .. PlayerModel:getUid())
+end
+
+function P:isShowDrawNotice()
+    return LocalStore:isDailyTagValidCrossDay("draw_notice" .. PlayerModel:getUid(), true)
 end
 
 return P

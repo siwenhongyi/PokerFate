@@ -9,6 +9,8 @@ function P:onAwake()
     bee.addClick2(self:find("common_panel_mask_70", self.AnimRoot), function()
         self:hideUI()
     end)
+
+    bee.logEvent("development-fund-rewards")
 end
 
 function P:onShow()

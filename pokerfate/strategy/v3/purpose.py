@@ -42,6 +42,10 @@ class Purpose:
         """Return [(pot_fraction, weight)] candidate list. Override."""
         return []
 
+    def active_value_sizing_allowed(self, ctx: DecisionCtx, frac: float) -> bool:
+        """Whether the generic active value sizing optimizer may rewrite frac."""
+        return True
+
     def alpha_target(self, ctx: DecisionCtx, frac: float) -> Optional[float]:
         """α target for this purpose at the given pot fraction.
 

@@ -21,6 +21,10 @@ function P:onUiBlur(flag, name, isMoveY)
     local post = bee.find("UIRoot/UiCanvaPost")
     if not post then return end
 
+    if not self._inBlurs then
+        return
+    end
+    
     if flag then
         self._inBlurs[name] = name
     else

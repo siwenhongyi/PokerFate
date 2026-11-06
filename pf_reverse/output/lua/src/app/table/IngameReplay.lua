@@ -2,13 +2,15 @@ local P = class("IngameReplay", UiFullView)
 
 ------------------ 回放的玩法类型 ------------------
 REPLAY_GAME_TYPE = {
-    All = 0,
-    Poker = 1,
-    Omaha = 2,
-    AllInPoker = 3,
-    Friend = 4,
+    All = 1,
+    Poker = 2,
+    Omaha = 3,
+    AllInPoker = 4,
     SNG = 5,
     MTT = 6,
+    Friend = 7,
+    FriendOmaha = 8,
+    FriendSNG = 9,
 }
 
 function P:onAwake()
@@ -18,54 +20,57 @@ function P:onAwake()
     local Center = self:find("Center", AnimRoot)
     local Bottom = self:find("Bottom", AnimRoot)
 
-    self.NearGameToggle = self:find("TabToggle/Tab01Toggle", Tab)
-    bee.onCheck(self.NearGameToggle, function(isOn) self:setNearGameData(isOn) end)
-    self.CollectToggle = self:find("TabToggle/Tab02Toggle", Tab)
-    bee.onCheck(self.CollectToggle, function(isOn) self:setCollectData(isOn) end)
+    self.Tabs = {
+        self:find("TabToggle/Tab01Toggle", Tab),
+        self:find("TabToggle/Tab02Toggle", Tab),
+    }
+
     self.ReplayList = self:find("IngameReplayList", Center)
     self.ReplayScroll = self.ReplayList:GetComponent("ScrollRect")
     self.ReplayScroll.onValueChanged:AddListener(function() self:onScrolling() end)
     self.ScrollBar = self:find("ScrollBar", Center)
     self.Item = self:find("Item", self.ReplayList)
+    self.Item:SetActive(false)
     self.PageTip = self:find("Text", Bottom)
     self.NoDataTip = self:find("Empty", Center)
 
     local Refresh = self:find("Refresh", Center)
     self.RefreshButton = self:find("RefreshButton", Refresh)
-    self.FilterButton = self:find("FilterButton", Refresh)
-    self.FilterText = self:find("FilterButton/Text", Refresh)
-    self.ArrowTran = self:find("FilterButton/common_panel_black_filter_button_arrow", Refresh).transform
-    self.DropDown = self:find("DropDown", Refresh)
-    self.DropDownRoot = self:find("DropDown/common_panel_black_filter_list", Refresh)
-    self.DropDownItem = self:find("DropDown/DropDownItem", Refresh)
-    self.MaskButton = self:find("Mask", Refresh)
-
-    self.dropItems = {}
+    self.Filter = self:find("Filter", Refresh)
 
     bee.addClick(self:find("CloseButton", LeftTop), function()
         self:hideUI()
     end)
-    bee.addClick(self.MaskButton, function() self:switchDropDownPart(false) end)
+    
     bee.addClick(self.RefreshButton, function() self:reReqData() end)
 
     self.List = UiListEx:create(self.ReplayList)
-    self.List:setWidth(230)
+    self.List:setWidth(260)
     self.List:setCreateFunc(function(data)
         return CU.GameObject.Instantiate(self.Item)
     end)
     self.List:setRefreshFunc(function(data, item)
         self:refreshItem(data, item)
     end)
-
-    self.InitCollect = false
-    self.InNear = false
-    self.InCollect = false
+    
+    self._filterType = {
+        REPLAY_GAME_TYPE.All,
+        REPLAY_GAME_TYPE.All,
+    }
+    self._viewIndex = 1
+    
+    for k, v in ipairs(self.Tabs) do
+        bee.onCheck(v, function(isOn)
+            if isOn and not self._watiStart then
+                self._viewIndex = k
+                self.Filter:setSelectIdx(self._filterType[k])
+            end
+        end)
+    end
+    
     self.NearGameList = {}
     self.CollectList = {}
-    self.NearSkip = 0
-    self.CollectSkip = 0
-    self.SaveNearType = REPLAY_GAME_TYPE.All
-    self.SaveCollectType = REPLAY_GAME_TYPE.All
+    
     self.NearTotal = 0
     self.CollectTotal = 0
 
@@ -73,42 +78,50 @@ function P:onAwake()
         [REPLAY_GAME_TYPE.Poker] = {GAME_GAME_TYPE.LOBBY_HOLDEM_GAME, GAME_GAME_TYPE.TRAINING_HOLDEM_GAME},
         [REPLAY_GAME_TYPE.Omaha] = {GAME_GAME_TYPE.LOBBY_OMAHA_GAME, GAME_GAME_TYPE.TRAINING_OMAHA_GAME},
         [REPLAY_GAME_TYPE.AllInPoker] = {GAME_GAME_TYPE.LOBBY_HOLDEM_ALLIN},
-        [REPLAY_GAME_TYPE.Friend] = {GAME_GAME_TYPE.FRIEND_HOLDEM_GAME},
         [REPLAY_GAME_TYPE.SNG] = {GAME_GAME_TYPE.SNG_HOLDEM_GAME, GAME_GAME_TYPE.SNG_OMAHA_GAME, GAME_GAME_TYPE.SNG_TRAIN_GAME},
-        [REPLAY_GAME_TYPE.MTT] = {GAME_GAME_TYPE.MTT_HOLDEM_GAME}}
+        [REPLAY_GAME_TYPE.MTT] = {GAME_GAME_TYPE.MTT_HOLDEM_GAME},
+        [REPLAY_GAME_TYPE.Friend] = {GAME_GAME_TYPE.FRIEND_HOLDEM_GAME},
+        [REPLAY_GAME_TYPE.FriendOmaha] = {GAME_GAME_TYPE.FRIEND_OMAHA_GAME},
+        [REPLAY_GAME_TYPE.FriendSNG] = {GAME_GAME_TYPE.FRIEND_SNG_GAME},
+    }
     self.ReplayTypeLabDic = {
-        [REPLAY_GAME_TYPE.All] = "LAB_FRIROOM_034",
-        [REPLAY_GAME_TYPE.Poker] = "LAB_POKER_GAME",
-        [REPLAY_GAME_TYPE.Omaha] = "LAB_OMAHA",
-        [REPLAY_GAME_TYPE.AllInPoker] = "LAB_ALLIN_01",
-        [REPLAY_GAME_TYPE.Friend] = "LAB_FRIROOM_001",
-        [REPLAY_GAME_TYPE.SNG] = "LAB_TOURNAMENT_SNG",
-        [REPLAY_GAME_TYPE.MTT] = "LAB_TOURNAMENT_MTT"}
+        [REPLAY_GAME_TYPE.All] = _T("LAB_FRIROOM_034"),
+        [REPLAY_GAME_TYPE.Poker] = _T("LAB_POKER_GAME"),
+        [REPLAY_GAME_TYPE.Omaha] = _T("LAB_OMAHA"),
+        [REPLAY_GAME_TYPE.AllInPoker] = _T("LAB_ALLIN_01"),
+        [REPLAY_GAME_TYPE.SNG] = _T("LAB_TOURNAMENT_SNG"),
+        [REPLAY_GAME_TYPE.MTT] = _T("LAB_TOURNAMENT_MTT"),
+        [REPLAY_GAME_TYPE.Friend] = GF.getGameTypeName(GAME_GAME_TYPE.FRIEND_HOLDEM_GAME, true),
+        [REPLAY_GAME_TYPE.FriendOmaha] = GF.getGameTypeName(GAME_GAME_TYPE.FRIEND_OMAHA_GAME, true),
+        [REPLAY_GAME_TYPE.FriendSNG] = GF.getGameTypeName(GAME_GAME_TYPE.FRIEND_SNG_GAME, true),
+    }
 
+    self.Filter = UiFilterBox:create(self.Filter, self:find("FilterArea", self.Filter), self.node)
+    self.Filter:setDatas(self.ReplayTypeLabDic)
+    self.Filter:setSelectFunc(function(idx, data)
+        self._filterType[self._viewIndex] = idx
+        self:refreshList()
+    end)
 end
 
 function P:onShow()
+    self._scheme = DecorationModel:getCurScheme()
     self.NoDataTip:SetActive(false)
     self.ScrollBar:SetActive(true)
-    bee.setToggle(self.NearGameToggle, true)
 
-    self:InitDropDown()
-
-    -- bee.setText(self.PageTip, _F("LAB_SAVE_LIMIT", PlayerModel:getCurRecord() .. " / " .. PlayerModel:getRecordNum()))
-
-    -- Net:post("/collCard/list", {t = 1, lang = LAN:getLanguage()}, function(data)
-    --     if 0 == data.code then
-    --         if data.list then
-    --             self.ReplayDataList = data.list
-    --             self.NoDataTip:SetActive(#data.list == 0)
-    --             self.List:setDatas(data.list)
-    --             PlayerModel:setCurRecord(#data.list)
-    --             bee.setText(self.PageTip, _F("LAB_SAVE_LIMIT", #data.list .. " / " .. PlayerModel:getRecordNum()))
-    --         else
-    --             self.NoDataTip:SetActive(true)
-    --         end
-    --     end
-    -- end)
+    if self._params and self._params.record then
+        self._filterType[RecordDataModel.showIndex] = RecordDataModel.showType
+        if 1 == RecordDataModel.showIndex then
+            bee.setCheck(self.Tabs[1], true, true)
+            self:refreshList()
+        else
+            bee.setCheck(self.Tabs[2], true, true)
+        end
+        self.Filter:setSelectIdx(RecordDataModel.showType)
+    else
+        bee.setCheck(self.Tabs[1], true, true)
+        self:refreshList()
+    end
 
     -- 任务进度-查看牌局回放
     TaskModel:reportTask(TaskType.CheckView, TaskTargetId.CardDeck)
@@ -116,119 +129,49 @@ function P:onShow()
     bee.logEvent("history-lobby")
 end
 
-function P:InitDropDown()
-    local count = table.nums(REPLAY_GAME_TYPE)
-    for i = 0, count - 1 do
-        local item = {}
-        local itemGo = CU.GameObject.Instantiate(self.DropDownItem, self.DropDownRoot.transform, false)
-        itemGo:SetActive(true)
-        item.type = i
-        item.go = itemGo
-        item.on = bee.find("On", itemGo)
-        item.off = bee.find("Off", itemGo)
-        local str = _T(self.ReplayTypeLabDic[i])
-        bee.setText(bee.find("On/Text", itemGo), str)
-        bee.setText(bee.find("Off/Text", itemGo), str)
-        -- bee.find("Off", item):SetActive(false)
-        bee.addClick(itemGo, function()
-            self:filterType(i)
-            self:switchDropDownPart(false)
-        end)
-        table.insert(self.dropItems, item)
-    end
-
-    bee.addClick(self.FilterButton, function()
-        self:switchDropDownPart(true)
-    end)
-
-    local dropDownTran = self.DropDownRoot:GetComponent("RectTransform")
-    dropDownTran.sizeDelta = bee.v2(dropDownTran.sizeDelta.x, (50 + 10) * count + 40)
-end
-function P:switchDropDownPart(sw)
-    self.MaskButton:SetActive(sw)
-    self.DropDown:SetActive(sw)
-    self.ArrowTran.localEulerAngles = bee.v3(0, 0, sw and 0 or 180)
-
-    if sw then
-        local curType
-        if self.InNear then
-            curType = self.SaveNearType
-        elseif self.InCollect then
-            curType = self.SaveCollectType
-        end
-        for _,v in pairs(self.dropItems) do
-            v.on:SetActive(v.type == curType)
-            v.off:SetActive(v.type ~= curType)
-        end
-    end
-end
-
-function P:setNearGameData(isOn, type)
-    Game:playSound("ui_tab_switch_1")
-    self.InNear = isOn
-    if not isOn then
-        return
-    end
-
-    if self.NearSkip == 0 then
-        Net:post("collCard/recentlyCardList", {skip = self.NearSkip, lang = LAN:getLanguage()}, function(data)
-            if 0 == data.code then
-                self.NearSkip = table.nums(data.list)
-                if data.list then
-                    self.NearGameList = data.list
-                    self.NearTotal = data.total
+function P:refreshList()
+    RecordDataModel.showIndex = self._viewIndex
+    RecordDataModel.showType = self._filterType[self._viewIndex]
+    if 1 == self._viewIndex then
+        RecordDataModel:fetchRecentList(self.ReplayTypeDic[self._filterType[self._viewIndex]], function(ok, list, total)
+            if ok then
+                self.NearGameList = {}
+                self.NearTotal = total
+                if list then
+                    for k, v in ipairs(list) do
+                        self.NearGameList[k] = v
+                    end
                 end
-                self:filterType(type or REPLAY_GAME_TYPE.All)
+                self:filterType(self._filterType[self._viewIndex])
             end
         end)
+        bee.setText(self.PageTip, _F("LAB_PLAYBACK3", PlayerModel:getRecentHistoryLimit()))
     else
-        self:filterType(self.SaveNearType)
-    end
-    bee.setText(self.PageTip, _F("LAB_PLAYBACK3", PlayerModel:getRecentHistoryLimit()))
-
-end
-
-function P:setCollectData(isOn, type)
-    Game:playSound("ui_tab_switch_1")
-    self.InCollect = isOn
-    if not isOn then
-        return
-    end
-
-    if not self.InitCollect then
-        self.InitCollect = true
-        Net:post("collCard/list", {skip = 0, lang = LAN:getLanguage()}, function(data)
-            if 0 == data.code then
-                if data.list then
-                    self.CollectList = data.list
+        RecordDataModel:fetchCollectList(self.ReplayTypeDic[self._filterType[self._viewIndex]], function(ok, list, total)
+            if ok then
+                self.CollectList = {}
+                if list then
+                    for k, v in ipairs(list) do
+                        self.CollectList[k] = v
+                    end
                 end
-                self.CollectSkip = table.nums(data.list)
-                self.CollectTotal = data.total
+                
+                self.CollectTotal = total
                 PlayerModel:setCurRecord(self.CollectTotal)
-                self:filterType(type or REPLAY_GAME_TYPE.All)
+                self:filterType(self._filterType[self._viewIndex])
                 bee.setText(self.PageTip, _F("LAB_SAVE_LIMIT", string.format("%s / %s", self.CollectTotal, PlayerModel:getRecordNum())))
             end
         end)
-    else
-        self:filterType(self.SaveCollectType)
         bee.setText(self.PageTip, _F("LAB_SAVE_LIMIT", string.format("%s / %s", PlayerModel:getCurRecord(), PlayerModel:getRecordNum())))
     end
 end
 
 --刷新数据
 function P:reReqData()
-    if self.InNear then
-        self.NearSkip = 0
-        self.NearGameList = {}
-        self.List:moveToYItem(1, false)
-        self:setNearGameData(true, self.SaveNearType)
-    end
-    if self.InCollect then
-        self.CollectSkip = 0
-        self.CollectGameList = {}
-        self.List:moveToYItem(1, false)
-        self:setCollectData(true, self.SaveCollectType)
-    end
+    self.List:moveToYItem(1, false)
+    RecordDataModel:markRecentDirty()
+    RecordDataModel:markCollectDirty()
+    self:refreshList()
 end
 
 --刷新item
@@ -240,10 +183,11 @@ function P:refreshItem(data, item)
         self:find("ImageCard4", item),
         self:find("ImageCard5", item),
     }
-    local d = tpl_card_back[PlayerModel:getCurCardBack()]
+    -- local scheme = DecorationModel:getCurScheme()
+    local d = tpl_card_back[DecorationModel:getCurCardBack(self._scheme)]
     for i = 1, 5 do
         if data.cards[i] and data.cards[i] > 0 then
-            bee.setIcon(ImageCards[i], GF.getCardImageByCode(data.cards[i]))
+            bee.setIcon(ImageCards[i], GF.getCardImageByCode(data.cards[i], self._scheme))
         else
             bee.setIcon(ImageCards[i], d.image)
         end
@@ -253,25 +197,18 @@ function P:refreshItem(data, item)
     
     local TextAdd, TextDec = self:find("TextAdd", item), self:find("TextDec", item)
     local TextCardType
+    self:find("ingame_replay_lose", item):SetActive(data.profit < 0)
+    self:find("ingame_replay_win", item):SetActive(data.profit > 0)
+    self:find("ingame_replay_draw", item):SetActive(data.profit == 0)
     if data.profit >= 0 then
-        TextAdd:SetActive(true)
-        TextDec:SetActive(false)
-        if data.profit > 0 then
-            bee.setText(TextAdd, "+" .. _N(data.profit))
-        else
-            bee.setText(TextAdd, _N(data.profit))
-        end
-        self:find("ingame_replay_lose", item):SetActive(false)
-        self:find("ingame_replay_win", item):SetActive(true)
+        bee.setText(self:find("ingame_replay_win/TextNum", item), "+" .. _N2(data.profit))
+        
         self:find("ingame_replay_card_type_02", item):SetActive(true)
         self:find("ingame_replay_card_type_01", item):SetActive(false)
         TextCardType = self:find("ingame_replay_card_type_02/TextCardType", item)
     else
-        TextAdd:SetActive(false)
-        TextDec:SetActive(true)
-        bee.setText(TextDec, "-" .. _N(-data.profit))
-        self:find("ingame_replay_lose", item):SetActive(true)
-        self:find("ingame_replay_win", item):SetActive(false)
+        bee.setText(self:find("ingame_replay_lose/TextNum", item), "-" .. _N2(-data.profit))
+        
         self:find("ingame_replay_card_type_02", item):SetActive(false)
         self:find("ingame_replay_card_type_01", item):SetActive(true)
         TextCardType = self:find("ingame_replay_card_type_01/TextCardType", item)
@@ -284,19 +221,15 @@ function P:refreshItem(data, item)
     end
 
     local CollectButton = self:find("CollectButton", item)
-    CollectButton:SetActive(self.InNear)
-    if self.InNear then
+    CollectButton:SetActive(1 == self._viewIndex)
+    if 1 == self._viewIndex then
         self:refreshCollectButton(CollectButton, data.collected)
         bee.removeAllClick(CollectButton)
         bee.addClick(CollectButton, function()
             if data.collected then
-                Net:post("/collCard/update", {del_id = data.gameid, lang = LAN:getLanguage()}, function(d)
-                    if 0 == d.code then
-                        data.collected = not data.collected
+                RecordDataModel:removeCollect(data.gameid, function(ok)
+                    if ok then
                         self:refreshCollectButton(CollectButton, data.collected)
-                        self.CollectSkip = self.CollectSkip - 1
-                        self.CollectTotal = self.CollectTotal - 1
-                        PlayerModel:setCurRecord(self.CollectTotal)
                         for k,v in pairs(self.CollectList) do
                             if v.gameid == data.gameid then
                                 table.remove(self.CollectList, k)
@@ -307,20 +240,9 @@ function P:refreshItem(data, item)
                 end)
             else
                 if PlayerModel:getCurRecord() >= PlayerModel:getRecordNum() then
-                    GameModel:getReplayList(function(d)
-                        if 0 == d.code then
-                            if d.list and #d.list > 0 then
-                                UiManager:showTip({
-                                    text = _F("LAB_DEL_PLAYBACK_TIP5", GameModel:getReplayTitle(d.data)),
-                                    sureStr = _T("LAB_SAVE"),
-                                    cancelStr = _T("LAB_DEL_PLAYBACK_TIP6"),
-                                    onSure = function()
-                                        self:changeReplay(d.data.gameid, data, CollectButton)
-                                    end,
-                                    onCancel = function()
-                                    end,
-                                })
-                            end
+                    GameModel:saveReplay(data.gameid, function(ok, removeId)
+                        if ok then
+                            self:changeReplay(removeId, data, CollectButton)
                         end
                     end)
                 else
@@ -331,23 +253,17 @@ function P:refreshItem(data, item)
     end
 
     local DeleteButton = self:find("DeleteButton", item)
-    DeleteButton:SetActive(self.InCollect)
-    if self.InCollect then
+    DeleteButton:SetActive(2 == self._viewIndex)
+    if 2 == self._viewIndex then
         bee.removeAllClick(DeleteButton)
         bee.addClick(DeleteButton, function()
             UiManager:showTip({
                 text = _T("LAB_DEL_PLAYBACK_TIP") .. "\n" .. title,
                 onSure = function()
-                    Net:post("/collCard/update", {
-                        del_id = data.gameid,
-                        lang = LAN:getLanguage(),
-                    }, function(d)
-                        if 0 == d.code then
+                    RecordDataModel:removeCollect(data.gameid, function(ok)
+                        if ok then
                             self.List:removeData(data)
                             table.removebyvalue(self.CollectList, data)
-                            self.CollectSkip = self.CollectSkip - 1
-                            self.CollectTotal = #d.gameids
-                            PlayerModel:setCurRecord(self.CollectTotal)
                             for k,v in pairs(self.NearGameList) do
                                 if v.gameid == data.gameid then
                                     v.collected = false
@@ -366,28 +282,36 @@ function P:refreshItem(data, item)
     local PlayButton = self:find("PlayButton", item)
     bee.removeAllClick(PlayButton)
     bee.addClick(PlayButton, function()
-        Net:post("/collCard/detail", {
-            gameid= data.gameid,
-            lang = LAN:getLanguage(),
-        }, function(d)
-            if 0 == d.code then
-                local data = require("app.table.data.PKRecordData"):create(d.data, title)
+        RecordDataModel:fetchGameDetail(data.gameid, function(ok, detail)
+            if ok then
+                local data = require("app.table.data.PKRecordData"):create(detail, title)
+                data.listType = 2 == self._viewIndex and "collect" or "recent"
                 data:run()
+                RecordDataModel.verticalNormalizedPosition = self.ReplayScroll.verticalNormalizedPosition
                 self:hideUI()
             end
         end)
         bee.logEvent("history-play", data.gameid)
     end, true)
+    
+    local EditButton = self:find("EditButton", item)
+    if data.remark and data.remark ~= "" then
+        bee.setText(self:find("TextRemark", item), data.remark)
+    else
+        bee.setText(self:find("TextRemark", item), _T("LAB_GAME_081"))
+    end
+    self:find("TextRemark", item):SetActive(2 == self._viewIndex)
+    self:find("ingame_replay_bg_edit_01", item):SetActive(2 == self._viewIndex)
+    EditButton:SetActive(2 == self._viewIndex)
+    bee.addClick(EditButton, function()
+        UiManager:showUI("IngameReplayEdit", {data = data, scheme = self._scheme})
+    end, true)
 end
 
 --收藏记录
 function P:saveData(data, CollectButton)
-    Net:post("/collCard/update", {add_id = data.gameid, lang = LAN:getLanguage()}, function(d)
-        if 0 == d.code then
-            self.CollectSkip = self.CollectSkip + 1
-            self.CollectTotal = self.CollectTotal + 1
-            PlayerModel:setCurRecord(self.CollectTotal)
-            data.collected = not data.collected
+    RecordDataModel:addCollect(data.gameid, function(ok)
+        if ok then
             self:refreshCollectButton(CollectButton, data.collected)
             table.insert(self.CollectList, 1, data)
         end
@@ -396,20 +320,14 @@ end
 
 --更换收藏
 function P:changeReplay(removeId, newData, CollectButton)
-    Net:post("/collCard/update", {del_id = removeId, add_id = newData.gameid, lang = LAN:getLanguage()}, function(d)
-        if 0 == d.code then
-            for k,v in pairs(self.CollectList) do
-                if v.gameid == removeId then
-                    table.remove(self.CollectList, k)
-                    break
-                end
-            end
-
-            newData.collected = not newData.collected
-            self:refreshCollectButton(CollectButton, newData.collected)
-            table.insert(self.CollectList, 1, newData)
+    for k,v in pairs(self.CollectList) do
+        if v.gameid == removeId then
+            table.remove(self.CollectList, k)
+            break
         end
-    end)
+    end
+    self:refreshCollectButton(CollectButton, newData.collected)
+    table.insert(self.CollectList, 1, newData)
 end
 
 --刷新历史牌局收藏按钮
@@ -420,69 +338,62 @@ end
 
 --筛选类型
 function P:filterType(type, keepPos)
-    local cacheList = {}
-    if self.InNear then
-        cacheList = self.NearGameList
-        self.SaveNearType = type
-    elseif self.InCollect then
-        cacheList = self.CollectList
-        self.SaveCollectType = type
+    local cacheList = 1 == self._viewIndex and self.NearGameList or self.CollectList
+    
+    if type then
+        self._filterType[self._viewIndex] = type
     end
 
-    local list = {}
-    if type == REPLAY_GAME_TYPE.All then
-        list = cacheList
-    else
-        local typeList = self.ReplayTypeDic[type]
-        for _,v in pairs(cacheList) do
-            if table.keyof(typeList, v.game_type) then
-                table.insert(list, v)
-            end
-        end
-    end
-
-    bee.setText(self.FilterText, _T(self.ReplayTypeLabDic[type]))
-    local noData = table.nums(list) == 0
+    local noData = table.nums(cacheList) == 0
     self.NoDataTip:SetActive(noData)
     self.ScrollBar:SetActive(not noData)
-    if not keepPos then
-        self.List:moveToYItem(1, false)
+
+    self.List:setDatas(cacheList)
+    if self._params and self._params.record then
+        self._params.record = nil
+        if RecordDataModel.verticalNormalizedPosition then
+            self.ReplayScroll.verticalNormalizedPosition = RecordDataModel.verticalNormalizedPosition
+        end
+    else
+        if not keepPos then
+            self.List:moveToYItem(1, false)
+        end
     end
-    -- table.sort(list, function(a, b)  return a.game_start_time > b.game_start_time end)
-    self.List:setDatas(list)
 end
 
 function P:onScrolling()
     if self.ReplayScroll.verticalNormalizedPosition < 0 then
-        if self.InNear and table.nums(self.NearGameList) < self.NearTotal then
-            Net:post("collCard/recentlyCardList", {skip = self.NearSkip, lang = LAN:getLanguage()}, function(data)
-                if 0 == data.code then
-                    self.NearSkip = self.NearSkip + table.nums(data.list)
-                    if data.list then
-                        for _,v in pairs(data.list) do
+        if 1 == self._viewIndex and RecordDataModel:hasMoreRecent() then
+            RecordDataModel:fetchMoreRecent(function(ok, newList, hasMore)
+                if ok then
+                    if newList then
+                        for _,v in pairs(newList) do
                             table.insert(self.NearGameList, v)
                         end
                     end
-                    if self.InNear then
-                        self:filterType(self.SaveNearType, true)
+                    if 1 == self._viewIndex then
+                        self:filterType(self._filterType[self._viewIndex], true)
                     end 
                 end
             end)
         end
-        if self.InCollect and table.nums(self.CollectList) < PlayerModel:getCurRecord() then
-            Net:post("collCard/list", {skip = self.CollectSkip, lang = LAN:getLanguage()}, function(data)
-                self.CollectSkip = self.CollectSkip + table.nums(data.list)
-                if 0 == data.code then
-                    if data.list then
-                        for _,v in pairs(data.list) do
+        if 2 == self._viewIndex and RecordDataModel:hasMoreCollect() then
+            RecordDataModel:fetchMoreCollect(function(ok, newList, hasMore)
+                if ok then
+                    if newList then
+                        for _,v in pairs(newList) do
                             table.insert(self.CollectList, v)
                         end
                     end
-                    self:filterType(self.SaveCollectType, true)
+                    self:filterType(self._filterType[self._viewIndex], true)
                 end
             end)
         end
     end
+end
+
+function P:evt_ReplayRemarkChanged()
+    self.List:refreshShowingUi()
 end
 
 return P

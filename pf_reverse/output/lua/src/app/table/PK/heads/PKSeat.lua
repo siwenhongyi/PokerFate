@@ -90,9 +90,9 @@ function P:refreshEyes()
 	end
 end
 
-function P:refreshTableTag()
+function P:refreshTableTag(isForceHide)
 	if self._tableInfo then
-		self._tableInfo:refreshTag()
+		self._tableInfo:refreshTag(isForceHide)
 	end
 end
 
@@ -101,7 +101,7 @@ function P:refreshCard()
 		self:emitFunc("refreshCard")
 	else
 		local player = self.data:getPlayer(self.seatid)
-		if player.has_card and player.hand_cards and player.hand_cards[1] > 0 then
+		if player:isHasCardData() or self.data:isInOpenObserve() then
 			self:emitFunc("refreshCard")
 			self._tableCard:showCard(false)
 		else
@@ -123,7 +123,7 @@ function P:showCard(visible, index, isBack)
 			self.playerCls:showCard(visible, index, isBack)
 		else
 			local player = self.data:getPlayer(self.seatid)
-			if player.has_card and player.hand_cards and player.hand_cards[1] > 0 then
+			if player:isHasCardData() or self.data:isInOpenObserve() then
 				self.playerCls:showCard(visible, index, isBack)
 				self._tableCard:showCard(false)
 			else
@@ -221,6 +221,8 @@ end
 
 function P:getDealToPosition(index)
 	if self:isMe() and self.playerCls then
+		return self.playerCls:getCardWorldPos(index)
+	elseif self.data:isInObserve() and self.data:isOpenObserve() and self.playerCls then
 		return self.playerCls:getCardWorldPos(index)
 	else
 		return self._tableCard:getCardPosiiton(index)

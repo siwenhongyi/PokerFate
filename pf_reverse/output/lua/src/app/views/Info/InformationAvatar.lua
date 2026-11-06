@@ -12,6 +12,7 @@ function P:onAwake()
     self.EquipButton = self:find("EquipButton", self.SelectedInfo)
     self.UnEquipButton = self:find("UnEquipButton", self.SelectedInfo)
     self.ClaimButton = self:find("ClaimButton", self.SelectedInfo)
+    self.ChangeButton = self:find("ChangeButton", self.SelectedInfo)
     self.TextDec = self:find("DecList/Viewport/Content/TextDec", self.SelectedInfo)
     self.AvatarList = self:find("AvatarList", self.Center)
     self.AvatarItem1 = self:find("Item1", self.AvatarList)
@@ -26,6 +27,17 @@ function P:onAwake()
     self.ImageNew = self:find("ImageNew", self.SelectedInfo)
     self.Filter = self:find("Filter", self.Center)
     self.CheckToggle = self:find("CheckToggle", self.Center)
+
+    self.DecorationSwitchItem = self:find("DecorationSwitchItem", self.Center)
+    self.DecLobbyItem = self:find("LobbyItem", self.DecorationSwitchItem)
+    self.DecLobbyButton = self:find("LobbyButton", self.DecorationSwitchItem)
+    self.DecInGameItem = self:find("InGameItem", self.DecorationSwitchItem)
+    self.DecInGameButton = self:find("InGameButton", self.DecorationSwitchItem)
+    self.DecSwitchDatas = {[1] = SchemeTag.Lobby, [2] = SchemeTag.Lobby, [3] = SchemeTag.Lobby}
+
+    self.Title = self:find("TITLE", self.Center)
+    self.InfoButton = self:find("InfoButton", self.Center)
+
     self.Tab = self:find("Tab", self.Center)
     self.Toggles = {
         self:find("Tab_01_Toggle", self.Tab),
@@ -48,21 +60,48 @@ function P:onAwake()
         ItemModel:requestRefreshItem()
         self:hideUI()
     end)
+    bee.addClick(self.InfoButton, function()
+        Game:playSound("ui_button_confirm")
+        GuideManager:startSystemGuide(20001, 0, true)
+    end)
+
     bee.addClick(self.EquipButton, function()
+        local isLobby = self.DecSwitchDatas[self._showIndex] == SchemeTag.Lobby
         if 1 == self._showIndex then
-            Net:sendReq("pb.ChangeAvatarREQ", {item_id = self._curSelectItem.id})
+            if isLobby then
+                DecorationModel:useLobbyAvatar(self._curSelectItem.id)
+            else
+                DecorationModel:useInGameAvatar(self._curSelectItem.id)
+            end
         elseif 2 == self._showIndex then
-            Net:sendReq("pb.ChangeFrameREQ", {item_id = self._curSelectItem.id})
+            if isLobby then
+                DecorationModel:useLobbyFrame(self._curSelectItem.id)
+            else
+                DecorationModel:useInGameFrame(self._curSelectItem.id)
+            end
         else
-            Net:sendReq("pb.ChangeTitleREQ", {item_id = self._curSelectItem.id})
+            if isLobby then
+                DecorationModel:useLobbyTitle(self._curSelectItem.id)
+            else
+                DecorationModel:useInGameTitle(self._curSelectItem.id)
+            end
         end
     end)
     bee.addClick(self.UnEquipButton, function()
+        local isLobby = self.DecSwitchDatas[self._showIndex] == SchemeTag.Lobby
         if 1 == self._showIndex then
         elseif 2 == self._showIndex then
-            Net:sendReq("pb.ChangeFrameREQ", {item_id = 0})
+            if isLobby then
+                DecorationModel:useLobbyFrame(0)
+            else
+                DecorationModel:useInGameFrame(0)
+            end
         else
-            Net:sendReq("pb.ChangeTitleREQ", {item_id = 0})
+            if isLobby then
+                DecorationModel:useLobbyTitle(0)
+            else
+                DecorationModel:useInGameTitle(0)
+            end
         end
     end)
     bee.addClick(self.ClaimButton, function()
@@ -73,6 +112,19 @@ function P:onAwake()
     bee.addClick(self.PreviewButton, function()
         Game:playSound("ui_button_confirm")
         UiManager:showUI("BackpackPreview", {data = self._curSelectItem})
+    end)
+    --切换大厅方案
+    bee.addClick(self.DecLobbyButton, function ()
+        Game:playSound("ui_button_confirm")
+        self:switchDecorationEvent(SchemeTag.Lobby)
+    end)
+    --切换对局方案
+    bee.addClick(self.DecInGameButton, function ()
+        Game:playSound("ui_button_confirm")
+        self:switchDecorationEvent(SchemeTag.Ingame)
+    end)
+    bee.addClick(self.ChangeButton, function ()
+        self:jumpToScheme(false)
     end)
 
     for k, v in ipairs(self.Toggles) do
@@ -117,11 +169,17 @@ function P:onShow()
     -- 任务进度-查看玩家个人信息头像列表
     TaskModel:reportTask(TaskType.CheckView, TaskTargetId.InfoAvatarList)
     self._isShowed = true
+
+    local titleText = self.Title:GetComponent("Text")
+    self.InfoButton.transform.localPosition = bee.v3(titleText.preferredWidth * 0.5 + 40, 392, 0)
+
+    GuideManager:startSystemGuide(20001, 0.65)
 end
 
 function P:showList(index)
     self._showIndex = index
     self.PreviewButton:SetActive(false)
+    self:refreshDecorationItem()
     if 1 == index then
         self._reds = ItemModel:removeNewFrame(GPropKind.Avatar)
         self.AvatarList:SetActive(true)
@@ -129,6 +187,7 @@ function P:showList(index)
         self.TitleList:SetActive(false)
         self:showAvatarList()
         self:setCurSelectItem(self._selectAvatar)
+        -- self:changeSchemeBtn(true)
     elseif 2 == index then
         self._reds = ItemModel:removeNewFrame(GPropKind.FrameAvatar)
         self.AvatarList:SetActive(false)
@@ -136,6 +195,7 @@ function P:showList(index)
         self.TitleList:SetActive(false)
         self:showFrameList()
         self:setCurSelectItem(self._selectFrame)
+        -- self:changeSchemeBtn(true)
     else
         self._reds = ItemModel:removeNewFrame(GPropKind.Title)
         self.AvatarList:SetActive(false)
@@ -143,7 +203,9 @@ function P:showList(index)
         self.TitleList:SetActive(true)
         self:showTitleList()
         self:setCurSelectItem(self._selectTitle)
+        -- self:changeSchemeBtn(false)
     end
+
     self:refreshEmpty()
 end
 
@@ -297,7 +359,34 @@ function P:refreshAvatarItem(data, item)
     if not item then return end
     self:find("Locked", item):SetActive(data:isLocked())
     self:find("ImageSelect", item):SetActive(self._selectAvatar == data)
-    self:find("tag", item):SetActive(PlayerModel:getAvatar() == data.id)
+    local tag = self:find("tag", item) --:SetActive(PlayerModel:getAvatar() == data.id)
+    local randomTag = self:find("randomTag", item)
+    local isRandom = false
+    if self.DecSwitchDatas[1] == SchemeTag.Lobby then
+        isRandom = DecorationModel:isLobbySchemeRandom()
+        if isRandom then
+            local inRandom = DecorationModel:checkAvatarInScheme(SchemeTag.Lobby, false, data.id)
+            tag:SetActive(false)
+            randomTag:SetActive(inRandom)
+        else
+            local isUsing = DecorationModel:checkAvatarInScheme(SchemeTag.Lobby, true, data.id)
+            tag:SetActive(isUsing)
+            randomTag:SetActive(false)
+        end
+    else
+        isRandom = DecorationModel:isInGameSchemeRandom()
+        if isRandom then
+            local inRandom = DecorationModel:checkAvatarInScheme(SchemeTag.Ingame, false, data.id)
+            tag:SetActive(false)
+            randomTag:SetActive(inRandom)
+        else
+            local isUsing = DecorationModel:checkAvatarInScheme(SchemeTag.Ingame, true, data.id)
+            tag:SetActive(isUsing)
+            randomTag:SetActive(false)
+        end
+    end
+    
+
     self:find("Reddot", item):SetActive(table.indexof(self._reds, data.id) ~= -1 and data ~= self._selectAvatar and ItemModel:getItemNumById(data.id, true) > 0)
     bee.setIcon(self:find("Avatar/Mask/ImageIcon", item), data.icon)
     bee.addClick(item, function()
@@ -318,7 +407,33 @@ function P:refreshFrameItem(data, item)
     if not item then return end
     self:find("Locked", item):SetActive(data:isLocked())
     self:find("ImageSelect", item):SetActive(self._selectFrame == data)
-    self:find("tag", item):SetActive(PlayerModel:getFrame() == data.id)
+    local tag = self:find("tag", item) --:SetActive(PlayerModel:getFrame() == data.id)
+    local randomTag = self:find("randomTag", item)
+    local isRandom = false
+    if self.DecSwitchDatas[2] == SchemeTag.Lobby then
+        isRandom = DecorationModel:isLobbySchemeRandom()
+        if isRandom then
+            local inRandom = DecorationModel:checkFrameInScheme(SchemeTag.Lobby, false, data.id)
+            tag:SetActive(false)
+            randomTag:SetActive(inRandom)
+        else
+            local isUsing = DecorationModel:checkFrameInScheme(SchemeTag.Lobby, true, data.id)
+            tag:SetActive(isUsing)
+            randomTag:SetActive(false)
+        end
+    else
+        isRandom = DecorationModel:isInGameSchemeRandom()
+        if isRandom then
+            local inRandom = DecorationModel:checkFrameInScheme(SchemeTag.Ingame, false, data.id)
+            tag:SetActive(false)
+            randomTag:SetActive(inRandom)
+        else
+            local isUsing = DecorationModel:checkFrameInScheme(SchemeTag.Ingame, true, data.id)
+            tag:SetActive(isUsing)
+            randomTag:SetActive(false)
+        end
+    end
+
     self:find("Reddot", item):SetActive(table.indexof(self._reds, data.id) ~= -1 and data ~= self._selectFrame and ItemModel:getItemNumById(data.id, true) > 0)
     bee.setIcon(self:find("ImageIcon", item), data.icon)
     bee.addClick(item, function()
@@ -338,7 +453,33 @@ function P:refreshTitleItem(data, item)
     if not item then return end
     self:find("Locked", item):SetActive(data:isLocked())
     self:find("ImageSelect", item):SetActive(self._selectTitle == data)
-    self:find("tag", item):SetActive(PlayerModel:getTitle() == data.id)
+    local tag = self:find("tag", item)
+    local randomTag = self:find("randomTag", item)
+    local isRandom = false
+    if self.DecSwitchDatas[3] == SchemeTag.Lobby then
+        isRandom = DecorationModel:isLobbySchemeRandom()
+        if isRandom then
+            local inRandom = DecorationModel:checkTitleInScheme(SchemeTag.Lobby, false, data.id)
+            tag:SetActive(false)
+            randomTag:SetActive(inRandom)
+        else
+            local isUsing = DecorationModel:checkTitleInScheme(SchemeTag.Lobby, true, data.id)
+            tag:SetActive(isUsing)
+            randomTag:SetActive(false)
+        end
+    else
+        isRandom = DecorationModel:isInGameSchemeRandom()
+        if isRandom then
+            local inRandom = DecorationModel:checkTitleInScheme(SchemeTag.Ingame, false, data.id)
+            tag:SetActive(false)
+            randomTag:SetActive(inRandom)
+        else
+            local isUsing = DecorationModel:checkTitleInScheme(SchemeTag.Ingame, true, data.id)
+            tag:SetActive(isUsing)
+            randomTag:SetActive(false)
+        end
+    end
+
     self:find("Reddot", item):SetActive(table.indexof(self._reds, data.id) ~= -1 and data ~= self._selectTitle and ItemModel:getItemNumById(data.id, true) > 0)
     bee.setIcon(self:find("ImageIcon", item), data.icon, true)
     bee.addClick(item, function()
@@ -373,14 +514,29 @@ function P:setCurSelectItem(data)
     local isInUse = false
     if 1 == self._showIndex then
         bee.setIcon(self:find("Mask/ImageIcon", self.Avatar), data.icon)
-        isInUse = PlayerModel:getAvatar() == self._curSelectItem.id
+        if self.DecSwitchDatas[1] == SchemeTag.Lobby and not DecorationModel:isLobbySchemeRandom() then
+            isInUse = PlayerModel:getAvatar() == self._curSelectItem.id
+        end
+        if self.DecSwitchDatas[1] == SchemeTag.Ingame and not DecorationModel:isInGameSchemeRandom() then
+            isInUse = DecorationModel:checkAvatarInScheme(SchemeTag.Ingame, true, self._curSelectItem.id)
+        end
     elseif 2 == self._showIndex then
         bee.setIcon(self:find("Mask/ImageIcon", self.Avatar), PlayerModel:getAvatarIcon())
         bee.setIcon(self.ImageFrame, data.icon)
-        isInUse = PlayerModel:getFrame() == self._curSelectItem.id
+        if self.DecSwitchDatas[2] == SchemeTag.Lobby and not DecorationModel:isLobbySchemeRandom() then
+            isInUse = PlayerModel:getFrame() == self._curSelectItem.id
+        end
+        if self.DecSwitchDatas[2] == SchemeTag.Ingame and not DecorationModel:isInGameSchemeRandom() then
+            isInUse = DecorationModel:checkFrameInScheme(SchemeTag.Ingame, true, self._curSelectItem.id)
+        end
     else
         bee.setIcon(self.ImageTitle, data.icon, true)
-        isInUse = PlayerModel:getTitle() == self._curSelectItem.id
+        if self.DecSwitchDatas[3] == SchemeTag.Lobby and not DecorationModel:isLobbySchemeRandom() then
+            isInUse = PlayerModel:getTitle() == self._curSelectItem.id
+        end
+        if self.DecSwitchDatas[3] == SchemeTag.Ingame and not DecorationModel:isInGameSchemeRandom() then
+            isInUse = DecorationModel:checkTitleInScheme(SchemeTag.Ingame, true, self._curSelectItem.id)
+        end
     end
 
     if self._countDownTag then
@@ -395,10 +551,12 @@ function P:setCurSelectItem(data)
         self.EquipButton:SetActive(false)
         self.UnEquipButton:SetActive(self._showIndex ~= 1)
         self.ClaimButton:SetActive(false)
+        self.ChangeButton:SetActive(false)
     elseif data:isLocked() then
         self.TextEquiped:SetActive(false)
         self.EquipButton:SetActive(false)
         self.UnEquipButton:SetActive(false)
+        self.ChangeButton:SetActive(false)
         local jump = data.accesses or data.jump
         local toId = data.id
         if data.type == GPropKind.Avatar then
@@ -423,9 +581,16 @@ function P:setCurSelectItem(data)
         self.TextFrom:SetActive(false)
         self.TextEquiped:SetActive(false)
         self.TextLimit:SetActive(false)
-        self.EquipButton:SetActive(true)
         self.UnEquipButton:SetActive(false)
         self.ClaimButton:SetActive(false)
+        local isRandom = false
+        if self.DecSwitchDatas[self._showIndex] == SchemeTag.Lobby then
+            isRandom = DecorationModel:isLobbySchemeRandom()
+        else
+            isRandom = DecorationModel:isInGameSchemeRandom()
+        end
+        self.EquipButton:SetActive(not isRandom)
+        self.ChangeButton:SetActive(isRandom)
     end
     if (data.id == tpl_monthly_card[1].exc_frame[1] or data.id == tpl_monthly_card[1].exc_title[1]) and ShopModel:isMonthlyCard() then
         self.TextFrom:SetActive(true)
@@ -462,12 +627,66 @@ function P:resetTagVisible(item, flag)
     end
 end
 
+function P:jumpToScheme(logSign)
+    Game:playSound("ui_button_confirm")
+    local viewId = self.DecSwitchDatas[self._showIndex] == 1 and 13001 or 13002
+    ItemModel:jumpView(viewId, nil, function ()
+        self:showList(self._showIndex)
+    end)
+    if logSign then
+        if self._showIndex == 1 then
+            bee.logEvent("style-preset-avatar")
+        elseif self._showIndex == 2 then
+            bee.logEvent("style-preset-avatarframe")
+        elseif self._showIndex == 3 then
+            bee.logEvent("style-preset-avatartitle")
+        end
+    else
+        bee.logEvent("style-preset-profile-change", self._curSelectItem.id)
+    end
+end
+
+--刷新装饰按钮
+function P:refreshDecorationItem(dtype)
+    if dtype == nil then
+        dtype = self.DecSwitchDatas[self._showIndex]
+    end
+    self.DecLobbyItem:SetActive(dtype == 1)
+    self.DecInGameItem:SetActive(dtype == 2)
+end
+--切换方案
+function P:switchDecorationEvent(dtype)
+    self.DecSwitchDatas[self._showIndex] = dtype
+    self:refreshDecorationItem(dtype)
+    if self._showIndex == 1 then
+        self:showAvatarList()
+        self:setCurSelectItem(self._selectAvatar)
+    elseif self._showIndex == 2 then
+        self:showFrameList()
+        self:setCurSelectItem(self._selectFrame)
+    elseif self._showIndex == 3 then
+        self:showTitleList()
+        self:setCurSelectItem(self._selectTitle)
+    end
+end
+
 function P:evt_ChangeAvatarRSP(msg)
     for _, v in ipairs(self._dataAvatars) do
         if v.id == PlayerModel:getAvatar() then
             self:resetTagVisible(self.ListAvatar:getDataNode(v), true)
             bee.emit(EventDef.evt_refreshAvatar)
         elseif v.id == PlayerModel._avatarOld then
+            self:resetTagVisible(self.ListAvatar:getDataNode(v), false)
+        end
+    end
+    self:setCurSelectItem(self._curSelectItem)
+    UiManager:showToast(_T("LAB_INFO_030"))
+end
+function P:evt_ChangeAvatarInGameRSP(msg)
+    for _, v in ipairs(self._dataAvatars) do
+        if v.id == msg.id then
+            self:resetTagVisible(self.ListAvatar:getDataNode(v), true)
+        elseif v.id == msg.oldId then
             self:resetTagVisible(self.ListAvatar:getDataNode(v), false)
         end
     end
@@ -486,12 +705,34 @@ function P:evt_ChangeFrameRSP(msg)
     self:setCurSelectItem(self._curSelectItem)
     UiManager:showToast(_T("LAB_INFO_031"))
 end
+function P:evt_ChangeFrameInGameRSP(msg)
+    for _, v in ipairs(self._dataFrames) do
+        if v.id == msg.id then
+            self:resetTagVisible(self.ListFrame:getDataNode(v), true)
+        elseif v.id == msg.oldId then
+            self:resetTagVisible(self.ListFrame:getDataNode(v), false)
+        end
+    end
+    self:setCurSelectItem(self._curSelectItem)
+    UiManager:showToast(_T("LAB_INFO_031"))
+end
 
 function P:evt_ChangeTitleRSP(msg)
     for _, v in ipairs(self._dataTitles) do
         if v.id == PlayerModel:getTitle() then
             self:resetTagVisible(self.ListTitle:getDataNode(v), true)
         elseif v.id == PlayerModel._titleOld then
+            self:resetTagVisible(self.ListTitle:getDataNode(v), false)
+        end
+    end
+    self:setCurSelectItem(self._curSelectItem)
+    UiManager:showToast(_T("LAB_INFO_032"))
+end
+function P:evt_ChangeTitleInGameRSP(msg)
+    for _, v in ipairs(self._dataTitles) do
+        if v.id == msg.id then
+            self:resetTagVisible(self.ListTitle:getDataNode(v), true)
+        elseif v.id == msg.oldId then
             self:resetTagVisible(self.ListTitle:getDataNode(v), false)
         end
     end

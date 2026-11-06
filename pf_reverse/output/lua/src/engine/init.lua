@@ -54,6 +54,7 @@ ObjectCache:initRoot()
 local _sceneParams = nil
 local _sceneName, _sceneWaitName, _sceneWaitParams = nil, nil, nil
 bee.enterScene = function(name, params, sync)
+    bee.removeAllTasks()    -- 防止任务回调导致卡死
     if ResManager:IsLoadingScene() then
         if _sceneName ~= name then
             _sceneWaitName, _sceneWaitParams = name, params
@@ -66,6 +67,7 @@ bee.enterScene = function(name, params, sync)
         if sync then
             ResManager:LoadScene(name)
         else
+            UiManager:setShowingScene()
             ResManager:LoadSceneAsync(name)
         end
     end
@@ -83,6 +85,10 @@ bee.getSceneParams = function(noClear)
         _sceneParams = nil
     end
     return ret
+end
+
+bee.getWaitingScene = function()
+    return _sceneWaitName
 end
 
 bee.getCurRunScene=function()
@@ -122,6 +128,14 @@ bee.createPrefabObj = function(name, params)
         return obj
     end
     return nil
+end
+
+bee.destroy = function(obj, dt)
+    if dt then
+        CU.GameObject.Destroy(obj, dt)
+    else
+        CU.GameObject.Destroy(obj)
+    end
 end
 
 bee.moveBy = function(obj, x, y, z, isWorld)
@@ -630,6 +644,15 @@ bee.find = function(name, parent)
         return t.gameObject
     end
 	return nil
+end
+
+bee.removeAllChildren = function(parent)
+	if parent then
+		for i = 0, parent.transform.childCount - 1 do
+			CU.GameObject.Destroy(parent.transform:GetChild(i).gameObject)
+		end
+		parent.transform:DetachChildren()
+	end
 end
 
 bee.playSound = function(name, isAsyn, volume, loop)

@@ -2,6 +2,7 @@ local P = class("LoginStartLayer", UiBase)
 
 function P:onAwake()
     self.AnimRoot = self:find("AnimRoot")
+    self.Center = self:find("Center", self.AnimRoot)
     self.Bottom = self:find("Bottom", self.AnimRoot)
 
     local Loading = self:find("Loading", self.Bottom)
@@ -14,6 +15,10 @@ function P:onAwake()
 
     self.TouchStart = self:find("TouchStart", self.AnimRoot)
 
+    self.LeftTop = self:find("LeftTop", self.AnimRoot)
+    self.ButtonLogo = self:find("LogoIcon", self.LeftTop)
+    self._logo_clickable = false
+
     self.RightTop = self:find("RightTop", self.AnimRoot)
     local Layer = self:find("Layer", self.RightTop)
     self.ButtonLanguage = self:find("ButtonLanguage", Layer)
@@ -25,6 +30,9 @@ function P:onAwake()
     bee.addClick(self.TouchStart, function()
         Game:playSound("ui_button_confirm")
         if PlayerModel:isLogin() then
+            if AppLoadRes:isInCheckUpdate() then
+                return
+            end
             if PlayerModel:getLoginType() == LOGIN_TYPE.GUEST then
                 local params = {}
                 params.text = _T("LAB_GUEST_LOGIN_TIPS")
@@ -40,6 +48,14 @@ function P:onAwake()
             self:showLoginLayer()
             self.TouchStart:SetActive(false)
         end
+    end)
+
+
+    bee.addClick(self:find("LogoIcon2", self.LeftTop), function ()
+        self:onBtLogo()
+    end)
+    bee.addClick(self.ButtonLogo, function ()
+        self:onBtLogo()
     end)
 
     bee.addClick(self.ButtonLanguage, function()
@@ -102,6 +118,8 @@ function P:onAwake()
     end)
 
     self.ButtonAccount:SetActive(false)
+
+    self:evt_refreshLimitView()
 end
 
 function P:onShow()
@@ -115,11 +133,11 @@ function P:onShow()
         PlayerModel:setNotAutoLogin(true)
         ItemModel:clearItems()
         Net:closeSocket()
-        self.ButtonRepair:SetActive(false)
+        -- self.ButtonRepair:SetActive(false)
         AppLoadRes:startDownload()
     elseif not G_CHECK_DL_RES then
         G_CHECK_DL_RES = true
-        self.ButtonRepair:SetActive(false)
+        -- self.ButtonRepair:SetActive(false)
         self:checkDownload()
     else
         self:onDownloadComplete()
@@ -237,11 +255,31 @@ function P:showLoginLayer()
     self.LoginLayer.transform.localPosition = bee.v3zero
     self.LoginLayer.transform.localScale = bee.v3one
     self.ButtonAccount:SetActive(false)
+    self._logo_clickable = true
 end
 
 function P:hideLoginLayer()
-    self.LoginLayer.transform.localPosition = bee.v3(0, -9999)
-    self.LoginLayer.transform.localScale = bee.v3zero
+    if self.LoginLayer then
+        self.LoginLayer.transform.localPosition = bee.v3(0, -9999)
+        self.LoginLayer.transform.localScale = bee.v3zero
+    end
+end
+
+function P:onBtLogo()
+    if not (G_CHNL_ID == 5 or G_CHNL_ID == 6) then
+        return
+    end
+    if self._isLinked then
+        return
+    end
+    if not self._logo_clickable then
+        return
+    end
+
+    Game:playSound("ui_button_confirm")
+    self:showLoginLayer()
+    self.LoginLayer:showEmailLogin()
+    bee.logEvent("login-logo")
 end
 
 function P:evt_onApplicationPause(paused)
@@ -254,8 +292,17 @@ function P:evt_onApplicationPause(paused)
     end
 end
 
+function P:evt_remote_res_start()
+    self.ButtonRepair:SetActive(false)
+    UiManager:hideUI("Loginrepair")
+    UiManager:hideUI("CommonNoticeSmall")
+end
+
 function P:evt_remote_res_progress(val)
     self.Bottom:SetActive(true)
+    self:hideLoginLayer()
+    self.TouchStart:SetActive(false)
+    self.ButtonAccount:SetActive(false)
     
     self._downloadText = nil
     bee.setText(self.TextPrecent, tostring(math.ceil(val * 100)) .. "%")
@@ -278,6 +325,7 @@ end
 
 function P:evt_login_fail()
     self:showLoginLayer()
+    self._isLinked = false
     self._isInAutoLogin = nil
     self._isInWhiteUpdate = nil
 end
@@ -304,6 +352,7 @@ function P:evt_SelfUserInfoRSP(msg)
         self.TouchStart:SetActive(true)
         self.ButtonAccount:SetActive(G_CHNL_ID ~= 8)
     end
+    self._isLinked = true
     self._isInAutoLogin = nil
     self._isInWhiteUpdate = nil
 end
@@ -312,6 +361,7 @@ function P:evt_UserLogoutRSP()
     UiManager:hideLoadingMask("Logout")
     self:showLoginLayer()
     self.TouchStart:SetActive(false)
+    self._isLinked = false
     if G_CHNL_ID == 5 or G_CHNL_ID == 6 then
         CS.ThirdManager.Instance:login()
     end
@@ -349,6 +399,25 @@ function P:evt_try_resume_bgm()
 
     self:find("ON", self.ButtonMusic):SetActive(SettingModel.saveData.lobbyBGMOn)
     self:find("OFF", self.ButtonMusic):SetActive(not SettingModel.saveData.lobbyBGMOn)
+end
+
+function P:evt_refreshLimitView()
+    local oldName = self.LoginSpineKV
+    local isUseKv2 = tpl_constdata.KV2_Endtime > bee.getServerTime()
+    self.LoginSpineKV = bee.getLimitViewRes(isUseKv2 and "LoginSpineKV2" or "LoginSpineKV", true)
+    self:find("LogoIcon", self.LeftTop):SetActive(not isUseKv2)
+    self:find("LogoIcon2", self.LeftTop):SetActive(isUseKv2)
+    if oldName ~= self.LoginSpineKV then
+        local obj = ResManager:InstantiateObject(self.LoginSpineKV)
+        if obj then
+            if not bee.isNull(self.LoginSpineKVObj) then
+                CU.GameObject.Destroy(self.LoginSpineKVObj)
+                self.LoginSpineKVObj = nil
+            end
+            obj.transform:SetParent(self.Center.transform, false)
+            self.LoginSpineKVObj = obj
+        end
+    end
 end
 
 return P

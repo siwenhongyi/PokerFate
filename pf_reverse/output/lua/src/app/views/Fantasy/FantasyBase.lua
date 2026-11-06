@@ -1,0 +1,136 @@
+local P = class("FantasyBase", UiFullView)
+
+function P:onAwake()
+    self._isMute = true
+
+    self.AnimRoot = self:find("AnimRoot")
+    self.Center = self:find("Center", self.AnimRoot)
+    self.Left = self:find("Left", self.AnimRoot)
+    self.Right = self:find("Right", self.AnimRoot)
+    self.LeftTop = self:find("LeftTop", self.AnimRoot)
+    self.RightTop = self:find("RightTop", self.AnimRoot)
+    self.LeftBottom = self:find("LeftBottom", self.AnimRoot)
+    self.RightBottom = self:find("RightBottom", self.AnimRoot)
+
+    self.BackButton = self:find("BackButton", self.LeftTop)
+    self.TipsButton = self:find("TipsButton", self.LeftTop)
+    self.PropButton = self:find("FantasyCurrency/icon_activity_s9_01", self.RightTop)
+    self.TextCount = self:find("FantasyCurrency/Value", self.RightTop)
+    self.PlusFrameButton = self:find("FantasyCurrency/fantasy_main_bg_01", self.RightTop)
+    self.PlusButton = self:find("FantasyCurrency/fantasy_main_btn_plus", self.RightTop)
+
+    self.RoleButton = self:find("RoleButton", self.AnimRoot)
+    self.Tip = self:find("Tip", self.Center)
+    self.TextTip = self:find("Tip/Text", self.Center)
+    self.CacheTips = {}
+    self.LastStr = ""
+
+    self.CharacterImage = self:find("CharacterImage", self.Center)
+
+    bee.addClick(self.BackButton, function()
+       Game:playSound("ui_button_confirm")
+       self:hideUI()
+    end)
+
+    bee.addClick(self.TipsButton, function()
+        Game:playSound("ui_button_confirm")
+        bee.logEvent("activity-theme-rules", ActivityId.Sports)
+        UiManager:showUI("FantasyRules")
+    end)
+
+    bee.addClick(self.PlusFrameButton, function()
+        Game:playSound("ui_button_confirm")
+        self:showDetail()
+        -- ItemModel:jumpView(5001)
+    end)
+    bee.addClick(self.PlusButton, function()
+        Game:playSound("ui_button_confirm")
+        self:showDetail()
+        -- ItemModel:jumpView(5001)
+    end)
+
+    bee.addClick(self.RoleButton, function()
+        if bee.checkCd("Theme_RoleButton", 1) then
+            self:showRoleTip()
+        end
+    end)
+
+    bee.setIcon(self.PropButton, ThemeModel:getThemeIcon())
+    self:clickActiveItem(self.PropButton)
+end
+
+function P:onShow()
+    self:evt_refreshTopInfo()
+
+    self:showRoleTip()
+end
+
+--点击活动道具
+function P:clickActiveItem(obj)
+	bee.addClick(obj, function()
+		Game:playSound("ui_button_confirm")
+		UiManager:showUI("CommonItemTip", {data = ItemModel:getItem(ThemeModel:getItemId(), true), target = obj})
+    end, true)
+end
+
+--点击获得道具跳转
+function P:clickToGetProp(obj)
+    bee.addClick(obj, function()
+        Game:playSound("ui_button_confirm")
+        UiManager:showUI("FantasyTask")
+    end, true)
+end
+
+--点击提示活动道具获得
+function P:showDetail()
+    Game:playSound("ui_button_confirm")
+    UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(ThemeModel:getItemId(), true)})
+end
+
+function P:showRoleTip()
+    if not self.Tip then
+        return
+    end
+    if not self._tips then
+        self.Tip:SetActive(false)
+        return
+    end
+    if #self.CacheTips == 0 then
+        for _,v in pairs(self._tips) do
+            if self.LastStr ~= v then
+                table.insert(self.CacheTips, v)
+            end
+        end
+    end
+
+    local index = math.random(#self.CacheTips)
+    self.LastStr = self.CacheTips[index]
+    table.remove(self.CacheTips, index)
+    bee.setText(self.TextTip, _T(self.LastStr))
+    self.Tip:SetActive(true)
+    bee.Tween.killByTarget(self.Tip)
+
+    bee.setAlpha(self.Tip, 0)
+    bee.tween(self.Tip)
+    : to(0.5, {alpha = 1})
+    : delay(3)
+    : to(0.5, {alpha = 0})
+    : onComplete(function()
+        self.Tip:SetActive(false)
+    end)
+    : link()
+    : setTarget()
+end
+
+function P:evt_refreshTopInfo()
+    bee.setTextGold(self.TextCount, _N2(ItemModel:getItemNumById(ThemeModel:getItemId())))
+end
+
+function P:hideTopUI()
+    self.LeftTop:SetActive(false)
+    self.RightTop:SetActive(false)
+end
+
+
+
+return P

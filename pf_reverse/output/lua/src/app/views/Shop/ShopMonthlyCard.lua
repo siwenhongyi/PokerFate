@@ -12,10 +12,12 @@ function P:onAwake()
 	self.TotalRewardCount2 = self:find("TotalRewardCount2", RewardTotal)
 
 	local Privilege = self:find("Privilege", self.Ani_root)
-	self.ItemTitle = self:find("ItemTitle", Privilege)
-	self.ItemFrame = self:find("ItemFrame", Privilege)
-	self.SignIn = self:find("SignIn", Privilege)
-	self.Task = self:find("Task", Privilege)
+	self.Items = self:find("Items/Viewport/Content", Privilege)
+	self.ItemTitle = self:find("ItemTitle", self.Items)
+	self.ItemFrame = self:find("ItemFrame", self.Items)
+	self.ItemEmoji = self:find("ItemEmoji", self.Items)
+	self.SignIn = self:find("SignIn", self.Items)
+	self.Task = self:find("Task", self.Items)
 	self.OffTitle = self:find("OffTitle", Privilege)
 	self.OnTitle = self:find("OnTitle", Privilege)
 	self.ActiveEff1 = self:find("ActiveEff1", Privilege)
@@ -73,14 +75,68 @@ function P:setContShow()
 	self:setRewardItem(self.Reward2, dailyRewards)
 
 	-- 月卡特权
-	PropItem:create(self:find("PropItem", self.ItemTitle), {item_id = showCfg.exc_title[1], num = 0}):bindTips()
+	PropItem:create(self:find("PropItem", self.ItemTitle), {item_id = showCfg.exc_title[1], num = 0})
 	bee.setText(self:find("NameText", self.ItemTitle), _T("LAB_MONTHLY_CARD_7"))
-	PropItem:create(self:find("PropItem", self.ItemFrame), {item_id = showCfg.exc_frame[1], num = 0}):bindTips()
+	PropItem:create(self:find("PropItem", self.ItemFrame), {item_id = showCfg.exc_frame[1], num = 0})
 	bee.setText(self:find("NameText", self.ItemFrame), _T("LAB_MONTHLY_CARD_8"))
-	PropItem:create(self:find("PropItem", self.SignIn), {item_id = GPropId.Retroactive, num = 0}):bindTips()
+	PropItem:create(self:find("PropItem", self.ItemEmoji), {item_id = showCfg.exc_emoji[1], num = 0})
+	bee.setText(self:find("NameText", self.ItemEmoji), _T("LAB_MONTHLY_CARD_33"))
+	PropItem:create(self:find("PropItem", self.SignIn), {item_id = GPropId.Retroactive, num = 0})
 	bee.setText(self:find("NameText", self.SignIn), _T("LAB_MONTHLY_CARD_9"))
-	PropItem:create(self:find("PropItem", self.Task), {item_id = GPropId.ExclusiveTask, num = 0}):bindTips()
+	PropItem:create(self:find("PropItem", self.Task), {item_id = GPropId.ExclusiveTask, num = 0})
 	bee.setText(self:find("NameText", self.Task), _T("LAB_MONTHLY_CARD_10"))
+
+	local clickCb = function(item, data)
+        if self._itemsTween then
+            self._itemsTween:pause()
+        end
+        UiManager:showUI("CommonItemTip", {data = data, target = item, hideCb = function()
+            if self._itemsTween then
+                self._itemsTween:resume()
+            end
+        end})
+	end
+
+	bee.removeAllClick(self:find("PropItem", self.ItemTitle))
+	bee.addClick(self:find("PropItem", self.ItemTitle), function()
+		clickCb(self:find("PropItem", self.ItemTitle), tpl_props[showCfg.exc_title[1]])
+	end)
+	bee.removeAllClick(self:find("PropItem", self.ItemFrame))
+	bee.addClick(self:find("PropItem", self.ItemFrame), function()
+		clickCb(self:find("PropItem", self.ItemFrame), tpl_props[showCfg.exc_frame[1]])
+	end)
+	bee.removeAllClick(self:find("PropItem", self.ItemEmoji))
+	bee.addClick(self:find("PropItem", self.ItemEmoji), function()
+		clickCb(self:find("PropItem", self.ItemEmoji), tpl_props[showCfg.exc_emoji[1]])
+	end)
+	bee.removeAllClick(self:find("PropItem", self.SignIn))
+	bee.addClick(self:find("PropItem", self.SignIn), function()
+		clickCb(self:find("PropItem", self.SignIn), tpl_props[GPropId.Retroactive])
+	end)
+	bee.removeAllClick(self:find("PropItem", self.Task))
+	bee.addClick(self:find("PropItem", self.Task), function()
+		clickCb(self:find("PropItem", self.Task), tpl_props[GPropId.ExclusiveTask])
+	end)
+
+	bee.Tween.killByTarget(self.Items)
+	CS.Utils.ForceRebuildLayoutImmediate(self.Items)
+	local s1, s2 = self.Items.transform.sizeDelta, self.Items.transform.parent.parent.sizeDelta
+	local pos = self.Items.transform.localPosition
+	pos.x = 0
+	self.Items.transform.localPosition = pos
+	if s1.x > s2.x then
+		self._itemsTween = bee.tween(self.Items)
+		: to(5, {position = bee.v3(s2.x - s1.x, pos.y)})
+		: delay(1)
+		: call(function()
+			if not bee.isNull(parent) then
+				parent.transform.localPosition = pos
+			end
+		end)
+		: loop(-1)
+		: ease(DT.Ease.Linear)
+		: link(parent)
+	end
 
 	if self._timeTag then
 		scheduler:removeTag(self._timeTag)

@@ -50,7 +50,7 @@ function P:onShow()
     self._shopData = tpl_quick_purchase[self._data.quick_buy]
 
     bee.setText(self.TextChip, _N(self._shopData.props[2]))
-    bee.setIcon(self.ingame_bankrupt_chip_01, self._shopData.icon, true)
+    bee.setIcon(self.ingame_bankrupt_chip_01, self._shopData.image, true)
 
     ShopModel:setTextPrice(self.TextPrice, self._shopData.buy_id)
     self.GreatValueFrame:SetActive(false)
@@ -102,7 +102,7 @@ function P:refreshTime()
 end
 
 function P:evt_pay_sucess(data)
-    if GameModel.data then
+    if GameModel.data and not GameModel.data:isMTT() then
         local player = GameModel.data:getMyPlayerInfo()
         if player and player.chips <= 0 then
             Net:sendReq("pb.RebyREQ", {

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass
 from typing import Iterable, Protocol
 
@@ -17,6 +17,9 @@ from pf_entertainment.color_game import (
 class _ChoiceRng(Protocol):
     def choice(self, seq: list[int]) -> int:
         ...
+
+
+ALLOWED_SELECTION_MODES = ("cycle", "bet", "random_each", "recent3_most")
 
 
 @dataclass(frozen=True)
@@ -74,6 +77,98 @@ class LeastSeenColorPicker:
         return {color_id: self._counts[color_id] for color_id in self._color_ids}
 
 
+class RandomColorPicker:
+    """Choose a random color for every play."""
+
+    def __init__(
+        self,
+        *,
+        color_ids: Iterable[int] = ALL_COLOR_IDS,
+        rng: _ChoiceRng | None = None,
+    ) -> None:
+        self._color_ids = tuple(int(color_id) for color_id in color_ids)
+        if not self._color_ids:
+            raise ValueError("color_ids must not be empty")
+        self._rng = rng or random.SystemRandom()
+        self._counts: Counter[int] = Counter({color_id: 0 for color_id in self._color_ids})
+
+    def choose(self) -> ColorPick:
+        return ColorPick(
+            color_id=self._rng.choice(list(self._color_ids)),
+            reason="random_each",
+            candidates=self._color_ids,
+            counts_before=self.snapshot(),
+        )
+
+    def observe(self, ids: Iterable[int]) -> None:
+        for raw_color_id in ids:
+            color_id = int(raw_color_id)
+            if color_id in self._counts:
+                self._counts[color_id] += 1
+
+    def snapshot(self) -> dict[int, int]:
+        return {color_id: self._counts[color_id] for color_id in self._color_ids}
+
+
+class RecentResultsMostSeenColorPicker:
+    """Choose the most common color in the latest result records."""
+
+    def __init__(
+        self,
+        *,
+        color_ids: Iterable[int] = ALL_COLOR_IDS,
+        recent_results: int = 3,
+        rng: _ChoiceRng | None = None,
+    ) -> None:
+        self._color_ids = tuple(int(color_id) for color_id in color_ids)
+        if not self._color_ids:
+            raise ValueError("color_ids must not be empty")
+        if recent_results <= 0:
+            raise ValueError("recent_results must be > 0")
+        self._rng = rng or random.SystemRandom()
+        self._counts: Counter[int] = Counter({color_id: 0 for color_id in self._color_ids})
+        self._recent_results: deque[tuple[int, ...]] = deque(maxlen=recent_results)
+
+    def choose(self) -> ColorPick:
+        counts = self._recent_counts()
+        max_count = max(counts.values())
+        if max_count <= 0:
+            candidates = self._color_ids
+            reason = "random"
+        else:
+            candidates = tuple(
+                color_id
+                for color_id in self._color_ids
+                if counts[color_id] == max_count
+            )
+            reason = "recent3_most_seen"
+        return ColorPick(
+            color_id=self._rng.choice(list(candidates)),
+            reason=reason,
+            candidates=candidates,
+            counts_before=dict(counts),
+        )
+
+    def observe(self, ids: Iterable[int]) -> None:
+        result_ids: list[int] = []
+        for raw_color_id in ids:
+            color_id = int(raw_color_id)
+            if color_id in self._counts:
+                self._counts[color_id] += 1
+                result_ids.append(color_id)
+        if result_ids:
+            self._recent_results.append(tuple(result_ids))
+
+    def snapshot(self) -> dict[int, int]:
+        return {color_id: self._counts[color_id] for color_id in self._color_ids}
+
+    def _recent_counts(self) -> dict[int, int]:
+        counts: Counter[int] = Counter({color_id: 0 for color_id in self._color_ids})
+        for result in self._recent_results:
+            counts.update(result)
+        return {color_id: counts[color_id] for color_id in self._color_ids}
+
+
 @dataclass(frozen=True)
 class ColorMartingaleConfig:
     base_bet: int = DEFAULT_STAKE
@@ -96,8 +191,9 @@ class ColorMartingaleConfig:
             raise ValueError("multiplier must be > 1")
         if self.cycles <= 0:
             raise ValueError("cycles must be > 0")
-        if self.selection_mode not in ("cycle", "bet"):
-            raise ValueError("selection_mode must be 'cycle' or 'bet'")
+        if self.selection_mode not in ALLOWED_SELECTION_MODES:
+            modes = "', '".join(ALLOWED_SELECTION_MODES)
+            raise ValueError(f"selection_mode must be one of '{modes}'")
         if not 1 <= self.lvl <= 5:
             raise ValueError("lvl must be in 1..5")
         if self.room_id < 0:

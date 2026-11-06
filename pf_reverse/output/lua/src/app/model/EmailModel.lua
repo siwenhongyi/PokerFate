@@ -114,7 +114,7 @@ function P:getEamilContent(data)
                     if d2 then
                         p2 = _T(d2.name) .. " x" .. args[3]
                     end
-                    ret = _F(d.main_text, p1, p2)
+                ret = _F(d.main_text, p1, p2)
                 elseif data.system_mail_id == 4002 then
                     local p1, p2, p3 = "", "", ""
                     local act = tpl_theme_activity[args[1]]
@@ -127,9 +127,27 @@ function P:getEamilContent(data)
                         p3 = _T(d2.name)
                     end
                     ret = _F(d.main_text, p1, p2, p3)
+                elseif data.system_mail_id == 6001 or data.system_mail_id == 6002 then
+                    local p1 = os.date("%Y".."/".."%m".."/".."%d %H"..":".."%M", args[1])
+                    local p2 = json.decode(args[2])
+                    local p3 = json.decode(args[3])
+                    local team1 = p2[LanguageManager:getLanguage()]
+                    if not team1 then
+                        team1 = p2["en"]
+                    end
+                    local team2 = p3[LanguageManager:getLanguage()]
+                    if not team2 then
+                        team2 = p3["en"]
+                    end
+                    ret = _F(d.main_text, p1, team1, team2)
+                elseif data.system_mail_id == 90001 or data.system_mail_id == 90002 then
+                    local name1 = args[1][LanguageManager:getLanguage()]
+                    ret = _F(d.main_text, name1)
                 else
                     for k, v in ipairs(args) do
-                        if string.sub(v, 1, 1) == "{" then
+                        if type(v) == "table" then
+                            args[k] = v[LanguageManager:getLanguage()]
+                        elseif string.sub(v, 1, 1) == "{" then
                             local td = json.decode(v)
                             args[k] = td[LAN:getLanguage()] or ""
                         elseif string.find(v, "time_") then

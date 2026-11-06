@@ -62,7 +62,7 @@ function P:getTimeLeftStr(dt, needSecond)
         isHour = true
     end
     if not isDay then
-        if dt > 60 then
+        if dt >= 60 then
             if LAN:getLanguage() == "en" and s ~= "" then
                 s = s .. " "
             end
@@ -137,6 +137,28 @@ function P:getLunarMonthAndDay(time)
     local d = CS.Utils.GetLunarDay(time)
 
     return m, d
+end
+
+-- 判断时间戳 dt 是否在今天的跨天周期内
+-- 游戏日 = targetZone 时区每天的 crossHour(4点) 刷新，即 UTC 19:00 换日
+-- 先算出当前游戏日起始的跨天时间戳，再判断 dt 是否落在该日起的 24 小时内
+function P:isInToday(dt)
+    if not dt then
+        dt = bee.getServerTime()
+    end
+    local now = bee.getServerTime()
+    -- 跨天点在本地时区的时刻（目标时区每天 crossHour 点，如东9区4点 → 本地(4-(9-本地时区))点）
+    local crossHourLocal = (self.crossHour - (self.targetZone - self:getTimeZone())) % 24
+    local t = os.date("*t", now)
+    -- 今天本地时间的跨天点时间戳
+    local crossToday = os.time({year = t.year, month = t.month, day = t.day, hour = crossHourLocal, min = 0, sec = 0})
+    -- 还没到今天的跨天点，说明当前游戏日从昨天的跨天点开始
+    local crossTime = crossToday
+    if now < crossToday then
+        crossTime = crossToday - 86400
+    end
+    -- 传入时间落在 [跨天点, 跨天点+24小时) 内，即为同一个游戏日
+    return dt >= crossTime and dt < crossTime + 86400
 end
 
 return P

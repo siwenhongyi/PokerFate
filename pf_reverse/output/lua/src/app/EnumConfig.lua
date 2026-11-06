@@ -21,6 +21,7 @@ GPropKind = {
     Show = 111,         -- 展示类道具
     ExpCard = 112,      -- 经验卡
     TournamentTicket = 113,    -- 赛事门票
+    EmojiCard = 114,    -- 送礼卡
 
     Avatar = 201,       -- 头像
     FrameAvatar = 202,  -- 头像框
@@ -34,10 +35,19 @@ GPropKind = {
     AllInEff = 210,     -- all in特效
     NameplateEff = 211, -- 铭牌特效
     CardFace = 212,     -- 牌面
+    AllinShowEff = 213, -- allin 秀牌特效
 
     Box = 301,          -- 普通礼包
     RandomBox = 302,    -- 随机礼包
     OptionalBox = 303,  -- 自选礼包
+
+    Emoji = 401,        -- 交互表情
+
+    Illustration = 501, -- 插画
+    MonthlyCardBase = 601,  -- 体验月卡，只有签到奖励生效
+    MonthlyCard = 602,  -- 完整月卡，月卡权益和奖励均可获得
+    RoleCard = 701,     -- 角色
+    SkinCard = 702,     -- 皮肤
 }
 
 -- 道具ID
@@ -51,8 +61,10 @@ GPropId = {
     ChampionPoints = 11000011, -- 冠军积分道具
     Exp = 11000020,         -- 经验
     ExpSNG = 11000021,         -- 经验 SNG
+    ExpDispatch = 11000022,     -- 经验 派遣
     Bond = 11000030,        -- 好感度
     BondSNG = 11000031,        -- 好感度 SNG
+    BondDispatch = 11000032,    -- 好感度 派遣
     ActivePoint = 11000040, -- 日常活跃点
     WeeklyPoint = 11000041, -- 周常活跃点
     ChallengePoint = 11000042,  -- 挑战活跃点
@@ -86,6 +98,16 @@ GPropId = {
     CharacterFileId3 = 11100303,   -- 角色专属档案道具 3
     CharacterFileId4 = 11100304,   -- 角色专属档案道具 4
     CharacterFileId5 = 11100305,   -- 角色专属档案道具 5
+
+    TicketEmoji = 11400001, --交互表情道具
+    
+    OrdinaryDispatch = 10440001,    -- 普通派遣道具
+    SeniorDispatch = 10440002,      -- 高级派遣道具
+    AccelerateDispatch = 10440003,  -- 派遣加速道具
+    RefreshDispatch = 10440004,     -- 事务刷新道具
+    RoleDispatchExp = 10440005,     -- 牌手星级经验
+    CampDispatchUpgrade = 10440006, -- 事务所提升/解锁道具
+    DispatchBonus = 11000051,       -- 派遣彩蛋道具
 }
 
 GPropQuality = {
@@ -135,12 +157,15 @@ GAME_GAME_TYPE = {
     ALLINFOLD_HOLDEM_GAME = 10010206, -- all in fold
 
     LOBBY_OMAHA_GAME    = 10020101, -- 大厅常规奥马哈玩法
+    FRIEND_OMAHA_GAME    = 20020102, -- 好友房奥马哈玩法
+    FRIEND_SNG_GAME    = 20050302, -- 好友 SNG 比赛
     SNG_OMAHA_GAME      = 10060301,
     MTT_OMAHA_GAME      = 10070401,
 
     TRAINING_HOLDEM_GAME    = 40010101, -- 训练房德州德州玩法
     TRAINING_OMAHA_GAME     = 40020101, -- 训练房奥马哈玩法
     SNG_TRAIN_GAME      = 40050301, -- sng 训练场
+    TRAINING_HOLDEM_ALLIN = 40040101,   -- 训练场allin
 
     LOBBY_SLOTS_GAME        = 10030101, -- 大厅slots
     SIDE_GAME_COLOR_GAME    = 30030101, -- color game
@@ -212,7 +237,7 @@ POKER_ACTION = {
 POKER_ACTION_TAGS = {
     [POKER_ACTION.FOLD] = {name = "LAB_FOLD", bg = "InGame[ingame_action_05]", replayBg = "InGame[ingame_replay_action_05]"},
     [POKER_ACTION.CHECK] = {name = "LAB_CHECK", bg = "InGame[ingame_action_02]", replayBg = "InGame[ingame_replay_action_02]"},
-    [POKER_ACTION.CALL] = {name = "LAB_CALL", bg = "InGame[ingame_action_04]", replayBg = "InGame[ingame_replay_action_04]", nameImg = "ingame_action_call_tw"},
+    [POKER_ACTION.CALL] = {name = "LAB_CALL", bg = "InGame[ingame_action_01]", replayBg = "InGame[ingame_replay_action_01]", nameImg = "ingame_action_call_tw"},
     [POKER_ACTION.RAISE] = {name = "LAB_RAISE", bg = "InGame[ingame_action_04]", replayBg = "InGame[ingame_replay_action_04]", nameImg = "ingame_action_raise_tw"},
     [POKER_ACTION.BET] = {name = "LAB_BET", bg = "InGame[ingame_action_04]", replayBg = "InGame[ingame_replay_action_04]", nameImg = "ingame_action_bet_tw"},
     [POKER_ACTION.SB] = {name = "LAB_SMALL_BLIND", bg = "InGame[ingame_action_01]", replayBg = "InGame[ingame_replay_action_01]", nameImg = "ingame_action_sb_tw"},
@@ -227,6 +252,23 @@ POKER_ACTION_TAGS = {
     [POKER_ACTION.ALLIN] = {name = "LAB_ALL_IN_LOWER", bg = "InGame[ingame_action_03]", replayBg = "InGame[ingame_replay_action_03]", nameImg = "ingame_action_allin_tw"},
 }
 
+POKER_RECORD_TAGS = {
+    [POKER_ACTION.FOLD] = "InGame[ingame_assistant_detailes_action_frame_04]",
+    [POKER_ACTION.CHECK] = "InGame[ingame_assistant_detailes_action_frame_03]",
+    [POKER_ACTION.CALL] = "InGame[ingame_assistant_detailes_action_frame_01]",
+    [POKER_ACTION.RAISE] = "InGame[ingame_assistant_detailes_action_frame_02]",
+    [POKER_ACTION.BET] = "InGame[ingame_assistant_detailes_action_frame_02]",
+    [POKER_ACTION.SB] = "InGame[ingame_assistant_detailes_action_frame_01]",
+    [POKER_ACTION.BB] = "InGame[ingame_assistant_detailes_action_frame_01]",
+    [POKER_ACTION.ANTE] = "InGame[ingame_assistant_detailes_action_frame_01]",
+    [POKER_ACTION.FORCE_BB] = "InGame[ingame_assistant_detailes_action_frame_01]",
+    [POKER_ACTION.SYS_FOLD] = "InGame[ingame_assistant_detailes_action_frame_04]",
+    [POKER_ACTION.SYS_CHECK] = "InGame[ingame_assistant_detailes_action_frame_03]",
+    [POKER_ACTION.STRADDLE] = "InGame[ingame_assistant_detailes_action_frame_01]",
+    [POKER_ACTION.LEAVE_FOLD] = "InGame[ingame_assistant_detailes_action_frame_04]",
+    [POKER_ACTION.ALLIN] = "InGame[ingame_assistant_detailes_action_frame_05]",
+}
+
 POKER_ROUND = {
 	PRE_FLOP = 1,
 	FLOP = 2,
@@ -234,6 +276,13 @@ POKER_ROUND = {
 	RIVER = 4,
 	OVER = 5,
 	FINISH = 6,  --结算阶段
+}
+
+POKER_ROUND_NAME = {
+    [POKER_ROUND.PRE_FLOP] = "LAB_GAME_063",
+    [POKER_ROUND.FLOP] = "LAB_GAME_064",
+    [POKER_ROUND.TURN] = "LAB_GAME_065",
+    [POKER_ROUND.RIVER] = "LAB_GAME_066",
 }
 
 POKER_TYPE = {
@@ -388,14 +437,18 @@ CARD_CONTENT_TYPE = {
 
 ------------------ 大厅自动弹窗优先级 ------------------
 LOBBY_POP_PRIORITY = {
+    Loading = 3000,     -- 进出牌桌的loading
     LevelUpgrade = 2000,  -- 升级
     SysOpen = 1900,  -- 功能解锁
     VipUp = 990,    -- vip 等级提升
     Bankrupt = 980, -- 破产保护
+    LimitedPack = 975, --超值礼包
     BondUp = 970,   -- 好感度提升
+    BestSeller = 969,   -- 热销
+    -- SkinGift = 969,     -- 皮肤礼包
     FestivalGift = 968, --活动礼包
-    ActivityGift = 967,     -- 主题活动礼包
-    ShopPush = 965,     -- 商店-新人优惠
+    -- ActivityGift = 967,     -- 主题活动礼包
+    -- ShopPush = 965,     -- 商店-新人优惠
 
     MonthlyCardEffect = 962,    -- 月卡获得特效
     RewardNew = 961,        -- 获得新道具
@@ -440,8 +493,11 @@ SHOP_TYPE = {
     rank_exchange = 17,     -- 兑换商城-扑克总会奖章
     shop_effect = 18,
     activity_gifts = 19,    -- 礼包商城-活动礼包
+    skin_gifts = 20,        -- 皮肤礼包
+    dispatch_passcard = 22, -- 派遣通行证
     hot_spring = 10001,    -- 温泉季商店
     gala_season = 10002,   -- 礼服季商店
+    activity_sports = 20001,    -- 运动会活动商店
 }
 
 SHOP_PAGE_TYPE = {
@@ -487,6 +543,7 @@ SKIN_KIND = {
     NORMAL = 0, -- 普通
     AWAKEN = 1, -- 觉醒
     PAY = 2,    -- 付费
+    SECOND_AWAKEN = 3,  -- 二次觉醒
 }
 
 -- 皮肤等级
@@ -510,6 +567,7 @@ ROLE_VOICE = {
     bet = "2004",
     all_in = {"2011_1","2011_2"},
     all_in_awakened = {"2011_1","2011_2","2011_3"},
+    all_in_awakened2 = {"2011_1","2011_2","2011_3","2011_4"},
     pot = "2006",
     scrap = "3006",    -- 爆衣
 
@@ -523,6 +581,8 @@ ROLE_VOICE = {
 
     take_a_seat = "3001_1",    -- 落座	take_a_seat
     take_a_seat_awakened = "3001_2",   -- 落座_觉醒后 take_a_seat_awakened
+    take_a_seat_awakened2 = "3001_3",   -- 落座_二次觉醒后
+    take_a_seat_skin = "3001_4",    -- 落座 皮肤专用
     game_starts = "3002",    -- 游戏开始	game_starts
     dealer_turn = "3003",    -- 轮到庄位	dealer_turn
     strong_cards = "3004",  -- 初始牌牌力很强	strong_cards
@@ -574,6 +634,8 @@ TaskType = {
 TaskTargetId = {
     ShopChip = 101,         -- 商城-充值筹码界面
     ShopPackage = 102,      -- 商城-特惠礼包界面
+    ShopSkin = 103,         -- 商城-服饰界面
+    ThemeShop = 104,        -- 主题活动商城
     Role = 201,             -- 角色界面
     Info = 301,             -- 其他玩家个人信息界面
     InfoInGame = 302,       -- 牌局其他玩家个人信息界面
@@ -583,6 +645,11 @@ TaskTargetId = {
     HandExplanation = 501,  -- 牌型说明界面
     CardDeck = 601,         -- 牌谱界面
     Tournament = 701,       -- 赛事界面
+    Decoration = 801,       -- 装饰界面
+    Development = 901,      -- 发展基金界面
+    Ranking = 1001,         -- 排行榜界面
+    Achievement = 1101,     -- 成就界面
+
     HotSpring = 10001,      -- 温泉季界面
     GalaSeason = 10002,     -- 礼服季界面
     School = 10003,         -- 开学季界面
@@ -598,6 +665,7 @@ TaskTargetId = {
 TaskTableChatType = {
     Text = 1,
     Emoji = 2,
+    EmojiAni = 3,
 }
 
 -- 七日任务列表
@@ -636,15 +704,33 @@ ActivityId = {
     SevenSignIn = 1001,     -- 七日签到
     SocialMedia = 1002,     -- 关注社媒
     LinkEmail = 1003,       -- 绑定邮箱
+    RetentionSurvey = 1004, -- 问卷调查
 
     Theme = 10000,         -- 主题活动，包含了下面的活动
     HotSpring = 10001,    -- 温泉季活动
     GalaSeason = 10002,     -- 礼服季活动
     School = 10003,         --开学季活动
     BunnyGirl = 10004,      --兔女郎活动
+    Sports = 10005,         --运动会活动
+    Sayaka = 10006,          -- 泳装季
+    Matsuri = 10007,        --夏日祭
+    Racing = 10008,        --赛车季
+    Fantasy = 10009,        --日幻
 
     SpringFestival = 3001,  --春节活动
 }
+ThemeName = {
+    [ActivityId.HotSpring] = "HotSpringHall",
+    [ActivityId.GalaSeason] = "GalaSeason",
+    [ActivityId.School] = "School",
+    [ActivityId.BunnyGirl] = "BunnyGirl",
+    [ActivityId.Sports] = "Sports",
+    [ActivityId.Sayaka] = "Sayaka",
+    [ActivityId.Matsuri] = "Matsuri",
+    [ActivityId.Racing] = "Racing",
+    [ActivityId.Fantasy] = "Fantasy",
+}
+
 
 ActivityCheckInStatus = {
     NoReward = 1,       -- 签到未领取奖励
@@ -663,15 +749,20 @@ MediaPlatform = {
 }
 
 ------------------ 装饰方案 ------------------
+SchemeTag = {
+    Lobby = 1,  --大厅
+    Ingame = 2, --房间
+}
+
 MusicTag = {
-    Single = 1,
-    Order = 2,
-    Random = 3,
+    Single = 1, --单曲
+    Order = 2, --队列
+    Random = 3, --随机
 }
 
 SchemeRandomTag = {
-    NoRandom = 0,
-    Random = 1,
+    NoRandom = 0, --不随机
+    Random = 1, --随机
 }
 
 ------------------ 排行榜 ------------------
@@ -690,9 +781,35 @@ VibrateKind = {
 
 ------------------ 比赛 ------------------
 TOUR_STATUS = {
+    Unopen = -1,   -- 比赛未开始 mtt
     Unregister = 0, -- 未报名
     Register = 1,   -- 已报名未开赛
-    Inprocess = 2,  -- 比赛进行中
-    Finished = 3,   -- 比赛结束
+    Inprocess = 2,  -- 比赛进行中 sng/mtt
+    Finished = 3,   -- 比赛结束 sng/mtt
     Losed = 4,      -- 比赛中途被淘汰
+}
+
+MTT_PLAYER_STATUS = {
+    Unregister = 0, -- 未报名
+    Register = 1,   -- 已报名
+    Losed = 2,      -- 比赛中途被淘汰
+}
+
+MTT_SIGN_STATUS = {
+    Unopen = -1,  -- 未开放报名
+    Inporcess = 0,   -- 报名中
+    Delayed = 1,   -- 延迟报名中
+    Closed = 2,    -- 报名截止
+}
+
+------------------ 显示模式 ------------------
+ScreenShowType = {
+    Window = 1, --窗口模式
+    FullScreen = 2, --全屏模式
+    Borderless = 3, --无边框窗口
+}
+ScreenShowTypeName = {
+    [ScreenShowType.Window] = "LAB_SETTINGS_168", --窗口模式
+    [ScreenShowType.FullScreen] = "LAB_SETTINGS_014", --全屏模式
+    [ScreenShowType.Borderless] = "LAB_SETTINGS_137", --无边框窗口
 }

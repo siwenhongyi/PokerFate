@@ -8,6 +8,9 @@ function P:onAwake()
     self.ButtonCode = self:find("ButtonCode", Center)
     self.ButtonCode2 = self:find("ButtonCode2", Center)
 
+    bee.checkInputField(self.InputFieldName, _T("LAB_E_MAIL"))
+    bee.checkInputField(self.InputFieldCode, _T("LAB_VERI_CODE_INPUT"))
+
     bee.addClick(self:find("ButtonClose", Center), function()
         bee.emit("evt_showRegister")
         self:hideUI()

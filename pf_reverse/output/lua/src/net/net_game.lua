@@ -9,16 +9,13 @@ function net:UserLoginRSP(msg)
         ModelManager:afterLogin()
         Net:sendReq("pb.SelfUserInfoREQ", {})
         Net:sendReq("pb.UserValueREQ", {type = GPropId.Gold})
-        Net:sendReq("pb.ItemListREQ", {})
         Net:sendReq("pb.RoleListREQ", {})
         Net:sendReq("pb.GetBlockChatListREQ", {})
         GachaModel:initGachaPoolList()
         FriendModel:initFriendList()
         ShopModel:initInfo()
         PlayerModel:reqCurRecord()
-        -- PlayerModel:requestDecorationScheme()
         ShareModel:initShareList()
-        -- EmailModel:reqEmailList(EmailModel.MAIL_TYPE.Normal, 0)
         EmailModel:reqEmailList(nil, 0, function()
             EmailModel:reqEmailList(EmailModel.MAIL_TYPE.Special, 0)
             EmailModel:reqEmailNum()
@@ -31,7 +28,10 @@ function net:UserLoginRSP(msg)
         ActivityModel:initActInfo()
         ActivityManager:reqActivityData()
         QuickByModel:requireData()
+        QuickByModel:reqLimitPack()
         AchievementModel:requestAchTask()
+        Net:sendReq("pb.SngMatchPlayerNumREQ", {})
+
         bee.once(3, function () AchievementModel:requestAchTaskClearCount() end)
 
         LoginModel:resetHeartBeat()
@@ -117,7 +117,9 @@ function net:ServerStopBRC(msg)
 end
 
 function net:SelfUserInfoRSP(msg)
+    Net:sendReq("pb.ItemListREQ", {})
     SettingModel:setUnlockSys(msg.unlock_modules)
+    SettingModel:setVipHide(msg.switch)
     PlayerModel:setInfo(msg)
     ItemModel:setInfo(msg)
     if bee.isInStart() then
@@ -125,8 +127,8 @@ function net:SelfUserInfoRSP(msg)
     end
     GuideManager:setCurStep(msg.newer_guide_step)
     VipModel:setVipLevel(msg.vip_level)
-    GuideManager:getSystemGuides()
     ClientDataModel:initDatas(msg.client_def_str)
+    GuideManager:getSystemGuides()
 
     bee.emit("evt_refreshTopInfo")
     bee.emit("evt_refreshLevel")
@@ -265,7 +267,9 @@ function net:NoticeBRC(msg)
     elseif msg.type == tpl_PushConsts.GAME_REBATE_SETTLE.code then
         ClientDataModel:reqDevelopmentFundData()
         bee.emit(EventDef.evt_developmentFund_refresh)
-    elseif msg.type >= 10091 and msg.type <= 100100 then -- pay success for stove
+    elseif msg.type == tpl_PushConsts.BACKEND_PRICE_CONFIG_UPDATED.code then
+        ShopModel:requestShopPid()
+    elseif msg.type >= 10091 and msg.type < 10100 then -- pay success for stove
         if msg.message then
             local d = json.decode(msg.message)
             if d then
@@ -278,8 +282,40 @@ function net:NoticeBRC(msg)
         if msg.message then
             local d = json.decode(msg.message)
             if d then
-                -- UiManager:showUI("AchievementTips", {clearId = d[1]})
                 bee.emit("evt_clearAchievement", {clearIds = d})
+            end
+        end
+    elseif msg.type == tpl_PushConsts.MTT_START.code then
+        if msg.message then
+            local d = json.decode(msg.message)
+            if d then
+                if not bee.isInStart() and not GuideManager:isInGuide() then
+	                UiManager:showUI("TournamentMTThint", d)
+                end
+            end
+        end
+    elseif msg.type == tpl_PushConsts.MTT_CANCEL.code then
+        if msg.message then
+            local d = json.decode(msg.message)
+            if d then
+	            bee.emit("evt_MTT_CANCEL", d)
+                if bee.isInGame() and GameModel.data and GameModel.data:isMTT() and GameModel.data.room_info.tour_id == d.tour_id then
+                    if "" ~= d.reason then
+                        bee.once(1, function()
+                            local code = tonumber(d.reason)
+                            if code then
+                                Net:onErrorCode({code = code})
+                            end
+                        end)
+                    end
+                end
+            end
+        end
+    elseif msg.type == tpl_PushConsts.MONTH_CARD_UNLOCK.code then
+        if msg.message then
+            local d = json.decode(msg.message)
+            if d then
+                ShopModel:setMonthlyCardLeftTime(d.monthly_card_exp)
             end
         end
 	end

@@ -47,7 +47,19 @@ function P:onAwake()
         Net:sendReq("pb.JoinFriendRoomREQ", {
             roomid = tonumber(self._curRoomId),
         })
-        bee.logEvent("friendsroom-join")
+        bee.logEvent("friendsroom-join", tonumber(self._curRoomId))
+    end)
+    bee.addClick(self:find("ObserveButton", self.Join), function()
+        if #self._curRoomId < ROOM_ID_LIMIT then
+            UiManager:showToast(_T("LAB_FRIROOM_025"))
+            return
+        end
+        Game:playSound("ui_button_confirm")
+        Net:sendReq("pb.JoinFriendRoomREQ", {
+            roomid = tonumber(self._curRoomId),
+            is_observer = true,
+        })
+        bee.logEvent("friendsroom-view", tonumber(self._curRoomId))
     end)
 
     bee.addClick(self.CreateButton, function()
@@ -65,6 +77,11 @@ function P:onAwake()
         UiManager:showUI("Setting")
         bee.logEvent("friendsroom-setting")
     end)
+    bee.addClick(self:find("RecordButton", self.RightTop), function()
+        Game:playSound("ui_button_confirm")
+        UiManager:showUI("FriendsRoomRecordList")
+        bee.logEvent("friendsroom-history")
+    end)
     bee.addClick(self:find("InfoButton", self.LeftTop), function()
         Game:playSound("ui_button_confirm")
         UiManager:showUI("IngameRules")
@@ -74,11 +91,18 @@ function P:onAwake()
     bee.addClick(self:find("BackButton", self.LeftTop), function()
         self:hideUI()
     end)
+
+    bee.addClick(self:find("ReGuideButton", self.LeftTop), function ()
+        GuideManager:startSystemGuide(21001, 0, true)
+    end)
 end
 
 function P:onShow()
     self._curRoomId = ""
     self:refreshInput()
+
+    if GuideManager:startSystemGuide(21001, 1) then
+    end
 end
 
 function P:addRoomNum(i)

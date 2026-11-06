@@ -84,16 +84,8 @@ function P:onClickPurchase()
 
 	local ownCount = ItemModel:getItemNumById(data.consumeId)
 	if ownCount < self._params.data.pri then
-		-- 前往获得提示
-		local propCfg = tpl_props[self._params.data.consumeId]
-	    local params = {}
-	    params.text = _F("LAB_SHOP_ROLE_SKIN_10", _T(propCfg.name))
-	    params.onSure = function()
-	    	UiManager:hideUI("ShopThemePreview")
-	    	self:hideUI()
-	        ItemModel:jumpView(propCfg.accesses[1])
-	    end
-	    UiManager:showTip(params)
+    	UiManager:showToast(_T("LAB_COMMON_TIPS_1"))
+		UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(data.consumeId, true)})
 		return
 	end
 

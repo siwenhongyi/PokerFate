@@ -5,7 +5,7 @@ local PL = {}
 local function _initData()
     local keys = {'id','name','sub_page','props_type','tab_type','show_type','page_icon','red_name','show_num',}
     local bodys = {
-{1,"LAB_BACKPACK_TAB_1",nil,{101,102,103,104,105,109,301,112,113},1,1,"Backpack[backpack_tab_icon_01]","BackPackProp",1},
+{1,"LAB_BACKPACK_TAB_1",nil,{101,102,103,104,105,109,301,112,113,114},1,1,"Backpack[backpack_tab_icon_01]","BackPackProp",1},
 {2,"LAB_BACKPACK_TAB_2",{15,16},nil,1,2,"Backpack[backpack_tab_icon_02]","BackPackGift",nil},
 {3,"LAB_BACKPACK_TAB_3",nil,{107,108},1,1,"Backpack[backpack_tab_icon_03]","BackPackAwaken",nil},
 {4,"LAB_BACKPACK_TAB_4",{20,5,6,14,7,17},nil,1,1,"Backpack[backpack_tab_icon_04]","BackpackDecorate",nil},
@@ -21,10 +21,13 @@ local function _initData()
 {14,"LAB_BACKPACK_TAB_10",nil,{209},2,1,nil,"BackpackScene",nil},
 {15,"LAB_BACKPACK_TAB_11",nil,{303,302},3,nil,nil,nil,nil},
 {16,"LAB_BACKPACK_TAB_2",nil,{106},3,nil,nil,nil,nil},
-{17,"LAB_BACKPACK_TAB_12",{18,19},nil,2,2,nil,"BackpackEff",nil},
+{17,"LAB_BACKPACK_TAB_12",{18,19,22},nil,2,2,nil,"BackpackEff",nil},
 {18,"LAB_BACKPACK_TAB_13",nil,{210},3,nil,nil,nil,nil},
 {19,"LAB_BACKPACK_TAB_14",nil,{211},3,nil,nil,nil,nil},
-{20,"LAB_BACKPACK_TAB_15",nil,{212},2,1,nil,"BackpackCardFace",nil}
+{20,"LAB_BACKPACK_TAB_15",nil,{212},2,1,nil,"BackpackCardFace",nil},
+{21,"LAB_GAME_EMOJI_01",nil,{401},1,1,"Backpack[backpack_tab_icon_05]","BackpackEmoji",nil},
+{22,"LAB_BACKPACK_TAB_16",nil,{213},3,2,nil,nil,nil},
+{23,"LAB_BACKPACK_TAB_17",nil,{501},1,1,"Backpack[backpack_tab_icon_06]",nil,nil}
 }
     for _, v in pairs(bodys) do
         local m = {}

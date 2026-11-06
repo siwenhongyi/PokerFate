@@ -211,8 +211,9 @@ function P:setShopItem(item, data, isInit, index)
 		end
 
 		if propCfg.type == GPropKind.AllInEff then
-			local themeInfo = PlayerModel:getCurScheme()
-			local skinCfg = tpl_character_skin[themeInfo.skin_id]
+			local skinCfg = DecorationModel:getSkinCfgInScheme()
+			-- local themeInfo = DecorationModel:getCurScheme()
+			-- local skinCfg = tpl_character_skin[themeInfo.skin_id]
 			UiManager:showUI(GameModel:getAllinUiName(propCfg.id), {role = CharacterModel:getRoleData(skinCfg.role), skin = skinCfg})
 		elseif propCfg.type == GPropKind.LobbyScene then
 			UiManager:showUI("BackpackLobbyPreview", {data = propCfg, list = {propCfg}})

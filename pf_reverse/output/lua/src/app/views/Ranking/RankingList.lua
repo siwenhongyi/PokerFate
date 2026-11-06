@@ -230,10 +230,10 @@ function P:setRankItem(item, data, isInit, index)
 	if data.name == "" then
 		bee.setText(NameText, _T("LAB_LEADERBOARD_1"))
 	else
-		bee.setText(NameText, data.name)
+		bee.setText(NameText, GF.getOtherName(data.name, nil, data.uid))
 	end
 
-	bee.setText(CountText, _N1(data.value))
+	bee.setText(CountText, _N2(data.value))
 	bee.setIcon(AvatarImg, PlayerModel:getAvatarIcon(data.avatar))
 	GF.setFrameImage(AvatarFrame, data.frame)
 	GF.setTitleImage(TitleImg, data.title)

@@ -10,7 +10,7 @@ function P:onAwake()
 	self.RecoverButton = self:find("RecoverButton", Panel)
 	self.CloseButton = self:find("CloseButton", Panel)
 
-	self.Input:GetComponent("InputField").characterLimit = 8
+	self.Input:GetComponent("InputField").characterLimit = 16
 
 	bee.addClick(self.CloseButton, function()
 		self:hideUI()

@@ -5,6 +5,7 @@ net = net or {}
 function net:DealerInfoRSP(msg)
 	if not GameModel.data then return end
 	GameModel.data.table_status.gameid = msg.gameid
+	GameModel.data.table_status.is_wait_join = false
 	GameModel.data:setPlaying(true)
 	GameModel.data:setActionIndex(-1)
 	GameModel.data:setPotInfo({})
@@ -16,6 +17,11 @@ function net:DealerInfoRSP(msg)
 	GameModel.data:setDelayRebyChips(0)
 	GameModel.data:setShowCardInfo()
 	GameModel.data:setTableGameOver(false)
+	GameModel.data:resetHistoryInfo()
+
+	if not GameModel.data:isRecord() and not GameModel.data:isInObserve() then
+		RecordDataModel:markRecentDirty()
+	end
 end
 
 -- 发手牌
@@ -23,9 +29,9 @@ function net:HandCardRSP(msg)
 	if not GameModel.data then return end
 	GameModel.data:updateSelfCard(msg)
 	GameModel.data:begenDealCard()
-	local player = GameModel.data:getMyPlayerInfo()
+	local player = GameModel.data:getPlayer(msg.seatid + 1)
 	if player then
-		player.has_card = true
+		player:setHasCard(true)
 	end
 end
 
@@ -51,24 +57,7 @@ end
 function net:ActionBRC(msg)
 	if not GameModel.data then return end
 
-	GameModel.data:refreshLastPotNum()
-	
-	local player = GameModel.data:getPlayer(msg.seatid + 1)
-	player.action_type = msg.action_type
-	player.bet_change = msg.chips
-	player.bet_chip = player.bet_chip + msg.chips
-	player.chips = msg.hand_chips
-	
-	if GF.isFoldAction(msg.action_type) then
-		player.is_fold = true
-	end
-
-	if msg.chips and GameModel.data.updateMaxBetValue then
-		GameModel.data:updateMaxBetValue(msg.chips)
-	end
-	if GameModel.data:getActionIndex() == msg.seatid + 1 then
-		GameModel.data:setActionIndex(-1)
-	end
+	GameModel.data:onActionBRC(msg)
 end
 
 -- 下注圈开始
@@ -82,12 +71,15 @@ function net:RoundStartBRC(msg)
 	if msg.board then
 		GameModel.data:addBoardInfo(msg.board)
 	end
+
+	GameModel.data:addHistoryRound(msg)
 end
 
 -- 下注圈结束
 function net:RoundOverBRC(msg)
 	if not GameModel.data then return end
 	GameModel.data:setPotInfo(msg.pool)
+	GameModel.data:setHistoryPot(msg)
 end
 
 -- 手牌结算
@@ -107,7 +99,7 @@ function net:ShowHandRSP(msg)
 			local seatid = v.seatid + 1
 			local player = GameModel.data:getPlayer(seatid)
 			if player then
-				player.has_card = true
+				player:setHasCard(true)
 				player.is_fold = false
 
 				player.hand_cards = {}
@@ -117,6 +109,7 @@ function net:ShowHandRSP(msg)
 			end
 		end
 		-- GameModel.data:setRoundStage(POKER_ROUND.FINISH)
+		GameModel.data:addHistoryShowRound(msg)
 	end
 end
 
@@ -135,12 +128,13 @@ function net:ShowMyCardBRC(msg)
 			local seatid = v.seatid + 1
 			local player = GameModel.data:getPlayer(seatid)
 			if player then
-				player.has_card = true
-				player.is_fold = false
+				player:setHasCard(true)
+				-- player.is_fold = false
 
 				player.hand_cards = v.hand_cards
 			end
 		end
+		GameModel.data:addHistoryShowCardRound(msg)
 	end
 end
 
@@ -157,6 +151,9 @@ end
 -- 少于2人牌局中断
 function net:TableGameOverRSP(msg)
 	if not GameModel.data then return end
+	if msg.type == 3 then
+		GameModel.data.table_status.is_wait_join = true
+	end
 	GameModel.data:setPlaying(false)
 	GameModel.data:setDealerIndex(-1)
 	GameModel.data:setActionIndex(-1)
@@ -164,6 +161,10 @@ function net:TableGameOverRSP(msg)
 	GameModel.data:setBoardInfo({})
 	GameModel.data:resetPlayerInfo({})
 	GameModel.data:setTableGameOver(true)
+
+	if GameModel.data.room_status.is_addoning then
+        TournamentModel:showAddon()
+	end
 end
 
 -- 发现缺牌时重新请求
@@ -256,7 +257,7 @@ end
 function net:NoticeRebyRSP(msg)
 	if not GameModel.data then return end
 
-	if GameModel.data:isSNG() or GameModel.data:isMTT() then
+	if GameModel.data:isSNG() then
 		return
 	end
 
@@ -306,4 +307,14 @@ end
 function net:BlindStatusBRC(msg)
 	if not GameModel.data then return end
 	GameModel.data:setBlindStatus(msg)
+end
+
+function net:OBTableReachLiveBRC(msg)
+	UiManager:showToast(_T("LAB_TOURNAMENT_MTT_INFO114"))
+end
+
+function net:RoomAvgChipsChangeBRC(msg)
+	if not GameModel.data then return end
+
+	GameModel.data:setAvgChips(msg.avg_chips)
 end

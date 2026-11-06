@@ -17,27 +17,32 @@ end
 function P:loadLocalData()
 	if self._load then return end
 
-	local jstr = LocalStore:getStringForKey(self._model_name)
-	if jstr and string.len(jstr) > 1 then
-		if not bee.isRelease then
-			print(self._model_name.." 存储信息" .. jstr)
-		end
-		--print("读缓存数据")
-		local d = json.decode(jstr)
-		if d then
-			for k, v in pairs(self.saveData or {}) do
-				if d[k]==nil then
-					d[k]=v
-					if not bee.isRelease then
-						CS.NLog.Log(CS.UnityEngine.Color.red, self._model_name.." 兼容一个新加的结构self.saveData."..k)
+	local _, err = pcall(function()
+		local jstr = LocalStore:getStringForKey(self._model_name)
+		if jstr and string.len(jstr) > 1 then
+			if not bee.isRelease then
+				print(self._model_name.." 存储信息" .. jstr)
+			end
+			--print("读缓存数据")
+			local d = json.decode(jstr)
+			if d and type(d) == "table" then
+				for k, v in pairs(self.saveData or {}) do
+					if d[k]==nil then
+						d[k]=v
+						if not bee.isRelease then
+							CS.NLog.Log(CS.UnityEngine.Color.red, self._model_name.." 兼容一个新加的结构self.saveData."..k)
+						end
 					end
 				end
+				
+				self.saveData = d
 			end
-			
-			self.saveData = d
+		else
+			--print("首次读配置")
 		end
-	else
-		--print("首次读配置")
+	end)
+	if err then
+		printError("[BaseModel] loadLocalData error", self.__cname, err)
 	end
 	self:updateCloudData()
 	self._load=true
@@ -64,11 +69,19 @@ end
 function P:afterLogin()
 end
 
-function P:getCloudKeyData(key)
+function P:getCloudKeyData(key, def)
 	if not self.cloud[key .. PlayerModel:getUid()] then
         self.cloud[key .. PlayerModel:getUid()] = {}
     end
-	return self.cloud[key .. PlayerModel:getUid()]
+	local ret =  self.cloud[key .. PlayerModel:getUid()]
+	if def then
+		for k, v in pairs(def) do
+			if nil == ret[k] then
+				ret[k] = v
+			end
+		end
+	end
+	return ret
 end
 
 function P:initListeners()

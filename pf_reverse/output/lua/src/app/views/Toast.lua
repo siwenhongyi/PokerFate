@@ -7,14 +7,30 @@ function P:onAwake()
 	self.inPop = true
     self.ImageBg = self:find("ImageBg")
     self.Text = self:find("Text", self.ImageBg)
+    self.ImageBgPos = self.ImageBg.transform.localPosition
     self.ImageBg.transform.localScale = bee.v3(0,0,0)
 end
 
-function P:onStart()
+function P:onShow()
     if self._params and self._params.text then
         bee.setText(self.Text, self._params.text)
+        local text = self.Text:GetComponent("Text")
+        local gameWidth = UiManager:getUiRoot():GetComponent("RectTransform").sizeDelta.x
+        local fixWidth = gameWidth - 200
+
+        if text.preferredWidth > fixWidth then
+            local horGroup = self.ImageBg:GetComponent("HorizontalLayoutGroup")
+            horGroup.childControlWidth = false
+            horGroup.childControlHeight = true
+            text.rectTransform.sizeDelta = bee.v2(fixWidth, 0)
+        end
     end
     if not bee.isNull(self.ImageBg) then
+        self.ImageBg.transform.localScale = bee.v3(0,0,0)
+        self.ImageBg.transform.localPosition = self.ImageBgPos
+        bee.setAlpha(self.ImageBg, 1)
+
+        bee.Tween.killByTarget(self.ImageBg)
         bee.tween(self.ImageBg)
         : to(0.08, {scale = 1})
         : by(1.5, {y = 120})
@@ -23,7 +39,7 @@ function P:onStart()
         : onComplete(function()
             UiManager:hideUIByCls(self)
         end)
-        : link()
+        : link(self.ImageBg)
     end
 
     if not self._params or not self._params.isSilence then

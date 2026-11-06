@@ -90,7 +90,7 @@ function P:onBtCommon()
 	local strls=string.split(inputCode," ")
 	--print(strls[1],strls[2])
 	UiManager:showToast(_T("执行命命令"..strls[1]), bee.v3(0, 0))
-	if self:EimtFunc(strls[1],strls[2],strls[3]) then
+	if self:EimtFunc(strls[1],strls[2],strls[3],strls[4]) then
 		LocalStore:setStringForKey("gm_last_code", inputCode)
 		self._gms[strls[1]] = inputCode
 		LocalStore:saveTableData("gm_cmd_history", self._gms)

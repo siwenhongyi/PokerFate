@@ -20,6 +20,9 @@ function P:onAwake()
 	self.TotalText3 = self:find("TotalText3", GrandTotal)
 	self.SignInSlider = self:find("SignInSlider", GrandTotal)
 
+	self.CharacterImg = self:find("CharacterImg", Panel)
+	bee.setLimitViewIcon(self.CharacterImg, "avatar_1004_01_full", true)
+
 	self.Item1 = self:find("Item1", RewardCont)
 	self.Item1:SetActive(false)
 
@@ -196,7 +199,13 @@ function P:setSignInItem(item, data)
 		if data.isSigned then
 			return
 		end
-		if data.day >= self._curDay then
+		if data.day == self._curDay then
+			if not data.isSigned then
+				self:signIn()
+			end
+			return
+		end
+		if data.day > self._curDay then
 			return
 		end
 		if SignInModel:getLeftRetroactiveTimes() <= 0 then

@@ -59,4 +59,16 @@ function P:createRoleCanvas()
     end
 end
 
+function P:setRoleOffset(pos, scale)
+    if self._myRoleCanvas then
+        self._myRoleCanvas.CharacterImage.transform.localPosition = pos
+        if scale then
+            self._myRoleCanvas.CharacterImage.transform.localScale = scale
+        end
+    end
+    local Root = self:getRoleSpine()
+    Root.transform.localPosition = pos
+    Root.transform.localScale = scale
+end
+
 return P

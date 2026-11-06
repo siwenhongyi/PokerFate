@@ -1,10 +1,12 @@
 local P = class("TournamentBlindStructure", UiBase)
 
 function P:onAwake()
+    self._closeAnim = "UI_1_TournamentBlindStructure_back"
     self.AnimRoot = self:find("AnimRoot")
     self.Right = self:find("Right", self.AnimRoot)
 
     self.SidePanel = self:find("SidePanel", self.Right)
+    self.InfoButton = self:find("InfoButton", self.SidePanel)
 
     bee.addClick(self:find("TouchMask", self.AnimRoot), function()
         self:hideUI()
@@ -24,7 +26,6 @@ function P:onAwake()
     self.ListBlind:setRefreshFunc(function(data, item)
         self:refreshBlindItem(data, item)
     end)
-
 end
 
 function P:onShow()
@@ -47,7 +48,7 @@ end
 function P:refreshBlindItem(data, item)
     bee.setText(self:find("TextLevel", item), data.blind_level)
     if data.ante > 0 then
-        bee.setText(self:find("TextBlind", item), _N(data.small_blind) .. "/" .. _N(data.big_blind) .. "(" .. _N(data.ante) .. ")")
+        bee.setText(self:find("TextBlind", item), _N(data.small_blind) .. "/" .. _N(data.big_blind) .. " (" .. _N(data.ante) .. ")")
     else
         bee.setText(self:find("TextBlind", item), _N(data.small_blind) .. "/" .. _N(data.big_blind))
     end

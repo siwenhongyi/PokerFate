@@ -43,14 +43,21 @@ function P:onShow()
 end
 
 function P:evt_refreshRecentlyAchievement(data)
-    table.sort(data, function(a, b)
+    local list = {}
+    for _,v in pairs(data) do
+        if tpl_achievement_task[v.task_id] ~= nil then
+            table.insert(list, v)
+        end
+    end
+
+    table.sort(list, function(a, b)
         if a.created_at == b.created_at then
             return a.task_id > b.task_id
         else
             return a.created_at > b.created_at
         end
     end)
-    self.ItemList:setDatas(data)
+    self.ItemList:setDatas(list)
 end
 
 function P:refreshThemeItem(data, item, isInit, index)
@@ -81,7 +88,8 @@ function P:getTip(data, pos)
         str = _F(cfg.des, nameStr)
     end
     self.TestText.text = str
-    local tip = self.TestText.preferredWidth > self.TestTextTran.sizeDelta.x and self.TwoLineTip or self.SingleLineTip
+    local moreLine = self.TestText.preferredWidth > self.TestTextTran.sizeDelta.x
+    local tip = moreLine and self.TwoLineTip or self.SingleLineTip
     tip:SetActive(true)
     bee.setText(self:find("Information/Title", tip), _T(cfg.name))
     bee.setText(self:find("Information/Text", tip), str)
@@ -90,7 +98,47 @@ function P:getTip(data, pos)
     bee.setIcon(self:find("icon", tip), string.format("achievement_level_%s", cfg.ach_level), "Achievement", true)
     self.TipMask:SetActive(true)
     tip.transform.position = pos
+    self:checkTipLimit(moreLine and 2 or 1)
     return tip
+end
+
+function P:checkTipLimit(index)
+    local uiRoot = UiManager:getUiRoot()
+    if uiRoot == nil then
+        return
+    end
+    local height = uiRoot:GetComponent("RectTransform").sizeDelta.y
+    if index == 1 then
+        local rectTran = self.SingleLineTip:GetComponent("RectTransform")
+        local bg = self:find("bg", rectTran)
+        local line = self:find("achievement_record_bg_02", bg)
+        local dif = height * 0.5 - rectTran.sizeDelta.y
+        if rectTran.localPosition.y < -dif then
+            bg.transform.localScale = bee.v3(1, -1, 1)
+            bg.transform.localPosition = bee.v3(bg.transform.localPosition.x, -154.5, bg.transform.localPosition.z)
+            line.transform.localPosition = bee.v3(78.5, -35, 0)
+            rectTran.localPosition = bee.v3(rectTran.localPosition.x, rectTran.localPosition.y + 290, rectTran.localPosition.z)
+        else
+            bg.transform.localScale = bee.v3(1, 1, 1)
+            bg.transform.localPosition = bee.v3(bg.transform.localPosition.x, -114.5, bg.transform.localPosition.z)
+            line.transform.localPosition = bee.v3(78.5, -5, 0)
+        end
+    else
+        local rectTran = self.TwoLineTip:GetComponent("RectTransform")
+        local bg = self:find("bg", rectTran)
+        local line = self:find("achievement_record_bg_02", bg)
+        local dif = height * 0.5 - rectTran.sizeDelta.y
+        if rectTran.localPosition.y < -dif then
+            bg.transform.localScale = bee.v3(1, -1, 1)
+            bg.transform.localPosition = bee.v3(bg.transform.localPosition.x, -175, bg.transform.localPosition.z)
+            line.transform.localPosition = bee.v3(78.5, -58, 0)
+            rectTran.localPosition = bee.v3(rectTran.localPosition.x, rectTran.localPosition.y + 310, rectTran.localPosition.z)
+        else
+            bg.transform.localScale = bee.v3(1, 1, 1)
+            bg.transform.localPosition = bee.v3(bg.transform.localPosition.x, -131, bg.transform.localPosition.z)
+            line.transform.localPosition = bee.v3(78.5, 11, 0)
+        end
+    end
 end
 
 return P

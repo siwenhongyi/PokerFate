@@ -26,17 +26,15 @@ function P:onAwake()
         self.FilesTips:SetActive(false)
     end
 
-    bee.addClick(self:find("BackButton", self.LeftTop), function()
+    self.BackButton = self:find("BackButton", self.LeftTop)
+    bee.addClick(self.BackButton, function()
         self:onBtClose()
-        if self.__cname ~= "CharacterMain" then
-            bee.emit(EventDef.evt_role_back_to_main, self.__cname)
-        end
     end)
 
     bee.addClick(self:find("LobbyButton", self.LeftTop), function()
         self._openAnim, self._closeAnim = nil, "UI_1_" .. self.__cname .. "_backall"
         self:hideUI()
-        UiManager:hideAllUI({"LobbyLayer"})
+        UiManager:hideAllUI({"LobbyLayer"}, true)
         -- UiManager:hideUI("CharacterMain")
         if self.__cname == "CharacterMainGarments" then
             bee.logEvent("character-wardrobe-home")
@@ -93,6 +91,9 @@ end
 
 function P:onBtClose()
     self:hideUI()
+    if self.__cname ~= "CharacterMain" then
+        bee.emit(EventDef.evt_role_back_to_main, self.__cname)
+    end
 end
 
 function P:refreshUI()
@@ -101,15 +102,23 @@ function P:refreshUI()
 end
 
 function P:refreshRole()
+    local x = -381
     if nil == self._RoleCanvas then
         self._RoleCanvas = CharacterModel:getRoleCanvas()
+        if not self._RoleCanvas then
+            return
+        end
+        self._RoleCanvas.CharacterImage.transform.localPosition = bee.v3(x, 0)
     end
     if bee.isNull(self._CharacterImage) then
         self._CharacterImage = self._RoleCanvas:getRoleImage()
         if self._CharacterImage then
             self._CharacterImage.transform:SetParent(self.CharacterImage.transform, false)
+            self._CharacterImage.transform.localPosition = bee.v3(-x, 0)
         end
     end
+    
+    bee.invoke(self._CharacterImage, "setShowReal", true)
     bee.invoke(self._CharacterImage, "setRole", self._role, true)
 
     -- local roleImage = CharacterModel:getRoleImage()

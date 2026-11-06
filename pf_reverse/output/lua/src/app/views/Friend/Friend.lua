@@ -38,6 +38,8 @@ function P:onAwake()
 	self.SearchButton:SetActive(true)
 	self.ClearButton:SetActive(false)
 
+	bee.checkInputField(self.InputFieldSearch, _T("LAB_FRIENDS_1"))
+
 	local TabToggle = self:find("TAB/TabToggle", Left)
 	self.tabToggleList = {}
 	for i = 1, 4 do
@@ -123,6 +125,16 @@ function P:onStart()
 	self:onClickTabToggle(startIndex)
 	
     FriendModel:initFriendList()
+
+	self:schedule(5, function()
+		if self._selectedIndex == TabIndex.FriendsList then
+			FriendModel:requestFriendList(function()
+				if not bee.isNull(self.node) then
+					self:refreshList()
+				end
+			end)
+		end
+	end)
 end
 
 function P:onClickTabToggle(index)
@@ -271,8 +283,10 @@ function P:setFriendItem(item, data)
 	
 	local Online = self:find("Online", FriendCont)
 	local OfflineText = self:find("OfflineText", FriendCont)
-	local BlockButton = self:find("BlockButton", FriendCont)
-	local DeleteButton = self:find("DeleteButton", FriendCont)
+	local IngameText = self:find("IngameText", FriendCont)
+	local BlockButton = self:find("Buttons/BlockButton", FriendCont)
+	local DeleteButton = self:find("Buttons/DeleteButton", FriendCont)
+	local ObserveButton = self:find("Buttons/ObserveButton", FriendCont)
 
 	local AppliedText = self:find("AppliedText", SearchCont)
 	local AddButton = self:find("AddButton", SearchCont)
@@ -294,9 +308,9 @@ function P:setFriendItem(item, data)
 	bee.setIconInAtlas(RankIcon, tpl_level[data.level].icon)
 
 	if data.mark and data.mark ~= "" then
-		bee.setText(NameText, data.mark)
+		bee.setText(NameText, GF.getOtherName(data.mark))
 	else
-		bee.setText(NameText, data.nickname)
+		bee.setText(NameText, GF.getOtherName(data.nickname))
 	end
 	bee.setIcon(AvatarIcon, PlayerModel:getAvatarIcon(data.avatar))
 	GF.setFrameImage(AvatarFrame, data.using_frame)
@@ -308,8 +322,10 @@ function P:setFriendItem(item, data)
 		ApplyCont:SetActive(false)
 		BlockedCont:SetActive(false)
 
-		Online:SetActive(data.is_online)
-		OfflineText:SetActive(not data.is_online)
+		IngameText:SetActive(data.roomid and data.roomid > 0)
+		Online:SetActive(not IngameText.activeSelf and data.is_online)
+		OfflineText:SetActive(not IngameText.activeSelf and not data.is_online)
+		ObserveButton:SetActive(data.roomid and data.roomid > 0)
 		if not data.is_online then
 			bee.setText(OfflineText, FriendModel:getOfflineTimeText(data.last_login_time))
 		end
@@ -326,6 +342,11 @@ function P:setFriendItem(item, data)
 			Game:playSound("ui_button_confirm")
 			self:onClickDeleteFriend(data)
 		end)
+		bee.addClick(ObserveButton, function()
+			Game:playSound("ui_button_confirm")
+			bee.logEvent("friends-main-view", data.uid)
+			Net:sendReq("pb.EnterRoomREQ", {roomid = data.roomid, is_observer = true, uid_being_observed = data.uid})
+		end, true)
 	elseif self._selectedIndex == TabIndex.FindFriends then
 		FriendCont:SetActive(false)
 		SearchCont:SetActive(true)
@@ -401,6 +422,7 @@ function P:setFriendItem(item, data)
 		bee.addClick(RevertButton, function()
 			Game:playSound("ui_button_confirm")
 			FriendModel:unblockFriend(data.uid)
+			UiManager:showToast(_T("LAB_FRIENDS_38"))
 			bee.logEvent("friends-blacklist-remove", data.uid)
 		end)
 	end
@@ -435,9 +457,9 @@ function P:setRecentItem(item, data)
 	local AppliedText = self:find("AppliedText", item)
 
 	if data.mark and data.mark ~= "" then
-		bee.setText(NameText, data.mark)
+		bee.setText(NameText, GF.getOtherName(data.mark))
 	else
-		bee.setText(NameText, data.nickname)
+		bee.setText(NameText, GF.getOtherName(data.nickname))
 	end
 	bee.setIcon(AvatarIcon, PlayerModel:getAvatarIcon(data.avatar))
 	GF.setFrameImage(AvatarFrame, data.using_frame)
@@ -520,6 +542,7 @@ function P:onClickBlock(data, cb)
         text = _F("LAB_FRIENDS_26", name),
         onSure = function()
             FriendModel:blockFriend(data.uid)
+			UiManager:showToast(_T("LAB_FRIENDS_27"))
 			if cb then cb() end
         end
     })

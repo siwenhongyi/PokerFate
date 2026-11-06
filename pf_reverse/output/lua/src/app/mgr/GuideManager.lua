@@ -62,8 +62,16 @@ function P:startGuide(id)
 end
 
 -- 开始系统引导
-function P:startSystemGuide(id, delay)
-    local guideId = self:isSysGuideValid(id)
+function P:startSystemGuide(id, delay, reguide, isDebug)
+    local guideId = 0
+    if reguide or isDebug then
+        guideId = id
+        if reguide then
+            bee.logEvent("guide-id-replay", guideId)
+        end
+    else
+        guideId = self:isSysGuideValid(id)
+    end
     if guideId == 0 then
         return false
     end
@@ -75,11 +83,12 @@ function P:startSystemGuide(id, delay)
     self.curGuide = d
     bee.emit(EventDef.evt_sys_guide_start, self.curGuide)
     if d and not UiManager:getUI("GameGuide") then
-        UiManager:showUI("GameGuide", {data = d, delay = delay, sid = guideId})
-        bee.logEvent("guide-id-trigger", guideId)
-        Net:post("player/reportGuide", {guide_id = guideId}, function()
+        UiManager:showUI("GameGuide", {data = d, delay = delay, sid = guideId, reguide = reguide})
+        if not reguide then
+            bee.logEvent("guide-id-trigger", guideId)
             self:changeSysGuideId(guideId)
-        end)
+            Net:post("player/reportGuide", {guide_id = guideId}, function() end)
+        end
         return true
     end
     return false
@@ -158,10 +167,16 @@ end
 
 --获取系统引导id
 function P:getSystemGuides()
+    self.sysGuideIds = ClientDataModel:getData("sys_guide_list")
+    if self.sysGuideIds then
+        return
+    end
+    self.sysGuideIds = {}
+    ClientDataModel:setData("sys_guide_list", self.sysGuideIds)
     Net:post("player/guideList", nil, function(data)
         if data.code == 0 then
-            self.sysGuideIds = data.list or {}
-            -- self.sysGuideIds = {}
+            self.sysGuideIds = table.unique(data.list or {}, true)
+            ClientDataModel:setData("sys_guide_list", self.sysGuideIds, true)
         end
     end)
 end
@@ -177,7 +192,10 @@ end
 
 --系统引导存储记录变更
 function P:changeSysGuideId(id)
-    table.insert(self.sysGuideIds, id)
+    if not table.keyof(self.sysGuideIds, id) then
+        table.insert(self.sysGuideIds, id)
+        ClientDataModel:setData("sys_guide_list", self.sysGuideIds, true)
+    end
 end
 
 --时间判定
@@ -206,20 +224,11 @@ function P:checkGuideId(cfg, id)
         return 0
     end
     return id
+end
 
-    -- if cfg.guide_old == nil then
-    --     if table.keyof(self.sysGuideIds, id) then
-    --         return false
-    --     end
-    --     return true
-    -- else
-    --     if table.keyof(self.sysGuideIds, cfg.guide_old) then
-    --         return false
-    --     elseif table.keyof(self.sysGuideIds, id) then
-    --         return false
-    --     end
-    --     return true
-    -- end
+--引导是否播过
+function P:checkGuidePlayed(id)
+    return table.keyof(self.sysGuideIds, id) ~= nil
 end
 
 return P

@@ -7,8 +7,7 @@ higher-level packages (bot/, strategy/) to avoid circular imports.
 
 
 # ── Opponent-model sample thresholds ─────────────────────────────────────────
-# Minimum hands before we stop treating an opponent as "unknown":
-#   - player_type() returns 'unknown' below this
+# Minimum hands before opponent statistics are trusted by exploit helpers:
 #   - pwi() returns 0 below this
 #   - exploit_adjustments() returns {} below this
 #   - range_v2 prior blending uses GTO defaults below this

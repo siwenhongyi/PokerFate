@@ -3,11 +3,11 @@
 local P = {}
 local PL = {}
 local function _initData()
-    local keys = {'id','shop_type','name','icon','activate_rewards','days','exc_title','exc_frame','buy_id',}
+    local keys = {'id','shop_type','name','icon','activate_rewards','days','exc_title','exc_frame','exc_emoji','buy_id',}
     local bodys = {
-{1,2,"LAB_MONTHLY_CARD_30","Icon[icon_11100003]",{10200001,100,10100001,850000},30,{20400002,1},{20200002,1},200001},
-{2,2,"LAB_MONTHLY_CARD_31","Icon[icon_11100003]",{10200001,400,10100001,3175000},90,{20400002,1},{20200002,1},200002},
-{3,2,"LAB_MONTHLY_CARD_32","Icon[icon_11100003]",{10200001,900,10100001,6975000},180,{20400002,1},{20200002,1},200003}
+{1,2,"LAB_MONTHLY_CARD_30","Icon[icon_11100003]",{10200001,100,10100001,850000},30,{20400002,1},{20200002,1},{40100006,1},200001},
+{2,2,"LAB_MONTHLY_CARD_31","Icon[icon_11100003]",{10200001,400,10100001,3175000},90,{20400002,1},{20200002,1},{40100006,1},200002},
+{3,2,"LAB_MONTHLY_CARD_32","Icon[icon_11100003]",{10200001,900,10100001,6975000},180,{20400002,1},{20200002,1},{40100006,1},200003}
 }
     for _, v in pairs(bodys) do
         local m = {}

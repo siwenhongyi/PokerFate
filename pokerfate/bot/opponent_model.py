@@ -3,39 +3,27 @@
 Persistence
 -----------
 OpponentModel 支持将对手数据持久化到 JSON 文件。
-遇到熟悉对手时（相同 player_id 或相同 name），可以直接加载历史数据，
-继续利用已积累的统计信息进行可剥削调整。
+持久化记录以用户唯一 player_id 为主键，name 只是该 uid 的展示属性。
+旧版 name_archive 会在玩家再次出现时按名字懒迁移到 uid 归档。
+遇到熟悉对手时，可以直接加载历史数据，继续利用已积累的统计信息进行可剥削调整。
 
 用法：
-    model = OpponentModel.load("opponents.json")  # 从文件加载
+    model = OpponentModel.load("opponents_all_bb.json")  # 从文件加载
     ...（对战过程中 model 自动更新）
-    model.save("opponents.json")                  # 保存到文件
-
-player_type 标签（hands_seen >= MIN_HANDS_FOR_CLASSIFICATION；按下列顺序先匹配先胜出）
-----------------------------------------------------------------
-nit — VPIP < 18% 且 PFR < 14%。
-
-reg — 22% ≤ VPIP ≤ 32%、16% ≤ PFR ≤ 26%、且 (VPIP−PFR) ≤ 12%。
-
-maniac — VPIP > 33%，且 (AF > 2.5) 或（flop 下注+被动 ≥ 12 且 flop AFq ≥ 0.42 且 AF > 1.6）。
-
-whale — (VPIP > 55% 且 AF < 1.2) 或（48% ≤ VPIP ≤ 55%、AF < 1.25、flop_seen ≥ 15、WTSD ≥ 31%）。
-
-fish — VPIP > 30%、PFR < 17%、且 (VPIP−PFR) ≥ 6%。
-
-calling_station — VPIP > 40% 且 AF < 1.5，且满足以下任一：flop_seen ≥ 15 且 WTSD ≥ 26%；或 PFR ≥ 17%；或 (VPIP−PFR) ≤ 14%。
-
-unknown — 以上皆不满足。
+    model.save("opponents_all_bb.json")           # 保存到文件
 """
 
 from __future__ import annotations
+
 import json
 import logging
 import os
-from dataclasses import dataclass, asdict, fields
+from dataclasses import asdict, dataclass, fields
 from typing import Dict, List, Optional
 
 from pokerfate.core.config import MIN_HANDS_FOR_CLASSIFICATION
+from pokerfate.strategy.range_v2.empirical_model import population_rate
+from pokerfate.strategy.v3.context import VillainStats
 
 log = logging.getLogger(__name__)
 
@@ -221,56 +209,9 @@ class OpponentStats:
         )
         return score
 
-    def player_type(self) -> str:
-        """Classify opponent into a rough player type. 命中条件见本文件模块 docstring。"""
-        if self.hands_seen < MIN_HANDS_FOR_CLASSIFICATION:
-            return 'unknown'
-        vpip = self.vpip
-        pfr = self.pfr
-        af = self.aggression_factor
-        gap = vpip - pfr
-        wtsd = self.wtsd
-        flop_seen = self.flop_seen_count
-        flop_n = self.flop_bet_count + self.flop_passive_count
-        flop_afq = self.flop_afq
-
-        # 1) nit
-        if vpip < 0.18 and pfr < 0.14:
-            return 'nit'
-        # 2) reg — TAG：常客 VPIP/PFR 带 + VPIP−PFR 不过大（减少跛进型误标）
-        if 0.22 <= vpip <= 0.32 and 0.16 <= pfr <= 0.26 and gap <= 0.12:
-            return 'reg'
-        # 3) maniac — 凶：AF 高；flop 样本够时用 AFq 补（AF 在少量 postflop 动作时易失真）
-        if vpip > 0.33 and (
-            af > 2.5
-            or (flop_n >= 12 and flop_afq >= 0.42 and af > 1.6)
-        ):
-            return 'maniac'
-        # 4) whale — 极松被动；55%+ 经典 whale；48–55% 需 flop/摊牌样本 + 高 WTSD 支撑
-        if vpip > 0.55 and af < 1.2:
-            return 'whale'
-        if (
-            0.48 <= vpip <= 0.55
-            and af < 1.25
-            and flop_seen >= 15
-            and wtsd >= 0.31
-        ):
-            return 'whale'
-        # 5) fish — 松、主动加注少、VPIP−PFR 偏大（跛进/跟注型）
-        if vpip > 0.30 and pfr < 0.17 and gap >= 0.06:
-            return 'fish'
-        # 6) calling_station — 松、被动；或 WTSD 偏高印证爱跟到摊牌
-        if vpip > 0.40 and af < 1.5:
-            if flop_seen >= 15 and wtsd >= 0.26:
-                return 'calling_station'
-            if pfr >= 0.17 or gap <= 0.14:
-                return 'calling_station'
-        return 'unknown'
-
     def __repr__(self) -> str:
         return (
-            f"OpponentStats(type={self.player_type()}, "
-            f"VPIP={self.vpip:.0%}, PFR={self.pfr:.0%}, "
+            f"OpponentStats(VPIP={self.vpip:.0%}, PFR={self.pfr:.0%}, "
             f"AF={self.aggression_factor:.1f}, "
             f"fold_cbet={self.fold_to_cbet:.0%}, "
             f"hands={self.hands_seen})"
@@ -283,8 +224,6 @@ class OpponentStats:
         river_action_count / bet_win_count / hands_seen），让 exploit.py 的
         _value_lean / _bluff_lean / _trap_lean 能真正通过所有路驱动。
         """
-        # Import lazily to avoid circular import at module load.
-        from pokerfate.strategy.v3.context import VillainStats
         return VillainStats(
             vpip=self.vpip,
             pfr=self.pfr,
@@ -309,74 +248,30 @@ class OpponentStats:
 class OpponentModel:
     """Track and model opponent behavior, with optional persistence.
 
-    Keyed by player_id (int). Optionally also indexed by name for
-    cross-session lookup when player_ids change.
+    Keyed by player_id (int). Display names are active-table labels, not identity keys.
+    Older name-keyed archives are supported only for lazy migration.
     """
 
     def __init__(self):
         self._stats: Dict[int, OpponentStats] = {}
-        self._id_to_name: Dict[int, str] = {}    # player_id -> name
-        self._name_to_id: Dict[str, int] = {}    # name -> canonical player_id
-        # Archive: stats keyed by name for players who vacated a seat.
-        # Allows stats to survive seat changes without leaking to new occupants.
+        self._id_to_name: Dict[int, str] = {}    # uid -> display name
         self._name_archive: Dict[str, OpponentStats] = {}
         # Showdown calibrator data loaded from file (passed back to caller).
         self._showdown_data: dict = {}
 
-    def register_name(self, player_id: int, name: str) -> None:
-        """Associate a player_id with a display name.
+    def register_name(self, uid: int, name: str) -> None:
+        """Associate a stable uid with a display name and migrate legacy name data."""
+        if uid < 0:
+            return
+        uid = int(uid)
+        if uid not in self._stats and name in self._name_archive:
+            self._stats[uid] = self._name_archive.pop(name)
+        self._id_to_name[uid] = name
 
-        Handles three scenarios correctly:
-
-        1. Same player, same ID (re-registration): no-op, stable.
-
-        2. Same player, new ID (e.g. changed seat between sessions):
-           stats are migrated from old active ID to new ID.
-           Also restores from name_archive if they previously vacated a seat.
-
-        3. Different player, same ID (seat reuse within a session):
-           old player's stats are archived under their name and cleared
-           from this ID so the new player starts with a clean slate.
-           Old player's data is recoverable if they rejoin later.
-        """
-        existing_name = self._id_to_name.get(player_id)
-        if existing_name is not None and existing_name != name:
-            # Scenario 3: different player now at this seat/ID.
-            # Archive old player's stats by name (not lost, just detached).
-            if self._name_to_id.get(existing_name) == player_id:
-                del self._name_to_id[existing_name]
-            if player_id in self._stats:
-                self._name_archive[existing_name] = self._stats.pop(player_id)
-
-        # Restore from archive if this player was previously seen (unregistered).
-        if name in self._name_archive and player_id not in self._stats:
-            self._stats[player_id] = self._name_archive.pop(name)
-
-        # Migrate from a different active ID (same player, seat change).
-        self._id_to_name[player_id] = name
-        if name in self._name_to_id:
-            old_id = self._name_to_id[name]
-            if old_id != player_id and old_id in self._stats:
-                self._stats[player_id] = self._stats.pop(old_id)
-        self._name_to_id[name] = player_id
 
     def unregister_seat(self, player_id: int) -> None:
-        """Dissociate a player_id / seat from its current occupant.
-
-        Call this when a player leaves their seat (StandUpBRC / LeaveRoom)
-        so the next player to sit here does not inherit their stats.
-
-        Stats are moved to the name_archive — if the player rejoins at any
-        seat/ID later, register_name() will restore their history.
-        """
-        name = self._id_to_name.pop(player_id, None)
-        if name is None:
-            return
-        if self._name_to_id.get(name) == player_id:
-            del self._name_to_id[name]
-        # Move stats to name-keyed archive so they survive ID recycling.
-        if player_id in self._stats:
-            self._name_archive[name] = self._stats.pop(player_id)
+        """Compatibility no-op: seat lifecycle is not persisted in the uid model."""
+        return
 
     def get(self, player_id: int) -> OpponentStats:
         if player_id not in self._stats:
@@ -460,7 +355,37 @@ class OpponentModel:
         if won:
             s.showdown_win_count += 1
 
-    def record_win_with_hand_type(self, player_id: int, hand_type: int, had_aggression: bool) -> None:
+    @staticmethod
+    def _is_bluff_win_hand_type(hand_type: int, board_hand_type: int | None = None) -> bool:
+        """Return whether a winning hand type counts as a bluff-win sample."""
+        try:
+            winner_type = int(hand_type)
+        except (TypeError, ValueError):
+            return False
+
+        if board_hand_type is None:
+            return winner_type in (1, 2)
+
+        try:
+            board_type = int(board_hand_type)
+        except (TypeError, ValueError):
+            return winner_type in (1, 2)
+
+        # Strong made winners are value wins for this statistic.
+        if winner_type >= 5:
+            return False
+        if board_type >= 5:
+            return False
+
+        return winner_type == board_type and winner_type in (1, 2, 3, 4)
+
+    def record_win_with_hand_type(
+        self,
+        player_id: int,
+        hand_type: int,
+        had_aggression: bool,
+        board_hand_type: int | None = None,
+    ) -> None:
         """记录赢底池时的牌型，用于统计 bluff_win_rate。
 
         Parameters
@@ -469,24 +394,26 @@ class OpponentModel:
             服务端牌型整数（1=高牌, 2=一对, ...）。
         had_aggression : bool
             本手该玩家是否有过下注/加注行为（无攻击性行为的赢不计入）。
+        board_hand_type : int, optional
+            公牌自身牌型整数（1=高牌, 2=一对, ...），用于判断赢家是否只靠公牌牌力赢。
         """
         if not had_aggression:
             return
         s = self.get(player_id)
         s.bet_win_count += 1
-        if hand_type in (1, 2):   # 高牌或一对 = 弱牌赢
+        if self._is_bluff_win_hand_type(hand_type, board_hand_type):
             s.bluff_win_count += 1
 
     def fold_to_cbet_rate(self, player_id: int) -> float:
         s = self.get(player_id)
         if s.fold_to_cbet_opps < 5:
-            return 0.45  # Default assumption
+            return population_rate('fold_to_cbet', 0.45)
         return s.fold_to_cbet
 
     def river_fold_rate(self, player_id: int) -> float:
         s = self.get(player_id)
         if s.river_facing_bet_opps < 5:
-            return 0.40
+            return population_rate('river_fold_rate', 0.40)
         return s.river_fold_rate
 
     def preferred_exploit_target(self, player_ids: List[int]) -> int:
@@ -518,8 +445,6 @@ class OpponentModel:
         输出字段：
           value_ag_scale      ∈ [0.30, 1.00]  价值下注频率乘子
           bluff_ag_scale      ∈ [0.08, 1.15]  诈唬下注频率乘子
-          value_sizing_scale  ∈ [1.00, 1.35]  价值注码放大倍率
-          aggression_scale    ∈ [0.35, 1.30]  PWI 驱动整体攻击性
           river_bluff_likely  bool            对手河牌偏向诈唬（提升跟注意愿）
           river_bet_rare      bool            对手河牌下注罕见（下注=强手）
           flop_float_favorable bool           对手翻牌激进但可浮牌剥削
@@ -528,8 +453,8 @@ class OpponentModel:
         连续化要点：
           1. sticky 对手（whale/station/fish）原来由 ptype 枚举触发
              bluff_freq='none'。现在由 fold_to_cbet/wtsd/river_fold_rate
-             三路指标共同下压 bluff_ag_scale 至 0.08-0.15；同时 sticky
-             越深 value_sizing_scale 越大（连续插值而非 0/1.30 二档）。
+             三路指标共同下压 bluff_ag_scale 至 0.08-0.15；价值下注强度由
+             value_ag_scale 与 V3 purpose 内部尺寸档位共同处理。
           2. maniac 的慢打（原 value_ag_scale=0.45 硬值）现在由 AF + bwr
              驱动：AF 2.5→0.75, AF 3.0→0.60, AF 3.5+bwr 0.40→0.45。
           3. nit 的多诈唬（原 'high'）由 fold_to_cbet 本身驱动 bluff_ag
@@ -541,8 +466,10 @@ class OpponentModel:
         if s.hands_seen < MIN_HANDS_FOR_CLASSIFICATION:
             return adj
 
-        pwi = s.pwi()
         af = s.aggression_factor
+        ftc_base = population_rate('fold_to_cbet', 0.45)
+        river_fold_base = population_rate('river_fold_rate', 0.45)
+        wtsd_base = population_rate('wtsd', 0.25)
 
         # ──────────────────────────────────────────────────────────────
         # 连续指数：作为下游连续 scale 的共享输入
@@ -551,21 +478,21 @@ class OpponentModel:
         # 缺样本的路贡献 0（不惩罚），最终归一化。
         sticky_parts = []
         if s.fold_to_cbet_opps >= 5:
-            sticky_parts.append(_clip((0.50 - s.fold_to_cbet) / 0.35, 0.0, 1.0))
+            sticky_parts.append(_clip((ftc_base - s.fold_to_cbet) / max(ftc_base, 0.20), 0.0, 1.0))
         if s.flop_seen_count >= 15 or s.server_wtsd_prior > 0:
-            sticky_parts.append(_clip((s.wtsd - 0.22) / 0.22, 0.0, 1.0))
+            sticky_parts.append(_clip((s.wtsd - wtsd_base) / max(1.0 - wtsd_base, 0.20), 0.0, 1.0))
         if s.river_facing_bet_opps >= 5:
-            sticky_parts.append(_clip((0.45 - s.river_fold_rate) / 0.30, 0.0, 1.0))
+            sticky_parts.append(_clip((river_fold_base - s.river_fold_rate) / max(river_fold_base, 0.20), 0.0, 1.0))
         sticky_score = sum(sticky_parts) / len(sticky_parts) if sticky_parts else 0.0
 
         # fold_lean_score ∈ [0, 1]：对手"易弃牌"强度（与 sticky 对称）。
         fold_lean_parts = []
         if s.fold_to_cbet_opps >= 5:
-            fold_lean_parts.append(_clip((s.fold_to_cbet - 0.45) / 0.25, 0.0, 1.0))
+            fold_lean_parts.append(_clip((s.fold_to_cbet - ftc_base) / max(1.0 - ftc_base, 0.20), 0.0, 1.0))
         if s.river_facing_bet_opps >= 5:
-            fold_lean_parts.append(_clip((s.river_fold_rate - 0.45) / 0.25, 0.0, 1.0))
+            fold_lean_parts.append(_clip((s.river_fold_rate - river_fold_base) / max(1.0 - river_fold_base, 0.20), 0.0, 1.0))
         if s.flop_seen_count >= 15 or s.server_wtsd_prior > 0:
-            fold_lean_parts.append(_clip((0.25 - s.wtsd) / 0.15, 0.0, 1.0))
+            fold_lean_parts.append(_clip((wtsd_base - s.wtsd) / max(wtsd_base, 0.15), 0.0, 1.0))
         fold_lean_score = sum(fold_lean_parts) / len(fold_lean_parts) if fold_lean_parts else 0.0
 
         # ──────────────────────────────────────────────────────────────
@@ -610,11 +537,14 @@ class OpponentModel:
         #   fold-lean 进一步上提。最低 0.08（原 'bluff_freq=none' 等价效果），
         #   最高 1.15（原 'bluff_freq=high' + fold_to_cbet 高的等价效果）。
         if s.fold_to_cbet_opps >= 5:
-            # fold_to_cbet 0.20→0.40, 0.40→0.80, 0.60→1.10, 0.75→1.15(cap)
-            base_bluff = _clip(s.fold_to_cbet / 0.50, 0.25, 1.15)
+            base_bluff = _clip(0.55 + (s.fold_to_cbet - ftc_base) * 1.4, 0.25, 1.15)
         elif action_samples >= 10:
-            # af 高 = 激进 = 我方诈唬易被反加 → 低；af 低 = 被动 = 但爱跟 → 也低
-            base_bluff = _clip(0.55 - (af - 1.5) * 0.20, 0.15, 1.10)
+            # AF 兜底只在缺 fold_to_cbet 时使用。AF 低不是"更容易被诈唬"，
+            # 它通常意味着 check/call 多；AF 过高则容易被反加。两端都降，
+            # 只有 fold_lean 的真实弃牌证据才能把 bluff_ag 拉高。
+            passive_penalty = max(0.0, (1.20 - af) / 1.20) * 0.30
+            aggro_penalty = max(0.0, (af - 2.20) / 1.50) * 0.25
+            base_bluff = _clip(0.55 - passive_penalty - aggro_penalty, 0.20, 0.90)
         else:
             base_bluff = 0.55  # baseline
         # sticky 下压（可至 0.08）：sticky_score=1 时从 base 减 0.40，但不低于 0.08。
@@ -633,38 +563,10 @@ class OpponentModel:
         base_bluff = _clip(base_bluff + fold_lean_score * 0.20, 0.08, 1.15)
         adj['bluff_ag_scale'] = base_bluff
 
-        # ──────────────────────────────────────────────────────────────
-        # value_sizing_scale：价值注码放大倍率
-        # ──────────────────────────────────────────────────────────────
-        #   驱动：sticky（不弃牌+爱摊牌）→ 加大价值注码。
-        #   上限从旧 1.30 提到 1.35（sticky_score=1 + WMSD 证据可加满）。
-        fold_w = _clip((0.45 - s.fold_to_cbet) / 0.30, 0.0, 1.0) \
-                 if s.fold_to_cbet_opps >= 5 else 0.5
-        wtsd_w = _clip((s.wtsd - 0.20) / 0.20, 0.0, 1.0) \
-                 if (s.flop_seen_count >= 15 or s.server_wtsd_prior > 0) else 0.5
-        sizing = 1.0 + 0.30 * fold_w * wtsd_w
-        # WTSD 极端高加满（原代码 hardcoded 1.30，现在保留但在新上限范围内）
-        if (s.flop_seen_count >= 15 or s.server_wtsd_prior > 0) and s.wtsd > 0.38:
-            sizing = max(sizing, 1.30)
-        if s.showdown_count >= 8 and s.wmsd < 0.45 and s.wtsd > 0.35:
-            sizing = max(sizing, 1.32)
-        adj['value_sizing_scale'] = min(1.35, sizing)
-
-        # ──────────────────────────────────────────────────────────────
-        # aggression_scale：PWI 连续映射（原分档保留，驱动指标本来就连续）
-        # ──────────────────────────────────────────────────────────────
-        if pwi >= 60:
-            adj['aggression_scale'] = 0.35
-        elif pwi >= 40:
-            adj['aggression_scale'] = 0.55
-        elif pwi >= 20:
-            adj['aggression_scale'] = 0.75
-        elif pwi >= 0:
-            adj['aggression_scale'] = 0.90
-        elif pwi >= -10:
-            adj['aggression_scale'] = 1.10
-        else:
-            adj['aggression_scale'] = 1.30
+        # 不再输出 aggression_scale。PWI 是"好剥削程度"，不是"整体少进攻"
+        # 的可靠信号；V3 决策层已经用 value_lean / bluff_lean / trap_lean
+        # 分 purpose 加权。保留一个全局 ag×0.35 只会让日志和复盘误以为
+        # loose-passive 桌应整体缩手。
 
         # ──────────────────────────────────────────────────────────────
         # Boolean 派生信号（单一指标阈值 → 语义 flag，用于 log 与特定策略钩子）
@@ -738,13 +640,16 @@ class OpponentModel:
             ``"showdown"`` key. Pass ``calibrator.to_dict()`` here so both
             datasets stay in one local JSON file.
         """
+        players = {
+            str(uid): {
+                "name": self._id_to_name.get(uid, ""),
+                "stats": asdict(stats),
+            }
+            for uid, stats in self._stats.items()
+            if uid >= 0
+        }
         data = {
-            "stats": {
-                str(pid): asdict(stats)
-                for pid, stats in self._stats.items()
-            },
-            "id_to_name": {str(k): v for k, v in self._id_to_name.items()},
-            "name_to_id": self._name_to_id,
+            "players": players,
             "name_archive": {
                 name: asdict(stats)
                 for name, stats in self._name_archive.items()
@@ -752,6 +657,9 @@ class OpponentModel:
         }
         if showdown_data is not None:
             data["showdown"] = showdown_data
+        parent = os.path.dirname(filepath)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
@@ -787,12 +695,39 @@ class OpponentModel:
             return OpponentStats(**{k: v for k, v in stats_dict.items()
                                      if k in valid_keys})
 
-        for pid_str, stats_dict in data.get("stats", {}).items():
-            model._stats[int(pid_str)] = _build(stats_dict)
-        model._id_to_name = {int(k): v for k, v in data.get("id_to_name", {}).items()}
-        model._name_to_id = data.get("name_to_id", {})
+        for pid_str, entry in data.get("players", {}).items():
+            uid = int(pid_str)
+            if isinstance(entry, dict) and "stats" in entry:
+                model._stats[uid] = _build(entry.get("stats", {}))
+                name = entry.get("name")
+                if name:
+                    model._id_to_name[uid] = name
+            elif isinstance(entry, dict):
+                model._stats[uid] = _build(entry)
+        legacy_id_to_name = {
+            str(pid): str(name)
+            for pid, name in data.get("id_to_name", {}).items()
+            if name
+        }
+        legacy_name_to_id = {
+            str(name): str(pid)
+            for name, pid in data.get("name_to_id", {}).items()
+            if name
+        }
         for name, stats_dict in data.get("name_archive", {}).items():
             model._name_archive[name] = _build(stats_dict)
+        for pid_str, stats_dict in data.get("stats", {}).items():
+            # Legacy top-level stats were keyed by runtime player_id, which was
+            # often a physical seat. Keep them only as name-keyed lazy migration
+            # data so we do not persist seat numbers as uid keys.
+            name = legacy_id_to_name.get(str(pid_str))
+            if not name:
+                for candidate_name, candidate_pid in legacy_name_to_id.items():
+                    if candidate_pid == str(pid_str):
+                        name = candidate_name
+                        break
+            if name and name not in model._name_archive:
+                model._name_archive[name] = _build(stats_dict)
         model._showdown_data = data.get("showdown", {})
         return model
 
@@ -835,7 +770,6 @@ class OpponentModel:
             else:
                 self._stats[pid] = stats
         self._id_to_name.update(other._id_to_name)
-        self._name_to_id.update(other._name_to_id)
 
     def summary(self) -> str:
         """Return a human-readable summary of all known opponents."""

@@ -19,7 +19,6 @@ from pokerfate.data import lookup_gto
 # _normalize_position is re-exported for backward-compat with tests and
 # external imports that existed before the core.position module was introduced.
 
-
 def _hand_category(hole_cards: List[Card]) -> str:
     """Convert 2 hole cards to a canonical category string like 'AKs', 'AKo', 'AA'."""
     c1, c2 = hole_cards
@@ -156,9 +155,9 @@ _BB_VS_SB_DEFENSE = _BTN_RANGE | _expand_range(
 # fell through to _BTN_RANGE (~48%) for UTG/MP/CO/BTN opens, causing BB
 # to over-fold by 6+ hands where equity ≥ pot-odds.
 #
-# Sources: GTO Wizard 6-max BB-vs-RFI defend ranges; Pekarstas "Modern
-# Poker Theory" ch.8 table 8.4. MDF vs 3× open = 0.7; IP advantage of
-# opener means real defend is ~0.62-0.85 (tighter vs UTG, widest vs BTN).
+# Sources: GTO Wizard 6-max BB-vs-RFI defend ranges. MDF vs 3× open = 0.7;
+# IP advantage of opener means real defend is ~0.62-0.85 (tighter vs UTG,
+# widest vs BTN).
 # ---------------------------------------------------------------------------
 
 _BB_VS_UTG_DEFENSE = _expand_range(
@@ -215,16 +214,6 @@ _BB_VS_OPEN_DEFENSE = {
     'BTN': _BB_VS_BTN_DEFENSE,
     'SB':  _BB_VS_SB_DEFENSE,
 }
-
-# BB iso-raise range when facing limpers (no one raised, BB has option to raise).
-# Strong enough to thin the field and play for value OOP.
-# With more limpers, only tighten slightly — pot odds improve for everyone.
-_BB_ISO_RAISE = _expand_range(
-    'AA, KK, QQ, JJ, TT, 99, 88, '
-    'AKs, AQs, AJs, ATs, '
-    'AKo, AQo, AJo, '
-    'KQs, KJs'
-)
 
 # Conservative fallback for ISO spots when no chart exists for the position.
 # Chart data is authoritative when present; this fallback only covers missing
@@ -295,78 +284,84 @@ _3BET_SQUEEZE_DOWNGRADE = _expand_range('TT, AJs, AQo, KQs')
 _4BET_MULTIWAY_DOWNGRADE = _expand_range('JJ, TT, AKo')
 _VS_4BET_FALLBACK_JAM = _expand_range('AA, KK')
 _VS_4BET_FALLBACK_CALL = _expand_range('QQ, AKs, AKo')
-_VS_4BET_RANGE_EDGE_FALLBACK = _expand_range('JJ, TT, AQs')
-_VS_4BET_CALL_EQUITY_MIN = {
-    '99': 0.50,
-    'JJ': 0.55,
-    'TT': 0.55,
-    'AQs': 0.52,
-}
-_VS_4BET_CHART_CALL_MIN_EDGE = 0.08
-_VS_4BET_CHART_MIX_MIN_EDGE = 0.13
-_VS_4BET_RANGE_EDGE_MIN = 0.18
-_VS_4BET_STICKY_EDGE_PENALTY = 0.03
-_VS_4BET_CALL_MAX_POT_ODDS = 0.40
-_VS_4BET_CALL_MAX_STACK_COMMIT = 0.45
-_VS_4BET_CALL_MIN_STACK_BB = 70.0
-_VS_4BET_CHART_ALLIN_MAX_STACK_BB = 150.0
-_VS_4BET_EDGE_ADJUST_MIN = -0.03
-_VS_4BET_EDGE_ADJUST_MAX = 0.04
 
-# Chart-backed overlays. These do not remove any baseline action; they only
-# rescue good chart spots that the static baseline would otherwise fold.
-_IP_SMALL_OPEN_3BET_EXPAND = _expand_range('KQo, AJo, KJs, QJs')
-_IP_SMALL_OPEN_CALL_EXPAND = _expand_range('KTs, QTs, JTs')
-_IP_SMALL_OPEN_SPOTS = {
-    ('BTN', 'CO'),
-    ('BTN', 'MP'),
-    ('CO', 'MP'),
-}
-_IP_SMALL_OPEN_MAX_BB = 2.5
-_IP_SMALL_OPEN_MIN_STACK_BB = 50.0
-_IP_SMALL_OPEN_CALL_MIN_STACK_BB = 70.0
-_IP_SMALL_OPEN_STICKY_DENSITY = 0.45
+_GREENLINE_VS_OPEN_MAX_OPEN_BB = 4.0
+_GREENLINE_VS_OPEN_MIN_STACK_BB = 50.0
+_GREENLINE_VS_OPEN_MAX_SQUEEZE_CALLERS = 1
+_GREENLINE_VS_OPEN_SQUEEZE_STICKY_CAP = 0.75
 
-_CHART_3BET_CALL_DEEP_EXPAND = _expand_range(
-    '99, 88, 77, ATs, KJs, KTs, QJs, QTs, JTs, T9s'
+# Amount-aware pressure layer.  Bet level is still named by raise count
+# (open/3bet/4bet), but the continue range must flex with the actual price.
+_TINY_PRESSURE_MAX_CALL_BB = 2.0
+_TINY_PRESSURE_MAX_POT_ODDS = 0.12
+_CHEAP_PRESSURE_MAX_POT_ODDS = 0.20
+_CHEAP_PRESSURE_MAX_STACK_COMMIT = 0.15
+_HEAVY_PRESSURE_MIN_POT_ODDS = 0.35
+_HEAVY_PRESSURE_MIN_STACK_COMMIT = 0.35
+_JAM_PRESSURE_MIN_STACK_COMMIT = 0.65
+_OPEN_SIZE_AS_3BET_MIN_BB = 8.0
+_OPEN_SIZE_AS_4BET_MIN_BB = 32.0
+_PRICE_TINY_EQUITY_EDGE = -0.02
+_PRICE_CHEAP_EQUITY_EDGE = 0.03
+_PRICE_DEFEND_RANGE = _BTN_RANGE | _SB_STEAL_VS_BB | _3BET_RANGE | _expand_range(
+    '22+, A2s+, K2s+, Q5s+, J7s+, T7s+, 97s+, 86s+, 75s+, 65s, 54s, '
+    'A9o+, KTo+, QTo+, JTo'
 )
-_CHART_3BET_CALL_MID_EXPAND = _expand_range(
-    '99, 88, ATs, KJs, QJs, JTs'
+_POOL_FOLD_TO_3BET = 0.55
+_FOLD_TO_3BET_SHRINK_OPPS = 30.0
+_BLUFF_3BET_MIN_EXEC_FREQ = 0.05
+_BLUFF_3BET_PURE_CHART_MIN_EVIDENCE = 0.05
+
+_RANK_VALUE = {
+    '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7,
+    '8': 8, '9': 9, 'T': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14,
+}
+_PRESSURE_PREMIUM_CONTINUE = _expand_range('QQ+, AKs, AKo')
+_PRESSURE_STRONG_CONTINUE = _expand_range('TT+, AQs, AQo, AJs, KQs')
+
+# Opponent-aware range expansions.  These only add continues against opponents
+# whose observed preflop aggression is materially wider than baseline.
+_WIDE_OPEN_3BET_EXPAND = _expand_range('99, 88, ATs, KQo, KJs, QJs')
+_VERY_WIDE_OPEN_3BET_EXPAND = _WIDE_OPEN_3BET_EXPAND | _expand_range(
+    '77, A9s, KTs, QTs, JTs, T9s'
 )
-_CHART_3BET_CALL_DEEP_STACK_BB = 70.0
-_CHART_3BET_CALL_MID_STACK_BB = 50.0
-_CHART_3BET_CALL_MAX_STACK_COMMIT = 0.25
-_CHART_3BET_CALL_MAX_POT_ODDS = 0.42
+_WIDE_3BET_DEFEND_EXPAND = _expand_range(
+    '99, 88, 77, AQo, AJo, ATs, A9s, KQo, KJs, KTs, QJs, QTs, JTs, T9s'
+)
+_VERY_WIDE_3BET_DEFEND_EXPAND = _WIDE_3BET_DEFEND_EXPAND | _expand_range(
+    '66, A8s, K9s, Q9s, 98s, 87s'
+)
 
 
 # ---------------------------------------------------------------------------
-# 3-bet call range by hero-open position (hero open → vs any 3-bet).
-# Sources: GTO Wizard, PioSolver, Acevedo "Modern Poker Theory" (2019),
-# Upswing Poker, cross-validated against Greenline data.
+# 3-bet call fallback by hero-open position (hero open -> vs any 3-bet).
+#
+# Exact hero-position + villain-position responses still come from Greenline.
+# This fallback only runs when that exact chart is absent.  Keep it close to
+# the standard 6-max 100bb high-rake "RFI vs 3bet" continue core instead of
+# the older hand-written wide defend table.
+#
+# Source reference: RangeConverter "6 max 100bb 100z GTO Ranges" free PDF.
+# The standard chart set has UTG/MP/CO/BTN/SB RFI vs 3bet pages; there is no
+# standard BB RFI vs 3bet page, so BB intentionally falls back to default.
 # ---------------------------------------------------------------------------
 _3BET_CALL_BY_POS = {
-    # UTG opens wide-premium; faces 3bet mostly from late positions
+    # UTG: narrow continue core; exact blind/late 3bet mixes are chart-backed.
     'UTG': _expand_range('JJ, TT, AKo, AQs, AJs, KQs'),
 
-    # MP opens slightly wider; includes suited broadway + ATs/88/QJs for MDF
-    'MP':  _expand_range('JJ, TT, 99, 88, AKo, AQs, AQo, AJs, ATs, KQs, KJs, QJs'),
+    # MP: high-rake 100bb core keeps suited broadways; drops old AQo/88 widen.
+    'MP':  _expand_range('JJ, TT, 99, AKo, AQs, AJs, ATs, KQs, KJs, QJs'),
 
-    # CO: removed 66 (OOP 3bet pot implied odds insufficient), kept 77
-    'CO':  _expand_range('JJ, TT, 99, 88, 77, AKo, AQs, AQo, AJs, ATs, KQs'),
+    # CO: keep core pair/broadway calls; avoid auto-calling low suited connectors.
+    'CO':  _expand_range('JJ, TT, 99, 88, AKo, AQs, AJs, ATs, KQs, KJs, QJs, JTs'),
 
-    # BTN: widest defend (IP vs blinds, most common 3bet scenario)
+    # BTN: widest standard RFI-vs-blind-3bet fallback, but still not BB-wide.
     'BTN': _expand_range('JJ, TT, 99, 88, 77, AKo, AQs, AQo, AJs, ATs, A9s, '
-                         'KQs, KQo, KJs, KTs, QJs, JTs, T9s, 98s, 87s'),
+                         'KQs, KQo, KJs, KTs, QJs, QTs, JTs, T9s, 98s'),
 
-    # SB vs BB 3bet: drop low SC, keep broadway SC (OOP flush/straight potential)
+    # SB: only standard SB RFI vs BB 3bet fallback.
     'SB':  _expand_range('JJ, TT, 99, 88, 77, AKo, AQs, AQo, AJs, ATs, '
-                         'KQs, KQo, KJs, KTs, QJs, QTs, JTs, T9s'),
-
-    # BB iso-raise then gets 3bet (review P1 fix — previously missing).
-    # BB defend range vs 3bet is noticeably wider than other positions
-    # because BB already invested 1 bb and gets closing action IP post-flop.
-    'BB':  _expand_range('JJ, TT, 99, 88, 77, AKo, AQs, AQo, AJs, ATs, A9s, '
-                         'KQs, KQo, KJs, KTs, QJs, QTs, JTs, T9s, 98s, 87s'),
+                         'A9s, KQs, KQo, KJs, KTs, QJs, QTs, JTs, T9s, 98s'),
 }
 # Fallback for unknown / unmatched hero position
 _3BET_CALL_DEFAULT = _expand_range('JJ, TT, 99, AKo, AQs, AQo, AJs, KQs')
@@ -411,8 +406,16 @@ _4BET_SIZE_MULT = {
 _4BET_SIZE_FALLBACK_IP = 2.15
 _4BET_SIZE_FALLBACK_OOP = 2.45
 
-# Isolation raise sizing: standard RFI plus 1bb per limper; blinds add an
-# OOP premium because limpers realise equity too cheaply when we go small.
+# Sticky-pool preflop adjustment.  When disabled, RFI/ISO sizing and ISO
+# chart handling fall back to the legacy behavior.
+_PREFLOP_STICKY_POOL_ADJUST_DEFAULT = os.environ.get(
+    'PREFLOP_STICKY_POOL_ADJUST', '1'
+) != '0'
+_RFI_STICKY_OPEN_BONUS_BB = 1.0
+
+# Isolation raise sizing for the observed sticky pool. Logs show standard
+# 3-3.5bb ISO keeps too many callers, so use a 4bb base plus 1bb per limper.
+_ISO_BASE_BB = 4.0
 _ISO_PER_LIMPER_BB = 1.0
 _ISO_OOP_BONUS_BB = 1.0
 
@@ -420,17 +423,21 @@ _ISO_OOP_BONUS_BB = 1.0
 # open-limp and never applies after a raise. It exists for loose multiway
 # tables where paying ~1bb with deep stacks has set-mining / draw implied odds.
 _LIMP_BEHIND_ENABLED = os.environ.get('PF_LIMP_BEHIND_ENABLED', '1') != '0'
-_LIMP_BEHIND_MAX_CALL_BB = float(os.environ.get('PF_LIMP_BEHIND_MAX_CALL_BB', '1.25'))
-_LIMP_BEHIND_MIN_STACK_BB = float(os.environ.get('PF_LIMP_BEHIND_MIN_STACK_BB', '60.0'))
-_LIMP_BEHIND_MIN_IMPLIED = float(os.environ.get('PF_LIMP_BEHIND_MIN_IMPLIED', '25.0'))
-_LIMP_BEHIND_MIN_LIMPERS = int(os.environ.get('PF_LIMP_BEHIND_MIN_LIMPERS', '2'))
-_LIMP_BEHIND_STICKY_DENSITY = float(os.environ.get('PF_LIMP_BEHIND_STICKY_DENSITY', '0.35'))
-_LIMP_BEHIND_LOOSE_LIMPERS = int(os.environ.get('PF_LIMP_BEHIND_LOOSE_LIMPERS', '3'))
-_LIMP_BEHIND_REPLACE_ISO = os.environ.get('PF_LIMP_BEHIND_REPLACE_ISO', '1') != '0'
+_LIMP_BEHIND_MAX_CALL_BB = 1.25
+_LIMP_BEHIND_MIN_STACK_BB = 0.0
+_LIMP_BEHIND_MIN_IMPLIED = 25.0
+_LIMP_BEHIND_MIN_LIMPERS = 1
+_LIMP_BEHIND_STICKY_DENSITY = 0.35
+_LIMP_BEHIND_LOOSE_LIMPERS = 3
 _LIMP_BEHIND_SMALL_PAIRS = _expand_range('22, 33, 44, 55, 66')
 _LIMP_BEHIND_SUITED_CONNECTORS = _expand_range('54s, 65s, 76s, 87s, 98s, T9s, JTs')
 _LIMP_BEHIND_SUITED_ONE_GAPPERS = _expand_range('64s, 75s, 86s, 97s, T8s, J9s, QTs')
 _LIMP_BEHIND_WHEEL_AXS = _expand_range('A2s, A3s, A4s, A5s')
+_ISO_EDGE_LIMP_DOWNGRADE = _LIMP_BEHIND_SMALL_PAIRS | _expand_range(
+    '54s, 65s, 76s, 87s, 98s'
+)
+_ISO_EDGE_FOLD_DOWNGRADE = _expand_range('KTo, QTo, QJo, JTo, K9s, Q9s, J9s, T8s')
+_ISO_EDGE_STICKY_DENSITY = 0.45
 
 # Bluff 3bet frequency by villain (opener) position — applied to _3BET_BLUFF.
 # Tighter open (UTG) → fewer 3bet bluffs; wider open (SB/BTN) → more.
@@ -442,20 +449,30 @@ _BLUFF_3BET_FREQ_BY_VS_POS = {
     'SB':  0.70,
 }
 
-_ACHIEVEMENT_ENTRY_BB = 1000.0
-_ACHIEVEMENT_ENTRY_MAX_CALL_BB = 4.0
-
-
 class PreflopStrategy:
     """Preflop decision engine."""
 
-    def __init__(self, bluff_3bet_freq: float = 0.5,
-                 rng: Optional[random.Random] = None):
+    def __init__(
+        self,
+        bluff_3bet_freq: float = 0.5,
+        rng: Optional[random.Random] = None,
+        sticky_pool_adjust: Optional[bool] = None,
+    ):
         self.bluff_3bet_freq = bluff_3bet_freq  # how often to execute 3-bet bluffs
         # Use an instance RNG so preflop decisions are reproducible alongside
         # the v3 engine (doc 03 §10).
         self._rng: random.Random = rng or random.Random()
+        self.sticky_pool_adjust = (
+            _PREFLOP_STICKY_POOL_ADJUST_DEFAULT
+            if sticky_pool_adjust is None
+            else bool(sticky_pool_adjust)
+        )
         self.last_expand_reason: str = ''
+
+    def _sticky_pool_adjust_enabled(self, override: Optional[bool] = None) -> bool:
+        if override is None:
+            return bool(self.sticky_pool_adjust)
+        return bool(override)
 
     def in_open_range(self, hole_cards: List[Card], position: str,
                       num_players: int = 6) -> bool:
@@ -471,12 +488,36 @@ class PreflopStrategy:
         vs_position: str,
         squeeze_callers: int = 0,
         sticky_density: float = 0.0,
+        villain_vpip: float = 0.0,
+        villain_pfr: float = 0.0,
+        villain_three_bet: float = 0.0,
+        villain_af: float = 1.5,
+        villain_hands_seen: int = 0,
+        villain_fold_to_3bet: float = _POOL_FOLD_TO_3BET,
+        villain_fold_to_3bet_opps: int = 0,
+        open_raise: float = 0.0,
+        big_blind: float = 0.0,
+        stack: float = 0.0,
+        pot: float = 0.0,
+        to_call: float = 0.0,
+        stack_bb: float = 100.0,
+        is_ip: bool = True,
     ) -> bool:
         cat = _hand_category(hole_cards)
+        attack_tier = self._opener_attack_tier(
+            villain_vpip, villain_pfr, villain_three_bet, villain_af, villain_hands_seen,
+        )
         if cat in _3BET_VALUE:
             if squeeze_callers > 0 and cat in _3BET_SQUEEZE_DOWNGRADE:
                 return False
             return True
+        if attack_tier >= 1 and squeeze_callers == 0 and sticky_density < 0.7:
+            if cat in _WIDE_OPEN_3BET_EXPAND:
+                self.last_expand_reason = f"villain_expand:wide_open_3bet {cat}"
+                return True
+            if attack_tier >= 2 and cat in _VERY_WIDE_OPEN_3BET_EXPAND:
+                self.last_expand_reason = f"villain_expand:very_wide_open_3bet {cat}"
+                return True
         if cat in _3BET_BLUFF:
             # Position-aware bluff freq: tighter opener → fewer bluff 3bets.
             vs_norm = _normalize_position(vs_position)
@@ -485,85 +526,749 @@ class PreflopStrategy:
                 freq *= 0.35
             if sticky_density >= 0.7:
                 return False
-            freq *= max(0.0, 1.0 - sticky_density * 1.5)
-            return self._rng.random() < freq
+            candidate_raise = 0.0
+            if open_raise > 0 and big_blind > 0:
+                candidate_raise = self.three_bet_size(
+                    open_raise, is_ip, big_blind,
+                    open_pos=vs_position,
+                    three_bet_pos=position,
+                )
+            freq = self._adjusted_bluff_3bet_freq(
+                cat,
+                freq,
+                position=position,
+                villain_position=vs_position,
+                open_raise=open_raise,
+                big_blind=big_blind,
+                stack=stack,
+                pot=pot,
+                to_call=to_call,
+                stack_bb=stack_bb,
+                candidate_raise=candidate_raise,
+                sticky_density=sticky_density,
+                squeeze_callers=squeeze_callers,
+                villain_vpip=villain_vpip,
+                villain_pfr=villain_pfr,
+                villain_three_bet=villain_three_bet,
+                villain_af=villain_af,
+                villain_hands_seen=villain_hands_seen,
+                villain_fold_to_3bet=villain_fold_to_3bet,
+                villain_fold_to_3bet_opps=villain_fold_to_3bet_opps,
+            )
+            if freq < _BLUFF_3BET_MIN_EXEC_FREQ:
+                self.last_expand_reason = (
+                    f"preflop_exploit:3bet_bluff_block {cat} adj={freq:.0%}"
+                )
+                return False
+            if attack_tier >= 1:
+                freq *= 1.0 + 0.35 * attack_tier
+            freq = min(1.0, freq)
+            fired = self._rng.random() < freq
+            if not fired:
+                self.last_expand_reason = (
+                    f"preflop_exploit:3bet_bluff_freq {cat} adj={freq:.0%}"
+                )
+            return fired
         return False
 
     @staticmethod
     def _chart_has_action(action, wanted: str) -> bool:
+        if isinstance(action, dict):
+            return float(action.get(wanted, 0.0)) > 0.0001
         if isinstance(action, list):
             return wanted in action
         return action == wanted
 
     @staticmethod
-    def _chart_action_is_mixed(action) -> bool:
-        return isinstance(action, list) and 'fold' in action
+    def _primary_chart_action(refs: dict) -> tuple[object, str]:
+        primary = refs.get('primary')
+        source = refs.get('primary_source') or ''
+        if primary is not None:
+            return primary, source
+        return None, source
+
+    def _greenline_action(self, chart_key: str, cat: str) -> tuple[str, str]:
+        """Return the primary preflop chart action.
+
+        Greenline is the only primary chart. PokerGTO is used only as a
+        frequency reference when Greenline returns a mixed action.
+        """
+        refs = lookup_gto(chart_key, cat)
+        action, source = self._primary_chart_action(refs)
+        if action is None:
+            return '', ''
+        raw = action
+        if isinstance(action, list):
+            choices = [str(a) for a in action if a]
+            if not choices:
+                return '', ''
+            weights = self._pokergto_mix_weights(refs.get('pokergto'), choices)
+            weight_source = 'pokergto'
+            if weights is None:
+                uniform = 1.0 / len(choices)
+                weights = {choice: uniform for choice in choices}
+                weight_source = 'uniform'
+            action = self._weighted_chart_choice(choices, weights)
+            weight_text = '/'.join(
+                f"{choice}:{weights.get(choice, 0.0):.0%}" for choice in choices
+            )
+            return str(action), (
+                f"{source}_mix:{chart_key} {cat} {choices} "
+                f"w={weight_source} {weight_text} -> {action}"
+            )
+        if isinstance(action, dict):
+            choices = [
+                str(name)
+                for name in ('allin', 'raise', 'call', 'fold')
+                if float(action.get(name, 0.0)) > 0.0001
+            ]
+            if not choices:
+                return 'fold', f"{source}:{chart_key} {cat} -> fold"
+            weights = {
+                choice: max(0.0, float(action.get(choice, 0.0)))
+                for choice in choices
+            }
+            selected = self._weighted_chart_choice(choices, weights)
+            weight_text = '/'.join(
+                f"{choice}:{weights.get(choice, 0.0):.0%}" for choice in choices
+            )
+            pg_key = refs.get('pokergto_chart_key') or chart_key
+            return selected, (
+                f"{source}:{pg_key} {cat} {weight_text} -> {selected}"
+            )
+        if self._chart_has_action(action, 'allin'):
+            return 'allin', f"{source}:{chart_key} {cat} -> allin"
+        if self._chart_has_action(action, 'raise'):
+            return 'raise', f"{source}:{chart_key} {cat} -> raise"
+        if self._chart_has_action(action, 'call'):
+            return 'call', f"{source}:{chart_key} {cat} -> call"
+        if self._chart_has_action(action, 'fold'):
+            return 'fold', f"{source}:{chart_key} {cat} -> fold"
+        return '', f"{source}:{chart_key} {cat} -> {raw}"
+
+    def _greenline_vs_open_action(
+        self,
+        chart_key: str,
+        cat: str,
+        *,
+        position: str,
+        villain_position: str,
+        open_raise: float,
+        big_blind: float,
+        stack: float,
+        pot: float,
+        to_call: float,
+        stack_bb: float,
+        is_ip: bool,
+        sticky_density: float,
+        squeeze_callers: int,
+        villain_vpip: float,
+        villain_pfr: float,
+        villain_three_bet: float,
+        villain_af: float,
+        villain_hands_seen: int,
+        villain_fold_to_3bet: float,
+        villain_fold_to_3bet_opps: int,
+    ) -> tuple[str, str]:
+        refs = lookup_gto(chart_key, cat)
+        action, source = self._primary_chart_action(refs)
+        if action is None:
+            return '', ''
+
+        def _fallback_choice(choices: list[str]) -> str:
+            if 'call' in choices:
+                return 'call'
+            return 'fold'
+
+        def _candidate_raise() -> float:
+            if open_raise <= 0 or big_blind <= 0:
+                return 0.0
+            return self.three_bet_size(
+                open_raise, is_ip, big_blind,
+                open_pos=villain_position,
+                three_bet_pos=position,
+            )
+
+        def _adjust_raise_weight(base_raise: float) -> tuple[float, str]:
+            adjusted = self._adjusted_bluff_3bet_freq(
+                cat,
+                base_raise,
+                position=position,
+                villain_position=villain_position,
+                open_raise=open_raise,
+                big_blind=big_blind,
+                stack=stack,
+                pot=pot,
+                to_call=to_call,
+                stack_bb=stack_bb,
+                candidate_raise=_candidate_raise(),
+                sticky_density=sticky_density,
+                squeeze_callers=squeeze_callers,
+                villain_vpip=villain_vpip,
+                villain_pfr=villain_pfr,
+                villain_three_bet=villain_three_bet,
+                villain_af=villain_af,
+                villain_hands_seen=villain_hands_seen,
+                villain_fold_to_3bet=villain_fold_to_3bet,
+                villain_fold_to_3bet_opps=villain_fold_to_3bet_opps,
+            )
+            return adjusted, f"exploit_raise={base_raise:.0%}->{adjusted:.0%}"
+
+        if isinstance(action, list):
+            choices = [str(a) for a in action if a]
+            if not choices:
+                return '', ''
+            weights = self._pokergto_mix_weights(refs.get('pokergto'), choices)
+            weight_source = 'pokergto'
+            if weights is None:
+                uniform = 1.0 / len(choices)
+                weights = {choice: uniform for choice in choices}
+                weight_source = 'uniform'
+            exploit_text = ''
+            if 'raise' in choices and cat not in _3BET_VALUE:
+                base_raise = max(0.0, float(weights.get('raise', 0.0)))
+                adjusted, exploit_text = _adjust_raise_weight(base_raise)
+                weights = dict(weights)
+                weights['raise'] = adjusted
+                give_back = max(0.0, base_raise - adjusted)
+                fallback = _fallback_choice(choices)
+                weights[fallback] = max(0.0, float(weights.get(fallback, 0.0))) + give_back
+            selected = self._weighted_chart_choice(choices, weights)
+            weight_text = '/'.join(
+                f"{choice}:{weights.get(choice, 0.0):.0%}" for choice in choices
+            )
+            extra = f" {exploit_text}" if exploit_text else ''
+            return selected, (
+                f"{source}_mix:{chart_key} {cat} {choices} "
+                f"w={weight_source} {weight_text}{extra} -> {selected}"
+            )
+
+        if isinstance(action, dict):
+            choices = [
+                str(name)
+                for name in ('allin', 'raise', 'call', 'fold')
+                if float(action.get(name, 0.0)) > 0.0001
+            ]
+            if not choices:
+                return 'fold', f"{source}:{chart_key} {cat} -> fold"
+            weights = {
+                choice: max(0.0, float(action.get(choice, 0.0)))
+                for choice in choices
+            }
+            exploit_text = ''
+            if 'raise' in choices and cat not in _3BET_VALUE:
+                base_raise = max(0.0, float(weights.get('raise', 0.0)))
+                adjusted, exploit_text = _adjust_raise_weight(base_raise)
+                weights['raise'] = adjusted
+                give_back = max(0.0, base_raise - adjusted)
+                fallback = _fallback_choice(choices)
+                weights[fallback] = max(0.0, float(weights.get(fallback, 0.0))) + give_back
+            selected = self._weighted_chart_choice(choices, weights)
+            weight_text = '/'.join(
+                f"{choice}:{weights.get(choice, 0.0):.0%}" for choice in choices
+            )
+            extra = f" {exploit_text}" if exploit_text else ''
+            pg_key = refs.get('pokergto_chart_key') or chart_key
+            return selected, f"{source}:{pg_key} {cat} {weight_text}{extra} -> {selected}"
+
+        if self._chart_has_action(action, 'allin'):
+            return 'allin', f"{source}:{chart_key} {cat} -> allin"
+        if self._chart_has_action(action, 'raise'):
+            if cat in _3BET_VALUE:
+                return 'raise', f"{source}:{chart_key} {cat} -> raise"
+            size_mult = self._three_bet_size_multiplier(
+                open_raise=open_raise,
+                big_blind=big_blind,
+                stack=stack,
+                pot=pot,
+                candidate_raise=_candidate_raise(),
+            )
+            has_exploit_evidence = (
+                sticky_density >= _BLUFF_3BET_PURE_CHART_MIN_EVIDENCE
+                or villain_fold_to_3bet_opps > 0
+                or villain_hands_seen >= 10
+                or squeeze_callers > 0
+                or size_mult < 0.95
+            )
+            if has_exploit_evidence:
+                adjusted, exploit_text = _adjust_raise_weight(1.0)
+                if adjusted < _BLUFF_3BET_MIN_EXEC_FREQ:
+                    return 'fold', (
+                        f"{source}:{chart_key} {cat} -> fold "
+                        f"{exploit_text}"
+                    )
+                selected = 'raise' if self._rng.random() < adjusted else 'fold'
+                return selected, (
+                    f"{source}:{chart_key} {cat} -> {selected} "
+                    f"{exploit_text}"
+                )
+            return 'raise', f"{source}:{chart_key} {cat} -> raise"
+        if self._chart_has_action(action, 'call'):
+            return 'call', f"{source}:{chart_key} {cat} -> call"
+        if self._chart_has_action(action, 'fold'):
+            return 'fold', f"{source}:{chart_key} {cat} -> fold"
+        return '', f"{source}:{chart_key} {cat} -> {action}"
 
     @staticmethod
-    def _primary_chart_action(refs: dict) -> tuple[object, str]:
-        greenline = refs.get('greenline')
-        if greenline is not None:
-            return greenline, 'greenline'
-        pekarstas = refs.get('pekarstas')
-        if pekarstas is not None:
-            return pekarstas, 'pekarstas'
-        return None, ''
+    def _pokergto_mix_weights(
+        pokergto_action: object,
+        choices: list[str],
+    ) -> dict[str, float] | None:
+        if not isinstance(pokergto_action, dict):
+            return None
+        choice_set = set(choices)
+        nonzero = {
+            name
+            for name, value in pokergto_action.items()
+            if float(value) > 0.0001
+        }
+        if nonzero - choice_set:
+            return None
 
-    def _ip_small_open_expand_action(
+        weights = {
+            choice: max(0.0, float(pokergto_action.get(choice, 0.0)))
+            for choice in choices
+        }
+        total = sum(weights.values())
+        if total <= 0:
+            return None
+
+        return {choice: weight / total for choice, weight in weights.items()}
+
+    def _weighted_chart_choice(self, choices: list[str], weights: dict[str, float]) -> str:
+        weighted = [(choice, max(0.0, float(weights.get(choice, 0.0)))) for choice in choices]
+        total = sum(weight for _, weight in weighted)
+        if total <= 0:
+            return self._rng.choice(choices)
+
+        roll = self._rng.random() * total
+        upto = 0.0
+        for choice, weight in weighted:
+            upto += weight
+            if roll <= upto:
+                return choice
+        return weighted[-1][0]
+
+    @staticmethod
+    def _clamp(x: float, lo: float, hi: float) -> float:
+        return max(lo, min(hi, x))
+
+    @staticmethod
+    def _cat_parts(cat: str) -> tuple[int, int, str]:
+        if len(cat) < 2:
+            return 0, 0, ''
+        hi = _RANK_VALUE.get(cat[0], 0)
+        lo = _RANK_VALUE.get(cat[1], 0)
+        if hi < lo:
+            hi, lo = lo, hi
+        return hi, lo, cat[2] if len(cat) >= 3 else ''
+
+    @classmethod
+    def _bluff_3bet_hand_quality(cls, cat: str) -> float:
+        """Relative realisation/blocker quality for non-value 3bet candidates."""
+        if cat in _3BET_VALUE:
+            return 1.0
+        hi, lo, suited = cls._cat_parts(cat)
+        if hi <= 0 or lo <= 0:
+            return 0.50
+        if suited == '':
+            return 0.75 if hi >= 7 else 0.55
+        if suited == 's':
+            if hi == 14:
+                return 1.10 if lo <= 5 else 0.95
+            if hi >= 12 and lo >= 9:
+                return 0.90
+            if hi - lo <= 1 and hi >= 8:
+                return 0.80
+            if hi - lo <= 2 and hi >= 9:
+                return 0.75
+            return 0.60
+        if hi >= 13 and lo >= 11:
+            return 0.75
+        if hi >= 12 and lo >= 10:
+            return 0.65
+        return 0.45
+
+    @classmethod
+    def _has_deep_implied_playability(cls, cat: str) -> bool:
+        hi, lo, suited = cls._cat_parts(cat)
+        if suited == '':
+            return 22 <= hi * 10 + lo <= 99
+        if suited == 's':
+            return hi == 14 or hi - lo <= 2 or (hi >= 11 and lo >= 9)
+        return False
+
+    def _fold_to_3bet_prior(
+        self,
+        *,
+        sticky_density: float,
+        villain_vpip: float,
+        villain_pfr: float,
+        villain_hands_seen: int,
+    ) -> float:
+        prior = _POOL_FOLD_TO_3BET - 0.14 * self._clamp(sticky_density, 0.0, 1.0)
+        if villain_hands_seen >= 10:
+            gap = max(0.0, villain_vpip - villain_pfr)
+            prior -= max(0.0, villain_vpip - 0.42) * 0.35
+            prior -= max(0.0, gap - 0.18) * 0.50
+            if villain_vpip >= 0.45 and villain_pfr < 0.18 and gap >= 0.22:
+                prior -= 0.10
+        return self._clamp(prior, 0.25, 0.70)
+
+    def _effective_fold_to_3bet(
+        self,
+        *,
+        sticky_density: float,
+        villain_vpip: float,
+        villain_pfr: float,
+        villain_hands_seen: int,
+        villain_fold_to_3bet: float,
+        villain_fold_to_3bet_opps: int,
+    ) -> float:
+        prior = self._fold_to_3bet_prior(
+            sticky_density=sticky_density,
+            villain_vpip=villain_vpip,
+            villain_pfr=villain_pfr,
+            villain_hands_seen=villain_hands_seen,
+        )
+        opps = max(0.0, float(villain_fold_to_3bet_opps or 0))
+        if opps <= 0:
+            return prior
+        rel = opps / (opps + _FOLD_TO_3BET_SHRINK_OPPS)
+        observed = self._clamp(float(villain_fold_to_3bet or 0.0), 0.0, 1.0)
+        return self._clamp(rel * observed + (1.0 - rel) * prior, 0.05, 0.85)
+
+    def _opener_range_multiplier(
+        self,
+        *,
+        villain_vpip: float,
+        villain_pfr: float,
+        villain_three_bet: float,
+        villain_af: float,
+        villain_hands_seen: int,
+    ) -> float:
+        if villain_hands_seen < 10:
+            return 1.0
+        gap = max(0.0, villain_vpip - villain_pfr)
+        if villain_vpip >= 0.45 and villain_pfr < 0.18 and gap >= 0.22:
+            return 0.55
+        mult = 1.0
+        if villain_pfr < 0.14:
+            mult *= 0.65
+        elif villain_pfr < 0.18:
+            mult *= 0.80
+        elif villain_pfr >= 0.30:
+            mult *= 1.18
+        elif villain_pfr >= 0.24:
+            mult *= 1.08
+        if villain_three_bet >= 0.12 and villain_af >= 1.5:
+            mult *= 1.05
+        return self._clamp(mult, 0.45, 1.25)
+
+    def _three_bet_size_multiplier(
+        self,
+        *,
+        open_raise: float,
+        big_blind: float,
+        stack: float,
+        pot: float,
+        candidate_raise: float,
+    ) -> float:
+        mult = 1.0
+        if big_blind > 0 and open_raise > 0:
+            open_bb = open_raise / big_blind
+            if open_bb >= 4.5:
+                mult *= 0.45
+            elif open_bb >= 4.0:
+                mult *= 0.65
+            elif open_bb >= 3.5:
+                mult *= 0.80
+        if stack > 0 and candidate_raise > 0:
+            raise_to = min(candidate_raise, stack)
+            commit = raise_to / stack
+            if commit >= 0.30:
+                mult *= 0.35
+            elif commit >= 0.22:
+                mult *= 0.55
+            elif commit >= 0.17:
+                mult *= 0.75
+            post_stack = max(0.0, stack - raise_to)
+            post_pot = max(1.0, pot + raise_to)
+            post_spr = post_stack / post_pot
+            if post_spr < 2.0:
+                mult *= 0.55
+            elif post_spr < 3.0:
+                mult *= 0.75
+        return self._clamp(mult, 0.15, 1.0)
+
+    def _adjusted_bluff_3bet_freq(
+        self,
+        cat: str,
+        base_freq: float,
+        *,
+        position: str,
+        villain_position: str,
+        open_raise: float,
+        big_blind: float,
+        stack: float,
+        pot: float,
+        to_call: float,
+        stack_bb: float,
+        candidate_raise: float,
+        sticky_density: float,
+        squeeze_callers: int,
+        villain_vpip: float,
+        villain_pfr: float,
+        villain_three_bet: float,
+        villain_af: float,
+        villain_hands_seen: int,
+        villain_fold_to_3bet: float,
+        villain_fold_to_3bet_opps: int,
+    ) -> float:
+        del position, villain_position, to_call, stack_bb
+        if cat in _3BET_VALUE:
+            return 1.0
+        eff_fold = self._effective_fold_to_3bet(
+            sticky_density=sticky_density,
+            villain_vpip=villain_vpip,
+            villain_pfr=villain_pfr,
+            villain_hands_seen=villain_hands_seen,
+            villain_fold_to_3bet=villain_fold_to_3bet,
+            villain_fold_to_3bet_opps=villain_fold_to_3bet_opps,
+        )
+        fold_mult = self._clamp(1.0 + (eff_fold - _POOL_FOLD_TO_3BET) * 2.1, 0.35, 1.35)
+        sticky_mult = self._clamp(1.0 - sticky_density * 0.80, 0.25, 1.0)
+        range_mult = self._opener_range_multiplier(
+            villain_vpip=villain_vpip,
+            villain_pfr=villain_pfr,
+            villain_three_bet=villain_three_bet,
+            villain_af=villain_af,
+            villain_hands_seen=villain_hands_seen,
+        )
+        size_mult = self._three_bet_size_multiplier(
+            open_raise=open_raise,
+            big_blind=big_blind,
+            stack=stack,
+            pot=pot,
+            candidate_raise=candidate_raise,
+        )
+        squeeze_mult = 0.55 if squeeze_callers > 0 else 1.0
+        quality = self._bluff_3bet_hand_quality(cat)
+        return self._clamp(
+            base_freq * fold_mult * sticky_mult * range_mult * size_mult * squeeze_mult * quality,
+            0.0,
+            1.0,
+        )
+
+    @staticmethod
+    def _pressure_inputs(
+        stack: float,
+        pot: float,
+        to_call: float,
+        open_raise: float,
+        big_blind: float,
+    ) -> tuple[float, float, float, float]:
+        raw_call = max(0.0, float(to_call or open_raise or 0.0))
+        call_amt = min(raw_call, stack)
+        contestable_pot = max(0.0, float(pot or 0.0) - max(0.0, raw_call - call_amt))
+        pot_odds = call_amt / (contestable_pot + call_amt) if (contestable_pot + call_amt) > 0 else 1.0
+        stack_commit = call_amt / stack if stack > 0 else 1.0
+        call_bb = call_amt / big_blind if big_blind > 0 else 99.0
+        return call_amt, pot_odds, stack_commit, call_bb
+
+    def _pressure_kind(
+        self,
+        stack: float,
+        pot: float,
+        to_call: float,
+        open_raise: float,
+        big_blind: float,
+    ) -> str:
+        call_amt, pot_odds, stack_commit, call_bb = self._pressure_inputs(
+            stack, pot, to_call, open_raise, big_blind,
+        )
+        if call_amt <= 0:
+            return 'none'
+        if stack_commit >= _JAM_PRESSURE_MIN_STACK_COMMIT:
+            return 'jam'
+        if call_bb <= _TINY_PRESSURE_MAX_CALL_BB or pot_odds <= _TINY_PRESSURE_MAX_POT_ODDS:
+            return 'tiny'
+        if pot_odds <= _CHEAP_PRESSURE_MAX_POT_ODDS and stack_commit <= _CHEAP_PRESSURE_MAX_STACK_COMMIT:
+            return 'cheap'
+        if pot_odds >= _HEAVY_PRESSURE_MIN_POT_ODDS or stack_commit >= _HEAVY_PRESSURE_MIN_STACK_COMMIT:
+            return 'heavy'
+        return 'normal'
+
+    def _price_call_allowed(
+        self,
+        cat: str,
+        stack: float,
+        pot: float,
+        to_call: float,
+        open_raise: float,
+        big_blind: float,
+        equity: float,
+        context: str,
+    ) -> bool:
+        kind = self._pressure_kind(stack, pot, to_call, open_raise, big_blind)
+        if kind not in {'tiny', 'cheap'}:
+            return False
+        if cat not in _PRICE_DEFEND_RANGE:
+            return False
+        call_amt, pot_odds, _, call_bb = self._pressure_inputs(
+            stack, pot, to_call, open_raise, big_blind,
+        )
+        edge = _PRICE_TINY_EQUITY_EDGE if kind == 'tiny' else _PRICE_CHEAP_EQUITY_EDGE
+        if equity < pot_odds + edge:
+            return False
+        self.last_expand_reason = (
+            f"price_call:{kind}_{context} {cat} "
+            f"call={call_bb:.1f}bb po={pot_odds:.0%} eq={equity:.0%}"
+        )
+        return call_amt > 0
+
+    @staticmethod
+    def _opener_attack_tier(
+        villain_vpip: float,
+        villain_pfr: float,
+        villain_three_bet: float,
+        villain_af: float,
+        villain_hands_seen: int,
+    ) -> int:
+        if villain_hands_seen < 10:
+            return 0
+        gap = villain_vpip - villain_pfr
+        loose_passive_raise = villain_vpip >= 0.45 and villain_pfr < 0.17 and gap >= 0.20
+        if loose_passive_raise:
+            return 0
+        if (
+            villain_pfr >= 0.32
+            or (villain_vpip >= 0.50 and villain_pfr >= 0.26)
+            or (villain_three_bet >= 0.12 and villain_pfr >= 0.22 and villain_af >= 1.3)
+        ):
+            return 2
+        if (
+            villain_pfr >= 0.24
+            or (villain_vpip >= 0.42 and villain_pfr >= 0.20)
+            or (villain_three_bet >= 0.09 and villain_pfr >= 0.18)
+        ):
+            return 1
+        return 0
+
+    @staticmethod
+    def _three_bettor_attack_tier(
+        villain_vpip: float,
+        villain_pfr: float,
+        villain_three_bet: float,
+        villain_af: float,
+        villain_hands_seen: int,
+    ) -> int:
+        if villain_hands_seen < 10:
+            return 0
+        if villain_three_bet >= 0.14 or (
+            villain_vpip >= 0.45 and villain_pfr >= 0.28 and villain_af >= 1.3
+        ):
+            return 2
+        if villain_three_bet >= 0.09 or (
+            villain_vpip >= 0.38 and villain_pfr >= 0.23 and villain_af >= 1.2
+        ):
+            return 1
+        return 0
+
+    def _dynamic_3bet_call_range(
+        self,
+        call_range: Set[str],
+        villain_vpip: float,
+        villain_pfr: float,
+        villain_three_bet: float,
+        villain_af: float,
+        villain_hands_seen: int,
+        pressure_kind: str,
+    ) -> Set[str]:
+        expanded = set(call_range)
+        tier = self._three_bettor_attack_tier(
+            villain_vpip, villain_pfr, villain_three_bet, villain_af, villain_hands_seen,
+        )
+        if tier >= 1:
+            expanded |= _WIDE_3BET_DEFEND_EXPAND
+        if tier >= 2:
+            expanded |= _VERY_WIDE_3BET_DEFEND_EXPAND
+        if pressure_kind in {'tiny', 'cheap'}:
+            expanded |= _WIDE_3BET_DEFEND_EXPAND
+        return expanded
+
+    def _greenline_vs_open_expand_action(
         self,
         cat: str,
         position: str,
         villain_position: str,
-        is_ip: bool,
         open_raise: float,
         big_blind: float,
         stack_bb: float,
         sticky_density: float,
         squeeze_callers: int,
+        is_ip: bool,
+        stack: float,
+        pot: float,
+        to_call: float,
+        villain_vpip: float,
+        villain_pfr: float,
+        villain_three_bet: float,
+        villain_af: float,
+        villain_hands_seen: int,
+        villain_fold_to_3bet: float,
+        villain_fold_to_3bet_opps: int,
     ) -> str:
         hero_norm = _normalize_position(position)
         villain_norm = _normalize_position(villain_position)
-        if not is_ip or (hero_norm, villain_norm) not in _IP_SMALL_OPEN_SPOTS:
+        if not hero_norm or not villain_norm or big_blind <= 0:
             return ''
-        if squeeze_callers > 0 or stack_bb < _IP_SMALL_OPEN_MIN_STACK_BB:
+        if stack_bb < _GREENLINE_VS_OPEN_MIN_STACK_BB:
             return ''
-        open_bb = open_raise / big_blind if big_blind > 0 else 99.0
-        good_price_or_table = (
-            open_bb <= _IP_SMALL_OPEN_MAX_BB
-            or sticky_density >= _IP_SMALL_OPEN_STICKY_DENSITY
-        )
-        if not good_price_or_table:
+        open_bb = open_raise / big_blind
+        if open_bb <= 0 or open_bb > _GREENLINE_VS_OPEN_MAX_OPEN_BB:
+            return ''
+        if squeeze_callers > _GREENLINE_VS_OPEN_MAX_SQUEEZE_CALLERS:
+            return ''
+        if squeeze_callers > 0 and sticky_density >= _GREENLINE_VS_OPEN_SQUEEZE_STICKY_CAP:
             return ''
 
         chart_key = f"{hero_norm}-vs-open-{villain_norm}"
-        refs = lookup_gto(chart_key, cat)
-        chart_raises = any(
-            self._chart_has_action(action, 'raise')
-            for action in refs.values()
+        chart_action, chart_reason = self._greenline_vs_open_action(
+            chart_key,
+            cat,
+            position=position,
+            villain_position=villain_position,
+            open_raise=open_raise,
+            big_blind=big_blind,
+            stack=stack,
+            pot=pot,
+            to_call=to_call,
+            stack_bb=stack_bb,
+            is_ip=is_ip,
+            sticky_density=sticky_density,
+            squeeze_callers=squeeze_callers,
+            villain_vpip=villain_vpip,
+            villain_pfr=villain_pfr,
+            villain_three_bet=villain_three_bet,
+            villain_af=villain_af,
+            villain_hands_seen=villain_hands_seen,
+            villain_fold_to_3bet=villain_fold_to_3bet,
+            villain_fold_to_3bet_opps=villain_fold_to_3bet_opps,
         )
-        chart_plays = chart_raises or any(
-            self._chart_has_action(action, 'call')
-            for action in refs.values()
-        )
-        if chart_raises and cat in _IP_SMALL_OPEN_3BET_EXPAND:
-            self.last_expand_reason = (
-                f"chart_expand:ip_3bet_small_open {chart_key} {cat}"
-            )
-            return 'raise'
-        if (
-            chart_plays
-            and stack_bb >= _IP_SMALL_OPEN_CALL_MIN_STACK_BB
-            and cat in _IP_SMALL_OPEN_CALL_EXPAND
-        ):
-            self.last_expand_reason = (
-                f"chart_expand:ip_call_small_open {chart_key} {cat}"
-            )
-            return 'call'
-        return ''
+        if chart_action != 'raise':
+            return ''
 
-    def _chart_expand_3bet_call_allowed(
+        mode = 'squeeze' if squeeze_callers > 0 else '3bet'
+        self.last_expand_reason = (
+            f"chart_expand:{mode} {chart_reason}"
+        )
+        return 'raise'
+
+    def _can_call_vs_3bet(
         self,
         cat: str,
+        call_range: set,
         position: str,
         villain_position: str,
         open_raise: float,
@@ -572,96 +1277,103 @@ class PreflopStrategy:
         pot: float,
         to_call: float,
         stack_bb: float,
+        equity: float = 0.5,
     ) -> bool:
-        hero_norm = _normalize_position(position)
-        villain_norm = _normalize_position(villain_position)
-        if not hero_norm or not villain_norm:
-            return False
-        if hero_norm not in {'UTG', 'MP', 'CO'}:
-            return False
-        if stack_bb >= _CHART_3BET_CALL_DEEP_STACK_BB:
-            expand = _CHART_3BET_CALL_DEEP_EXPAND
-        elif stack_bb >= _CHART_3BET_CALL_MID_STACK_BB:
-            expand = _CHART_3BET_CALL_MID_EXPAND
-        else:
-            return False
-        if cat not in expand:
-            return False
+        if self._price_call_allowed(
+            cat, stack, pot, to_call, open_raise, big_blind, equity, '3bet',
+        ):
+            return True
+        if cat in call_range:
+            return True
+        return False
 
-        call_amt = min(to_call or open_raise, stack)
-        if call_amt <= 0 or call_amt >= stack:
-            return False
-        if stack > 0 and call_amt / stack > _CHART_3BET_CALL_MAX_STACK_COMMIT:
-            return False
-        pot_odds = call_amt / (pot + call_amt) if (pot + call_amt) > 0 else 1.0
-        if pot_odds > _CHART_3BET_CALL_MAX_POT_ODDS:
-            return False
-
-        chart_key = f"{hero_norm}-vs-3bet-{villain_norm}"
-        refs = lookup_gto(chart_key, cat)
-        if not any(self._chart_has_action(action, 'call') for action in refs.values()):
-            return False
-        self.last_expand_reason = f"chart_expand:deep_3bet_defend {chart_key} {cat}"
-        return True
-
-    def _conditional_4bet_call_allowed(
+    def _chart_call_pressure_allows(
         self,
         cat: str,
+        *,
+        context: str,
         stack: float,
         pot: float,
         to_call: float,
         open_raise: float,
-        equity: float,
+        big_blind: float,
         stack_bb: float,
-        cold_callers: int,
-        sticky_density: float,
-        edge_adjust: float = 0.0,
-        chart_defends: bool = False,
-        chart_mixed: bool = False,
-        chart_source: str = 'range_edge',
+        equity: float,
+        is_ip: bool,
     ) -> bool:
-        if cold_callers > 0 or stack_bb < _VS_4BET_CALL_MIN_STACK_BB:
-            return False
-
-        call_amt = min(to_call or open_raise, stack)
-        if call_amt <= 0 or call_amt >= stack:
-            return False
-        if stack > 0 and call_amt / stack > _VS_4BET_CALL_MAX_STACK_COMMIT:
-            return False
-
-        pot_odds = call_amt / (pot + call_amt) if (pot + call_amt) > 0 else 1.0
-        if pot_odds > _VS_4BET_CALL_MAX_POT_ODDS:
-            return False
-
-        edge = equity - pot_odds
-        edge_penalty = (
-            _VS_4BET_STICKY_EDGE_PENALTY if sticky_density >= 0.45 else 0.0
+        call_amt, pot_odds, stack_commit, call_bb = self._pressure_inputs(
+            stack, pot, to_call, open_raise, big_blind,
         )
-        if chart_defends:
-            min_edge = (
-                _VS_4BET_CHART_MIX_MIN_EDGE
-                if chart_mixed else _VS_4BET_CHART_CALL_MIN_EDGE
-            ) + edge_penalty
-        elif cat in _VS_4BET_RANGE_EDGE_FALLBACK:
-            min_edge = _VS_4BET_RANGE_EDGE_MIN + edge_penalty
-        else:
-            return False
-        edge_adjust = max(
-            _VS_4BET_EDGE_ADJUST_MIN,
-            min(_VS_4BET_EDGE_ADJUST_MAX, edge_adjust),
-        )
-        min_edge = max(0.0, min_edge + edge_adjust)
+        if call_amt <= 0:
+            return True
 
-        equity_min = _VS_4BET_CALL_EQUITY_MIN.get(cat, pot_odds + min_edge)
-        if equity < equity_min or edge < min_edge:
+        pressure = self._pressure_kind(stack, pot, to_call, open_raise, big_blind)
+        premium = cat in _PRESSURE_PREMIUM_CONTINUE
+        strong = cat in _PRESSURE_STRONG_CONTINUE
+        playable = self._has_deep_implied_playability(cat)
+
+        implied_credit = 0.0
+        if context == '3bet' and playable and pressure not in {'jam'}:
+            if stack_bb >= 90.0 and stack_commit <= 0.18:
+                implied_credit = 0.10 if is_ip else 0.08
+            elif stack_bb >= 60.0 and stack_commit <= 0.25:
+                implied_credit = 0.05 if is_ip else 0.03
+
+        margin = 0.00 if pressure in {'tiny', 'cheap'} else 0.02
+        if not is_ip:
+            margin += 0.02
+        if context == '4bet':
+            margin += 0.03
+        if pressure == 'heavy':
+            margin += 0.03
+        elif pressure == 'jam':
+            margin += 0.07
+        if stack_commit >= 0.35:
+            margin += 0.03
+
+        hi, lo, suited = self._cat_parts(cat)
+        dominated_broadway = suited == 'o' and hi >= 12 and lo >= 10
+        dominated_suited_broadway = suited == 's' and hi <= 13 and lo >= 10
+        if dominated_broadway:
+            margin += 0.03
+        if dominated_suited_broadway and stack_commit >= 0.30:
+            margin += 0.03
+        if premium:
+            margin -= 0.04
+        elif strong:
+            margin -= 0.02
+
+        realised = equity + implied_credit
+        if pressure == 'jam' and not premium and realised < pot_odds + 0.10:
+            self.last_expand_reason = (
+                f"chart_block:{context}_jam_pressure {cat} "
+                f"eq={equity:.0%}+imp={implied_credit:.0%} "
+                f"po={pot_odds:.0%} commit={stack_commit:.0%}"
+            )
+            return False
+        if stack_commit >= 0.45 and not (premium or strong) and realised < pot_odds + 0.08:
+            self.last_expand_reason = (
+                f"chart_block:{context}_commit_pressure {cat} "
+                f"eq={equity:.0%}+imp={implied_credit:.0%} "
+                f"po={pot_odds:.0%} commit={stack_commit:.0%}"
+            )
+            return False
+        if context == '4bet' and stack_commit >= 0.30 and not premium and realised < pot_odds + 0.08:
+            self.last_expand_reason = (
+                f"chart_block:{context}_nonpremium_pressure {cat} "
+                f"eq={equity:.0%}+imp={implied_credit:.0%} "
+                f"po={pot_odds:.0%} commit={stack_commit:.0%}"
+            )
             return False
 
-        mode = 'mix' if chart_mixed else ('chart' if chart_defends else 'edge')
-        self.last_expand_reason = (
-            f"chart_expand:4bet_defend {mode} {chart_source} {cat} "
-            f"eq={equity:.0%} po={pot_odds:.0%} edge={edge:.0%}/{min_edge:.0%}"
-            f" adj={edge_adjust:+.0%}"
-        )
+        need = pot_odds + margin
+        if realised < need:
+            self.last_expand_reason = (
+                f"chart_block:{context}_pressure {cat} "
+                f"eq={equity:.0%}+imp={implied_credit:.0%} "
+                f"need={need:.0%} po={pot_odds:.0%} commit={stack_commit:.0%}"
+            )
+            return False
         return True
 
     def _chart_4bet_defense_action(
@@ -669,42 +1381,59 @@ class PreflopStrategy:
         cat: str,
         position: str,
         villain_position: str,
-        stack: float,
-        pot: float,
-        to_call: float,
-        open_raise: float,
-        equity: float,
-        stack_bb: float,
-        cold_callers: int,
-        sticky_density: float,
-        edge_adjust: float,
     ) -> str:
         hero_norm = _normalize_position(position)
         villain_norm = _normalize_position(villain_position)
         chart_key = f"{hero_norm}-vs-4bet-{villain_norm}" if hero_norm and villain_norm else ''
         if not chart_key:
             return ''
-        refs = lookup_gto(chart_key, cat)
-        primary, source = self._primary_chart_action(refs)
-        if primary is None:
+        chart_action, chart_reason = self._greenline_action(chart_key, cat)
+        if not chart_action:
             return ''
-        if self._chart_has_action(primary, 'allin'):
-            if stack_bb > _VS_4BET_CHART_ALLIN_MAX_STACK_BB and cat not in _VS_4BET_FALLBACK_JAM:
-                return ''
-            self.last_expand_reason = (
-                f"chart_expand:4bet_allin {source} {chart_key} {cat}"
-            )
+        if chart_action in {'allin', 'raise'}:
+            self.last_expand_reason = chart_reason
             return 'raise'
-        if self._chart_has_action(primary, 'call'):
-            allowed = self._conditional_4bet_call_allowed(
-                cat, stack, pot, to_call, open_raise, equity, stack_bb,
-                cold_callers, sticky_density, edge_adjust,
-                chart_defends=True,
-                chart_mixed=self._chart_action_is_mixed(primary),
-                chart_source=f"{source} {chart_key}",
-            )
-            return 'call' if allowed else 'fold'
+        if chart_action == 'call':
+            self.last_expand_reason = chart_reason
+            return 'call'
+        if chart_action == 'fold':
+            self.last_expand_reason = chart_reason
+            return 'fold'
         return 'fold'
+
+    def _chart_vs_3bet_response_action(
+        self,
+        cat: str,
+        position: str,
+        villain_position: str,
+    ) -> str:
+        """Primary chart response after hero opened and faces a 3bet.
+
+        This is intentionally narrower than `should_4bet`: it only lets a
+        clear chart action take priority over the static range.  In particular,
+        chart-pure calls must not be promoted to 4bets by `_4BET_VALUE`.
+        """
+        hero_norm = _normalize_position(position)
+        villain_norm = _normalize_position(villain_position)
+        chart_key = f"{hero_norm}-vs-3bet-{villain_norm}" if hero_norm and villain_norm else ''
+        if not chart_key:
+            return ''
+        chart_action, chart_reason = self._greenline_action(chart_key, cat)
+        if not chart_action:
+            return ''
+        if chart_action == 'allin':
+            self.last_expand_reason = chart_reason
+            return 'allin'
+        if chart_action == 'raise':
+            self.last_expand_reason = chart_reason
+            return 'raise'
+        if chart_action == 'call':
+            self.last_expand_reason = chart_reason
+            return 'call'
+        if chart_action == 'fold':
+            self.last_expand_reason = chart_reason
+            return 'fold'
+        return ''
 
     def should_4bet(self, hole_cards: List[Card],
                     sticky_density: float = 0.0,
@@ -743,6 +1472,10 @@ class PreflopStrategy:
         hole_cards: List[Card],
         position: str,
         num_players: int = 6,
+        num_limpers: int = 0,
+        stack_bb: float = 100.0,
+        sticky_density: float = 0.0,
+        sticky_pool_adjust: Optional[bool] = None,
     ) -> bool:
         """Whether to isolate limpers from a non-free-check position.
 
@@ -754,9 +1487,14 @@ class PreflopStrategy:
         pos = _normalize_position(position) or position
         chart_key = f"{pos}-ISO"
         refs = lookup_gto(chart_key, cat)
-        chart_actions = [action for action in refs.values() if action is not None]
-        if chart_actions:
-            if any(self._chart_has_action(action, 'raise') for action in chart_actions):
+        chart_action = refs.get('primary')
+        sticky_adjust = self._sticky_pool_adjust_enabled(sticky_pool_adjust)
+        if chart_action is not None:
+            if self._chart_has_action(chart_action, 'raise'):
+                if sticky_adjust and self._should_downgrade_iso_edge(
+                    cat, chart_key, num_limpers, stack_bb, sticky_density,
+                ):
+                    return False
                 self.last_expand_reason = f"chart_iso:{chart_key} {cat}"
                 return True
             return False
@@ -765,8 +1503,44 @@ class PreflopStrategy:
             cat in _ISO_FALLBACK_RAISE
             and self.in_open_range(hole_cards, position, num_players)
         ):
+            if sticky_adjust and self._should_downgrade_iso_edge(
+                cat, chart_key, num_limpers, stack_bb, sticky_density,
+            ):
+                return False
             self.last_expand_reason = f"fallback_iso:{chart_key} {cat}"
             return True
+        return False
+
+    def _should_downgrade_iso_edge(
+        self,
+        cat: str,
+        chart_key: str,
+        num_limpers: int,
+        stack_bb: float,
+        sticky_density: float,
+    ) -> bool:
+        """Convert edge ISO raises into limp-behind/fold in sticky multiway pots."""
+        if num_limpers <= 0:
+            return False
+        multi_limp = num_limpers >= 2
+        sticky = sticky_density >= _ISO_EDGE_STICKY_DENSITY
+        if not (multi_limp or sticky):
+            return False
+
+        if cat in _ISO_EDGE_LIMP_DOWNGRADE:
+            self.last_expand_reason = (
+                f"iso_downgrade:overlimp {chart_key} {cat} "
+                f"nlimp={num_limpers} sticky={sticky_density:.0%} stack={stack_bb:.0f}bb"
+            )
+            return True
+
+        if multi_limp and cat in _ISO_EDGE_FOLD_DOWNGRADE:
+            self.last_expand_reason = (
+                f"iso_downgrade:fold {chart_key} {cat} "
+                f"nlimp={num_limpers} sticky={sticky_density:.0%}"
+            )
+            return True
+
         return False
 
     def should_limp_behind(
@@ -784,8 +1558,8 @@ class PreflopStrategy:
         """Cheap speculative limp-behind / SB complete after existing limpers.
 
         The range is deliberately narrow and implied-odds driven:
-          - small pairs: mainly set mining; can replace ISO only in multiway
-            sticky/deep spots where isolation is less valuable.
+          - small pairs: mainly set mining, but only when the hand would
+            otherwise fold; do not convert chart/fallback ISO raises to limps.
           - suited connectors: only when the hand would otherwise fold.
           - A2s-A5s / one-gappers: stricter, for very multiway cheap spots.
         """
@@ -799,17 +1573,14 @@ class PreflopStrategy:
         call_bb = call_amt / big_blind
         if call_bb <= 0 or call_bb > _LIMP_BEHIND_MAX_CALL_BB:
             return False
-        if stack_bb < _LIMP_BEHIND_MIN_STACK_BB:
+        if _LIMP_BEHIND_MIN_STACK_BB > 0 and stack_bb < _LIMP_BEHIND_MIN_STACK_BB:
+            return False
+        if iso_available:
             return False
 
         pos = _normalize_position(position) or position
         sb_complete = pos == 'SB' and call_bb <= 0.75 and num_limpers >= 1
-        multi_limp = num_limpers >= _LIMP_BEHIND_MIN_LIMPERS
-        loose_payment = (
-            sticky_density >= _LIMP_BEHIND_STICKY_DENSITY
-            or num_limpers >= _LIMP_BEHIND_LOOSE_LIMPERS
-        )
-        if not (sb_complete or (multi_limp and loose_payment)):
+        if not (sb_complete or num_limpers >= _LIMP_BEHIND_MIN_LIMPERS):
             return False
 
         implied = stack_bb / max(call_bb, 0.01)
@@ -817,27 +1588,11 @@ class PreflopStrategy:
             return False
 
         if cat in _LIMP_BEHIND_SMALL_PAIRS:
-            if iso_available and not (
-                _LIMP_BEHIND_REPLACE_ISO
-                and multi_limp
-                and loose_payment
-                and num_limpers >= 3
-                and sticky_density >= 0.50
-                and stack_bb >= 120.0
-                and call_bb <= 1.0
-                and cat != '66'
-            ):
-                return False
             self.last_expand_reason = (
                 f"limp_behind:setmine {cat} nlimp={num_limpers} "
                 f"call={call_bb:.1f}bb implied={implied:.0f}x"
             )
             return True
-
-        # If chart/fallback already wants to isolate, keep that fold-equity
-        # line for non-pair speculative hands.
-        if iso_available:
-            return False
 
         if cat in _LIMP_BEHIND_SUITED_CONNECTORS:
             self.last_expand_reason = (
@@ -861,14 +1616,22 @@ class PreflopStrategy:
             return True
         return False
 
-    def open_raise_size(self, position: str, big_blind: float, stack_bb: float = 100.0) -> float:
-        """Standard open raise sizing in chips. Shorter stacks use slightly smaller opens."""
+    def open_raise_size(
+        self,
+        position: str,
+        big_blind: float,
+        stack_bb: float = 100.0,
+        sticky_pool_adjust: Optional[bool] = None,
+    ) -> float:
+        """Standard open raise sizing in chips. Open size is position-based."""
         if position in ('SB',):
             mul = 3.0
         elif position in ('BTN', 'CO'):
-            mul = 2.5 if stack_bb >= 20.0 else 2.2
+            mul = 2.5
         else:
-            mul = 3.0 if stack_bb >= 22.0 else 2.7
+            mul = 3.0
+        if self._sticky_pool_adjust_enabled(sticky_pool_adjust):
+            mul += _RFI_STICKY_OPEN_BONUS_BB
         return big_blind * mul
 
     def iso_raise_size(
@@ -877,23 +1640,39 @@ class PreflopStrategy:
         big_blind: float,
         num_limpers: int,
         stack_bb: float = 100.0,
+        sticky_pool_adjust: Optional[bool] = None,
     ) -> float:
         """Isolation raise size after limpers.
 
-        Common live/solver practice is normal open size plus 1bb per limper.
-        SB/BB add one more blind because we are out of position and must charge
-        limp-call ranges more for equity realisation.
+        Sticky-pool adjustment: use 4bb plus 1bb per limper. When disabled,
+        restore the legacy normal-open-plus-limper-premium formula.
         """
-        base = self.open_raise_size(position, big_blind, stack_bb)
         limpers = max(0, num_limpers)
+        sticky_adjust = self._sticky_pool_adjust_enabled(sticky_pool_adjust)
         if limpers <= 0:
-            return base
-        pos = _normalize_position(position) or position
-        oop_bonus = _ISO_OOP_BONUS_BB if pos in ('SB', 'BB') else 0.0
+            return self.open_raise_size(
+                position,
+                big_blind,
+                stack_bb,
+                sticky_pool_adjust=sticky_adjust,
+            )
+        if not sticky_adjust:
+            base = self.open_raise_size(
+                position,
+                big_blind,
+                stack_bb,
+                sticky_pool_adjust=False,
+            )
+            pos = _normalize_position(position) or position
+            oop_bonus = _ISO_OOP_BONUS_BB if pos in ('SB', 'BB') else 0.0
+            return big_blind * (
+                (base / big_blind)
+                + limpers * _ISO_PER_LIMPER_BB
+                + oop_bonus
+            )
         return big_blind * (
-            (base / big_blind)
+            _ISO_BASE_BB
             + limpers * _ISO_PER_LIMPER_BB
-            + oop_bonus
         )
 
     def three_bet_size(
@@ -958,38 +1737,92 @@ class PreflopStrategy:
         sticky_density: float = 0.0,
         cold_callers: int = 0,
         squeeze_callers: int = 0,
-        fourbet_call_edge_adjust: float = 0.0,
+        villain_vpip: float = 0.0,
+        villain_pfr: float = 0.0,
+        villain_three_bet: float = 0.0,
+        villain_af: float = 1.5,
+        villain_hands_seen: int = 0,
+        villain_fold_to_3bet: float = _POOL_FOLD_TO_3BET,
+        villain_fold_to_3bet_opps: int = 0,
+        sticky_pool_adjust: Optional[bool] = None,
     ) -> Tuple[str, float]:
         """Return (action, amount). action in: fold, call, raise, check."""
         self.last_expand_reason = ''
         cat = _hand_category(hole_cards)
         stack_bb = max(stack_bb, 1.0)
-        if (
-            abs(big_blind - _ACHIEVEMENT_ENTRY_BB) < 1e-6
-            and 0 < to_call <= _ACHIEVEMENT_ENTRY_MAX_CALL_BB * big_blind
-        ):
-            self.last_expand_reason = (
-                f"achievement_entry:bb1000 call<={_ACHIEVEMENT_ENTRY_MAX_CALL_BB:.0f}bb"
-            )
-            return ('call', min(to_call, stack))
+        sticky_adjust = self._sticky_pool_adjust_enabled(sticky_pool_adjust)
+        size_map_reason = ''
+        if facing_action == 'open' and big_blind > 0 and open_raise > 0:
+            open_bb = open_raise / big_blind
+            if open_bb >= _OPEN_SIZE_AS_4BET_MIN_BB:
+                facing_action = '4bet'
+                size_map_reason = f"size_map:open_as_4bet open={open_bb:.1f}bb"
+                self.last_expand_reason = size_map_reason
+            elif open_bb >= _OPEN_SIZE_AS_3BET_MIN_BB:
+                facing_action = '3bet'
+                size_map_reason = f"size_map:open_as_3bet open={open_bb:.1f}bb"
+                self.last_expand_reason = size_map_reason
+        # Historical parameter name is is_big_blind, but callers use it as a
+        # "free check available" signal.  It is only allowed to convert a
+        # would-be fold into check after normal open/ISO logic has run.
+        free_check_option = bool(is_big_blind and to_call == 0)
+
+        def _fold_fallback() -> Tuple[str, float]:
+            if free_check_option:
+                self.last_expand_reason = 'free_check_option:fold_to_check'
+                return ('check', 0.0)
+            return ('fold', 0.0)
+
+        def _preserve_size_map_reason() -> None:
+            if (
+                size_map_reason
+                and self.last_expand_reason
+                and not self.last_expand_reason.startswith(size_map_reason)
+            ):
+                self.last_expand_reason = (
+                    f"{size_map_reason} | {self.last_expand_reason}"
+                )
 
         if facing_action == 'none':
-            if is_big_blind and to_call == 0:
-                # BB with free option: iso-raise premiums against limpers, otherwise check.
-                if num_limpers > 0 and _hand_category(hole_cards) in _BB_ISO_RAISE:
-                    size = self.iso_raise_size(position, big_blind, num_limpers, stack_bb)
+            pos = _normalize_position(position) or position
+            if num_limpers == 0:
+                chart_key = f"{pos}-RFI"
+                chart_action, chart_reason = self._greenline_action(chart_key, cat)
+                if chart_action in {'allin', 'raise'}:
+                    self.last_expand_reason = chart_reason
+                    size = self.open_raise_size(
+                        position,
+                        big_blind,
+                        stack_bb,
+                        sticky_pool_adjust=sticky_adjust,
+                    )
                     return ('raise', min(size, stack))
-                return ('check', 0.0)
+                if chart_action == 'fold':
+                    self.last_expand_reason = chart_reason
+                    return _fold_fallback()
 
             # SB heads-up steal: only BB left, use wide steal range
             if position == 'SB' and num_limpers == 0 and num_active_opponents == 1:
                 if cat in _SB_STEAL_VS_BB:
-                    size = self.open_raise_size(position, big_blind, stack_bb)
+                    size = self.open_raise_size(
+                        position,
+                        big_blind,
+                        stack_bb,
+                        sticky_pool_adjust=sticky_adjust,
+                    )
                     return ('raise', min(size, stack))
-                return ('fold', 0.0)
+                return _fold_fallback()
 
             if num_limpers > 0:
-                iso_available = self.should_iso_raise(hole_cards, position, num_players)
+                iso_available = self.should_iso_raise(
+                    hole_cards,
+                    position,
+                    num_players,
+                    num_limpers,
+                    stack_bb,
+                    sticky_density,
+                    sticky_pool_adjust=sticky_adjust,
+                )
                 if self.should_limp_behind(
                     hole_cards, position, big_blind, stack, to_call,
                     num_limpers, stack_bb, sticky_density,
@@ -997,21 +1830,118 @@ class PreflopStrategy:
                 ):
                     return ('call', min(to_call if to_call > 0 else big_blind, stack))
                 if iso_available:
-                    size = self.iso_raise_size(position, big_blind, num_limpers, stack_bb)
+                    size = self.iso_raise_size(
+                        position,
+                        big_blind,
+                        num_limpers,
+                        stack_bb,
+                        sticky_pool_adjust=sticky_adjust,
+                    )
                     return ('raise', min(size, stack))
-                return ('fold', 0.0)
+                return _fold_fallback()
 
             # Normal positions: open or fold (range adjusted for player count)
             if self.in_open_range(hole_cards, position, num_players):
-                size = self.open_raise_size(position, big_blind, stack_bb)
+                size = self.open_raise_size(
+                    position,
+                    big_blind,
+                    stack_bb,
+                    sticky_pool_adjust=sticky_adjust,
+                )
                 return ('raise', min(size, stack))
-            return ('fold', 0.0)
+            return _fold_fallback()
 
         elif facing_action == 'open':
+            hero_norm = _normalize_position(position)
+            villain_norm = _normalize_position(villain_position)
+            chart_key = f"{hero_norm}-vs-open-{villain_norm}" if hero_norm and villain_norm else ''
+            chart_action, chart_reason = (
+                self._greenline_vs_open_action(
+                    chart_key,
+                    cat,
+                    position=position,
+                    villain_position=villain_position,
+                    open_raise=open_raise,
+                    big_blind=big_blind,
+                    stack=stack,
+                    pot=pot,
+                    to_call=to_call,
+                    stack_bb=stack_bb,
+                    is_ip=is_ip,
+                    sticky_density=sticky_density,
+                    squeeze_callers=squeeze_callers,
+                    villain_vpip=villain_vpip,
+                    villain_pfr=villain_pfr,
+                    villain_three_bet=villain_three_bet,
+                    villain_af=villain_af,
+                    villain_hands_seen=villain_hands_seen,
+                    villain_fold_to_3bet=villain_fold_to_3bet,
+                    villain_fold_to_3bet_opps=villain_fold_to_3bet_opps,
+                ) if chart_key else ('', '')
+            )
+            call_amt, pot_odds, _, _ = self._pressure_inputs(
+                stack, pot, to_call, open_raise, big_blind,
+            )
+            oop_penalty = 0.04 if (position == 'SB') else 0.0
+            depth_margin = -0.02 if stack_bb >= 75.0 else 0.0
+            if chart_action in {'allin', 'raise'}:
+                self.last_expand_reason = chart_reason
+                size = self.three_bet_size(
+                    open_raise, is_ip, big_blind,
+                    open_pos=villain_position,
+                    three_bet_pos=position,
+                )
+                return ('raise', min(size, stack))
+            if chart_action == 'call':
+                self.last_expand_reason = chart_reason
+                if self._price_call_allowed(
+                    cat, stack, pot, to_call, open_raise, big_blind, equity, 'open',
+                ):
+                    return ('call', call_amt)
+                if call_amt > 0 and equity >= pot_odds + oop_penalty + depth_margin:
+                    return ('call', call_amt)
+                return _fold_fallback()
+            if chart_action == 'fold':
+                self.last_expand_reason = chart_reason
+                if self._price_call_allowed(
+                    cat, stack, pot, to_call, open_raise, big_blind, equity, 'open',
+                ):
+                    return ('call', call_amt)
+                return _fold_fallback()
+
+            if squeeze_callers > 0:
+                expand_action = self._greenline_vs_open_expand_action(
+                    cat, position, villain_position, open_raise, big_blind,
+                    stack_bb, sticky_density, squeeze_callers,
+                    is_ip, stack, pot, to_call,
+                    villain_vpip, villain_pfr, villain_three_bet, villain_af,
+                    villain_hands_seen, villain_fold_to_3bet, villain_fold_to_3bet_opps,
+                )
+                if expand_action == 'raise':
+                    size = self.three_bet_size(
+                        open_raise, is_ip, big_blind,
+                        open_pos=villain_position,
+                        three_bet_pos=position,
+                    )
+                    return ('raise', min(size, stack))
             if self.should_3bet(
                 hole_cards, position, villain_position,
                 squeeze_callers=squeeze_callers,
                 sticky_density=sticky_density,
+                villain_vpip=villain_vpip,
+                villain_pfr=villain_pfr,
+                villain_three_bet=villain_three_bet,
+                villain_af=villain_af,
+                villain_hands_seen=villain_hands_seen,
+                villain_fold_to_3bet=villain_fold_to_3bet,
+                villain_fold_to_3bet_opps=villain_fold_to_3bet_opps,
+                open_raise=open_raise,
+                big_blind=big_blind,
+                stack=stack,
+                pot=pot,
+                to_call=to_call,
+                stack_bb=stack_bb,
+                is_ip=is_ip,
             ):
                 size = self.three_bet_size(
                     open_raise, is_ip, big_blind,
@@ -1019,29 +1949,32 @@ class PreflopStrategy:
                     three_bet_pos=position,
                 )
                 return ('raise', min(size, stack))
-            expand_action = self._ip_small_open_expand_action(
-                cat, position, villain_position, is_ip, open_raise,
-                big_blind, stack_bb, sticky_density, squeeze_callers,
-            )
-            if expand_action == 'raise':
-                size = self.three_bet_size(
-                    open_raise, is_ip, big_blind,
-                    open_pos=villain_position,
-                    three_bet_pos=position,
+            if squeeze_callers <= 0:
+                expand_action = self._greenline_vs_open_expand_action(
+                    cat, position, villain_position, open_raise, big_blind,
+                    stack_bb, sticky_density, squeeze_callers,
+                    is_ip, stack, pot, to_call,
+                    villain_vpip, villain_pfr, villain_three_bet, villain_af,
+                    villain_hands_seen, villain_fold_to_3bet, villain_fold_to_3bet_opps,
                 )
-                return ('raise', min(size, stack))
-            if expand_action == 'call':
-                return ('call', min(to_call or open_raise, stack))
+                if expand_action == 'raise':
+                    size = self.three_bet_size(
+                        open_raise, is_ip, big_blind,
+                        open_pos=villain_position,
+                        three_bet_pos=position,
+                    )
+                    return ('raise', min(size, stack))
             # Pot-odds gate: if calling costs more equity than we have, fold.
             # Catches large/all-in raises where range heuristics should not override math.
-            call_amt = min(to_call or open_raise, stack)
-            pot_odds = call_amt / (pot + call_amt) if (pot + call_amt) > 0 else 0.0
             # OOP penalty: SB calling OOP requires extra equity vs IP callers
-            oop_penalty = 0.04 if (position == 'SB') else 0.0
-            # Stack depth: short stacks need stronger hands to commit good chips
-            depth_margin = 0.025 if stack_bb < 22.0 else (0.0 if stack_bb < 75.0 else -0.02)
+            # Deep enough stacks get a small realization discount; short stacks
+            # no longer pay an extra penalty here.
+            if self._price_call_allowed(
+                cat, stack, pot, to_call, open_raise, big_blind, equity, 'open',
+            ):
+                return ('call', call_amt)
             if equity < pot_odds + oop_penalty + depth_margin:
-                return ('fold', 0.0)
+                return _fold_fallback()
             # BB defense range only applies when we are actually in the big blind.
             # Issue I: select BB defend table by opener position (not just SB).
             # Previously only _BB_VS_SB_DEFENSE existed → BB over-folded
@@ -1057,9 +1990,67 @@ class PreflopStrategy:
             )
             if in_range:
                 return ('call', min(to_call or open_raise, stack))
-            return ('fold', 0.0)
+            return _fold_fallback()
 
         elif facing_action == '3bet':
+            hero_norm = _normalize_position(position)
+            call_range = _3BET_CALL_BY_POS.get(hero_norm, _3BET_CALL_DEFAULT)
+            pressure = self._pressure_kind(stack, pot, to_call, open_raise, big_blind)
+            call_range = self._dynamic_3bet_call_range(
+                call_range,
+                villain_vpip,
+                villain_pfr,
+                villain_three_bet,
+                villain_af,
+                villain_hands_seen,
+                pressure,
+            )
+            chart_action = self._chart_vs_3bet_response_action(
+                cat, position, villain_position,
+            )
+            if chart_action in {'allin', 'raise'}:
+                four_bet = self.four_bet_size(
+                    open_raise, is_ip,
+                    hero_open_pos=position,
+                    villain_3bet_pos=villain_position,
+                )
+                if chart_action == 'allin':
+                    _preserve_size_map_reason()
+                    return ('raise', stack)
+                _preserve_size_map_reason()
+                return ('raise', min(four_bet, stack))
+
+            if chart_action == 'call':
+                self.last_expand_reason = (
+                    f"chart_expand:3bet_call greenline "
+                    f"{hero_norm}-vs-3bet-{_normalize_position(villain_position)} {cat}"
+                )
+                if not self._chart_call_pressure_allows(
+                    cat,
+                    context='3bet',
+                    stack=stack,
+                    pot=pot,
+                    to_call=to_call,
+                    open_raise=open_raise,
+                    big_blind=big_blind,
+                    stack_bb=stack_bb,
+                    equity=equity,
+                    is_ip=is_ip,
+                ):
+                    _preserve_size_map_reason()
+                    return _fold_fallback()
+                _preserve_size_map_reason()
+                return ('call', min(to_call or open_raise, stack))
+
+            if chart_action == 'fold':
+                if self._price_call_allowed(
+                    cat, stack, pot, to_call, open_raise, big_blind, equity, '3bet',
+                ):
+                    _preserve_size_map_reason()
+                    return ('call', min(to_call or open_raise, stack))
+                _preserve_size_map_reason()
+                return _fold_fallback()
+
             if self.should_4bet(
                 hole_cards,
                 sticky_density=sticky_density,
@@ -1073,45 +2064,57 @@ class PreflopStrategy:
                     hero_open_pos=position,
                     villain_3bet_pos=villain_position,
                 )
-                if stack_bb <= 40 or four_bet >= stack * 0.65:
-                    return ('raise', stack)   # 短码或 4bet 已超过 65% 筹码 → jam
+                _preserve_size_map_reason()
                 return ('raise', min(four_bet, stack))
 
             # Position-aware call range (hero's open position determines defend range).
             # Falls back to _3BET_CALL_DEFAULT when hero position unrecognized.
-            hero_norm = _normalize_position(position)
-            call_range = _3BET_CALL_BY_POS.get(hero_norm, _3BET_CALL_DEFAULT)
-            if cat in call_range:
-                return ('call', min(to_call or open_raise, stack))
-            if self._chart_expand_3bet_call_allowed(
-                cat, position, villain_position, open_raise, big_blind,
-                stack, pot, to_call, stack_bb,
+            if self._can_call_vs_3bet(
+                cat, call_range, position, villain_position,
+                open_raise, big_blind, stack, pot, to_call, stack_bb,
+                equity,
             ):
+                _preserve_size_map_reason()
                 return ('call', min(to_call or open_raise, stack))
-            return ('fold', 0.0)
+            _preserve_size_map_reason()
+            return _fold_fallback()
 
         elif facing_action == '4bet':
             chart_action = self._chart_4bet_defense_action(
-                cat, position, villain_position, stack, pot, to_call,
-                open_raise, equity, stack_bb, cold_callers, sticky_density,
-                fourbet_call_edge_adjust,
+                cat, position, villain_position,
             )
             if chart_action == 'raise':
                 return ('raise', stack)
             if chart_action == 'call':
+                if not self._chart_call_pressure_allows(
+                    cat,
+                    context='4bet',
+                    stack=stack,
+                    pot=pot,
+                    to_call=to_call,
+                    open_raise=open_raise,
+                    big_blind=big_blind,
+                    stack_bb=stack_bb,
+                    equity=equity,
+                    is_ip=is_ip,
+                ):
+                    return _fold_fallback()
                 return ('call', min(to_call or open_raise, stack))
             if chart_action == 'fold':
-                return ('fold', 0.0)
+                if self._price_call_allowed(
+                    cat, stack, pot, to_call, open_raise, big_blind, equity, '4bet',
+                ):
+                    return ('call', min(to_call or open_raise, stack))
+                return _fold_fallback()
 
+            if self._price_call_allowed(
+                cat, stack, pot, to_call, open_raise, big_blind, equity, '4bet',
+            ):
+                return ('call', min(to_call or open_raise, stack))
             if cat in _VS_4BET_FALLBACK_JAM:
                 return ('raise', stack)  # 5-bet shove
             if cat in _VS_4BET_FALLBACK_CALL:
                 return ('call', min(to_call or open_raise, stack))
-            if self._conditional_4bet_call_allowed(
-                cat, stack, pot, to_call, open_raise, equity, stack_bb,
-                cold_callers, sticky_density, fourbet_call_edge_adjust,
-            ):
-                return ('call', min(to_call or open_raise, stack))
-            return ('fold', 0.0)
+            return _fold_fallback()
 
         return ('fold', 0.0)

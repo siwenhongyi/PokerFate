@@ -44,15 +44,22 @@ function P:onAwake()
         end
     end)
 
-    Net:post("/collCard/list", {skip = 0}, function(data)
-        if 0 == data.code then
-            if data.list then
-                for _,v in pairs(data.list) do
-                    table.insert(self.SaveList, v.gameid)
-                end
+    RecordDataModel:fetchCollectList(nil, function(ok, list, total)
+        if ok and list then
+            for _,v in pairs(list) do
+                table.insert(self.SaveList, v.gameid)
             end
         end
     end)
+    -- Net:post("/collCard/list", {skip = 0}, function(data)
+    --     if 0 == data.code then
+    --         if data.list then
+    --             for _,v in pairs(data.list) do
+    --                 table.insert(self.SaveList, v.gameid)
+    --             end
+    --         end
+    --     end
+    -- end)
 end
 
 function P:onShow()
@@ -96,7 +103,7 @@ function P:refreshUI(info)
         if not includeSelf then
             includeSelf = v.brief.uid == PlayerModel:getUid()
         end
-        bee.setTextCut(self:find("TextName", item), v.brief.name, 230)
+        bee.setTextCut(self:find("TextName", item), GF.getOtherName(v.brief.name, v.seatid + 1, v.brief.uid), 230)
         bee.setText(self:find("Rank/TextLevel", item), v.brief.level)
         bee.setIcon(self:find("Rank/icon_rank_01", item), (tpl_level[v.brief.level] or tpl_level[1]).icon)
         GF.setTitleImage(self:find("ImageTitle", item), v.brief.title, true)
@@ -185,31 +192,19 @@ function P:saveEvent(include, info)
     bee.removeAllClick(self.SaveButton)
     bee.addClick(self.SaveButton, function()
         if self.isSave then
-            Net:post("/collCard/update", {del_id = info.gameid}, function(d)
-                if 0 == d.code then
+            RecordDataModel:removeCollect(info.gameid, function(ok)
+                if ok then
                     self.isSave = not self.isSave
                     table.removebyvalue(self.SaveList, info.gameid)
                     GameModel:getReplayList()
-                    -- PlayerModel:setCurRecord(table.nums(gameids))
                     self:find("On", self.SaveButton):SetActive(self.isSave)
                 end
             end)
         else
             if PlayerModel:getCurRecord() >= PlayerModel:getRecordNum() then
-                GameModel:getReplayList(function(data)
-                    if 0 == data.code then
-                        if data.list and #data.list > 0 then
-                            UiManager:showTip({
-                                text = _F("LAB_DEL_PLAYBACK_TIP5", GameModel:getReplayTitle(data.data)),
-                                sureStr = _T("LAB_SAVE"),
-                                cancelStr = _T("LAB_DEL_PLAYBACK_TIP6"),
-                                onSure = function()
-                                    self:changeReplay(data.data.gameid, info)
-                                end,
-                                onCancel = function()
-                                end,
-                            })
-                        end
+                GameModel:saveReplay(info.gameid, function(ok, removeId)
+                    if ok then
+                        self:changeReplay(removeId, info)
                     end
                 end)
             else
@@ -220,25 +215,21 @@ function P:saveEvent(include, info)
 end
 
 function P:saveData(info)
-    Net:post("/collCard/update", {add_id = info.gameid}, function(d)
-        if 0 == d.code then
+    RecordDataModel:addCollect(info.gameid, function(ok)
+        if ok then
             self.isSave = not self.isSave
             table.insert(self.SaveList, info.gameid)
-            PlayerModel:setCurRecord(#d.gameids)
+            -- PlayerModel:setCurRecord(#d.gameids)
             self:find("On", self.SaveButton):SetActive(self.isSave)
         end
     end)
 end
 
 function P:changeReplay(removeId, data)
-    Net:post("/collCard/update", {del_id = removeId, add_id = data.gameid}, function(d)
-        if 0 == d.code then
-            self.isSave = not self.isSave
-            table.insert(self.SaveList, data.gameid)
-            PlayerModel:setCurRecord(#d.gameids)
-            self:find("On", self.SaveButton):SetActive(self.isSave)
-        end
-    end)
+    self.isSave = not self.isSave
+    table.insert(self.SaveList, data.gameid)
+    -- PlayerModel:setCurRecord(#d.gameids)
+    self:find("On", self.SaveButton):SetActive(self.isSave)
 end
 
 function P:refreshArrow()

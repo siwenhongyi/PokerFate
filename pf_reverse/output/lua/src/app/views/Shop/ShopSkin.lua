@@ -22,15 +22,27 @@ function P:onAwake()
 	self.IngameButton = self:find("IngameButton")
 	self.DetailButton = self:find("DetailButton")
 
-	self.PurchaseGreyButton = self:find("PurchaseGreyButton")
-	self.PurchaseButton = self:find("PurchaseButton")
+	self.PurchaseCont1 = self:find("PurchaseCont1")
+	self.PurchaseGreyButton = self:find("PurchaseGreyButton", self.PurchaseCont1)
+	self.PurchaseButton = self:find("PurchaseButton", self.PurchaseCont1)
 	self.CurrencyIcon = self:find("Cont/CurrencyIcon/CurrencyIcon", self.PurchaseButton)
 	self.CountText = self:find("Cont/CountText", self.PurchaseButton)
-	self.PurchaseTips = self:find("PurchaseTips")
+	self.PurchaseTips = self:find("PurchaseTips", self.PurchaseCont1)
 	self.OriCountText = self:find("OriCountText", self.PurchaseTips)
 	self.OriCurrencyIcon = self:find("OriCurrencyIcon", self.PurchaseTips)
-	self.DiscountTag = self:find("DiscountTag")
+	self.DiscountTag = self:find("DiscountTag", self.PurchaseCont1)
 	self.DiscountText = self:find("DiscountText", self.DiscountTag)
+
+	self.PurchaseCont2 = self:find("PurchaseCont2")
+	self.SkinPurchaseButton = self:find("SkinPurchaseButton", self.PurchaseCont2)
+	self.SkinPurchaseGreyButton = self:find("SkinPurchaseGreyButton", self.PurchaseCont2)
+	self.LeftTimeText = self:find("LeftTime/LeftTimeText", self.PurchaseCont2)
+	self.GiftsPurchaseButton = self:find("GiftsPurchaseButton", self.PurchaseCont2)
+	self.OriPri = self:find("PriCont/OriPri", self.GiftsPurchaseButton)
+	self.CurPri = self:find("PriCont/CurPri", self.GiftsPurchaseButton)
+	self.Discount = self:find("Discount", self.GiftsPurchaseButton)
+	self.DiscountText = self:find("DiscountText", self.Discount)
+	self.GiftsPurchaseGreyButton = self:find("GiftsPurchaseGreyButton", self.PurchaseCont2)
 
 	self._nodeCache = NodeCache:create()
 
@@ -70,15 +82,43 @@ function P:onAwake()
 
 	bee.addClick(self.PurchaseButton, function()
 		Game:playSound("ui_button_confirm")
-		self:onClickPurchase()
+		self:refreshRedTag(self._selectIndex)
+		UiManager:showUI("ShopPurchase", {info = self._skins[self._selectIndex]})
 	end)
 	bee.addClick(self.PurchaseGreyButton, function()
 		UiManager:showToast(_T("LAB_SHOP_ROLE_SKIN_14"))
+	end)
+
+	bee.addClick(self.SkinPurchaseButton, function()
+		Game:playSound("ui_button_confirm")
+		self:refreshRedTag(self._selectIndex)
+
+		local shopCfg = self._skins[self._selectIndex].cfg
+		local skinCfg = tpl_character_skin[shopCfg.role_skin]
+		bee.logEvent("shop-outfit-buy", shopCfg.role_skin, CharacterModel:getRoleIsOwn(skinCfg.role) and 1 or 0)
+		UiManager:showUI("ShopPurchaseGiftsSkin", {cfg = self._skins[self._selectIndex].cfg})
+	end)
+	bee.addClick(self.SkinPurchaseGreyButton, function()
+		UiManager:showToast(_T("LAB_SHOP_ROLE_SKIN_14"))
+	end)
+
+	bee.addClick(self.GiftsPurchaseButton, function()
+		Game:playSound("ui_button_confirm")
+		self:refreshRedTag(self._selectIndex)
+		local cfg = self._skins[self._selectIndex].cfg
+		local giftCfg = tpl_shop_gifts_skin[cfg.gifts_link]
+		bee.logEvent("shop-outfit-pack", cfg.role_skin, CharacterModel:isOwnedSkin(cfg.role_skin) and 1 or 0)
+		UiManager:showUI("ShopPurchaseGiftsSkin", {cfg = giftCfg})
+	end)
+	bee.addClick(self.GiftsPurchaseGreyButton, function()
+		UiManager:showToast(_T("LAB_SKIN_GIFTS_5"))
 	end)
 end
 
 function P:onStart()
 	self:initSkinLit()
+
+	TaskModel:reportTask(TaskType.CheckView, TaskTargetId.ShopSkin)
 end
 
 function P:onDestroy()
@@ -188,6 +228,7 @@ function P:refreshSkinItem(item, data)
 			end
 		end
 	end)
+	bee.setBtEnable(item, false)
 end
 
 function P:_setTimeShow(item, leftTime)
@@ -270,25 +311,95 @@ end
 function P:refreshSelectSkinInfo()
 	local skinInfo = self._skins[self._selectIndex]
 	local cfg = skinInfo.cfg
-	
-	if skinInfo.isOwn then
-		self.DiscountTag:SetActive(false)
-		self.PurchaseTips:SetActive(false)
-		self.PurchaseButton:SetActive(false)
-		self.PurchaseGreyButton:SetActive(true)
-	else
-		self.PurchaseGreyButton:SetActive(false)
-		self.PurchaseButton:SetActive(true)
-		if cfg.discount and cfg.discount > 0 then
-			self.DiscountTag:SetActive(true)
-			self.PurchaseTips:SetActive(true)
 
-			bee.setText(self.OriCountText, cfg.original_pri[2])
-			bee.setText(self.DiscountText, cfg.discount .. "%")
-			bee.setIconInAtlas(self.OriCurrencyIcon, tpl_props[cfg.original_pri[1]].icon)
+	if self._timeTag then
+		scheduler:removeTag(self._timeTag)
+		self._timeTag = nil
+	end
+	
+	-- 购买按钮显示
+	if cfg.gifts_link and ShopModel:productIsCanShow(tpl_shop_gifts_skin[cfg.gifts_link]) then
+		local giftCfg = tpl_shop_gifts_skin[cfg.gifts_link]
+
+		self.PurchaseCont1:SetActive(false)
+		self.PurchaseCont2:SetActive(true)
+
+		if skinInfo.isOwn then
+			self.SkinPurchaseButton:SetActive(false)
+			self.SkinPurchaseGreyButton:SetActive(true)
+
+			if ShopModel:getProductIsSoldOut(giftCfg) then
+				self.GiftsPurchaseButton:SetActive(false)
+				self.GiftsPurchaseGreyButton:SetActive(true)
+			else
+				self.GiftsPurchaseButton:SetActive(true)
+				self.GiftsPurchaseGreyButton:SetActive(false)
+
+				self.OriPri:SetActive(false)
+				self.Discount:SetActive(false)
+				bee.setIconInAtlas(self:find("Icon", self.CurPri), tpl_props[giftCfg.pri2[1]].icon)
+				bee.setText(self:find("PriText", self.CurPri), giftCfg.pri2[2] .. _T("LAB_SHOP_COMMON_4"))
+			end
 		else
+			self.SkinPurchaseButton:SetActive(true)
+			self.SkinPurchaseGreyButton:SetActive(false)
+			self.GiftsPurchaseButton:SetActive(true)
+			self.GiftsPurchaseGreyButton:SetActive(false)
+
+			bee.setText(self:find("PriText", self.SkinPurchaseButton), cfg.pri[2])
+			bee.setIconInAtlas(self:find("Icon", self.SkinPurchaseButton), tpl_props[cfg.pri[1]].icon)
+
+			self.OriPri:SetActive(true)
+
+			bee.setIconInAtlas(self:find("Icon", self.Ori), tpl_props[giftCfg.original_pri[1]].icon)
+			bee.setText(self:find("PriText", self.OriPri), giftCfg.original_pri[2])
+
+			bee.setIconInAtlas(self:find("Icon", self.CurPri), tpl_props[giftCfg.pri[1]].icon)
+			bee.setText(self:find("PriText", self.CurPri), giftCfg.pri[2])
+
+			if giftCfg.discount and giftCfg.discount > 0 then
+				self.Discount:SetActive(true)
+				bee.setText(self.DiscountText, giftCfg.discount .. "%")
+			else
+				self.Discount:SetActive(false)
+			end
+		end
+
+		if giftCfg.time_end then
+			local leftTime = giftCfg.time_end - bee.getServerTime()
+			if leftTime > 0 then
+				bee.setText(self.LeftTimeText, ShopModel:getShopTimeText(leftTime))
+				self._timeTag = self:schedule(1, function()
+					leftTime = leftTime - 1
+					bee.setText(self.LeftTimeText, ShopModel:getShopTimeText(leftTime))
+				end)
+			else
+				bee.setText(self.LeftTimeText, _T("LAB_BACKPACK_DES_21"))
+			end
+		end
+	else
+		self.PurchaseCont1:SetActive(true)
+		self.PurchaseCont2:SetActive(false)
+
+		if skinInfo.isOwn then
 			self.DiscountTag:SetActive(false)
 			self.PurchaseTips:SetActive(false)
+			self.PurchaseButton:SetActive(false)
+			self.PurchaseGreyButton:SetActive(true)
+		else
+			self.PurchaseGreyButton:SetActive(false)
+			self.PurchaseButton:SetActive(true)
+			if cfg.discount and cfg.discount > 0 then
+				self.DiscountTag:SetActive(true)
+				self.PurchaseTips:SetActive(true)
+
+				bee.setText(self.OriCountText, cfg.original_pri[2])
+				bee.setText(self.DiscountText, cfg.discount .. "%")
+				bee.setIconInAtlas(self.OriCurrencyIcon, tpl_props[cfg.original_pri[1]].icon)
+			else
+				self.DiscountTag:SetActive(false)
+				self.PurchaseTips:SetActive(false)
+			end
 		end
 	end
 
@@ -296,8 +407,10 @@ function P:refreshSelectSkinInfo()
 	local roleCfg = tpl_character[skinCfg.role]
 	if not self._characterCls then
 		self._characterCls = ObjectPool:getCls(self.CharacterImage)
+		self._characterCls:setShowReal(true)
 		self._characterCls:createRoleCanvas()
 	end
+	self._characterCls:setShowReal(true)
 	self._characterCls:setRole(CharacterModel:getRoleData(skinCfg.role), true)
 	self._characterCls:setSkin(skinCfg, true)
     self._characterCls:initSpecialInteraction(function()
@@ -311,8 +424,9 @@ function P:refreshSelectSkinInfo()
 	self.TagSR:SetActive(skinCfg.rank == 1)
 
 	local posInfo = cfg.image_offset_main
-	self.CharacterImage.transform.localPosition = bee.v3(posInfo[1], posInfo[2], 1)
-	self.CharacterImage.transform.localScale = bee.v3(posInfo[3], posInfo[3], 1)
+	self._characterCls:setRoleOffset(bee.v3(posInfo[1], posInfo[2], 1), bee.v3(posInfo[3], posInfo[3], 1))
+	-- self.CharacterImage.transform.localPosition = bee.v3(posInfo[1], posInfo[2], 1)
+	-- self.CharacterImage.transform.localScale = bee.v3(posInfo[3], posInfo[3], 1)
 
 	bee.setIconInAtlas(self.CurrencyIcon, tpl_props[cfg.pri[1]].icon)
 	bee.setText(self.CountText, cfg.pri[2])
@@ -320,6 +434,26 @@ end
 
 function P:onPointerDown(e)
 	self._isDraged = nil
+end
+
+function P:onPointerUp(e)
+	if not self._isDraged then
+		local upTarget = e.pointerCurrentRaycast.gameObject
+		while upTarget and upTarget.name ~= "SkinItem(Clone)" do
+			upTarget = upTarget.transform.parent and upTarget.transform.parent.gameObject or nil
+		end
+		if upTarget then
+			for _, v in ipairs(self._itemsTras) do
+				if upTarget == v.gameObject then
+					local cmp = v.gameObject:GetComponent("Button")
+					if cmp then
+						cmp.onClick:Invoke()
+					end
+					return
+				end
+			end
+		end
+	end
 end
 
 function P:onDrag(e)
@@ -331,6 +465,7 @@ function P:onDrag(e)
 		self._curPos = self._maxPos
 	end
 	self:refreshItems(self._curPos)
+	self._isDraged = true
 end
 
 function P:onEndDrag(e)
@@ -362,11 +497,6 @@ function P:onClickArrow(dir)
 		self:refreshItems(self._curPos)
 		self:refreshSelectSkin()
 	end)
-end
-
-function P:onClickPurchase()
-	self:refreshRedTag(self._selectIndex)
-	UiManager:showUI("ShopPurchase", {info = self._skins[self._selectIndex]})
 end
 
 function P:refreshUI()
@@ -415,6 +545,9 @@ function P:initTipEff()
 
 	self._firstTipTag = self:once(0.2, function()
 		local posObj1 = self:find(self._skinEffList[self._skinTipsIndex], self._characterCls:getRoleSpine())
+		if self:find("Point", posObj1) then
+			posObj1 = self:find("Point", posObj1)
+		end
 		if posObj1 then
 			self.TipEff:SetActive(true)
 			self.TipEff.transform.position = posObj1.transform.position
@@ -429,6 +562,10 @@ function P:initTipEff()
 			end
 
 			local posObj = self:find(self._skinEffList[self._skinTipsIndex], self._characterCls:getRoleSpine())
+			if self:find("Point", posObj) then
+				posObj = self:find("Point", posObj)
+			end
+			
 			if posObj then
 				self.TipEff:SetActive(true)
 				self.TipEff.transform.position = posObj.transform.position
@@ -461,6 +598,9 @@ function P:beginTipEff()
 	end
 
 	local posObj1 = self:find(self._skinEffList[self._skinTipsIndex], self._characterCls:getRoleSpine())
+	if self:find("Point", posObj1) then
+		posObj1 = self:find("Point", posObj1)
+	end
 	if posObj1 then
 		self.TipEff:SetActive(true)
 		self.TipEff.transform.position = posObj1.transform.position
@@ -475,6 +615,9 @@ function P:beginTipEff()
 		end
 
 		local posObj = self:find(self._skinEffList[self._skinTipsIndex], self._characterCls:getRoleSpine())
+		if self:find("Point", posObj) then
+			posObj = self:find("Point", posObj)
+		end
 		if posObj then
 			self.TipEff:SetActive(true)
 			self.TipEff.transform.position = posObj.transform.position

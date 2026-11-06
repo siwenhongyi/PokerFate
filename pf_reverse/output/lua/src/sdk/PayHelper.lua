@@ -2,6 +2,7 @@ local P = {
     curData = nil,
     iap_infos = nil,    -- 缓存的已经支付但还没上报的信息
     ios_skus = {},
+    sku_infos = nil,    -- 商品价格信息
 }
 PayHelper = P
 
@@ -85,6 +86,54 @@ function onAppProductInfos(info)
     end
 end
 
+function onQooSdkInit(info)
+end
+
+function onQooLoginResult(info)
+end
+
+function onQooBindUserIdResult(info)
+end
+
+function onQooPayResult(info)
+    print("onQooPayResult ", info)
+
+    local data = json.decode(info)
+
+    if data.code == 0 then
+        if data.data.status == "success" then
+            local raw = json.decode(data.raw)
+            UiManager:showToast(_T("LAB_PURCHASE_SUC"))
+            _onPaySucces({
+                token = data.data.token,
+                data = raw.data,
+                signature = raw.signature,
+                algorithm = raw.algorithm,
+                encVersion = raw.encVersion,
+                pid = data.data.product_id,
+                order_id = data.data.cpOrderId,
+            })
+            CS.PayHelper.consumeProductId(data.data.purchase_id, data.data.token)
+        end
+    else
+        ShopModel:doPayFail()
+    end
+end
+
+function onQooRestoreResult(info)
+end
+
+function onQooConsumeResult(msg)
+end
+
+function onQooProductsResult(info)
+    local datas = json.decode(info)
+    P.sku_infos = {}
+    for _, v in ipairs(datas) do
+        P.sku_infos[v.product_id] = {productId = v.product_id, name = v.name, pri = v.amount, coin = v.currency}
+    end
+end
+
 function onPcPayResult(info)
     -- local d = json.decode(info)
     -- print("onPcPayResult ", info, d)
@@ -128,24 +177,41 @@ function doPaySucces(info, successCb)
         return
     end
     if bee.isAndroid then
-        Net:post("shop/googlePay", {pid = info.pid, token = info.token}, function(data)
-            print("shop/googlePay resp ==== ", json.encode(data))
-            P:removeIapInfo(info)
-            if data.code ~= 0 then
-                return
-            end
-            ShopModel:onPaySucces(info, data)
-        end)
-    elseif bee.isIos then
-        if info.transaction_id then
-            Net:post("v2/shop/applePay", {transaction_id = info.transaction_id}, function(data)
-                print("v2/shop/applePay resp ==== ", json.encode(data))
+        if G_CHNL_ID == 7 then
+            Net:post("shop/qooApp", {data = info.data, signature = info.signature, algorithm = info.algorithm, encVersion = info.encVersion}, function(data)
+                print("shop/qooApp resp ==== ", json.encode(data))
                 P:removeIapInfo(info)
                 if data.code ~= 0 then
                     return
                 end
                 ShopModel:onPaySucces(info, data)
             end)
+        else
+            Net:post("shop/googlePay", {pid = info.pid, token = info.token}, function(data)
+                print("shop/googlePay resp ==== ", json.encode(data))
+                P:removeIapInfo(info)
+                if data.code ~= 0 then
+                    return
+                end
+                ShopModel:onPaySucces(info, data)
+            end)
+        end
+    elseif bee.isIos then
+        if info.transaction_id then
+            if P._last_transaction_id ~= info.transaction_id then
+                P._last_transaction_id = info.transaction_id
+                Net:post("v2/shop/applePay", {transaction_id = info.transaction_id}, function(data)
+                    P._last_transaction_id = nil
+                    print("v2/shop/applePay resp ==== ", json.encode(data))
+                    P:removeIapInfo(info)
+                    if data.code ~= 0 then
+                        return
+                    end
+                    ShopModel:onPaySucces(info, data)
+                end, function()
+                    P._last_transaction_id = nil
+                end)
+            end
         else
             Net:post("shop/applePay", {pid = info.pid, token = info.token, order_id = info.order_id}, function(data)
                 print("shop/applePay resp ==== ", json.encode(data))

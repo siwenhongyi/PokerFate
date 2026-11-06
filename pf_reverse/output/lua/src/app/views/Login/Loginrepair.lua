@@ -52,6 +52,7 @@ function P:onAwake()
             onSure = function()
                 bee.logEvent("login-repair-clearupdatefiles--confirm")
                 LocalStore:deleteValueForKey("app_full_version")
+                LocalStore:deleteValueForKey("app_update_version")
                 LocalStore:deleteValueForKey("load_slient_result")
                 CS.FileUtils.DeleteDirectory(CS.AppLoader.GetAddressWritePath());
                 CS.FileUtils.DeleteDirectory(CS.AppLoader.GetAddressWriteTempPath());

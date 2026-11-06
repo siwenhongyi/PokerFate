@@ -3,6 +3,8 @@ pytest>=7.0
 
 # Range/equity engine
 numpy>=1.20
+scikit-learn>=1.8
+lightgbm>=4.6
 
 # Hand evaluation — C-accelerated 7-card eval. HandEvaluator.eval_int falls
 # back to the pure-Python evaluator if eval7 isn't installed, but the test
@@ -14,5 +16,5 @@ websockets>=14.0
 cryptography>=42.0
 certifi>=2024.0
 
-# Protobuf — install after compiling protos with pf_intercept/gen_pb2.sh
+# Protobuf — install after compiling protos with pf_intercept/tools/gen_pb2.sh
 protobuf>=4.0

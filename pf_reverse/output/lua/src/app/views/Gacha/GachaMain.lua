@@ -23,14 +23,10 @@ function P:onAwake()
     self.DrawTicket = self:find("DrawTicket", Currency)
     self.DrawTicketIcon = self:find("DrawTicketIcon", self.DrawTicket)
     self.DrawTicketText = self:find("DrawTicketText", self.DrawTicket)
-
-    self.Up = self:find("Up", self.RightTop)
-    self.Up:SetActive(false)
-    self.UpTag = self:find("UpTag", self.Up)
-    self.UpNameText = self:find("UpNameText", self.Up)
-    self.UpTimeText = self:find("UpTimeText", self.Up)
     
     self.SkipToggle = self:find("SkipToggle", self.RightBottom)
+
+    self.PackageButton = self:find("PackageButton", self.RightBottom)
 
     self.RecruitScrollView = self:find("RecruitList", self.Left)
     self.ItemNormal = self:find("ItemNormal", self.RecruitScrollView)
@@ -44,6 +40,7 @@ function P:onAwake()
     self.Draw10Ticket = self:find("Draw10Ticket", self.Draw10Currency)
 
     bee.addClick(self:find("BackButton", self.LeftTop), function()
+        bee.logEvent("recruit-return", self._selectedCardPool)
         self:hideUI()
     end)
     bee.addClick(self.LoadingBackButton, function()
@@ -115,6 +112,21 @@ function P:onAwake()
     else
         bee.setUncheck(self.SkipToggle)
     end
+
+    self.Skin = self:find("Skin", self.RightTop)
+    self.AvatarImg = self:find("Avatar/Mask/AvatarImg", self.Skin)
+    self.SkinNameText = self:find("Information/SkinNameText", self.Skin)
+    self.EffSr = self:find("EffSr", self.Skin)
+    self.EffSsr = self:find("EffSsr", self.Skin)
+
+    bee.addClick(self.Skin, function()
+        Game:playSound("ui_button_confirm")
+        local showSkin = GachaModel:getCardPoolShowSkin(self._selectedCardPool)
+        bee.logEvent("recruit-skin-timelimit", self._selectedCardPool, showSkin)
+        if showSkin and showSkin > 0 then
+            ItemModel:jumpView(102001, showSkin)
+        end
+    end)
 end
 
 function P:evt_lan_mod()
@@ -283,13 +295,9 @@ end
 
 -- 卡池信息
 function P:setCardPoolShow()
-    if self.upScheduleTag then
-        scheduler:removeTag(self.upScheduleTag)
-        self.upScheduleTag = nil
-    end
-
     if self._gachaCenterItem then
-        ObjectCache:putItem(self._gachaCenterItem)
+        -- ObjectCache:putItem(self._gachaCenterItem)
+        CU.GameObject.Destroy(self._gachaCenterItem)
         self._gachaCenterItem = nil
     end
 
@@ -310,13 +318,29 @@ function P:setCardPoolShow()
     centerItem.transform:SetParent(self.Center.transform)
     centerItem.transform.localPosition = bee.v3(0, 0, 0)
     centerItem.transform.localScale = bee.v3(1, 1, 1)
+    centerItem:GetComponent("RectTransform").offsetMin = bee.v2(0, 0)
+    centerItem:GetComponent("RectTransform").offsetMax = bee.v2(0, 0)
     self._gachaCenterItem = centerItem
+
+    -- local defaultAnim = "UI_1_Gacha_" .. cfg.id
+    -- local idleAnim = "UI_1_Gacha_" .. cfg.id .. "_idle"
+
+    -- local animator = centerItem:GetComponent("Animator")
+    -- if not bee.isNull(animator) then
+    --     if CS.AnimatorManager.Instance:GetAnimationTimes(centerItem:GetComponent("Animator"), idleAnim) > 0 then
+    --         AnimationMgr:playAnim(centerItem, defaultAnim, function()
+    --             AnimationMgr:playAnim(centerItem, idleAnim)
+    --         end)
+    --     else
+    --         AnimationMgr:playAnim(centerItem, defaultAnim)
+    --     end
+    -- end
   
-    local characterCount = #cfg.character
     -- 角色信息
-    for i, v in ipairs(cfg.character) do
-        self:setRole(self:find("Character/Role" .. i, centerItem), v, cfg)
-        self:setNameCard(self:find("NameCard" .. i, centerItem), v)
+    local characterCount = #cfg.character
+    for i = 1, characterCount do
+        self:setRole(self:find("Character/Role" .. i, centerItem), i, cfg)
+        self:setNameCard(self:find("NameCard" .. i, centerItem), cfg.character[i])
     end
 
     local titleList = {}
@@ -337,51 +361,57 @@ function P:setCardPoolShow()
     local TipsText = self:find("TipsBg/TipsText", showTitle)
     bee.setText(TipsText, _T(cfg.des))
 
-    if cfg.up then
-        self.Up:SetActive(true)
-
-        bee.setIconInAtlas(self.UpTag, cfg.up)
-        local upRole = tpl_character[cfg.up_character[1]]
-        bee.setText(self.UpNameText, _T(upRole.name))
-
-        local endTime = GachaModel:getCardPoolEndTime(self._selectedCardPool)
-        if endTime > 0 then
-            self.UpTimeText:SetActive(true)
-
-            local leftTime = endTime - bee.getServerTime()
-            if leftTime > 0 then
-                bee.setText(self.UpTimeText, _F("LAB_GACHA_028", ShopModel:getShopTimeText(leftTime)))
-                self.upScheduleTag = self:schedule(1, function()
-                    leftTime = leftTime - 1
-                    if leftTime > 0 then
-                        bee.setText(self.UpTimeText, _F("LAB_GACHA_028", ShopModel:getShopTimeText(leftTime)))
-                    else
-                        bee.setText(self.UpTimeText, _T("LAB_BACKPACK_DES_21"))
-                    end
-                end)
-            else
-                bee.setText(self.UpTimeText, _T("LAB_BACKPACK_DES_21"))
-            end
-        else
-            self.UpTimeText:SetActive(false)
-        end
-    else
-        self.Up:SetActive(false)
-    end
-
     if self._selectedCardPool == 10005 then
         self:find("Title/gacha_rainyleisure_title_bg_word_02", centerItem):SetActive(curLan ~= "en")
         self:find("Title/gacha_rainyleisure_title_bg_word_01", centerItem):SetActive(curLan ~= "en")
     elseif self._selectedCardPool == 20012 then
         self:find("bg_gacha_nightflame_bird", centerItem):SetActive(false)
     end
+
+    local showSkin = GachaModel:getCardPoolShowSkin(self._selectedCardPool)
+    if showSkin and showSkin > 0 and ItemModel:isCanJump(102001, showSkin) then
+        self.Skin:SetActive(true)
+        local skinCfg = tpl_character_skin[showSkin]
+        if skinCfg then
+            local avatarCfg = tpl_props[skinCfg.avatar]
+            bee.setIconInAtlas(self.AvatarImg, avatarCfg.icon)
+            bee.setText(self.SkinNameText, _T(skinCfg.name))
+            self.EffSr:SetActive(skinCfg.rank == 1)
+            self.EffSsr:SetActive(skinCfg.rank == 2)
+        end
+    else
+        self.Skin:SetActive(false)
+    end
+
+    local activityId = ThemeModel:getThemeConfId()
+    if activityId and activityId > 0 then
+        local activityCfg = tpl_activity_map[activityId]
+        if activityCfg and activityCfg.activity_recruit then
+            self.PackageButton:SetActive(true)
+            bee.setIcon(self.PackageButton, activityCfg.activity_recruit .. "_" .. curLan, "Gacha", true)
+
+            bee.removeAllClick(self.PackageButton)
+            bee.addClick(self.PackageButton, function()
+                bee.logEvent("recruit-path-gifts", self._selectedCardPool)
+                UiManager:showUI(activityCfg.activity_gifts)
+            end)
+        else
+            self.PackageButton:SetActive(false)
+        end
+    else
+        self.PackageButton:SetActive(false)
+    end
 end
 
-function P:setRole(item, id, cfg)
-    local showSkin = get_tpl_subKey(tpl_character_skin_list, "role", id)[1]
+function P:setRole(item, index, cfg)
     local RoleImg = self:find("RoleImg", item)
     if RoleImg then
-        bee.setIcon(RoleImg, showSkin.image, true)
+        if cfg.character_img then
+            bee.setIcon(RoleImg, cfg.character_img[index], true)
+        else
+            local showSkin = get_tpl_subKey(tpl_character_skin_list, "role", cfg.character[index])[1]
+            bee.setIcon(RoleImg, showSkin.image, true)
+        end
 
         if cfg and cfg.up then
             if cfg.up_character_offset then
@@ -430,9 +460,9 @@ function P:setCurrencyShow()
     local curTicketCount = ItemModel:getItemNumById(GPropId.DrawTicket)
 
     -- 货币栏显示
-    bee.setTextGold(self.ExchangeCoinText, _N(ItemModel:getItemNumById(GPropId.ExchangeCoin)))
-    bee.setTextGold(self.DrawCoinText, _N(curCoinCount))
-    bee.setTextGold(self.DrawTicketText, _N(curTicketCount))
+    bee.setTextGold(self.ExchangeCoinText, _N2(ItemModel:getItemNumById(GPropId.ExchangeCoin)))
+    bee.setTextGold(self.DrawCoinText, _N2(curCoinCount))
+    bee.setTextGold(self.DrawTicketText, _N2(curTicketCount))
 
     -- 单抽数量显示
     if curTicketCount >= 1 then
@@ -504,7 +534,7 @@ function P:setCurrencyShow()
 end
 
 function P:onClickAddButton(id)
-    ItemModel:jumpView(tpl_props[id].accesses[1])
+    UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(id, true)})
 end
 
 function P:onClickRecruitOne()
@@ -523,19 +553,22 @@ function P:onClickRecruitOne()
     -- 数量不足跳转获取
     if not next(costList) then
         -- 跳转提示
-        local params = {}
-        local propCfg = tpl_props[GPropId.DrawTicket]
-        params.text = _F("LAB_GACHA_023", _T(propCfg.name))
-        params.onSure = function()
-            ItemModel:jumpView(propCfg.accesses[1])
-        end
-        UiManager:showTip(params)
+        UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(GPropId.DrawTicket, true)})
+        UiManager:showToast(_T("LAB_COMMON_TIPS_1"))
+        bee.logEvent("recruit-click", self._selectedCardPool, 0)
+        return
+    end
+
+    if GachaModel:isShowDrawNotice() then
+        UiManager:showUI("GachaNoticeSmall", {poolId = self._selectedCardPool, drawCount = 1})
         return
     end
 
     if bee.checkCd("DrawCard", 2) then
         Game:playGachaMusic()
+        bee.logEvent("recruit-click", self._selectedCardPool, 1)
         GachaModel:recruitOne(self._selectedCardPool, costList)
+        bee.emit("evt_gachaStart")
     end
 end
 
@@ -565,19 +598,22 @@ function P:onClickRecruitTen()
     -- 数量不足跳转获取
     if not next(costList) then
         -- 跳转提示
-        local params = {}
-        local propCfg = tpl_props[GPropId.DrawTicket]
-        params.text = _F("LAB_GACHA_023", _T(propCfg.name))
-        params.onSure = function()
-            ItemModel:jumpView(propCfg.accesses[1])
-        end
-        UiManager:showTip(params)
+        UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(GPropId.DrawTicket, true)})
+        UiManager:showToast(_T("LAB_COMMON_TIPS_1"))
+        bee.logEvent("recruit-click-10", self._selectedCardPool, 0)
+        return
+    end
+
+    if GachaModel:isShowDrawNotice() then
+        UiManager:showUI("GachaNoticeSmall", {poolId = self._selectedCardPool, drawCount = 10})
         return
     end
 
     if bee.checkCd("DrawCard", 2) then
         Game:playGachaMusic()
+        bee.logEvent("recruit-click-10", self._selectedCardPool, 1)
         GachaModel:recruitTen(self._selectedCardPool, costList)
+        bee.emit("evt_gachaStart")
     end
 end
 

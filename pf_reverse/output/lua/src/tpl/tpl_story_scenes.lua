@@ -26,7 +26,11 @@ local function _initData()
 {4003,"BackGround/Story/bg_story_s_2_3.png",nil},
 {5001,"BackGround/Story/bg_story_b_1_1.png",nil},
 {5002,"BackGround/Story/bg_story_b_1_2.png",nil},
-{6001,"BackGround/Story/bg_story_s_4_1.png",nil}
+{6001,"BackGround/Story/bg_story_s_4_1.png",nil},
+{7001,"BackGround/Story/bg_story_sm_1_1.png",nil},
+{7002,"BackGround/Story/bg_story_sm_1_2.png",nil},
+{7003,"BackGround/Story/bg_story_sm_1_3.png",nil},
+{8001,"BackGround/Story/bg_story_s_6_1.png",nil}
 }
     for _, v in pairs(bodys) do
         local m = {}

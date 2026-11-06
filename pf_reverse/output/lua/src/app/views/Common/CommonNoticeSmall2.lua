@@ -63,4 +63,9 @@ function P:onBtCancel(isClose)
     self:hideUI()
 end
 
+function P:onBtClose()
+    self:onBtCancel(true)
+end
+
+
 return P

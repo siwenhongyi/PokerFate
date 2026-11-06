@@ -15,9 +15,9 @@ function P:requestTaskList(immediately)
 			return
 		end
 
-		self._daily_task_list = data.daily_list 	-- 每日任务列表
-		self._weekly_task_list = data.weekly_list 	-- 每周任务列表
-		self._challenge_task_list = data.challenge_list -- 挑战任务列表
+		self._daily_task_list = self:filtrateTask(data.daily_list, tpl_dailytasks) 	-- 每日任务列表
+		self._weekly_task_list = self:filtrateTask(data.weekly_list, tpl_weeklytasks) 	-- 每周任务列表
+		self._challenge_task_list = self:filtrateTask(data.challenge_list, tpl_challengetasks) -- 挑战任务列表
 		self._point_data = data.point_data 			-- 活跃点数据
 		-- 每日活跃点配置
 		self._daily_point_conf_list = data.daily_point_conf_list
@@ -35,6 +35,30 @@ function P:requestTaskList(immediately)
 	end)
 end
 
+-- 任务筛选显示
+function P:filtrateTask(taskList, tpls)
+	local list = {}
+	for k,v in pairs(taskList) do
+		if tpls and not tpls[v.task_id] then
+		elseif v.task_type == 201 and v.status == TaskStatus.InProgress then
+			-- 给角色赠送礼物
+			local flag
+			for k, v in pairs(CharacterModel:getOwnedCharacters()) do
+				if not v:isCanAwaken() and not v:isAwaken() then
+					flag = true
+					break
+				end
+			end
+			if flag then
+				table.insert(list, v)
+			end
+		else
+			table.insert(list, v)
+		end
+	end
+	return list
+end
+
 function P:reportTask(task_type, id)
 	if task_type == TaskType.RoleInteraction then
 		-- 查找是否有 TaskType.RoleInteraction 的任务
@@ -49,6 +73,9 @@ function P:reportTask(task_type, id)
 	Net:post("task/report", args, function(data)
 		if data.code ~= 0 then
 			return
+		end
+		if task_type == TaskType.CheckView then
+			bee.emit("evt_checkViewCallback")
 		end
 	end)
 end
@@ -68,6 +95,18 @@ function P:isHaveTaskType(task_type)
 		for _, v in ipairs(self._weekly_task_list or {}) do
 			if v.status == TaskStatus.InProgress then
 				local cfg = tpl_weeklytasks[v.task_id]
+				if cfg and cfg.task_type == task_type then
+					flag = true
+					break
+				end
+			end
+		end
+	end
+	if not flag then
+		local themeTasks = ThemeModel:getTasks()
+		for _,v in pairs(themeTasks) do
+			if v.status == TaskStatus.InProgress then
+				local cfg = tpl_theme_task[v.task_id]
 				if cfg and cfg.task_type == task_type then
 					flag = true
 					break
@@ -245,7 +284,14 @@ function P:getTaskDesc(cfg, data)
 	if cfg.task_type == 311 then
 		return _T(cfg.dec)
 	elseif cfg.task_type == 313 then
+		local propCfg = tpl_props[value[2]]
+		return _F(cfg.dec, value[3], propCfg and _T(propCfg.name) or nil)
+	elseif cfg.task_type == 111 or cfg.task_type == 128 then
 		return _F(cfg.dec, value[3])
+	elseif cfg.task_type == 401 then
+		return _F(cfg.dec, _N(value[2]), value[1] == -1 and "" or DispatchModel:getLevelName(value[1]))
+	elseif cfg.task_type == 402 or cfg.task_type == 403 then
+		return _F(cfg.dec, _N(value[2]), value[1])
 	elseif valCount == 1 then
 		return _F(cfg.dec, _N(value[1]))
 	elseif valCount == 2 then
@@ -257,6 +303,8 @@ function P:getTaskDesc(cfg, data)
 		else
 			return _F(cfg.dec, _N(value[2]))
 		end
+	elseif valCount == 4 then
+		return _F(cfg.dec, _N(value[4]))
 	else
 		return _T(cfg.dec)
 	end
@@ -510,6 +558,10 @@ function P:evt_serverTimeCrossDay()
 		self:requestTaskList()
 		self._reportTasks = {}
     end)
+end
+
+function P:getNeedValue(data)
+	return data.value[#data.value]
 end
 
 return P

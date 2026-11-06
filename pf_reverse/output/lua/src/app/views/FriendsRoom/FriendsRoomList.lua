@@ -125,16 +125,31 @@ function P:refreshItem(data, item)
     bee.setIcon(self:find("Mask/ImageIcon", item), PlayerModel:getAvatarIcon(data.owner.avatar))
     GF.setFrameImage(self:find("ImageFrame", item), data.owner.frame)
 
-    bee.setText(self:find("Blind/TextBlind", item), _N(data.bb / 2) .. "/" .. _N(data.bb))
-    bee.setText(self:find("Buyin/TextByin", item), _N(data.min_byin) .. "-" .. _N(data.max_byin))
+    if GF.isFriendSNG(data.game_type) then
+        bee.setText(self:find("TextSngName", item), _F("LAB_FRIROOM_059", data.seat_num))
+        self:find("Blind", item):SetActive(false)
+        self:find("Buyin", item):SetActive(false)
+    else
+        bee.setText(self:find("TextSngName", item), "")
+        self:find("Blind", item):SetActive(true)
+        self:find("Buyin", item):SetActive(true)
+        bee.setText(self:find("Blind/TextBlind", item), _N(data.bb / 2) .. "/" .. _N(data.bb))
+        bee.setText(self:find("Buyin/TextByin", item), _N(data.min_byin) .. "-" .. _N(data.max_byin))
+    end
 
     self:find("common_panel_blue_tag_01_a", item):SetActive(data.sited_num <= 1)
     self:find("common_panel_blue_tag_01_b", item):SetActive(data.sited_num > 1)
 
+    local gameName = GF.getGameTypeName(data.game_type)
+    bee.setText(self:find("common_panel_blue_tag_01_a/TextGame", item), gameName)
+    bee.setText(self:find("common_panel_blue_tag_01_b/TextGame", item), gameName)
+
+    self:find("TipSeen", item):SetActive(data.open_observer)
+
     local JoinButton = self:find("JoinButton", item)
     local FullButton = self:find("FullButton", item)
     local s = string.format("%d/%d", data.sited_num, data.seat_num)
-    if data.sited_num >= data.seat_num then
+    if data.sited_num >= data.seat_num and not data.is_in_room then
         self:find("TextNum1", item):SetActive(false)
         self:find("TextNum2", item):SetActive(true)
         bee.setText(self:find("TextNum2", item), s)
@@ -150,12 +165,14 @@ function P:refreshItem(data, item)
 
     bee.addClick(JoinButton, function()
         Game:playSound("ui_button_confirm")
-        if data.sited_num < data.seat_num then
+        -- if data.sited_num < data.seat_num then
             Net:sendReq("pb.JoinFriendRoomREQ", {
                 roomid = tonumber(data.roomid),
             })
-	        SettingModel:addTag("friends_enter_toast")
-        end
+            if not data.is_in_room then
+	            SettingModel:addTag("friends_enter_toast")
+            end
+        -- end
     end, true)
 end
 

@@ -15,6 +15,8 @@ local function _initData()
 {5002,"LAB_LEADERBOARD_MAIL_TITLE_1","LAB_MAIL_SENDER_1",nil,"LAB_LEADERBOARD_MAIL_DEC_102",nil,nil,nil,nil,nil},
 {5011,"LAB_LEADERBOARD_MAIL_TITLE_2","LAB_MAIL_SENDER_1",nil,"LAB_LEADERBOARD_MAIL_DEC_201",nil,nil,nil,nil,nil},
 {5012,"LAB_LEADERBOARD_MAIL_TITLE_2","LAB_MAIL_SENDER_1",nil,"LAB_LEADERBOARD_MAIL_DEC_202",nil,nil,nil,nil,nil},
+{6001,"LAB_MAIL_TITLE_5","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_5",nil,nil,nil,nil,nil},
+{6002,"LAB_MAIL_TITLE_6","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_6",nil,nil,nil,nil,nil},
 {51001,"LAB_LEADERBOARD_MAIL_TITLE_3","LAB_MAIL_SENDER_1",nil,"LAB_LEADERBOARD_MAIL_DEC_1",nil,nil,nil,nil,nil},
 {51002,"LAB_LEADERBOARD_MAIL_TITLE_3","LAB_MAIL_SENDER_1",nil,"LAB_LEADERBOARD_MAIL_DEC_2",nil,nil,nil,nil,nil},
 {61001,"LAB_MAIL_030","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_031",nil,nil,nil,nil,nil},
@@ -22,7 +24,12 @@ local function _initData()
 {71002,"LAB_TOURNAMENT_MTT_INFO6","LAB_MAIL_SENDER_1",nil,"LAB_TOURNAMENT_MTT_INFO8",nil,nil,nil,nil,nil},
 {71003,"LAB_TOURNAMENT_MTT_INFO6","LAB_MAIL_SENDER_1",nil,"LAB_TOURNAMENT_MTT_INFO9",nil,nil,nil,nil,nil},
 {71004,"LAB_TOURNAMENT_MTT_INFO6","LAB_MAIL_SENDER_1",nil,"LAB_TOURNAMENT_MTT_INFO9",nil,nil,nil,nil,nil},
-{81001,"LAB_MAIL_034","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_035",nil,nil,nil,nil,nil}
+{81001,"LAB_MAIL_034","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_035",nil,nil,nil,nil,nil},
+{90001,"LAB_MAIL_TITLE_7","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_7",nil,nil,nil,nil,nil},
+{90002,"LAB_MAIL_TITLE_8","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_8",nil,nil,nil,nil,nil},
+{90003,"LAB_MAIL_TITLE_8","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_9",nil,nil,nil,nil,nil},
+{100001,"LAB_MAIL_036","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_037",nil,nil,nil,nil,nil},
+{110001,"LAB_MAIL_038","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_039",nil,nil,nil,nil,nil}
 }
     for _, v in pairs(bodys) do
         local m = {}

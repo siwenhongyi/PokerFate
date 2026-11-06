@@ -57,6 +57,13 @@ function P.getCardType(handCards, publicCards, roomType)
 	return P.getHoldemType(handCards, publicCards)
 end
 
+function P.getCardType2(handCards, publicCards, gameType)
+	if GF.isOmahaGame(gameType) or GF.isFriendOmaha(gameType) then
+		return P.getOmahaType(handCards, publicCards)
+	end
+	return P.getHoldemType(handCards, publicCards)
+end
+
 -- 获取 Omaha版型组合及名称
 function P.getOmahaType(handCards, publicCards)
 	if not handCards or #handCards == 0 then return nil, "" end
@@ -217,6 +224,9 @@ function P.getHoldemType(handCards, publicCards)
 	end
 	
 	if nil == publicCards or 0 == #publicCards then
+		if 0 == #hands then
+			return nil, ""
+		end
 		if hands[1].number == hands[2].number then
 			return hands, P.TYPE_2_NAME[20].label, P.TYPE_2_NAME[20].type
 		end

@@ -6,6 +6,7 @@ function P:ctor(params, scene)
 	P.super.ctor(self, params, scene)
 	self.hand_history = {}
 	-- self.save_gameids = {}
+	self._raiseCount = 0
 end
 
 function P:assignRoomInfo(params)
@@ -24,7 +25,7 @@ function P:updateRoomInfo()
 	self:initSelfHandCard()
 	self:calMaxBetValue()
 
-	if self.table_status.action_idx >= 0 then
+	if self.table_status.action_idx >= 0 and not self:isInObserve() then
 		local info = self:getPlayer(self.table_status.action_idx + 1)
 		if not info or (info.action_type ~= POKER_ACTION.WAIT 
 			and info.action_type ~= POKER_ACTION.SB
@@ -33,6 +34,20 @@ function P:updateRoomInfo()
 		)
 		then
 			self.table_status.action_idx = -1
+		end
+	end
+
+	self._raiseCount = 0
+	local idx, min_raise = self:getSBIndex(), self:getBigBlind()
+	if self:getRoundStage() == POKER_ROUND.PRE_FLOP then
+		idx = self:getBBIndex() + 1
+	end
+	for i = idx, #self.player_info - 1 do
+		local info = self:getPlayer(i > #self.player_info and ( i % #self.player_info + 1) or i)
+		if info then
+			if info.action_type == POKER_ACTION.RAISE then
+				self._raiseCount = self._raiseCount + 1
+			end
 		end
 	end
 end
@@ -190,7 +205,7 @@ function P:initSelfHandCard()
 end
 
 function P:updateSelfCard(msg)
-	self:updateHandCard(self.my_position, msg)
+	self:updateHandCard(msg.seatid and (msg.seatid + 1) or self.my_position, msg)
 end
 
 function P:updateHandCard(player_index, msg)
@@ -241,6 +256,39 @@ function P:resetRoundInfo()
 		if v.on_seat and v.action_type ~= POKER_ACTION.SITED then
 			v.action_type = POKER_ACTION.WAIT
 		end
+	end
+	self._raiseCount = 0
+end
+
+function P:getRaiseCount()
+	return self._raiseCount
+end
+
+function P:onActionBRC(msg)
+	self:refreshLastPotNum()
+	
+	local player = self:getPlayer(msg.seatid + 1)
+	player.action_type = msg.action_type
+	player.bet_change = msg.chips
+	player.bet_chip = player.bet_chip + msg.chips
+	player.chips = msg.hand_chips
+	
+	if GF.isFoldAction(msg.action_type) then
+		player.is_fold = true
+	end
+	if msg.action_type == POKER_ACTION.RAISE then
+		self._raiseCount = self._raiseCount + 1
+	elseif msg.action_type == POKER_ACTION.ALLIN and msg.chips >= self:getMinChipIn() and self:getMinChipIn() > 0 then
+		self._raiseCount = self._raiseCount + 1
+	end
+
+	self:addHistoryAction(msg)
+
+	if msg.chips and self.updateMaxBetValue then
+		self:updateMaxBetValue(msg.chips)
+	end
+	if self:getActionIndex() == msg.seatid + 1 then
+		self:setActionIndex(-1)
 	end
 end
 
@@ -327,17 +375,29 @@ function P:setSmallBlind(sb)
 	self.room_info.bb = sb * 2
 end
 
+function P:setAvgChips(avg_chips)
+	self.room_status.avg_chips = avg_chips
+end
+
+function P:getAvgChips()
+	if self.room_status.avg_chips then
+		return self.room_status.avg_chips
+	end
+	
+	return self:getBigBlind()
+end
+
 function P:getBetChipsStr(chips)
 	if SettingModel:isShowBB() then
 		if chips > 0 then
-			if chips * 10 < self:getBigBlind() then
-				return "<0.1BB"
+			if chips * 100 < self:getBigBlind() then
+				return "<0.01BB"
 			end
-			return "" .. tostring(math.floor(chips / self:getBigBlind() * 10) / 10) .. "BB"
+			return "" .. tostring(math.floor(chips * 100 / self:getBigBlind()) / 100) .. "BB"
 		end
 		return "0BB"
 	end
-	return _N(chips)
+	return _N2(chips)
 end
 
 function P:getBigBlind()
@@ -455,7 +515,7 @@ end
 
 -- 获取比赛思考时间，减掉了容错时间
 function P:getThinkTime()
-	return self.playing_status.think_time - tpl_constdata.Sng_Timebank_Extra
+	return (self.playing_status.think_time or 0) - tpl_constdata.Sng_Timebank_Extra
 end
 
 function P:setThinkTime(think_time)
@@ -545,6 +605,10 @@ function P:setHandInfo(id, info)
 	self.hand_history[id] = info
 end
 
+function P:clearHandInfos()
+	self.hand_history = {}
+end
+
 -- function P:getSaveGameids()
 -- 	return self.save_gameids
 -- end
@@ -588,6 +652,7 @@ end
 
 function P:setRecord(record)
 	self._recordData = record
+	self:resetHistoryInfo()
 end
 
 function P:getRecord()
@@ -609,26 +674,158 @@ function P:isCanSaveRecord()
 	return false
 end
 
-function P:saveRecord(tip)
+function P:saveRecord(tip, cb)
 	if self:getGameId() and "" ~= self:getGameId() then
 		self._saveGameId = self:getGameId()
-		Net:post("/collCard/update", {
-			add_id = self:getGameId(),
-			roomid = tostring(self:getRoomId()),
-			tid = tostring(self:getTid()),
-		}, function(d)
-			if 0 == d.code then
-				PlayerModel:setCurRecord(#d.gameids)
+		local gid = self._saveGameId
+		GameModel:saveReplay(gid, function(ok, removeId)
+			if ok then
 				if tip then
         			UiManager:showToast(tip)
 				end
+				if cb then
+					cb(gid)
+				end
 			end
-		end)
+		end, tostring(self:getRoomId()), tostring(self:getTid()))
 	end
+end
+
+function P:getHistoryDetail()
+	return self.table_status.his_detail
+end
+
+function P:resetHistoryInfo()
+	self.table_status.his_detail = {
+		pool_rd = {},
+		round_rd = {},
+		show_round_rd = {
+			pot = 0,
+			items = {},
+		},
+	}
+end
+
+function P:addHistoryRound(msg)
+	table.insert(self.table_status.his_detail.round_rd, {
+		stage = self:getRoundStage(),
+		pot = self.pot_info,
+		action = {},
+	})
+end
+
+function P:addHistoryAction(msg)
+	local ds = self.table_status.his_detail.round_rd[#self.table_status.his_detail.round_rd]
+	if not ds then
+		if msg.action_type == POKER_ACTION.ANTE then
+			ds = self.table_status.his_detail.ante_rd
+			if not ds then
+				ds = {
+					action = {},
+				}
+				self.table_status.his_detail.ante_rd = ds
+			end
+		end
+		if not ds then
+			return
+		end
+	end
+	local player = self:getPlayer(msg.seatid + 1)
+	table.insert(ds.action, {
+		uid = player and player.uid or 0,
+		name = player and player.name or "",
+		seatid = msg.seatid,
+		action_type = msg.action_type,
+		action_chips = msg.chips,
+		is_allin = msg.is_allin,
+		left_hand_chips = msg.hand_chips,
+	})
+end
+
+function P:addHistoryShowRound(msg)
+	self.table_status.his_detail.show_round_rd.pot = self.pot_info
+	local items = self.table_status.his_detail.show_round_rd.items
+	if not items then
+		items = {}
+		self.table_status.his_detail.show_round_rd.items = items
+	end
+	for _, v in ipairs(msg.info) do
+		local player = self:getPlayer(v.seatid + 1)
+		local hand_cards = {}
+		for i = 1, self:getHandCardNum() do
+			hand_cards[i] = v["card" .. i]
+		end
+		table.insert(items, {
+			seatid = v.seatid,
+			uid = player and player.uid or 0,
+			name = player and player.name or "",
+			hand_type = 0,
+			profit = 0,
+			hand_cards = hand_cards,
+			show_type_list = {1,1,1,1,1,1},
+		})
+	end
+end
+
+-- 主动秀牌数据
+function P:addHistoryShowCardRound(msg)
+	local items = self.table_status.his_detail.show_round_rd.items
+	if not items then
+		items = {}
+		self.table_status.his_detail.show_round_rd.items = items
+	end
+	for _, v in ipairs(msg.info) do
+		local player = self:getPlayer(v.seatid + 1)
+		table.insert(items, {
+			seatid = v.seatid,
+			uid = player and player.uid or 0,
+			name = player and player.name or "",
+			hand_type = 0,
+			profit = 0,
+			hand_cards = clone(v.hand_cards or {}),
+			show_type_list = {2,2,2,2,2,2},
+		})
+	end
+end
+
+function P:setHistoryPot(msg)
+	self.table_status.his_detail.pool_rd = msg.pool_rd
 end
 
 function P:setWinnerRSP(msg)
 	self.winner_rsp = msg
+
+	local items = self.table_status.his_detail.show_round_rd.items
+	for _, v in ipairs(msg.profit) do
+		local flag = true
+		for _, item in ipairs(items) do
+			if item.seatid == v.seatid then
+				item.profit = v.chips
+				flag = false
+				break
+			end
+		end
+		if flag then
+			local player = self:getPlayer(v.seatid + 1)
+			table.insert(items, {
+				seatid = v.seatid,
+				uid = v.uid,
+				name = player and player.name or "",
+				hand_type = v.chips > 0 and 0 or -1,
+				profit = v.chips,
+				hand_cards = v.uid == player and player.hand_cards or {},
+				show_type_list = {1,1,1,1,1,1},
+			})
+		end
+	end
+	local n = #items
+	local startSeatid = self:getSBIndex() - 1
+	table.sort(items, function(a, b)
+		local i1, i2 = a.seatid - startSeatid, b.seatid - startSeatid
+		if i1 < 0 then i1 = i1 + n end
+		if i2 < 0 then i2 = i2 + n end
+		return i1 < i2
+	end)
 end
 
 function P:getWinnerRSP()
@@ -688,7 +885,9 @@ function P:calculateWinOdds(boardCount, seed)
 			local player = self:getPlayer(v[1])
 			if player then
 				player.last_win_rate = player.win_rate
+				player.last_equally_rate = player.equally_rate
 				player.win_rate = v[2]
+				player.equally_rate = v[3]
 			end
 		end
 	end)
@@ -697,7 +896,7 @@ end
 function P:isHaveSurelyWinner()
 	for _, v in ipairs(self:getAllPlayers()) do
 		if v.on_seat and not v.is_fold and v.has_card then
-			if v.last_win_rate >= 100 then
+			if v.last_win_rate >= 100 or (v.last_equally_rate and v.last_equally_rate >= 100) then
 				return true
 			end
 		end
@@ -705,11 +904,36 @@ function P:isHaveSurelyWinner()
 	return false
 end
 
-function P:isCanScrop(chips)
-	if self:isTournament() then
-		return chips >= self.room_info.bust_threshold
+function P:isCanScrop(chips, isRecover)
+	if self:isTournament(true) and not self:isRecord() then
+		if self:isMTT() then
+			return chips >= self:getAvgChips() / 5
+		end
+		return chips >= self:getAvgChips() / 3
 	end
-	return chips >= tpl_constdata.ScrapRecoverBlindRate * self:getBigBlind()
+	if isRecover then
+		if self:isAllinOrFold() then
+			return chips >= tpl_constdata.ScrapRecoverBlindRateAOF * self:getBigBlind()
+		end
+		return chips >= tpl_constdata.ScrapRecoverBlindRate * self:getBigBlind()
+	end
+	return chips >= tpl_constdata.ScrapBlindRate * self:getBigBlind()
+end
+
+function P:getMyCardType()
+	if self:isMePlaying() then
+		local info = self:getMyPlayerInfo()
+		--弃牌
+		if info and info.is_fold then
+			return nil
+		end
+		--持牌
+		if info and info.hand_cards and info.hand_cards[1] and info.hand_cards[2] then
+			local cards, cardType, pkType = PKHelper.getCardType(info.hand_cards, self:getBoardInfo(), self:getRoomType())
+			return pkType
+		end
+	end
+	return nil
 end
 
 return P

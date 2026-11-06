@@ -49,6 +49,23 @@ function P:onStart()
         bee.setText(self.TimeText, TimeHelp:getTimeLeftStr(data.time_end - bee.getServerTime()))
     end)
     self:refreshItems()
+
+    -- 标题
+    local titleList = {}
+    titleList["tw"] = self:find("Title/TitleTw")
+    titleList["en"] = self:find("Title/TitleEn")
+    titleList["jp"] = self:find("Title/TitleJp")
+    titleList["zh"] = self:find("Title/TitleZh")
+    local showTitle
+    local curLan = LanguageManager:getLanguage()
+    for k, v in pairs(titleList) do
+        if k == curLan then
+            v:SetActive(true)
+            showTitle = v
+        else
+            v:SetActive(false)
+        end
+    end
 end
 
 -- 设置序号显示

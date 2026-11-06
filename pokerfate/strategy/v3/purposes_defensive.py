@@ -2,128 +2,116 @@
 
 from __future__ import annotations
 
-import os as _os
 from typing import List, Tuple
 
 from pokerfate.strategy.gto import GTOMath
 from pokerfate.strategy.v3.context import DecisionCtx
+from pokerfate.strategy.v3 import bluff_context, draw_quality, early_relative
 from pokerfate.strategy.v3.exploit import AF_PASSIVE_BASELINE, no_fold_equity, sticky_passive
 from pokerfate.strategy.v3.purpose import Purpose, TriggerResult
 from pokerfate.strategy.v3.stackoff_guard import stackoff_guard_reason
 
-# 2026-04-25 参数扫描钩子：overbet fold 加权的 pot_odds 阈值（3 级累加）
+# 2026-04-25 参数扫描：overbet fold 加权的 pot_odds 阈值（3 级累加）
 # 默认保持 v2 配置 0.55 / 0.65 / 0.75。扫描后选中的最优值写到默认。
-_BR_T1 = float(_os.environ.get('PF_BR_T1', '0.55'))
-_BR_T2 = float(_os.environ.get('PF_BR_T2', '0.65'))
-_BR_T3 = float(_os.environ.get('PF_BR_T3', '0.75'))
-_PR_MIN_EQ = float(_os.environ.get('PF_PROTECTION_RAISE_MIN_EQ', '0.55'))
-_PR_MEDIUM_ADD = float(_os.environ.get('PF_PROTECTION_RAISE_MEDIUM_ADD', '0.03'))
-_PR_MULTIWAY_ADD = float(_os.environ.get('PF_PROTECTION_RAISE_MULTIWAY_ADD', '0.03'))
-_PR_STICKY_ADD = float(_os.environ.get('PF_PROTECTION_RAISE_STICKY_ADD', '0.03'))
-_PR_WETNESS_MIN = float(_os.environ.get('PF_PROTECTION_RAISE_WETNESS_MIN', '0.35'))
-_PR_DRAW_MASS_MIN = float(_os.environ.get('PF_PROTECTION_RAISE_DRAW_MASS_MIN', '0.08'))
-_PR_MAX_NUTS = float(_os.environ.get('PF_PROTECTION_RAISE_MAX_NUTS', '0.30'))
-_PR_MAX_POT_ODDS = float(_os.environ.get('PF_PROTECTION_RAISE_MAX_POT_ODDS', '0.20'))
-_PR_MIN_SPR = float(_os.environ.get('PF_PROTECTION_RAISE_MIN_SPR', '0.5'))
-_PR_MAX_SPR = float(_os.environ.get('PF_PROTECTION_RAISE_MAX_SPR', '8.0'))
-_PR_VALUE_DEFER_MARGIN = float(_os.environ.get('PF_PROTECTION_RAISE_VALUE_DEFER_MARGIN', '0.08'))
-_PR_WEIGHT = float(_os.environ.get('PF_PROTECTION_RAISE_WEIGHT', '1.0'))
-_PR_TINY_DONK_OVERPAIR_MAX_POT_ODDS = float(
-    _os.environ.get('PF_PROTECTION_RAISE_TINY_DONK_OVERPAIR_MAX_POT_ODDS', '0.12')
-)
-_PR_TINY_DONK_OVERPAIR_MAX_SPR = float(
-    _os.environ.get('PF_PROTECTION_RAISE_TINY_DONK_OVERPAIR_MAX_SPR', '2.5')
-)
-_PR_TINY_DONK_OVERPAIR_MIN_PRESSURE = float(
-    _os.environ.get('PF_PROTECTION_RAISE_TINY_DONK_OVERPAIR_MIN_PRESSURE', '0.55')
-)
-_PR_TINY_DONK_OVERPAIR_MAX_NUTS = float(
-    _os.environ.get('PF_PROTECTION_RAISE_TINY_DONK_OVERPAIR_MAX_NUTS', '0.20')
-)
-_PR_TINY_DONK_OVERPAIR_MIN_EQ = float(
-    _os.environ.get('PF_PROTECTION_RAISE_TINY_DONK_OVERPAIR_MIN_EQ', '0.50')
-)
-_PR_TINY_DONK_OVERPAIR_WEIGHT = float(
-    _os.environ.get('PF_PROTECTION_RAISE_TINY_DONK_OVERPAIR_WEIGHT', '2.5')
-)
-_ORJ_MIN_SPR = float(_os.environ.get('PF_OVERBET_RAISE_JAM_MIN_SPR', '2.0'))
-_ORJ_MAX_SPR = float(_os.environ.get('PF_OVERBET_RAISE_JAM_MAX_SPR', '4.0'))
-_ORJ_MIN_NUT_ADV = float(_os.environ.get('PF_OVERBET_RAISE_JAM_MIN_NUT_ADV', '0.30'))
-_ORJ_MIN_EQ = float(_os.environ.get('PF_OVERBET_RAISE_JAM_MIN_EQ', '0.90'))
-_ORJ_MAX_STRONG_VILLAIN_NUTS = float(
-    _os.environ.get('PF_OVERBET_RAISE_JAM_MAX_STRONG_VILLAIN_NUTS', '0.55')
-)
-_ORJ_WEIGHT_BASE = float(_os.environ.get('PF_OVERBET_RAISE_JAM_WEIGHT_BASE', '7.0'))
-_ORJ_WEIGHT_EQ_SCALE = float(_os.environ.get('PF_OVERBET_RAISE_JAM_WEIGHT_EQ_SCALE', '18.0'))
-_ORJ_WEIGHT_NUTADV_SCALE = float(_os.environ.get('PF_OVERBET_RAISE_JAM_WEIGHT_NUTADV_SCALE', '4.0'))
-_DRAW_CALL_GUTSHOT_OVER_IMPLIED_MULT = float(
-    _os.environ.get('PF_DRAW_CALL_GUTSHOT_OVER_IMPLIED_MULT', '0.45')
-)
-_DRAW_CALL_NAKED_GUTSHOT_IMPLIED_MULT = float(
-    _os.environ.get('PF_DRAW_CALL_NAKED_GUTSHOT_IMPLIED_MULT', '0.15')
-)
-_DRAW_CALL_BACKDOOR_OVER_IMPLIED_MULT = float(
-    _os.environ.get('PF_DRAW_CALL_BACKDOOR_OVER_IMPLIED_MULT', '0.20')
-)
-_DRAW_CALL_OVERCARDS_MARGIN = float(
-    _os.environ.get('PF_DRAW_CALL_OVERCARDS_MARGIN', '0.08')
-)
-_DRAW_CALL_WEAK_MARGIN = float(_os.environ.get('PF_DRAW_CALL_WEAK_MARGIN', '0.03'))
-_DRAW_CALL_DIRTY_MARGIN = float(_os.environ.get('PF_DRAW_CALL_DIRTY_MARGIN', '0.05'))
-_DRAW_CALL_TURN_WEAK_MARGIN = float(_os.environ.get('PF_DRAW_CALL_TURN_WEAK_MARGIN', '0.04'))
-_DRAW_CALL_WEAK_MAX_POT_ODDS = float(
-    _os.environ.get('PF_DRAW_CALL_WEAK_MAX_POT_ODDS', '0.18')
-)
-_DRAW_CALL_OVERCARDS_MAX_POT_ODDS = float(
-    _os.environ.get('PF_DRAW_CALL_OVERCARDS_MAX_POT_ODDS', '0.25')
-)
-_SEMI_BLUFF_RAISE_WEAK_MIN_FOLD = float(
-    _os.environ.get('PF_SEMI_BLUFF_RAISE_WEAK_MIN_FOLD', '0.45')
-)
-_SEMI_BLUFF_RAISE_WEAK_MIN_EQ = float(
-    _os.environ.get('PF_SEMI_BLUFF_RAISE_WEAK_MIN_EQ', '0.35')
-)
-_SEMI_BLUFF_RAISE_MAX_COMMIT = float(
-    _os.environ.get('PF_SEMI_BLUFF_RAISE_MAX_COMMIT', '0.35')
-)
-_BLUFF_CATCH_FRAGILE_ADD = float(
-    _os.environ.get('PF_BLUFF_CATCH_FRAGILE_ADD', '0.04')
-)
-_BLUFF_CATCH_PASSIVE_FRAGILE_ADD = float(
-    _os.environ.get('PF_BLUFF_CATCH_PASSIVE_FRAGILE_ADD', '0.03')
-)
-_BLUFF_CATCH_RIVER_FRAGILE_ADD = float(
-    _os.environ.get('PF_BLUFF_CATCH_RIVER_FRAGILE_ADD', '0.03')
-)
-_BLUFF_CATCH_PAIRED_STRONG_SCALE = float(
-    _os.environ.get('PF_BLUFF_CATCH_PAIRED_STRONG_SCALE', '0.70')
-)
-_BLUFF_CATCH_PAIRED_STRONG_FLOOR = float(
-    _os.environ.get('PF_BLUFF_CATCH_PAIRED_STRONG_FLOOR', '0.25')
-)
-_BLUFF_CATCH_REL_LOSS_SCALE = float(
-    _os.environ.get('PF_BLUFF_CATCH_REL_LOSS_SCALE', '0.35')
-)
-_BLUFF_CATCH_HIGH_LEVERAGE_ADD = float(
-    _os.environ.get('PF_BLUFF_CATCH_HIGH_LEVERAGE_ADD', '0.06')
-)
-_VALUE_RAISE_SMALL_BET_MAX_POT_ODDS = float(
-    _os.environ.get('PF_VALUE_RAISE_SMALL_BET_MAX_POT_ODDS', '0.18')
-)
-_VALUE_RAISE_SMALL_BET_MIN_EQ = float(
-    _os.environ.get('PF_VALUE_RAISE_SMALL_BET_MIN_EQ', '0.64')
-)
-_VALUE_RAISE_SMALL_BET_MIN_WORSE = float(
-    _os.environ.get('PF_VALUE_RAISE_SMALL_BET_MIN_WORSE', '0.55')
-)
-_VALUE_RAISE_SMALL_BET_MAX_NUTS = float(
-    _os.environ.get('PF_VALUE_RAISE_SMALL_BET_MAX_NUTS', '0.24')
-)
-_VALUE_RAISE_SMALL_BET_WEIGHT_ADD = float(
-    _os.environ.get('PF_VALUE_RAISE_SMALL_BET_WEIGHT_ADD', '0.8')
-)
+_BR_T1 = 0.55
+_BR_T2 = 0.65
+_BR_T3 = 0.75
+_PR_MIN_EQ = 0.55
+_PR_MEDIUM_ADD = 0.03
+_PR_MULTIWAY_ADD = 0.03
+_PR_STICKY_ADD = 0.03
+_PR_WETNESS_MIN = 0.35
+_PR_DRAW_MASS_MIN = 0.08
+_PR_MAX_NUTS = 0.30
+_PR_MAX_POT_ODDS = 0.20
+_PR_MIN_SPR = 0.5
+_PR_MAX_SPR = 8.0
+_PR_VALUE_DEFER_MARGIN = 0.08
+_PR_WEIGHT = 1.0
+_PR_TINY_DONK_OVERPAIR_MAX_POT_ODDS = 0.12
+_PR_TINY_DONK_OVERPAIR_MAX_SPR = 2.5
+_PR_TINY_DONK_OVERPAIR_MIN_PRESSURE = 0.55
+_PR_TINY_DONK_OVERPAIR_MAX_NUTS = 0.20
+_PR_TINY_DONK_OVERPAIR_MIN_EQ = 0.50
+_PR_TINY_DONK_OVERPAIR_WEIGHT = 2.5
+_ORJ_MIN_SPR = 2.0
+_ORJ_MAX_SPR = 4.0
+_ORJ_MIN_NUT_ADV = 0.30
+_ORJ_MIN_EQ = 0.90
+_ORJ_MAX_STRONG_VILLAIN_NUTS = 0.55
+_ORJ_WEIGHT_BASE = 7.0
+_ORJ_WEIGHT_EQ_SCALE = 18.0
+_ORJ_WEIGHT_NUTADV_SCALE = 4.0
+_ORJ_COMMIT_SPR = 2.2
+_ORJ_MIN_STACK_COMMIT = 0.25
+_ORJ_MIN_POT_ODDS = 0.30
+_ORJ_PRESSURE_MIN = 0.55
+_ORJ_PRESSURE_CONTINUE_MIN = 0.45
+_ORJ_PURE_CONTINUE_MIN = 0.60
+_DRAW_CALL_GUTSHOT_OVER_IMPLIED_MULT = 0.45
+_DRAW_CALL_NAKED_GUTSHOT_IMPLIED_MULT = 0.15
+_DRAW_CALL_BACKDOOR_OVER_IMPLIED_MULT = 0.20
+_DRAW_CALL_OVERCARDS_MARGIN = 0.08
+_DRAW_CALL_WEAK_MARGIN = 0.03
+_DRAW_CALL_DIRTY_MARGIN = 0.05
+_DRAW_CALL_TURN_WEAK_MARGIN = 0.04
+_DRAW_CALL_WEAK_MAX_POT_ODDS = 0.18
+_DRAW_CALL_OVERCARDS_MAX_POT_ODDS = 0.25
+_SEMI_BLUFF_RAISE_WEAK_MIN_FOLD = 0.45
+_SEMI_BLUFF_RAISE_WEAK_MIN_EQ = 0.35
+_SEMI_BLUFF_RAISE_MAX_COMMIT = 0.35
+_SEMI_BLUFF_RAISE_PREMIUM_MIN_EQ = 0.42
+_SEMI_BLUFF_RAISE_PREMIUM_MIN_SCORE = 0.45
+_SEMI_BLUFF_RAISE_PREMIUM_MIN_FOLD = 0.32
+_SEMI_BLUFF_RAISE_PREMIUM_WEIGHT_ADD = 0.35
+_BLUFF_CATCH_FRAGILE_ADD = 0.04
+_BLUFF_CATCH_PASSIVE_FRAGILE_ADD = 0.03
+_BLUFF_CATCH_RIVER_FRAGILE_ADD = 0.03
+_BLUFF_CATCH_PAIRED_STRONG_SCALE = 0.70
+_BLUFF_CATCH_PAIRED_STRONG_FLOOR = 0.25
+_BLUFF_CATCH_REL_LOSS_SCALE = 0.35
+_BLUFF_CATCH_HIGH_LEVERAGE_ADD = 0.06
+_BLUFF_CATCH_REL_PRICE_MARGIN = 0.06
+_BLUFF_CATCH_REL_PASSIVE_MARGIN_ADD = 0.02
+_BLUFF_CATCH_REL_STICKY_MULTIWAY_ADD = 0.03
+_BLUFF_CATCH_REL_NUTS_MARGIN_ADD = 0.02
+_BLUFF_CATCH_REL_NUTS_MARGIN_MIN = 0.35
+_BLUFF_CATCH_REL_LOSS_DOMINANT_MIN_POT_ODDS = 0.20
+_BLUFF_CATCH_HIGH_LEVERAGE_COMMIT_MIN = 0.35
+_BLUFF_CATCH_HIGH_LEVERAGE_SPR_MAX = 1.00
+_DANGER_NON_NUT_CALL_MIN_POT_ODDS = 0.28
+_DANGER_NON_NUT_CALL_MIN_COMMIT = 0.30
+_DANGER_NON_NUT_CALL_STRONG_MASS = 0.62
+_DANGER_NON_NUT_CALL_NUTS = 0.30
+_DANGER_NON_NUT_CALL_REL_LOSS_GAP = 0.08
+_BLUFF_CATCH_REOPEN_MAX_POT_ODDS = 0.36
+_BLUFF_CATCH_REOPEN_MAX_NUTS = 0.32
+_BLUFF_CATCH_REOPEN_MAX_STRONG_MASS = 0.70
+_BLUFF_CATCH_REOPEN_RANGE_GAP = 0.07
+_BLUFF_CATCH_REOPEN_MIN_MC = 0.54
+_BLUFF_CATCH_REOPEN_MIN_AIR = 0.05
+_BLUFF_CATCH_REOPEN_FOLD_CAP = 1.05
+_VALUE_RAISE_SMALL_BET_MAX_POT_ODDS = 0.18
+_VALUE_RAISE_SMALL_BET_MIN_EQ = 0.64
+_VALUE_RAISE_SMALL_BET_MIN_WORSE = 0.55
+_VALUE_RAISE_SMALL_BET_MAX_NUTS = 0.24
+_VALUE_RAISE_SMALL_BET_WEIGHT_ADD = 0.8
+_VALUE_RAISE_SMALL_MEDIUM_MAX_POT_ODDS = 0.26
+_VALUE_RAISE_SMALL_MEDIUM_MIN_EQ = 0.60
+_VALUE_RAISE_SMALL_MEDIUM_MAX_NUTS = 0.14
+_VALUE_RAISE_SMALL_MEDIUM_MIN_PAYING = 0.48
+_VALUE_RAISE_SMALL_MEDIUM_MIN_REL_EQ = 0.58
+_VALUE_RAISE_SMALL_MEDIUM_MAX_REL_LOSS = 0.34
+_VALUE_RAISE_SMALL_MEDIUM_WEIGHT_ADD = 0.45
+_VALUE_RAISE_LOW_SPR_NUTS_MAX_SPR = 1.0
+_VALUE_RAISE_LOW_SPR_NUTS_MIN_EQ = 0.76
+_VALUE_RAISE_LOW_SPR_NUTS_MAX_NUTS = 0.18
+_VALUE_RAISE_LOW_SPR_NUTS_WEIGHT_ADD = 1.2
+_PASSIVE_VALUE_BET_MIN_POT_ODDS = 0.20
+_PASSIVE_VALUE_BET_MIN_COMMIT = 0.25
 
 _FRAGILE_BLUFF_CATCH_SUBTYPES = {
+    'pocket_pair',
     'top_pair_weak_kicker',
     'board_pair_kicker',
     'board_pair_hero_pair',
@@ -131,6 +119,13 @@ _FRAGILE_BLUFF_CATCH_SUBTYPES = {
     'board_two_pair',
     'trips_weak_kicker',
     'board_trips_kicker',
+}
+
+_SAFE_MEDIUM_VALUE_RAISE_SUBTYPES = {
+    'top_pair_good_kicker',
+    'clean_overpair',
+    'board_pair_pocket_pair',
+    'clean_two_pair',
 }
 
 
@@ -144,12 +139,33 @@ def _villain_strong_mass(ctx: DecisionCtx) -> float:
     return float((dist.get('nuts', 0.0) or 0.0) + (dist.get('strong', 0.0) or 0.0))
 
 
+def _villain_paying_mass(ctx: DecisionCtx) -> float:
+    dist = ctx.villain_bucket_dist or {}
+    return float(
+        (dist.get('medium', 0.0) or 0.0)
+        + 0.5 * (dist.get('strong', 0.0) or 0.0)
+        + (dist.get('draw', 0.0) or 0.0)
+        + 0.5 * (dist.get('weak_draw', 0.0) or 0.0)
+    )
+
+
+def _villain_jam_continue_mass(ctx: DecisionCtx) -> float:
+    dist = ctx.villain_bucket_dist or {}
+    return float(
+        (dist.get('strong', 0.0) or 0.0)
+        + 0.6 * (dist.get('medium', 0.0) or 0.0)
+        + 0.35 * (dist.get('draw', 0.0) or 0.0)
+        + 0.15 * (dist.get('weak_draw', 0.0) or 0.0)
+    )
+
+
 def _villain_rel_loss(ctx: DecisionCtx) -> float:
     return float((ctx.villain_vs_hero_dist or {}).get('loss', 0.0) or 0.0)
 
 
 def _stack_commit(ctx: DecisionCtx) -> float:
-    return (ctx.to_call / ctx.stack) if ctx.stack > 0 else 0.0
+    stack = ctx.effective_stack if ctx.effective_stack > 0 else ctx.stack
+    return (ctx.to_call / stack) if stack > 0 else 0.0
 
 
 def _fragile_bluff_catcher(ctx: DecisionCtx) -> bool:
@@ -157,6 +173,222 @@ def _fragile_bluff_catcher(ctx: DecisionCtx) -> bool:
     if subtype in {'board_pair_kicker', 'board_two_pair'} and ctx.street != 'river':
         return False
     return subtype in _FRAGILE_BLUFF_CATCH_SUBTYPES
+
+
+def _high_leverage_call(ctx: DecisionCtx) -> bool:
+    return (
+        ctx.street == 'river'
+        or _stack_commit(ctx) >= _BLUFF_CATCH_HIGH_LEVERAGE_COMMIT_MIN
+        or (ctx.spr > 0 and ctx.spr <= _BLUFF_CATCH_HIGH_LEVERAGE_SPR_MAX)
+    )
+
+
+def _dangerous_made_board(ctx: DecisionCtx) -> bool:
+    sig = ctx.board_sig
+    return (
+        bool(sig.flush_possible)
+        or bool(sig.straight_possible)
+        or bool(sig.monotone)
+        or bool(sig.paired)
+        or sig.wetness >= 0.62
+    )
+
+
+def _sticky_multiway_pressure(ctx: DecisionCtx) -> bool:
+    return (
+        ctx.num_opponents >= 2
+        and (
+            ctx.n_sticky >= 1
+            or ctx.max_value_lean >= 1.20
+            or sticky_passive(ctx)
+            or no_fold_equity(ctx)
+        )
+    )
+
+
+def _danger_non_nut_call_block(ctx: DecisionCtx) -> bool:
+    """Block only expensive non-nut calls on completed/dangerous textures.
+
+    This is intentionally narrower than a generic "wet board fold" rule. Clear
+    relative-showdown edge remains allowed, so value hands are not clipped just
+    because the board is scary.
+    """
+    if not ctx.facing_bet or ctx.street not in ('turn', 'river'):
+        return False
+    if ctx.hero_bucket == 'nuts':
+        return False
+    if not _dangerous_made_board(ctx):
+        return False
+    if (
+        ctx.pot_odds < _DANGER_NON_NUT_CALL_MIN_POT_ODDS
+        and _stack_commit(ctx) < _DANGER_NON_NUT_CALL_MIN_COMMIT
+        and ctx.spr > _BLUFF_CATCH_HIGH_LEVERAGE_SPR_MAX
+    ):
+        return False
+
+    strong_mass = _villain_strong_mass(ctx)
+    nuts = float((ctx.villain_bucket_dist or {}).get('nuts', 0.0) or 0.0)
+    rel = ctx.villain_vs_hero_dist or {}
+    if rel:
+        rel_eq = _relative_showdown_eq(ctx)
+        hero_wins = float(rel.get('win', 0.0) or 0.0)
+        villain_wins = float(rel.get('loss', 0.0) or 0.0)
+        clear_relative_edge = (
+            rel_eq >= ctx.pot_odds + 0.08
+            and hero_wins >= villain_wins + 0.05
+        )
+        if clear_relative_edge:
+            return False
+        if villain_wins >= hero_wins + _DANGER_NON_NUT_CALL_REL_LOSS_GAP:
+            return True
+
+    return (
+        nuts >= _DANGER_NON_NUT_CALL_NUTS
+        or strong_mass >= _DANGER_NON_NUT_CALL_STRONG_MASS
+    )
+
+
+def _relative_call_ok(ctx: DecisionCtx) -> bool:
+    """Price-aware hero-relative support for high-leverage bluff catches."""
+    rel = ctx.villain_vs_hero_dist or {}
+    if not rel:
+        return True
+    return _relative_showdown_eq(ctx) >= ctx.pot_odds + _relative_call_margin(ctx)
+
+
+def _relative_showdown_eq(ctx: DecisionCtx) -> float:
+    rel = ctx.villain_vs_hero_dist or {}
+    hero_wins = float(rel.get('win', 0.0) or 0.0)
+    ties = float(rel.get('tie', 0.0) or 0.0)
+    return hero_wins + 0.5 * ties
+
+
+def _relative_call_margin(ctx: DecisionCtx) -> float:
+    margin = _BLUFF_CATCH_REL_PRICE_MARGIN
+    if sticky_passive(ctx) or ctx.villain_stats.af < AF_PASSIVE_BASELINE:
+        margin += _BLUFF_CATCH_REL_PASSIVE_MARGIN_ADD
+    if _sticky_multiway_pressure(ctx):
+        margin += _BLUFF_CATCH_REL_STICKY_MULTIWAY_ADD
+    nuts = float((ctx.villain_bucket_dist or {}).get('nuts', 0.0) or 0.0)
+    if nuts >= _BLUFF_CATCH_REL_NUTS_MARGIN_MIN:
+        margin += _BLUFF_CATCH_REL_NUTS_MARGIN_ADD
+    return margin
+
+
+def passive_value_bet_dominates(ctx: DecisionCtx) -> bool:
+    """True when a passive/sticky bet is too value-heavy for fragile bluff catch.
+
+    This is deliberately not a blanket "tighten up" rule. It only applies on
+    turn/river high-leverage calls with fragile made hands. If hero-relative
+    enumeration clearly says worse hands dominate, value raises/calls remain
+    available.
+    """
+    if not ctx.facing_bet or ctx.street not in ('turn', 'river'):
+        return False
+    if ctx.hero_bucket == 'nuts' or not _fragile_bluff_catcher(ctx):
+        return False
+    if not (
+        sticky_passive(ctx)
+        or _sticky_multiway_pressure(ctx)
+        or ctx.villain_stats.af < AF_PASSIVE_BASELINE
+    ):
+        return False
+    if (
+        ctx.pot_odds < _PASSIVE_VALUE_BET_MIN_POT_ODDS
+        and _stack_commit(ctx) < _PASSIVE_VALUE_BET_MIN_COMMIT
+        and ctx.spr > _BLUFF_CATCH_HIGH_LEVERAGE_SPR_MAX
+    ):
+        return False
+
+    rel = ctx.villain_vs_hero_dist or {}
+    if not rel:
+        return False
+
+    hero_wins = float(rel.get('win', 0.0) or 0.0)
+    villain_wins = float(rel.get('loss', 0.0) or 0.0)
+    rel_eq = _relative_showdown_eq(ctx)
+    rel_need = ctx.pot_odds + _relative_call_margin(ctx)
+    if rel_eq >= rel_need:
+        return False
+    return villain_wins >= hero_wins
+
+
+def _effective_air_pressure(ctx: DecisionCtx) -> float:
+    """Air floor for polar pressure so range modeling does not become pure value.
+
+    Bucket models often collapse unknown overbets/large bets into strong+nuts.
+    This floor is small and only helps close-price bluff-catches; it does not
+    mutate the range tracker or create bluff raises.
+    """
+    dist = ctx.villain_bucket_dist or {}
+    raw = (
+        float(dist.get('air', 0.0) or 0.0)
+        + 0.5 * float(dist.get('weak_draw', 0.0) or 0.0)
+    )
+    denom = max(1e-9, 1.0 - float(ctx.pot_odds or 0.0))
+    bet_ratio = float(ctx.pot_odds or 0.0) / denom
+    floor = 0.0
+    if ctx.street == 'river' and bet_ratio >= 0.75:
+        floor = 0.10
+    elif ctx.street == 'turn' and bet_ratio >= 0.70:
+        floor = 0.08
+    if ctx.prev_bet_raised or ctx.resistance_level >= 0.40:
+        floor *= 0.60
+    if sticky_passive(ctx) or _sticky_multiway_pressure(ctx) or ctx.villain_stats.af < AF_PASSIVE_BASELINE:
+        floor *= 0.75
+    return max(raw, floor)
+
+
+def _bluff_catch_reopen_weight(ctx: DecisionCtx, need: float | None = None) -> float:
+    """Small anti-overfold path for close turn/river made-hand calls."""
+    if not ctx.facing_bet or ctx.street not in ('turn', 'river'):
+        return 0.0
+    if ctx.hero_bucket not in ('medium', 'strong'):
+        return 0.0
+    if ctx.pot_odds > _BLUFF_CATCH_REOPEN_MAX_POT_ODDS:
+        return 0.0
+    if _danger_non_nut_call_block(ctx):
+        return 0.0
+    if passive_value_bet_dominates(ctx):
+        return 0.0
+
+    strong_mass = _villain_strong_mass(ctx)
+    nuts = float((ctx.villain_bucket_dist or {}).get('nuts', 0.0) or 0.0)
+    if nuts > _BLUFF_CATCH_REOPEN_MAX_NUTS:
+        return 0.0
+    if strong_mass > _BLUFF_CATCH_REOPEN_MAX_STRONG_MASS:
+        return 0.0
+
+    range_gap = float(ctx.pot_odds or 0.0) - float(ctx.equity_range or 0.0)
+    if range_gap > _BLUFF_CATCH_REOPEN_RANGE_GAP:
+        return 0.0
+    if ctx.equity_mc < _BLUFF_CATCH_REOPEN_MIN_MC:
+        return 0.0
+
+    rel = ctx.villain_vs_hero_dist or {}
+    rel_support = False
+    if rel:
+        rel_eq = _relative_showdown_eq(ctx)
+        hero_wins = float(rel.get('win', 0.0) or 0.0)
+        villain_wins = float(rel.get('loss', 0.0) or 0.0)
+        rel_support = (
+            rel_eq >= ctx.pot_odds - 0.03
+            and villain_wins <= hero_wins + 0.15
+        )
+
+    air = _effective_air_pressure(ctx)
+    if air < _BLUFF_CATCH_REOPEN_MIN_AIR and not rel_support:
+        return 0.0
+    if need is not None and ctx.equity_range < need - 0.15 and not rel_support:
+        return 0.0
+
+    base = 0.62 + max(0.0, _BLUFF_CATCH_REOPEN_RANGE_GAP - max(0.0, range_gap)) * 4.0
+    base += min(0.20, air)
+    if rel_support:
+        base += 0.18
+    if sticky_passive(ctx) or _sticky_multiway_pressure(ctx) or ctx.villain_stats.af < AF_PASSIVE_BASELINE:
+        base *= 0.85
+    return max(0.45, min(1.25, base))
 
 
 def _draw_pressure(ctx: DecisionCtx) -> float:
@@ -167,6 +399,18 @@ def _draw_pressure(ctx: DecisionCtx) -> float:
         pressure = max(pressure, 0.50)
     pressure = max(pressure, _villain_draw_mass(ctx))
     return pressure
+
+
+def _overbet_raise_jam_needed(ctx: DecisionCtx) -> bool:
+    pressure = _draw_pressure(ctx)
+    continue_mass = _villain_jam_continue_mass(ctx)
+    return (
+        (0 < ctx.spr <= _ORJ_COMMIT_SPR)
+        or _stack_commit(ctx) >= _ORJ_MIN_STACK_COMMIT
+        or ctx.pot_odds >= _ORJ_MIN_POT_ODDS
+        or (pressure >= _ORJ_PRESSURE_MIN and continue_mass >= _ORJ_PRESSURE_CONTINUE_MIN)
+        or continue_mass >= _ORJ_PURE_CONTINUE_MIN
+    )
 
 
 def _tiny_donk_overpair_protection(ctx: DecisionCtx, pressure: float, nuts: float) -> bool:
@@ -243,6 +487,58 @@ def _small_bet_value_raise_spot(ctx: DecisionCtx) -> bool:
     return paying >= 0.45
 
 
+def _small_bet_medium_value_raise_spot(ctx: DecisionCtx) -> bool:
+    """Top-pair/overpair class hands may punish blocker bets before river."""
+    if ctx.street not in ('flop', 'turn'):
+        return False
+    if ctx.pot_odds > _VALUE_RAISE_SMALL_MEDIUM_MAX_POT_ODDS:
+        return False
+    if ctx.hero_bucket != 'medium':
+        return False
+    if ctx.hero_made_subtype not in _SAFE_MEDIUM_VALUE_RAISE_SUBTYPES:
+        return False
+    if ctx.equity_range < _VALUE_RAISE_SMALL_MEDIUM_MIN_EQ:
+        return False
+    if (ctx.villain_bucket_dist or {}).get('nuts', 0.0) > _VALUE_RAISE_SMALL_MEDIUM_MAX_NUTS:
+        return False
+    if passive_value_bet_dominates(ctx):
+        return False
+
+    if ctx.villain_vs_hero_dist:
+        if _relative_showdown_eq(ctx) < _VALUE_RAISE_SMALL_MEDIUM_MIN_REL_EQ:
+            return False
+        if _villain_rel_loss(ctx) > _VALUE_RAISE_SMALL_MEDIUM_MAX_REL_LOSS:
+            return False
+
+    paying = _villain_paying_mass(ctx)
+    return (
+        paying >= _VALUE_RAISE_SMALL_MEDIUM_MIN_PAYING
+        or _villain_draw_mass(ctx) >= _PR_DRAW_MASS_MIN
+        or _draw_pressure(ctx) >= _PR_WETNESS_MIN
+    )
+
+
+def _low_spr_nuts_value_raise_spot(ctx: DecisionCtx) -> bool:
+    """Low-SPR nuts should not turn a value raise into a passive bluff-catch.
+
+    At SPR <= 1 a raise is already a commitment decision. If hero is in the
+    nuts bucket, villain's modeled nuts density is not dominant, and range
+    equity is only a few points under the generic passive-bet threshold, this
+    is a value extraction spot rather than a bluff-catch spot.
+    """
+    return (
+        ctx.hero_bucket == 'nuts'
+        and ctx.spr > 0
+        and ctx.spr <= _VALUE_RAISE_LOW_SPR_NUTS_MAX_SPR
+        and ctx.pot_odds <= 0.35
+        and (ctx.villain_bucket_dist or {}).get('nuts', 0.0) <= _VALUE_RAISE_LOW_SPR_NUTS_MAX_NUTS
+        and (
+            ctx.equity_range >= _VALUE_RAISE_LOW_SPR_NUTS_MIN_EQ
+            or ctx.equity_mc >= _VALUE_RAISE_LOW_SPR_NUTS_MIN_EQ + 0.04
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # bluff_catch_call
 # ---------------------------------------------------------------------------
@@ -267,6 +563,8 @@ class BluffCatchCall(Purpose):
         # air 仍排除：eq 通常不够 pot_odds，真需要时走 fold baseline。
         if ctx.hero_bucket not in ('medium', 'strong', 'nuts'):
             return TriggerResult(False)
+        if _danger_non_nut_call_block(ctx):
+            return TriggerResult(False)
         adj = 0.0
         if ctx.villain_stats.bet_win_count >= 5:
             if ctx.villain_stats.bluff_win_rate < 0.12:
@@ -279,8 +577,29 @@ class BluffCatchCall(Purpose):
             adj += 0.03
 
         if _fragile_bluff_catcher(ctx):
+            if passive_value_bet_dominates(ctx):
+                return TriggerResult(False)
             strong_mass = _villain_strong_mass(ctx)
             rel_loss = _villain_rel_loss(ctx)
+            if _high_leverage_call(ctx) and (ctx.villain_vs_hero_dist or {}):
+                rel_eq = _relative_showdown_eq(ctx)
+                rel_need = ctx.pot_odds + _relative_call_margin(ctx)
+                rel = ctx.villain_vs_hero_dist or {}
+                hero_wins = float(rel.get('win', 0.0) or 0.0)
+                villain_wins = float(rel.get('loss', 0.0) or 0.0)
+                loss_dominant_passive_raise = (
+                    ctx.street == 'river'
+                    and ctx.board_sig.paired
+                    and ctx.pot_odds >= _BLUFF_CATCH_REL_LOSS_DOMINANT_MIN_POT_ODDS
+                    and villain_wins >= hero_wins
+                    and (sticky_passive(ctx) or ctx.villain_stats.af < AF_PASSIVE_BASELINE)
+                )
+                if loss_dominant_passive_raise:
+                    return TriggerResult(False)
+                if rel_eq < rel_need:
+                    return TriggerResult(False)
+                w = 0.5 + min(1.0, (rel_eq - rel_need) * 3.0)
+                return TriggerResult(True, max(0.3, w))
             adj += _BLUFF_CATCH_FRAGILE_ADD
             if sticky_passive(ctx) or ctx.villain_stats.af < AF_PASSIVE_BASELINE:
                 adj += _BLUFF_CATCH_PASSIVE_FRAGILE_ADD
@@ -297,8 +616,16 @@ class BluffCatchCall(Purpose):
             if ctx.street == 'river' and (_stack_commit(ctx) >= 0.35 or ctx.spr <= 1.0):
                 adj += _BLUFF_CATCH_HIGH_LEVERAGE_ADD
 
+        # Optional A/B guard: on flop/turn danger boards, fragile made hands
+        # need extra edge before being treated as bluff-catchers. Enabled by
+        # default; set PF_TURN_FLOP_RELATIVE_GUARD=0 to disable.
+        adj += early_relative.call_margin_add(ctx)
+
         need = ctx.pot_odds + adj
         if ctx.equity_range < need:
+            reopen_weight = _bluff_catch_reopen_weight(ctx, need)
+            if reopen_weight > 0.0:
+                return TriggerResult(True, reopen_weight)
             return TriggerResult(False)
         # Vote weight — scales with equity margin over need. Ceiling kept at
         # 1.5 so that at strong equity (eq ≥ 0.75) value_raise still
@@ -335,7 +662,8 @@ class DrawCall(Purpose):
         has_profile = any((
             d.flush_draw, d.oesd, d.gutshot, d.backdoor_flush, d.overcards,
         ))
-        strong_draw = d.flush_draw or d.oesd
+        premium_draw = draw_quality.premium_draw(ctx)
+        strong_draw = draw_quality.strong_draw(ctx)
         gutshot_over = d.gutshot and d.overcards
         overcards_only = (
             d.overcards
@@ -358,6 +686,10 @@ class DrawCall(Purpose):
                 margin = _DRAW_CALL_OVERCARDS_MARGIN
                 max_pot_odds = _DRAW_CALL_OVERCARDS_MAX_POT_ODDS
                 weight = 0.25
+        elif premium_draw:
+            implied_mult = 0.0 if ctx.spr <= 3.0 else 1.0
+            margin = -0.02 if ctx.spr <= 3.0 else 0.0
+            weight = 0.78
         elif strong_draw:
             weight = 0.65
         elif gutshot_over:
@@ -399,6 +731,11 @@ class DrawCall(Purpose):
 
         if ctx.pot_odds > max_pot_odds:
             return TriggerResult(False)
+        if premium_draw and ctx.spr <= 3.0:
+            direct_need = max(ctx.pot_odds + margin, 0.28)
+            if ctx.equity_range < direct_need:
+                return TriggerResult(False)
+            return TriggerResult(True, max(0.15, weight))
         effective_implied = implied * implied_mult
         if ctx.equity_range + effective_implied < ctx.pot_odds + margin:
             return TriggerResult(False)
@@ -422,11 +759,20 @@ class ValueRaise(Purpose):
             return TriggerResult(False)
         need = 0.72 + _opp_raise_premium(ctx)
         small_bet_value = _small_bet_value_raise_spot(ctx)
+        medium_small_bet_value = _small_bet_medium_value_raise_spot(ctx)
+        low_spr_nuts = _low_spr_nuts_value_raise_spot(ctx)
         if small_bet_value:
             need = min(need, _VALUE_RAISE_SMALL_BET_MIN_EQ)
+        if medium_small_bet_value:
+            need = min(need, _VALUE_RAISE_SMALL_MEDIUM_MIN_EQ)
+        if low_spr_nuts:
+            need = min(need, _VALUE_RAISE_LOW_SPR_NUTS_MIN_EQ)
         if ctx.equity_range < need:
             return TriggerResult(False)
-        if stackoff_guard_reason(ctx, self.id, will_jam=(ctx.spr <= 4.0)):
+        # The actual raise path only jams value_raise at SPR <= 2.0. Do not
+        # pre-block SPR 2-4 value raises as stack-off nodes; engine will run the
+        # guard again after the concrete raise size is known.
+        if stackoff_guard_reason(ctx, self.id, will_jam=(ctx.spr <= 2.0)):
             return TriggerResult(False)
         # Vote weight grows monotonically past the trigger threshold and
         # sharply past 0.85 to dominate bluff_catch_call at near-nuts equity
@@ -440,6 +786,10 @@ class ValueRaise(Purpose):
         w = 1.5 + 22.0 * max(0.0, eq - 0.72) + 30.0 * max(0.0, eq - 0.85)
         if small_bet_value:
             w += _VALUE_RAISE_SMALL_BET_WEIGHT_ADD
+        if medium_small_bet_value:
+            w += _VALUE_RAISE_SMALL_MEDIUM_WEIGHT_ADD
+        if low_spr_nuts:
+            w += _VALUE_RAISE_LOW_SPR_NUTS_WEIGHT_ADD
         return TriggerResult(True, w)
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
@@ -473,36 +823,64 @@ class SemiBluffRaise(Purpose):
             return TriggerResult(False)
         if ctx.hero_bucket == 'weak_draw' and ctx.equity_range < 0.22:
             return TriggerResult(False)
-        if not (ctx.blockers.nut_flush_blocker or ctx.blockers.straight_blocker):
+        premium_draw = draw_quality.premium_draw(ctx)
+        strong_draw = draw_quality.strong_draw(ctx)
+        weak_draw = ctx.hero_bucket == 'weak_draw'
+        blf = bluff_context.evaluate(ctx)
+        has_primary_blocker = ctx.blockers.nut_flush_blocker or ctx.blockers.straight_blocker
+        premium_aggressive = (
+            premium_draw
+            and ctx.equity_range >= _SEMI_BLUFF_RAISE_PREMIUM_MIN_EQ
+            and blf.score >= _SEMI_BLUFF_RAISE_PREMIUM_MIN_SCORE
+            and (
+                ctx.villain_stats.fold_to_cbet >= _SEMI_BLUFF_RAISE_PREMIUM_MIN_FOLD
+                or ctx.is_ip
+                or ctx.pot_odds <= 0.20
+            )
+        )
+        if not has_primary_blocker and not premium_aggressive:
             return TriggerResult(False)
-        if ctx.spr < 2.5:
+        if ctx.hero_bucket == 'weak_draw' and blf.nuts >= 0.30:
             return TriggerResult(False)
-        d = ctx.draw
-        strong_draw = d.flush_draw or d.oesd or (d.gutshot and d.overcards)
-        weak_bluff = not strong_draw
+        if not strong_draw and blf.strong_nuts >= 0.60:
+            return TriggerResult(False)
+        weak_bluff = weak_draw
         if weak_bluff:
+            if not draw_quality.weak_draw_semibluff_quality_ok(ctx):
+                return TriggerResult(False)
             if sticky_passive(ctx) or ctx.n_sticky >= 1:
                 return TriggerResult(False)
-            if (
-                ctx.villain_stats.fold_to_cbet_opps < 5
-                or ctx.villain_stats.fold_to_cbet < _SEMI_BLUFF_RAISE_WEAK_MIN_FOLD
-            ):
+            if blf.score < 0.55 or blf.blocker_score < 0.45:
+                return TriggerResult(False)
+            if ctx.villain_stats.fold_to_cbet < _SEMI_BLUFF_RAISE_WEAK_MIN_FOLD:
                 return TriggerResult(False)
             if ctx.equity_range < _SEMI_BLUFF_RAISE_WEAK_MIN_EQ:
                 return TriggerResult(False)
+            if ctx.spr <= 3.0:
+                return TriggerResult(False)
+        elif ctx.spr <= 2.0 and not premium_draw:
+            return TriggerResult(False)
         # Sticky villain 硬门：semi-bluff raise 的 EV 公式中 fold_equity 是
         # 主收入项；FE ≈ 0 时 raise 把 pot 放大只增加 reverse-implied 损失，
         # EV 结构性为负。用 exploit.no_fold_equity 公共判据（统一跨 purpose）。
-        if no_fold_equity(ctx):
+        if no_fold_equity(ctx) and not (premium_draw and ctx.equity_range >= 0.45):
             return TriggerResult(False)
         if ctx.stack > 0:
             raise_to = min(max(ctx.to_call * 2.8, ctx.to_call + ctx.pot * 0.75), ctx.stack)
-            if (
-                raise_to / ctx.stack > _SEMI_BLUFF_RAISE_MAX_COMMIT
-                and ctx.equity_range < 0.45
-            ):
-                return TriggerResult(False)
-        return TriggerResult(True, 0.3 + 0.3 * ctx.equity_range)
+            commit = raise_to / ctx.stack
+            if commit > _SEMI_BLUFF_RAISE_MAX_COMMIT:
+                if not premium_draw:
+                    return TriggerResult(False)
+                if ctx.equity_range < max(0.40, ctx.pot_odds + 0.12):
+                    return TriggerResult(False)
+        w = 0.3 + 0.3 * ctx.equity_range + 0.15 * blf.score
+        if premium_draw:
+            w += 0.10
+        if premium_aggressive:
+            w += _SEMI_BLUFF_RAISE_PREMIUM_WEIGHT_ADD
+        if weak_bluff:
+            w *= 0.75
+        return TriggerResult(True, w)
 
 
 # ---------------------------------------------------------------------------
@@ -585,6 +963,8 @@ class OverbetRaiseJam(Purpose):
                 and (ctx.villain_bucket_dist or {}).get('nuts', 0.0)
                 > _ORJ_MAX_STRONG_VILLAIN_NUTS):
             return TriggerResult(False)
+        if not _overbet_raise_jam_needed(ctx):
+            return TriggerResult(False)
         if stackoff_guard_reason(ctx, self.id, will_jam=True):
             return TriggerResult(False)
         w = (
@@ -644,10 +1024,11 @@ class FoldPurpose(Purpose):
 
         # 悲观 equity = point estimate 减 tracker 不确定度
         pessimistic_eq = ctx.equity_range - (ctx.equity_uncertainty or 0.0)
+        reopen_weight = _bluff_catch_reopen_weight(ctx)
 
         # 硬门：悲观口径 equity 不足 → 强 fold
         if pessimistic_eq < ctx.pot_odds:
-            return TriggerResult(True, 2.5)
+            return TriggerResult(True, _BLUFF_CATCH_REOPEN_FOLD_CAP if reopen_weight > 0.0 else 2.5)
 
         # Margin-based base weight（线性分段）：
         #   margin < 0.05  → w=1.5（勉强过门槛，fold 仍重）
@@ -689,6 +1070,8 @@ class FoldPurpose(Purpose):
         # Hero 自己是 air / weak → fold 至少保持 0.8 地板
         if ctx.hero_bucket in ('air', 'weak'):
             w = max(w, 0.8)
+        elif reopen_weight > 0.0:
+            w = min(w, _BLUFF_CATCH_REOPEN_FOLD_CAP)
 
         return TriggerResult(True, max(0.0, w))
 

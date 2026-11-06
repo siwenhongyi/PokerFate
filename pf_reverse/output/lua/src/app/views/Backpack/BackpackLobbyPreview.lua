@@ -4,6 +4,7 @@ function P:onAwake()
 	self.AnimRoot = self:find("AnimRoot")
 
 	self.LobbyImg = self:find("Center/LobbyImg", self.AnimRoot)
+	self.ImageFg = self:find("Center/ImageFg", self.AnimRoot)
 	self.PageRightButton = self:find("Right/PageRightButton", self.AnimRoot)
 	self.PageLeftButton = self:find("Left/PageLeftButton", self.AnimRoot)
 	self.TextName = self:find("LeftBottom/SceneTitle/TextName", self.AnimRoot)
@@ -39,7 +40,8 @@ function P:setSceneShow()
 	local propCfg = tpl_props[data.item_id or data.id]
 	local sceneCfg = tpl_hall_scene[propCfg.mapId]
 
-	bee.setIcon(self.LobbyImg, sceneCfg.bg_image)
+	-- bee.setIcon(self.LobbyImg, sceneCfg.bg_image)
+	GF.setLobbyImage(propCfg.mapId, self.LobbyImg, self.ImageFg)
 	bee.setText(self.TextName, _T(propCfg.name))
 end
 

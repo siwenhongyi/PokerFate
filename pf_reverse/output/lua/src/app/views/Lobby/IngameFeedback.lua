@@ -15,6 +15,11 @@ function P:onAwake()
 
     self.LevelSlider = self:find("LevelSlider", self.Panel)
 
+    self.DontShowButton = self:find("DontShow", self.Panel)
+    self.DontShowSign = self:find("Sign", self.DontShowButton)
+    self.DontShowSign:SetActive(false)
+    self.dontShowValue = false
+
     bee.addClick2(self:find("AnimRoot/Center/common_panel_mask_70"), function()
         self:hideUI()
     end)
@@ -31,6 +36,11 @@ function P:onAwake()
         Game:playSound("ui_button_confirm")
         UiManager:showUI("CommonItemTip", {data = {item_id = tpl_constdata.Affinity_Overflow_Reward[1], num = tpl_constdata.Affinity_Overflow_Reward[2]}, target = self:find("feedback_icon_di", self.Panel)})
     end)
+
+    bee.addClick(self.DontShowButton, function ()
+        Game:playSound("ui_button_confirm")
+        self:switchDontShowAgain()
+    end)
 end
 
 function P:onShow()
@@ -38,7 +48,15 @@ function P:onShow()
     local role = info and CharacterModel:getRole(info.role_id) or CharacterModel:getUsingRole()
     self._role = role
     
-    bee.invoke(self.CharacterImage, "setSkinImage", role:getSkinData())
+    local skin = nil
+    if info and info.skin_id then
+        skin = tpl_character_skin[info.skin_id]
+    end
+    if not skin then
+        skin = role:getSkinData()
+    end
+    bee.invoke(self.CharacterImage, "setSkinImage", skin)
+    bee.invoke(self.CharacterImage, "setSkinRotate")
 
     local progress = info.start_over_bond_inc / info.tpl_over_bond_inc
     bee.setSliderValue(self.LevelSlider, progress)
@@ -104,30 +122,63 @@ function P:evt_GetUserBondInfoRSP(msg)
     if 0 == msg.code then
         -- PlayerModel:setTodayHands(msg.hands)
         local str = ""
-        if self._params and GF.isSNG(self._params.info.game_type) then
-            if msg.sng_hands < VipModel:getFriendshipTournament() then
-                str = string.format("<color=#1b8b05>%d/%d</color>", msg.sng_hands, VipModel:getFriendshipTournament())
-                self.TextFull:SetActive(false)
-                self.BoostButton:SetActive(true)
+        if self._params and self._params.info.from == "Dispatch" then
+            if TimeHelp:isInToday(self._params.info.start_ts) then
+                if DispatchModel:getBondCount() < VipModel:getFriendshipDispatch() then
+                    str = string.format("<color=#1b8b05>%d/%d</color>", DispatchModel:getBondCount(), VipModel:getFriendshipDispatch())
+                else
+                    str = string.format("<color=#c00036>%d/%d %s</color>", DispatchModel:getBondCount(), VipModel:getFriendshipDispatch(), _T("LAB_GAME_009"))
+                end
+                bee.setText(self.TextTip, _T("LAB_VIP_TEXT_30") .. " " .. str)
             else
-                str = string.format("<color=#c00036>%d/%d %s</color>", msg.sng_hands, VipModel:getFriendshipTournament(), _T("LAB_GAME_009"))
+                bee.setText(self.TextTip, "")
+            end
+        elseif self._params and GF.isTournament(self._params.info.game_type) then
+            if msg.sng_hands + msg.mtt_hands < VipModel:getFriendshipTournament() then
+                str = string.format("<color=#1b8b05>%d/%d</color>", msg.sng_hands + msg.mtt_hands, VipModel:getFriendshipTournament())
                 self.TextFull:SetActive(true)
                 self.BoostButton:SetActive(false)
+            else
+                str = string.format("<color=#c00036>%d/%d %s</color>", msg.sng_hands + msg.mtt_hands, VipModel:getFriendshipTournament(), _T("LAB_GAME_009"))
+                self.TextFull:SetActive(false)
+                self.BoostButton:SetActive(true)
             end
             bee.setText(self.TextTip, _T("LAB_VIP_TEXT_25") .. " " .. str)
         else
             if msg.hands < VipModel:getFriendshipHands() then
                 str = string.format("<color=#1b8b05>%d/%d</color>", msg.hands, VipModel:getFriendshipHands())
-                self.TextFull:SetActive(false)
-                self.BoostButton:SetActive(true)
-            else
-                str = string.format("<color=#c00036>%d/%d %s</color>", msg.hands, VipModel:getFriendshipHands(), _T("LAB_GAME_009"))
                 self.TextFull:SetActive(true)
                 self.BoostButton:SetActive(false)
+            else
+                str = string.format("<color=#c00036>%d/%d %s</color>", msg.hands, VipModel:getFriendshipHands(), _T("LAB_GAME_009"))
+                self.TextFull:SetActive(false)
+                self.BoostButton:SetActive(true)
             end
             bee.setText(self.TextTip, _T("LAB_VIP_TEXT_15") .. " " .. str)
         end
     end
+end
+
+function P:switchDontShowAgain()
+    self.dontShowValue = not self.dontShowValue
+    self.DontShowSign:SetActive(self.dontShowValue)
+    bee.logEvent("character-bond-tips-today", self.dontShowValue and 1 or 0)
+end
+
+function P:saveDontShowAgain()
+    if self.dontShowValue then
+        LocalStore:isDailyTagValidCrossDay("role_favor" .. PlayerModel:getUid())
+    end
+end
+
+function P:hideUI()
+    P.super.hideUI(self)
+    self:saveDontShowAgain()
+end
+
+function P:hideUIForce()
+    P.super.hideUIForce(self)
+    self:saveDontShowAgain()
 end
 
 return P

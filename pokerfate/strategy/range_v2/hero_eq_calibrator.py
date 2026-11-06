@@ -27,14 +27,17 @@ ShowdownLearner 学的是**对手**的"某类牌强度下会做什么动作"，�
 
 from __future__ import annotations
 
-import os as _os
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+from pokerfate.strategy.range_v2.equity_ml_calibration import calibrate_equity
+from pokerfate.strategy.range_v2.runtime_formula_calibration import bb_key, load_params
 
 
 _MIN_SAMPLES = 10         # 低于此样本量直接返回 raw
 _MAX_SHIFT = 0.25         # bias 单次最多 ±25pp，防止 runaway
-_BIAS_SHRINK_K = float(_os.environ.get('PF_HEQ_BIAS_SHRINK_K', '50'))
+_BIAS_SHRINK_K = 50.0
 _VALID_CTX = frozenset(('passive', 'bet', 'raise'))
+_RUNTIME_EQUITY_CACHE: Dict[str, Optional[Dict[str, Any]]] = {}
 
 
 def _num_opp_bin(n: int) -> str:
@@ -46,6 +49,18 @@ def _num_opp_bin(n: int) -> str:
     return '3+'
 
 
+def _num_opp_exact_bin(n: int) -> str:
+    if n <= 1:
+        return '1'
+    if n == 2:
+        return '2'
+    if n == 3:
+        return '3'
+    if n == 4:
+        return '4'
+    return '5+'
+
+
 def _norm_ctx(action_ctx: str) -> str:
     """Clamp action_ctx 到 {passive, bet, raise}；未知值兜底 passive。"""
     return action_ctx if action_ctx in _VALID_CTX else 'passive'
@@ -54,6 +69,65 @@ def _norm_ctx(action_ctx: str) -> str:
 def _make_key(bucket: str, street: str, num_opp: int,
               action_ctx: str = 'passive') -> str:
     return f"{bucket}|{street}|{_num_opp_bin(num_opp)}|{_norm_ctx(action_ctx)}"
+
+
+def _runtime_eq_context(
+    bucket: str,
+    street: str,
+    num_opp: int,
+    action_ctx: str,
+    board_texture: str = '',
+) -> str:
+    texture = board_texture or 'pre'
+    return f"{street}|{bucket or '?'}|{_num_opp_bin(num_opp)}|{_norm_ctx(action_ctx)}|{texture}"
+
+
+def _runtime_size_context(bet_size_bucket: str = '',
+                          action_bet_ratio: float = 0.0,
+                          is_raise_over: bool = False) -> str:
+    size = str(bet_size_bucket or '').strip()
+    if not size:
+        try:
+            ratio = float(action_bet_ratio or 0.0)
+        except Exception:
+            ratio = 0.0
+        if ratio <= 0.0:
+            size = 'none'
+        elif ratio <= 0.25:
+            size = 'small'
+        elif ratio <= 0.40:
+            size = 'third'
+        elif ratio <= 0.55:
+            size = 'half'
+        elif ratio <= 0.80:
+            size = 'two_third'
+        elif ratio <= 1.10:
+            size = 'pot'
+        elif ratio <= 1.75:
+            size = 'overpot'
+        else:
+            size = 'huge'
+    return f"size={size} rr={'1' if is_raise_over else '0'}"
+
+
+def _apply_runtime_model(raw_eq: float, model: Dict[str, Any] | None) -> float:
+    if not model:
+        return raw_eq
+    kind = str(model.get('type') or '')
+    if kind == 'bias':
+        out = raw_eq + float(model.get('bias', 0.0) or 0.0)
+    elif kind == 'linear':
+        out = float(model.get('a', 1.0) or 1.0) * raw_eq + float(model.get('b', 0.0) or 0.0)
+    else:
+        out = raw_eq
+    return max(0.0, min(1.0, out))
+
+
+def _load_runtime_equity_params(big_blind: Optional[float]) -> Optional[Dict[str, Any]]:
+    key = "all_bb"
+    if key not in _RUNTIME_EQUITY_CACHE:
+        _RUNTIME_EQUITY_CACHE[key] = load_params('equity', big_blind)
+    return _RUNTIME_EQUITY_CACHE[key]
 
 
 def classify_action_ctx_from_trigger(trigger: str) -> str:
@@ -92,6 +166,7 @@ class HeroEquityCalibrator:
 
     def __init__(self) -> None:
         self._samples: Dict[str, List[Tuple[float, float]]] = {}
+        self.last_diagnostic: Dict[str, Any] = {}
 
     # -------- record / query --------
 
@@ -107,18 +182,117 @@ class HeroEquityCalibrator:
         self._samples.setdefault(key, []).append((float(predicted), float(actual)))
 
     def calibrate(self, raw_eq: float, bucket: str, street: str,
-                  num_opp: int, action_ctx: str = 'passive') -> float:
-        """Apply historical bias correction. Falls back to raw if insufficient data."""
+                  num_opp: int, action_ctx: str = 'passive',
+                  big_blind: Optional[float] = None,
+                  board_texture: str = '',
+                  bucket_dist: Optional[Dict[str, float]] = None,
+                  range_pct: float = 0.0,
+                  board_len: int = 0,
+                  trigger: str = '',
+                  strategy_version: Optional[str] = None,
+                  experiment_profile: Optional[str] = None,
+                  hero_made_subtype: str = '',
+                  hero_hand_rank: str = '',
+                  position: str = '',
+                  is_ip: bool = False,
+                  facing_action: str = '',
+                  preflop_action_type: str = '',
+                  action_bet_ratio: float = 0.0,
+                  bet_size_bucket: str = '',
+                  is_raise_over: bool = False,
+                  action_sequence: str = '',
+                  board_features: Optional[Dict[str, object]] = None,
+                  hero_draw: Optional[Dict[str, object]] = None,
+                  hero_blockers: Optional[Dict[str, object]] = None,
+                  relation_dist: Optional[Dict[str, float]] = None,
+                  player_profile: Optional[Dict[str, object]] = None) -> float:
+        """Apply formula, optional ML blend, then online historical bias."""
+        self.last_diagnostic = {}
         if not bucket or not street:
             return raw_eq
+        calibrated = raw_eq
+        runtime_params = _load_runtime_equity_params(big_blind)
+        if runtime_params:
+            texture = board_texture or 'pre'
+            size_ctx = _runtime_size_context(
+                bet_size_bucket, action_bet_ratio, is_raise_over,
+            )
+            exact_rich_key = f"{street}|{bucket or '?'}|{_num_opp_exact_bin(num_opp)}|{_norm_ctx(action_ctx)}|{texture}"
+            exact_rich_size_key = f"{exact_rich_key}|{size_ctx}"
+            exact_wildcard_key = f"{street}|{bucket or '?'}|{_num_opp_exact_bin(num_opp)}|*"
+            rich_key = _runtime_eq_context(
+                bucket, street, num_opp, action_ctx, board_texture,
+            )
+            rich_size_key = f"{rich_key}|{size_ctx}"
+            exact_action_key = f"{street}|{bucket or '?'}|{_num_opp_exact_bin(num_opp)}|{_norm_ctx(action_ctx)}"
+            exact_action_size_key = f"{exact_action_key}|{size_ctx}"
+            action_key = f"{street}|{bucket or '?'}|{_num_opp_bin(num_opp)}|{_norm_ctx(action_ctx)}"
+            action_size_key = f"{action_key}|{size_ctx}"
+            wildcard_key = f"{street}|{bucket or '?'}|{_num_opp_bin(num_opp)}|*"
+            simple_key = f"{street}|{bucket or '?'}"
+            model = (
+                runtime_params.get(exact_rich_size_key)
+                or runtime_params.get(exact_action_size_key)
+                or runtime_params.get(rich_size_key)
+                or runtime_params.get(action_size_key)
+                or runtime_params.get(exact_rich_key)
+                or runtime_params.get(exact_action_key)
+                or runtime_params.get(exact_wildcard_key)
+                or runtime_params.get(rich_key)
+                or runtime_params.get(action_key)
+                or runtime_params.get(wildcard_key)
+                or runtime_params.get(simple_key)
+            )
+            calibrated = _apply_runtime_model(calibrated, model)
+
+        formula_eq = calibrated
+        calibrated, ml_diag = calibrate_equity(
+            calibrated,
+            big_blind=big_blind,
+            bucket_dist=bucket_dist or {},
+            street=street,
+            trigger=trigger,
+            action_ctx=action_ctx,
+            active_count=num_opp,
+            board_len=board_len,
+            board_texture=board_texture,
+            range_pct=range_pct,
+            hero_bucket=bucket,
+            strategy_version=strategy_version,
+            experiment_profile=experiment_profile,
+            hero_made_subtype=hero_made_subtype,
+            hero_hand_rank=hero_hand_rank,
+            position=position,
+            is_ip=is_ip,
+            facing_action=facing_action,
+            preflop_action_type=preflop_action_type,
+            action_bet_ratio=action_bet_ratio,
+            bet_size_bucket=bet_size_bucket,
+            is_raise_over=is_raise_over,
+            action_sequence=action_sequence,
+            board_features=board_features,
+            hero_draw=hero_draw,
+            hero_blockers=hero_blockers,
+            relation_dist=relation_dist,
+            player_profile=player_profile,
+        )
+
         samples = self._samples.get(_make_key(bucket, street, num_opp, action_ctx), [])
-        if len(samples) < _MIN_SAMPLES:
-            return raw_eq
-        bias = sum(a - p for p, a in samples) / len(samples)
-        bias = max(-_MAX_SHIFT, min(_MAX_SHIFT, bias))
-        if _BIAS_SHRINK_K > 0:
-            bias *= len(samples) / (len(samples) + _BIAS_SHRINK_K)
-        return max(0.0, min(1.0, raw_eq + bias))
+        online_bias = 0.0
+        if len(samples) >= _MIN_SAMPLES:
+            online_bias = sum(a - p for p, a in samples) / len(samples)
+            online_bias = max(-_MAX_SHIFT, min(_MAX_SHIFT, online_bias))
+            if _BIAS_SHRINK_K > 0:
+                online_bias *= len(samples) / (len(samples) + _BIAS_SHRINK_K)
+            calibrated = max(0.0, min(1.0, calibrated + online_bias))
+        self.last_diagnostic = {
+            'raw': float(raw_eq),
+            'formula': float(formula_eq),
+            'ml': dict(ml_diag),
+            'online_bias': float(online_bias),
+            'final': float(calibrated),
+        }
+        return calibrated
 
     def sample_count(self, bucket: str, street: str, num_opp: int,
                      action_ctx: str = 'passive') -> int:

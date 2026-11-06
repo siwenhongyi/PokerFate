@@ -104,6 +104,11 @@ function P:getFriendshipTournament()
     return self:getCurData().friendship_tournament
 end
 
+-- 派遣好感度场次
+function P:getFriendshipDispatch()
+    return self:getCurData().friendship_dispatch
+end
+
 function P:refreshReddot()
     local num = 0
     for _, v in ipairs(tpl_vip_level_list) do

@@ -37,6 +37,7 @@ function P:getRenderTexture()
 end
 
 function P:refreshRole()
+    bee.invoke(self.CharacterImage, "setShowReal", true)
     bee.invoke(self.CharacterImage, "setRole", self._role, true)
 end
 

@@ -412,7 +412,8 @@ function P:playMusic()
         self._isPlaying = true
         self._time = 0
         bee.stopSoundByIndex(self._playIndex)
-        self._playIndex = bee.playSound(self._path)
+        local volume = SettingModel:getSoundVolume()
+        self._playIndex = bee.playSound(self._path, false, volume)
     end
 end
 

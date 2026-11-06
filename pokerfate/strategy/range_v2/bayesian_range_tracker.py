@@ -1,8 +1,8 @@
 """Bayesian 1326-dim range tracker.
 
-# 2026-04-28 P0.3 env hooks:
-#   PF_LP_SIGNAL_FACTOR  loose-passive (vpip>=0.45 & pfr/vpip<=0.30) signal ×=this
-#   PF_NEW_SIGNAL_FACTOR new villain (hands_seen<30) signal ×=this
+# 2026-04-28 P0.3 selected defaults:
+#   loose-passive (vpip>=0.45 & pfr/vpip<=0.30) signal ×=0.5
+#   new villain (hands_seen<30) signal ×=0.7
 
 Maintains a probability vector w[1326] for each opponent.  Every observed
 action multiplies by the action likelihood and re-normalizes.
@@ -21,12 +21,13 @@ from __future__ import annotations
 
 import logging
 import os as _os
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 import numpy as np
 
 from pokerfate.core.card import Card
 from pokerfate.core.config import MIN_HANDS_FOR_CLASSIFICATION
+from pokerfate.core.hand_evaluator import HandEvaluator
 from pokerfate.strategy.range_v2 import hand_categorizer as hcat
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
 from pokerfate.strategy.range_v2.action_model import (
@@ -36,108 +37,183 @@ from pokerfate.strategy.range_v2.action_model import (
     GTO_VPIP,
     PlayerProfile,
 )
+from pokerfate.strategy.range_v2.bucket_ml_calibration import calibrate_bucket_probs
+from pokerfate.strategy.range_v2.empirical_model import (
+    CAT_ORDER as EMPIRICAL_CAT_ORDER,
+    empirical_preflop_bucket_prior,
+    set_current_big_blind,
+)
+from pokerfate.strategy.range_v2.runtime_formula_calibration import bb_key, load_params
 
 log = logging.getLogger(__name__)
 
-_LP_SIGNAL_FACTOR = float(_os.environ.get('PF_LP_SIGNAL_FACTOR', '0.5'))
-_NEW_SIGNAL_FACTOR = float(_os.environ.get('PF_NEW_SIGNAL_FACTOR', '0.7'))
+_LP_SIGNAL_FACTOR = 0.5
+_NEW_SIGNAL_FACTOR = 0.7
 _BUCKET_CALIBRATION_ENABLED = (
     _os.environ.get('PF_BUCKET_CALIBRATION', '1').lower()
     not in ('0', 'false', 'no')
 )
-_BUCKET_CAL_MIN_FACTOR = float(_os.environ.get('PF_BUCKET_CAL_MIN_FACTOR', '0.25'))
-_BUCKET_CAL_MAX_FACTOR = float(_os.environ.get('PF_BUCKET_CAL_MAX_FACTOR', '8.0'))
+_BUCKET_CAL_MIN_FACTOR = 0.25
+_BUCKET_CAL_MAX_FACTOR = 8.0
 _BUCKET_CAL_CATS = ('nuts', 'strong', 'medium', 'draw', 'weak_draw', 'air')
 _BUCKET_CAL_IDX = {cat: i for i, cat in enumerate(_BUCKET_CAL_CATS)}
+_PREFLOP_CAT_IDX = np.array(
+    [_BUCKET_CAL_IDX.get(hcat.categorize(idx, []), _BUCKET_CAL_IDX['air'])
+     for idx in range(1326)],
+    dtype=np.int8,
+)
+_RUNTIME_BUCKET_CAL_CACHE: Dict[str, Optional[Dict[str, tuple[float, Dict[str, float]]]]] = {}
 
-# Fitted on 2-5.log, cross-validated on 6.log with full bucket distribution
-# replay. Formula: q = softmax(gamma * log(p) + theta). The layer preserves
-# combo ordering inside each bucket; it only recalibrates bucket mass.
+# Safe subset fitted on 2-5 logs and cross-validated on 6 logs with full
+# bucket-distribution rows (2026-05-16). We only keep contexts where validation
+# NLL improves and strong/nuts under-20% risk does not worsen. Formula:
+# q = softmax(gamma * log(p) + theta). The layer preserves combo ordering
+# inside each bucket; it only recalibrates bucket mass.
 _BUCKET_CALIBRATION: Dict[str, tuple[float, Dict[str, float]]] = {
-    'flop board:flop': (
-        0.8617,
-        {
-            'air': -0.1389, 'draw': 0.1915, 'medium': 0.1924,
-            'nuts': -0.0920, 'strong': -0.1354, 'weak_draw': -0.0176,
-        },
-    ),
-    'flop action:bet': (
-        0.8045,
-        {
-            'air': -0.2111, 'draw': 0.0234, 'medium': 0.7331,
-            'nuts': -0.4145, 'strong': -0.0490, 'weak_draw': -0.0819,
-        },
-    ),
-    'flop action:call': (
-        0.9448,
-        {
-            'air': 0.0802, 'draw': 0.2534, 'medium': 0.0236,
-            'nuts': -0.0549, 'strong': -0.2392, 'weak_draw': -0.0631,
-        },
-    ),
-    'flop action:check': (
-        0.8992,
-        {
-            'air': -0.0821, 'draw': 0.1698, 'medium': -0.0948,
-            'nuts': 0.0358, 'strong': -0.1610, 'weak_draw': 0.1324,
-        },
-    ),
     'flop action:raise_over': (
-        0.7533,
+        0.5500,
         {
-            'air': -0.7110, 'draw': 0.3420, 'medium': 0.5809,
-            'nuts': -0.2520, 'strong': 0.1951, 'weak_draw': -0.1548,
-        },
-    ),
-    'turn board:turn': (
-        0.9244,
-        {
-            'air': 0.0336, 'draw': 0.1091, 'medium': 0.1979,
-            'nuts': -0.2007, 'strong': -0.1291, 'weak_draw': -0.0107,
-        },
-    ),
-    'turn action:bet': (
-        0.8638,
-        {
-            'air': 0.0118, 'draw': -0.0420, 'medium': 0.6359,
-            'nuts': -0.5473, 'strong': -0.0552,
+            'air': -0.5363, 'draw': 0.0685, 'medium': 0.8187,
+            'nuts': -0.5516, 'strong': 0.2476, 'weak_draw': -0.0469,
         },
     ),
     'turn action:call': (
-        0.8233,
+        0.7399,
         {
-            'air': 0.0963, 'draw': 0.0619, 'medium': 0.0110,
-            'nuts': 0.0363, 'strong': -0.0390, 'weak_draw': -0.1665,
+            'air': 0.1453, 'draw': 0.0993, 'medium': 0.0515,
+            'nuts': -0.0643, 'strong': -0.0931, 'weak_draw': -0.1386,
         },
-    ),
-    'turn action:check': (
-        0.8764,
-        {'air': 0.0371, 'draw': 0.1634, 'strong': -0.2479, 'weak_draw': 0.0541},
     ),
     'turn action:raise_over': (
-        0.6500,
+        0.5500,
         {
-            'air': -0.1763, 'draw': 0.0433, 'medium': 0.3515,
-            'nuts': -0.4404, 'strong': 0.1414, 'weak_draw': 0.0805,
+            'air': -0.4089, 'draw': -0.0657, 'medium': 0.8308,
+            'nuts': -0.4810, 'strong': 0.0835, 'weak_draw': 0.0413,
         },
     ),
-    'river board:river': (
-        0.9166,
-        {'air': 0.2226, 'medium': 0.2185, 'nuts': -0.3603, 'strong': -0.0808},
-    ),
     'river action:bet': (
-        0.7590,
-        {'air': -0.0911, 'medium': 0.5684, 'nuts': -0.5142, 'strong': 0.0373},
+        0.7149,
+        {'air': -0.1820, 'medium': 0.7050, 'nuts': -0.5129, 'strong': -0.0077},
     ),
-    'river action:check': (
-        0.9140,
-        {'air': 0.1272, 'medium': 0.1000, 'nuts': -0.0556, 'strong': -0.1716},
+    'river action:call': (
+        0.6994,
+        {'air': -0.0731, 'medium': -0.0282, 'nuts': 0.0259, 'strong': 0.0778},
     ),
     'river action:raise_over': (
-        0.6500,
-        {'air': -0.0921, 'medium': 0.0552, 'nuts': -0.1864, 'strong': 0.2250},
+        0.6931,
+        {'air': -0.3667, 'medium': 0.7555, 'nuts': -0.3807},
     ),
 }
+
+
+def _nopp_bin(n: int) -> str:
+    if n <= 1:
+        return '1'
+    if n == 2:
+        return '2'
+    return '3+'
+
+
+def _board_texture_key(board: List[Card]) -> str:
+    if len(board) < 3:
+        return 'pre'
+    ranks = [c.rank for c in board]
+    suits = [c.suit for c in board]
+    paired = len(set(ranks)) < len(ranks)
+    if len(suits) >= 3 and len(set(suits[:3])) == 1:
+        flush = 'mono'
+    elif len(suits) >= 3 and max(suits[:3].count(s) for s in set(suits[:3])) >= 2:
+        flush = 'fd'
+    else:
+        flush = 'rainbow'
+    return ('paired' if paired else 'unpaired') + ':' + flush
+
+
+def _bet_size_bucket(ratio: float) -> str:
+    try:
+        x = float(ratio or 0.0)
+    except Exception:
+        x = 0.0
+    if x <= 0.0:
+        return 'none'
+    if x <= 0.25:
+        return 'small'
+    if x <= 0.40:
+        return 'third'
+    if x <= 0.55:
+        return 'half'
+    if x <= 0.80:
+        return 'two_third'
+    if x <= 1.10:
+        return 'pot'
+    if x <= 1.75:
+        return 'overpot'
+    return 'huge'
+
+
+def _action_sequence_key(history: List[tuple], limit: int = 6) -> str:
+    recent = history[-limit:]
+    return '|'.join(f'{street}:{action}' for street, action in recent)
+
+
+def _preflop_action_type(action: str, context: ActionContext) -> str:
+    if context.street != 'preflop':
+        return ''
+    if action == 'raise':
+        if context.facing_action == 'none':
+            return 'open'
+        if context.facing_action == 'open':
+            return '3bet'
+        if context.facing_action == '3bet':
+            return '4bet'
+        if context.facing_action == '4bet':
+            return '5bet'
+        return 'raise'
+    if action == 'call':
+        if context.facing_action == 'none':
+            return 'limp'
+        if context.facing_action == 'open':
+            return 'call_open'
+        if context.facing_action == '3bet':
+            return 'call_3bet'
+        return 'call'
+    if action == 'check':
+        return 'check_option'
+    if action == 'fold':
+        return 'fold'
+    return action or ''
+
+
+def _load_runtime_bucket_calibration(
+    big_blind: Optional[float],
+) -> Optional[Dict[str, tuple[float, Dict[str, float]]]]:
+    key = "all_bb"
+    if key in _RUNTIME_BUCKET_CAL_CACHE:
+        return _RUNTIME_BUCKET_CAL_CACHE[key]
+
+    raw = load_params('bucket', big_blind)
+    if raw is None:
+        _RUNTIME_BUCKET_CAL_CACHE[key] = None
+        return None
+
+    try:
+        parsed: Dict[str, tuple[float, Dict[str, float]]] = {}
+        for context_key, params in (raw or {}).items():
+            theta_raw = params.get('theta', {}) or {}
+            parsed[str(context_key)] = (
+                float(params.get('gamma', 1.0)),
+                {
+                    cat: float(v)
+                    for cat, v in theta_raw.items()
+                    if cat in _BUCKET_CAL_IDX
+                },
+            )
+        _RUNTIME_BUCKET_CAL_CACHE[key] = parsed
+        return parsed
+    except Exception:
+        log.exception('runtime bucket calibration parse failed for %s', key)
+        _RUNTIME_BUCKET_CAL_CACHE[key] = None
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -323,6 +399,7 @@ class BayesianRangeTracker:
     def __init__(self, action_model: ActionModel):
         self.action_model = action_model
         self._weights: Dict[int, np.ndarray] = {}  # player_id → w[1326]
+        self._big_blind: Optional[float] = None
         self._known_cards: Set[int] = set()        # my hole cards (set once per hand)
         # Per-hand folded set. Used to exclude folded villains from the
         # multi-way active set passed to the calibration hook. Cleared in
@@ -332,6 +409,7 @@ class BayesianRangeTracker:
         # sequence-pattern detection. Cleared in reset_hand so patterns
         # never bleed across hand boundaries.
         self._action_history: Dict[int, List[tuple]] = {}
+        self._action_meta: Dict[int, Dict[str, Any]] = {}
         # 2026-04-23 showdown calibration hook。可选 callback，在每次
         # _weights[pid] 更新后被调，参数：
         #   (player_id, street, board, weights, trigger)
@@ -348,14 +426,44 @@ class BayesianRangeTracker:
         # Review 01_bayesian_tracker §2.3 + §4.8: 50%+ CPU saving expected.
         self._cat_cache_key: Optional[tuple] = None
         self._cat_cache: Optional[List[str]] = None
+        self._board_int_cache_key: Optional[tuple] = None
+        self._board_int_cache: Set[int] = set()
+        self._blocked_mask_cache: Dict[tuple, np.ndarray] = {}
+
+    def set_big_blind(self, big_blind: float) -> None:
+        self._big_blind = float(big_blind or 0.0)
+        set_current_big_blind(self._big_blind)
 
     def set_known_cards(self, cards: List[Card]) -> None:
         """Call once per hand with bot's hole cards."""
         self._known_cards = {hcm.card_to_int(c) for c in cards}
 
     def start_new_hand(self) -> None:
-        """Per-hand reset of fold state. Call before per-player reset_hand."""
+        """Reset per-hand range state before per-player reset_hand calls."""
+        self._weights.clear()
         self._folded.clear()
+        self._action_history.clear()
+        self._action_meta.clear()
+
+    def _board_key(self, board: List[Card]) -> tuple:
+        if board and len(board) >= 3:
+            return tuple(sorted(hcm.card_to_int(c) for c in board))
+        return ()
+
+    def _board_ints(self, board: List[Card]) -> Set[int]:
+        key = self._board_key(board)
+        if self._board_int_cache_key != key:
+            self._board_int_cache = set(key)
+            self._board_int_cache_key = key
+        return self._board_int_cache
+
+    def _blocked_mask(self, known_cards: Set[int]) -> np.ndarray:
+        key = tuple(sorted(known_cards))
+        mask = self._blocked_mask_cache.get(key)
+        if mask is None:
+            mask = hcm.blocked_by(set(key))
+            self._blocked_mask_cache[key] = mask
+        return mask
 
     def _get_categories(self, board: List[Card]) -> List[str]:
         """Return per-combo category list for this board (cached).
@@ -364,11 +472,7 @@ class BayesianRangeTracker:
         list keyed by board. Preflop calls (empty board) use the preflop
         bucket; any postflop call uses the on-board evaluator.
         """
-        key: tuple
-        if board and len(board) >= 3:
-            key = tuple(sorted(hcm.card_to_int(c) for c in board))
-        else:
-            key = ()
+        key = self._board_key(board)
         if self._cat_cache_key != key:
             board_arg = board if key else []
             # Build in one pass; hcat.categorize is ~0.1 ms so 1326 calls
@@ -385,66 +489,116 @@ class BayesianRangeTracker:
             return
         if not board or len(board) < 3:
             return
-        params = _BUCKET_CALIBRATION.get(f'{street} {trigger}')
-        if params is None:
-            return
+        runtime_params = _load_runtime_bucket_calibration(self._big_blind) or {}
+        base_key = f'{street} {trigger}'
+        active_count = sum(1 for pid in self._weights if pid not in self._folded)
+        meta = self._action_meta.get(player_id, {})
+        size_bucket = str(meta.get('bet_size_bucket') or 'none')
+        is_raise_over = bool(meta.get('is_raise_over') or False)
+        size_ctx = f'size={size_bucket} rr={"1" if is_raise_over else "0"}'
+        rich_key = (
+            f'{base_key} nopp={_nopp_bin(active_count)} '
+            f'tex={_board_texture_key(board)}'
+        )
+        nopp_key = f'{base_key} nopp={_nopp_bin(active_count)}'
+        params = (
+            runtime_params.get(f'{rich_key} {size_ctx}')
+            or runtime_params.get(f'{base_key} {size_ctx}')
+            or runtime_params.get(rich_key)
+            or runtime_params.get(nopp_key)
+            or runtime_params.get(base_key)
+            or _BUCKET_CALIBRATION.get(base_key)
+        )
         w = self._weights.get(player_id)
         if w is None:
             return
 
-        gamma, theta_dict = params
-        board_ints = {hcm.card_to_int(c) for c in board}
+        board_ints = self._board_ints(board)
         categories = self._get_categories(board)
-        bucket_mass = np.zeros(len(_BUCKET_CAL_CATS), dtype=np.float64)
+        cat_indices = np.array(
+            [_BUCKET_CAL_IDX.get(cat, -1) for cat in categories],
+            dtype=np.int8,
+        )
+        blocked = self._blocked_mask(board_ints)
 
-        for idx in range(1326):
-            if w[idx] <= 1e-12:
-                continue
-            c1, c2 = hcm.ALL_COMBOS[idx]
-            if c1 in board_ints or c2 in board_ints:
-                continue
-            cat_idx = _BUCKET_CAL_IDX.get(categories[idx])
-            if cat_idx is not None:
-                bucket_mass[cat_idx] += float(w[idx])
+        def _eligible_mask() -> np.ndarray:
+            return (w > 1e-12) & (~blocked) & (cat_indices >= 0)
+
+        def _bucket_mass_vec() -> np.ndarray:
+            eligible = _eligible_mask()
+            return np.bincount(
+                cat_indices[eligible],
+                weights=w[eligible],
+                minlength=len(_BUCKET_CAL_CATS),
+            ).astype(np.float64, copy=False)
+
+        def _apply_target(target: np.ndarray, source: np.ndarray) -> bool:
+            factors = np.ones(len(_BUCKET_CAL_CATS), dtype=np.float64)
+            live = source > 1e-8
+            factors[live] = target[live] / source[live]
+            np.clip(factors, _BUCKET_CAL_MIN_FACTOR, _BUCKET_CAL_MAX_FACTOR,
+                    out=factors)
+            eligible = _eligible_mask()
+            combo_factors = factors[cat_indices[eligible]]
+            changed_local = bool(np.any(np.abs(combo_factors - 1.0) > 1e-9))
+            if changed_local:
+                w[eligible] *= combo_factors
+                s_local = float(w.sum())
+                if s_local > 1e-15:
+                    w[:] = w / s_local
+            return changed_local
+
+        bucket_mass = _bucket_mass_vec()
 
         total = float(bucket_mass.sum())
         if total <= 1e-15:
             return
         p = bucket_mass / total
-        theta = np.array(
-            [float(theta_dict.get(cat, 0.0)) for cat in _BUCKET_CAL_CATS],
-            dtype=np.float64,
+        if params is not None:
+            gamma, theta_dict = params
+            theta = np.array(
+                [float(theta_dict.get(cat, 0.0)) for cat in _BUCKET_CAL_CATS],
+                dtype=np.float64,
+            )
+            logits = gamma * np.log(np.clip(p, 1e-6, 1.0)) + theta
+            logits -= float(logits.max())
+            q = np.exp(logits)
+            q /= float(q.sum())
+            if _apply_target(q, p):
+                bucket_mass = _bucket_mass_vec()
+                total = float(bucket_mass.sum())
+                if total <= 1e-15:
+                    return
+                p = bucket_mass / total
+
+        range_threshold = (1.0 / 1326) * 0.1
+        range_pct = float((w > range_threshold).sum()) / 1326
+        ml_target, _diag = calibrate_bucket_probs(
+            {cat: float(val) for cat, val in zip(_BUCKET_CAL_CATS, p)},
+            big_blind=self._big_blind,
+            street=street,
+            trigger=trigger,
+            active_count=active_count,
+            board=list(board),
+            range_pct=range_pct,
+            known_cards=self._known_cards,
+            position=str(meta.get('position') or ''),
+            is_ip=bool(meta.get('is_ip') or False),
+            facing_action=str(meta.get('facing_action') or ''),
+            preflop_action_type=str(meta.get('preflop_action_type') or ''),
+            action_bet_ratio=float(meta.get('action_bet_ratio') or 0.0),
+            bet_size_bucket=size_bucket,
+            is_raise_over=is_raise_over,
+            action_sequence=str(meta.get('action_sequence') or ''),
         )
-        logits = gamma * np.log(np.clip(p, 1e-6, 1.0)) + theta
-        logits -= float(logits.max())
-        q = np.exp(logits)
-        q /= float(q.sum())
-
-        factors = np.ones(len(_BUCKET_CAL_CATS), dtype=np.float64)
-        live = p > 1e-8
-        factors[live] = q[live] / p[live]
-        np.clip(factors, _BUCKET_CAL_MIN_FACTOR, _BUCKET_CAL_MAX_FACTOR,
-                out=factors)
-
-        changed = False
-        for idx in range(1326):
-            if w[idx] <= 1e-12:
-                continue
-            c1, c2 = hcm.ALL_COMBOS[idx]
-            if c1 in board_ints or c2 in board_ints:
-                continue
-            cat_idx = _BUCKET_CAL_IDX.get(categories[idx])
-            if cat_idx is None:
-                continue
-            factor = float(factors[cat_idx])
-            if abs(factor - 1.0) > 1e-9:
-                w[idx] *= factor
-                changed = True
-
-        if changed:
-            s = float(w.sum())
-            if s > 1e-15:
-                w /= s
+        if ml_target:
+            target = np.array(
+                [float(ml_target.get(cat, 0.0) or 0.0) for cat in _BUCKET_CAL_CATS],
+                dtype=np.float64,
+            )
+            target_sum = float(target.sum())
+            if target_sum > 1e-15:
+                _apply_target(target / target_sum, p)
 
     def reset_hand(self, player_id: int, position: str,
                    profile: PlayerProfile) -> None:
@@ -488,11 +642,46 @@ class BayesianRangeTracker:
             else:
                 w[idx] = 0.03
 
+        empirical_prior = empirical_preflop_bucket_prior(
+            position, profile, self._big_blind,
+        )
+        if empirical_prior is not None:
+            target_dist, blend, _key, _n = empirical_prior
+            active_total = float(w.sum())
+            if active_total > 1e-15 and blend > 0.0:
+                current = {}
+                for cat in EMPIRICAL_CAT_ORDER:
+                    cat_idx = _BUCKET_CAL_IDX.get(cat)
+                    if cat_idx is None:
+                        continue
+                    current[cat] = float(w[_PREFLOP_CAT_IDX == cat_idx].sum()) / active_total
+                multipliers = np.ones(len(EMPIRICAL_CAT_ORDER), dtype=np.float64)
+                for i, cat in enumerate(EMPIRICAL_CAT_ORDER):
+                    cur = current.get(cat, 0.0)
+                    if cur <= 1e-12:
+                        continue
+                    target = (
+                        (1.0 - blend) * cur
+                        + blend * float(target_dist.get(cat, cur) or 0.0)
+                    )
+                    multipliers[i] = max(0.25, min(4.0, target / cur))
+                w *= multipliers[_PREFLOP_CAT_IDX]
+
         total = w.sum()
         if total > 0:
             w /= total
 
         self._weights[player_id] = w
+        self._action_meta[player_id] = {
+            'position': position,
+            'is_ip': False,
+            'facing_action': 'none',
+            'preflop_action_type': 'reset',
+            'action_bet_ratio': 0.0,
+            'bet_size_bucket': 'none',
+            'is_raise_over': False,
+            'action_sequence': '',
+        }
         # Sequence-pattern history starts fresh for this hand. If this call
         # gets skipped, _detect_sequence_pattern would see stale entries from
         # the previous hand and fire spurious triple_barrel/capped patterns.
@@ -514,20 +703,20 @@ class BayesianRangeTracker:
         that rebalancing is already handled by the renormalize step.
 
         Issue D/E (gameplay analysis): the boost floor must scale with the
-        opponent's range WIDTH. Fish open VPIP ~60% and reach postflop
+        opponent's range WIDTH. Loose high-VPIP profiles can reach postflop
         with ~600 live combos; nuts combos are DILUTED across that wide
         reach. Tight players reach with ~150 live combos; nuts are
-        CONCENTRATED. A fixed 3× avg floor over-inflates fish bucket[nuts]
-        (observed: 369 decisions showed fish bucket[nuts] ≥ 0.40;
+        CONCENTRATED. A fixed 3× avg floor over-inflates wide-range bucket[nuts]
+        (observed: 369 decisions showed wide-range bucket[nuts] ≥ 0.40;
         4 catastrophic river cold-calls vs obvious nuts).
 
         Math: P(nuts | reach) ∝ n_nuts_combos / n_reach_combos.
-        Linear interpolation by reach_pct so fish get a lower floor.
+        Linear interpolation by reach_pct so wider ranges get a lower floor.
         """
         if not board or len(board) < 3:
             return
 
-        board_ints = {hcm.card_to_int(c) for c in board}
+        board_ints = self._board_ints(board)
         categories = self._get_categories(board)
 
         # Threshold for "meaningful weight" (same bar as
@@ -548,7 +737,7 @@ class BayesianRangeTracker:
             # proxy for "how wide is the believable part of villain's range".
             # Tight prior (UTG) meaningful_pct ≈ 0.14 → nuts_mul ≈ 2.8
             # Loose prior (BB vs limp) meaningful_pct ≈ 0.55 → nuts_mul ≈ 2.2
-            # Very wide (whale after tempered update) meaningful_pct ≈ 0.80 → 1.8
+            # Very wide range meaningful_pct ≈ 0.80 → 1.8
             meaningful_pct = float((w > _MEANINGFUL_W).sum()) / 1326.0
             # Clamp to [0.1, 1.0] so edge cases (near-empty or near-uniform)
             # produce sane floors.
@@ -631,7 +820,7 @@ class BayesianRangeTracker:
         signal_strength = max(0.0, min(1.0, float(signal_strength)))
 
         # 2026-04-28 P0.3：loose-passive 对手 + 新对手信号降权（env 可调）。
-        # 鲸鱼/超松被动对手的下注 range 极宽且不极化，下注信号噪声远大于 reg；
+        # 极松被动对手的下注 range 极宽且不极化，下注信号噪声远大于低 VPIP/PFR gap 的高攻击 profile；
         # tracker 把他们的 0.3x pot bet 当强信号收紧，导致 hero "胜率 25%(vs随机
         # 35%)" 这类系统性压制。新对手 (hands_seen<30) vpip/pfr 都不稳定，同样降权。
         if profile.hands_seen >= MIN_HANDS_FOR_CLASSIFICATION:
@@ -642,15 +831,16 @@ class BayesianRangeTracker:
             signal_strength *= _NEW_SIGNAL_FACTOR
         if player_id not in self._weights:
             self.reset_hand(player_id, context.position or 'CO', profile)
+        if context.big_blind <= 0 and self._big_blind:
+            context.big_blind = float(self._big_blind)
 
         w = self._weights[player_id]
 
         # Card removal: board cards
         if board:
-            board_ints = {hcm.card_to_int(c) for c in board}
+            board_ints = self._board_ints(board)
             all_known = self._known_cards | board_ints
-            block = hcm.blocked_by(all_known)
-            w[block] = 0.0
+            w[self._blocked_mask(all_known)] = 0.0
 
         # Compute likelihoods for all 1326 combos
         hero_cards = (
@@ -689,8 +879,8 @@ class BayesianRangeTracker:
             w = np.ones(1326, dtype=np.float64)
             all_known = set(self._known_cards)
             if board:
-                all_known |= {hcm.card_to_int(c) for c in board}
-            w[hcm.blocked_by(all_known)] = 0.0
+                all_known |= self._board_ints(board)
+            w[self._blocked_mask(all_known)] = 0.0
             s = w.sum()
             if s > 0:
                 w /= s
@@ -738,12 +928,13 @@ class BayesianRangeTracker:
 
         history = self._action_history.setdefault(player_id, [])
         history.append((street, refined))
+        action_sequence = _action_sequence_key(history)
 
         pattern_name = _detect_sequence_pattern(history)
         if pattern_name:
             correction = _SEQUENCE_CORRECTIONS.get(pattern_name)
             if correction:
-                board_ints = {hcm.card_to_int(c) for c in board} if board else set()
+                board_ints = self._board_ints(board) if board else set()
                 categories = self._get_categories(board)
                 for idx in range(1326):
                     if w[idx] < 1e-10:
@@ -774,6 +965,23 @@ class BayesianRangeTracker:
                         w[below] = floor
                         w /= w.sum()
 
+        existing_meta = self._action_meta.get(player_id, {})
+        position = context.position or str(existing_meta.get('position') or '') or 'CO'
+        preflop_action_type = (
+            context.preflop_action_type
+            or _preflop_action_type(action, context)
+            or str(existing_meta.get('preflop_action_type') or '')
+        )
+        self._action_meta[player_id] = {
+            'position': position,
+            'is_ip': bool(context.is_ip),
+            'facing_action': context.facing_action or '',
+            'preflop_action_type': preflop_action_type,
+            'action_bet_ratio': float(context.bet_ratio or 0.0),
+            'bet_size_bucket': _bet_size_bucket(context.bet_ratio),
+            'is_raise_over': bool(context.is_raise_over),
+            'action_sequence': action_sequence,
+        }
         self._weights[player_id] = w
         self._apply_bucket_calibration(
             player_id, street, board, f'action:{refined}'
@@ -826,12 +1034,21 @@ class BayesianRangeTracker:
             for pid in self._weights
             if pid not in self._folded
         }
+        meta = self._action_meta.get(player_id, {})
         try:
             self._prediction_hook(
                 player_id=player_id, player_name=name,
                 street=street, board=list(board),
                 weights=w, hero_cards=hero_cards, trigger=trigger,
                 active_weights=active_weights,
+                position=str(meta.get('position') or ''),
+                is_ip=bool(meta.get('is_ip') or False),
+                facing_action=str(meta.get('facing_action') or ''),
+                preflop_action_type=str(meta.get('preflop_action_type') or ''),
+                action_bet_ratio=float(meta.get('action_bet_ratio') or 0.0),
+                bet_size_bucket=str(meta.get('bet_size_bucket') or ''),
+                is_raise_over=bool(meta.get('is_raise_over') or False),
+                action_sequence=str(meta.get('action_sequence') or ''),
             )
         except Exception:
             # Calibration hook 失败不应影响正常决策，但必须暴露出来。
@@ -882,13 +1099,11 @@ class BayesianRangeTracker:
         if w is None:
             return {}
 
-        from pokerfate.core.hand_evaluator import HandEvaluator
-
-        board_ints = {hcm.card_to_int(c) for c in board}
+        board_ints = self._board_ints(board)
         hero_ints = {hcm.card_to_int(c) for c in hero_cards}
         all_known = self._known_cards | board_ints | hero_ints
         valid = w.copy()
-        valid[hcm.blocked_by(all_known)] = 0.0
+        valid[self._blocked_mask(all_known)] = 0.0
         total = valid.sum()
         if total < 1e-15:
             return {}
@@ -920,8 +1135,7 @@ class BayesianRangeTracker:
         w = self._weights.get(player_id)
         if w is None:
             return {}
-
-        board_ints = {hcm.card_to_int(c) for c in board} if board else set()
+        board_ints = self._board_ints(board) if board else set()
         categories = self._get_categories(board)
         buckets: Dict[str, float] = {}
 

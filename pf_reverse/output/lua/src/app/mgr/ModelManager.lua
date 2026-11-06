@@ -15,6 +15,7 @@ local gamePath = {
 	{name = "ActivityManager", cls = require "app.model.activity.ActivityManager"},
 	{name = "ItemModel", cls = require "app.model.ItemModel"},
     {name = "VipModel", cls = require "app.model.VipModel"},
+	{name = "DecorationModel", cls = require "app.model.DecorationModel"},
     {name = "PlayerModel", cls = require "app.model.PlayerModel"},
     {name = "CharacterModel", cls = require "app.model.CharacterModel"},
     {name = "GachaModel", cls = require "app.model.GachaModel"},
@@ -32,13 +33,16 @@ local gamePath = {
     {name = "SideGameModel", cls = require "app.model.SideGameModel"},
 	{name = "QuickByModel", cls = require "app.model.QuickByModel"},
 	{name = "AchievementModel", cls = require "app.model.AchievementModel"},
+	{name = "EmojiModel", cls = require "app.model.EmojiModel"},
+	{name = "RecordDataModel", cls = require "app.model.RecordDataModel"},
 
     {name = "ActivityModel", cls = require "app.model.ActivityModel"},
     {name = "ActivityNewmanCheckinModel", cls = require "app.model.activity.ActivityNewmanCheckinModel"},
     {name = "SignInModel", cls = require "app.model.SignInModel"},
     {name = "ThemeModel", cls = require "app.model.activity.ThemeModel"},
 	{name = "SpringFestivalModel", cls = require "app.model.activity.SpringFestivalModel"},
-	
+	{name = "SoccerGuessingModel", cls = require "app.model.activity.SoccerGuessingModel"},
+	{name = "DispatchModel", cls = require "app.model.DispatchModel"},
     
 }
 
@@ -316,13 +320,18 @@ function P:saveSubCloud()
 end
 
 function P:loadCloud()
-	local jstr = LocalStore:getStringForKey("ModelManager")
-	if jstr and string.len(jstr) > 1 then
-		self._cloud = json.decode(jstr) or self:_getInitCloud()
-	end
-	jstr = LocalStore:getStringForKey("ModelManager_Sub")
-	if jstr and string.len(jstr) > 1 then
-		self._subCloud = json.decode(jstr) or {}
+	local _, err = pcall(function()
+		local jstr = LocalStore:getStringForKey("ModelManager")
+		if jstr and string.len(jstr) > 1 then
+			self._cloud = json.decode(jstr) or self:_getInitCloud()
+		end
+		jstr = LocalStore:getStringForKey("ModelManager_Sub")
+		if jstr and string.len(jstr) > 1 then
+			self._subCloud = json.decode(jstr) or {}
+		end
+	end)
+	if err then
+		printError("[ModelManager] loadCloud error", err)
 	end
 	if self._cloud.udv ~= G_DATA_VERSION then
 		self._cloud = self:_getInitCloud()

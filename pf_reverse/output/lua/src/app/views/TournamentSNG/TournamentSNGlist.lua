@@ -24,7 +24,7 @@ function P:onShow()
                 for kk, vv in ipairs(v.reward_item_list) do
                     local item = CU.GameObject.Instantiate(Item01, Reward.transform, false)
                     bee.setText(self:find("TextCount", item), _N(vv.item_num))
-                    bee.setIcon(self:find("Icon", item), tpl_props[vv.item_id].icon)
+                    GF.setItemIcon(item, vv.item_id)
                     item:SetActive(true)
 
                     bee.addClick(item, function()
@@ -33,7 +33,7 @@ function P:onShow()
                 end
                 if self._params.champion_points and self._params.champion_points > 0 then
                     bee.setText(self:find("TextCount", Item01), _N(self._params.champion_points))
-                    bee.setIcon(self:find("Icon", Item01), tpl_props[GPropId.ChampionPoints].icon)
+                    GF.setItemIcon(Item01, GPropId.ChampionPoints)
                     Item01:SetActive(true)
                     bee.addClick(Item01, function()
                         UiManager:showUI("CommonItemTip", {data = {item_id = GPropId.ChampionPoints}, target = self:find("Icon", Item01)})
@@ -48,7 +48,7 @@ function P:onShow()
             end
             GF.setFrameImage(self:find("Avatar/ImageFrame", self.Items[k]), v.brief.frame)
             GF.setTitleImage(self:find("ImageTitle", self.Items[k]), v.brief.title)
-            bee.setText(self:find("TextName", self.Items[k]), v.brief.name)
+            bee.setText(self:find("TextName", self.Items[k]), GF.getOtherName(v.brief.name, nil, v.brief.uid))
             bee.setIcon(self:find("Avatar/Mask/Icon", self.Items[k]), PlayerModel:getAvatarIcon(v.brief.avatar))
             
             bee.addClick(self:find("Avatar", self.Items[k]), function()

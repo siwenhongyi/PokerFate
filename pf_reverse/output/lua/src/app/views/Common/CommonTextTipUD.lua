@@ -13,7 +13,7 @@ function P:onAwake()
     self.DownArrow = self:find("DownArrow", self.ImageBg)
 
 	bee.addClick(self.Mask, function ()
-		self:hideUI()
+		self:onBtClose()
 	end)
 end
 
@@ -21,11 +21,13 @@ end
 	text: 提示文本, target: 提示目标位置
 ]]
 function P:onShow()
+	self.closeCb = self._params.closeCb
+	self.adaptive = self._params.adaptive or false
     bee.setText(self.TextTip, self._params.text or "")
     
     CS.Utils.ForceRebuildLayoutImmediate(self.ItemTips)
     self:setContentPos()
-    
+	self:setAdaptive()
 end
 
 function P:setContentPos()
@@ -65,6 +67,33 @@ function P:setContentPos()
     end
 
 	self.ItemTips.transform.localPosition = bee.v3(endPosX, endPosY)
+end
+
+function P:setAdaptive()
+	if not self.adaptive then
+		return
+	end
+	
+	local textWidth = self.TextTip:GetComponent("Text").preferredWidth
+	if textWidth > self.TextTip.transform.sizeDelta.x then
+		return
+	end
+
+	self.TextTip.transform.sizeDelta = bee.v2(textWidth, 0)
+	self.ItemTips.transform.sizeDelta = bee.v2(textWidth + 60 * 2, self.ItemTips.transform.sizeDelta.y)
+end
+
+function P:evt_hideUiWhenAction(isVisible)
+    if not isVisible then
+    	self:hideUIForce()
+    end
+end
+
+function P:onBtClose()
+	self:hideUI()
+	if self.closeCb then
+		self.closeCb()
+	end
 end
 
 return P

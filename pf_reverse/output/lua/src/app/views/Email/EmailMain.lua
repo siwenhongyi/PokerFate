@@ -289,7 +289,7 @@ function P:refreshEmailItem(data, item)
         bee.setText(self:find("TextDate", CurItem), _F("LAB_MAIL_029", day))
     end
     self:find("ImageStar", CurItem):SetActive(data.coll_type == 1)
-    
+
     if data.status == EmailModel.STATUS.UserMailStatusUnread then
         bee.setIcon(self:find("ImageRead", CurItem), "Email[email_icon_unread]", true)
         self:find("Reddot", item):SetActive(true)
@@ -302,7 +302,7 @@ function P:refreshEmailItem(data, item)
         self:find("ImageRead", CurItem):SetActive(false)
         local ds = get_tpl_subKey(tpl_character_skin_list, "role", data.role_id)
         if #ds > 0 then
-            CharacterModel:setSkinAvater(self:find("Avatar/Mask/ImageIcon"), ds[1].id)
+            CharacterModel:setSkinAvater(self:find("Avatar/ImageIcon", item), ds[1].id)
         end
     else
         bee.find("Avatar", item):SetActive(false)
@@ -350,15 +350,16 @@ function P:refreshEmailDetail()
 
         if data.item_list and #data.item_list > 0 then
             self.EmailAttachment:SetActive(true)
-            bee.setText(self.TextContentSmall, EmailModel:getEamilContent(data))
+            self:refreshContentText(self.TextContentSmall, EmailModel:getEamilContent(data))
             self.ContentSmall:SetActive(true)
             self.ContentBig:SetActive(false)
         else
             self.EmailAttachment:SetActive(false)
-            bee.setText(self.TextContentBig, EmailModel:getEamilContent(data))
+            self:refreshContentText(self.TextContentBig, EmailModel:getEamilContent(data))
             self.ContentSmall:SetActive(false)
             self.ContentBig:SetActive(true)
         end
+        
         if data.item_list and #data.item_list > 0 then
             self:removeAllChildren(self.AttachView)
             for _, v in ipairs(data.item_list) do
@@ -427,6 +428,23 @@ function P:evt_refreshEmailList(info)
         self.ListEmail:setDatas(info.list)
         self:refreshEmailDetail()
 	end
+end
+
+function P:refreshContentText(content, text)
+    local textList = GF.parseLinks(text)
+    local linkText = content:GetComponent("HyperlinkText")
+    linkText:RemoveAllListeners()
+    for _, v in ipairs(textList) do
+        if v ~= "" then
+            linkText:AddListener(function(href)
+                GF.onClickLink(string.gsub(href, '"', ''))
+            end)
+            if LanguageManager:getLanguage() ~= "en" then
+                v = string.gsub(v, " ",  Config.NO_WRAP_SPACE)
+            end
+            bee.setText(content, v, "HyperlinkText")
+        end
+    end
 end
 
 return P

@@ -22,6 +22,8 @@ local FACES = {
 
 local SCRAP_FACE = "shame"
 
+local updateInterval = 1 / 60 -- 每60帧动画更新
+
 function P:ctor(node, data)
 end
 
@@ -35,12 +37,29 @@ function P:onAwake()
     if self.ImageFg then
         self.ImageFg:SetActive(false)
     end
+
+    if bee.getFrameRate() > 60 and bee.isAndroid then
+        local cmp = self.Spine:GetComponent("SkeletonGraphic")
+        if cmp then
+            local cmp2 = self.Spine:GetComponent("LuaObject")
+            if cmp2 then
+                self._SpineCmp = cmp
+                self._SpineEt = 0
+                cmp.UpdateTiming = CS.Spine.Unity.UpdateTiming.ManualUpdate
+                cmp2.isOpenUpdate = true
+            end
+        end
+    end
 end
 
 function P:onStart()
     if not self._anim then
         self:playAnim("idle", self._skin or "skin1", self._face or "standby", nil, true)
     end
+end
+
+function P:setSkinId(skinId)
+    self._skinId = skinId
 end
 
 -- "None-无", "待机standby", "微笑smile", "开心happy", "害羞shy", "无奈silence", "难过sad", "爆衣羞耻shame"
@@ -170,6 +189,7 @@ function P:playAnim(anim, skin, face, onComplete, loop)
         if skin and sp:getSkin(skin) then
             sp:setSkin(skin)
             self._skin = skin
+            self:setAttachSkin(skin)
         end
         if face and sp:getSkin(face) then
             if self._face and self._face ~= face then
@@ -196,10 +216,49 @@ function P:playAnim(anim, skin, face, onComplete, loop)
                     self._anim = anims.Items[0].Name
                 end
             end
+
+            self:playAttachAnim(anim, loop)
         end
         if self._hide_attachments then
             for _, v in ipairs(self._hide_attachments) do
                 sp:removeAttachment(v)
+            end
+        end
+    end
+end
+
+function P:playAttachAnim(name, loop)
+    if self._skinId then
+        local d = tpl_character_scrap[self._skinId]
+        if d and d.attach_name then
+            for _, v in ipairs(d.attach_name) do
+                local n = self:find(v)
+                if n then
+                    local sp = bee.spine(n)
+                    if sp and sp:isHaveAnim(name) then
+                        sp:play(name, loop)
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- 新增接口：让 tpl_character_scrap 配置的附加部件跟随主体使用相同的 skin
+function P:setAttachSkin(skin)
+    if not self._skinId or not skin then
+        return
+    end
+    local d = tpl_character_scrap[self._skinId]
+    if not d or not d.attach_name then
+        return
+    end
+    for _, v in ipairs(d.attach_name) do
+        local n = self:find(v)
+        if n then
+            local sp = bee.spine(n)
+            if sp and sp:getSkin(skin) then
+                sp:setSkin(skin)
             end
         end
     end
@@ -232,6 +291,18 @@ function P:setHideAttachments(role_id)
             for _, v in ipairs(self._hide_attachments) do
                 sp:removeAttachment(v)
             end
+        end
+    end
+end
+
+function P:onUpdate()
+    if self._SpineCmp then
+        self._SpineEt = self._SpineEt + scheduler.dt
+        if self._SpineEt >= updateInterval then
+            local dt = self._SpineEt
+            self._SpineEt = 0
+            self._SpineCmp:Update(dt)
+            self._SpineCmp:LateUpdate()
         end
     end
 end

@@ -16,16 +16,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
+import math
 import os as _os
-from typing import Dict, List, Optional
+import random
+from typing import Any, Dict, List, Optional
 
 import numpy as np
-import random
 
 from pokerfate.core.card import Card
 from pokerfate.core.hand_evaluator import HandEvaluator
+from pokerfate.strategy.postflop import _hero_draw_profile
+from pokerfate.strategy.range_v2 import board_analyzer as _board_analyzer
 from pokerfate.strategy.range_v2 import hand_categorizer as hcat
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
+from pokerfate.strategy.range_v2.range_equity_calculator import RangeEquityCalculator
+from pokerfate.strategy.range_v2.river_relative_calibrator import (
+    board_texture_key,
+    relation_eq,
+    relation_from_actual_eq,
+)
+from pokerfate.strategy.v3 import board as _v3_board
 
 _PRED_EQ_SAMPLES = int(_os.environ.get('PF_CAL_PRED_EQ_SAMPLES', '500'))
 _ACTUAL_EQ_PREFLOP_SAMPLES = int(
@@ -40,6 +51,63 @@ _ACTUAL_EQ_TURN_SAMPLES = int(
 _ACTUAL_EQ_RIVER_UNSHOWN_SAMPLES = int(
     _os.environ.get('PF_CAL_ACTUAL_EQ_RIVER_UNSHOWN_SAMPLES', '2000')
 )
+log = logging.getLogger(__name__)
+
+def _bet_size_bucket(ratio: float) -> str:
+    try:
+        x = float(ratio or 0.0)
+    except Exception:
+        x = 0.0
+    if x <= 0.0:
+        return 'none'
+    if x <= 0.25:
+        return 'small'
+    if x <= 0.40:
+        return 'third'
+    if x <= 0.55:
+        return 'half'
+    if x <= 0.80:
+        return 'two_third'
+    if x <= 1.10:
+        return 'pot'
+    if x <= 1.75:
+        return 'overpot'
+    return 'huge'
+
+
+def _board_features(board: List[Card]) -> Dict[str, Any]:
+    tex = _board_analyzer.analyze(list(board or []))
+    return {
+        'wetness': float(tex.wetness),
+        'paired': bool(tex.paired),
+        'monotone': bool(tex.monotone),
+        'flush_possible': bool(tex.flush_possible),
+        'flush_draw': bool(tex.flush_draw),
+        'straight_possible': bool(tex.straight_possible),
+        'straight_draw_heavy': bool(tex.straight_draw_heavy),
+        'high_card_rank': int(tex.high_card_rank or 0),
+        'connectedness': float(tex.connectedness),
+    }
+
+
+def _hero_draw_features(hole: List[Card], board: List[Card]) -> Dict[str, bool]:
+    draw = _hero_draw_profile(list(hole or []), list(board or []))
+    return {
+        'flush_draw': bool(draw.flush_draw),
+        'oesd': bool(draw.oesd),
+        'gutshot': bool(draw.gutshot),
+        'backdoor_flush': bool(draw.backdoor_flush),
+        'overcards': bool(draw.overcards),
+    }
+
+
+def _hero_blocker_features(hole: List[Card], board: List[Card]) -> Dict[str, bool]:
+    return {
+        key: bool(value)
+        for key, value in _v3_board.detect_blockers(
+            list(hole or []), list(board or []),
+        ).items()
+    }
 
 
 @dataclass
@@ -64,6 +132,29 @@ class PredictionRecord:
     # 缺陷 C meta-calibration：按 (hero_bucket, street, n_opp) 累积 (pred,
     # actual) 对，用历史 bias 校正 raw equity。preflop 时为 hero preflop 桶。
     hero_bucket: str = ''
+    hero_made_subtype: str = ''
+    hero_hand_rank: str = ''
+    board_texture: str = ''
+    # River-only hero-relative distribution:
+    # {'win': hero beats villain, 'tie': split, 'loss': villain beats hero}.
+    villain_vs_hero_dist: Dict[str, float] = field(default_factory=dict)
+    position: str = ''
+    is_ip: bool = False
+    facing_action: str = ''
+    preflop_action_type: str = ''
+    action_bet_ratio: float = 0.0
+    bet_size_bucket: str = ''
+    is_raise_over: bool = False
+    action_sequence: str = ''
+    board_features: Dict[str, Any] = field(default_factory=dict)
+    hero_draw: Dict[str, bool] = field(default_factory=dict)
+    hero_blockers: Dict[str, bool] = field(default_factory=dict)
+    posterior_weights: Optional[np.ndarray] = field(
+        default=None, repr=False, compare=False,
+    )
+    static_weights: Optional[np.ndarray] = field(
+        default=None, repr=False, compare=False,
+    )
 
 
 @dataclass
@@ -85,6 +176,16 @@ class CalibrationResult:
     # 日志展示用：只用亮牌 villain 做模拟（旧行为），反映真实本手结果。
     # 不喂给 calibrator——它有口径偏差，只用于人看。
     actual_hero_eq_street_multi_shown: Optional[float] = None
+    predicted_relation_eq: Optional[float] = None
+    actual_relation: str = ''
+    actual_combo: str = ''
+    actual_combo_index: Optional[int] = None
+    static_combo_prob: Optional[float] = None
+    bayes_combo_prob: Optional[float] = None
+    nll_static: Optional[float] = None
+    nll_bayes: Optional[float] = None
+    delta_nll: Optional[float] = None
+    nll_source: str = ''
 
 
 class ShowdownCalibrator:
@@ -105,6 +206,12 @@ class ShowdownCalibrator:
         # 本手累积的摊牌 villain 底牌（player_id → cards），用于计算多人
         # 池"实际胜率"。finalize_hand_calibration 读这里。
         self._shown_cards: Dict[int, List[Card]] = {}
+        self._actual_eq_cache: Dict[tuple, Optional[float]] = {}
+        self._actual_eq_cache_hits = 0
+        self._actual_eq_cache_misses = 0
+        # Per-hand reset/pre-action baseline. NLL evaluation reapplies the
+        # prediction-time board/hero blockers before normalization.
+        self._static_weights: Dict[int, np.ndarray] = {}
 
     # ---------------- lifecycle ----------------
 
@@ -112,6 +219,10 @@ class ShowdownCalibrator:
         self._hand_id = hand_id
         self._hand_predictions = {}
         self._shown_cards = {}
+        self._actual_eq_cache = {}
+        self._actual_eq_cache_hits = 0
+        self._actual_eq_cache_misses = 0
+        self._static_weights = {}
 
     # ---------------- prediction 录入 ----------------
 
@@ -125,6 +236,14 @@ class ShowdownCalibrator:
         hero_cards: Optional[List[Card]],
         trigger: str,
         active_weights: Optional[Dict[int, np.ndarray]] = None,
+        position: str = '',
+        is_ip: bool = False,
+        facing_action: str = '',
+        preflop_action_type: str = '',
+        action_bet_ratio: float = 0.0,
+        bet_size_bucket: str = '',
+        is_raise_over: bool = False,
+        action_sequence: str = '',
     ) -> None:
         """每次 tracker 的 _weights[player_id] 更新后调用。
 
@@ -135,6 +254,16 @@ class ShowdownCalibrator:
         if total < 1e-15:
             return
         w_norm = weights / total
+        posterior_weights = np.array(w_norm, dtype=np.float64, copy=True)
+        if trigger == 'reset' or player_id not in self._static_weights:
+            self._static_weights[player_id] = np.array(
+                w_norm, dtype=np.float64, copy=True,
+            )
+        static_weights = np.array(
+            self._static_weights.get(player_id, posterior_weights),
+            dtype=np.float64,
+            copy=True,
+        )
 
         # range_pct：把"有效 combo"定义为权重 > uniform 的 10%
         # （meaningful in range）
@@ -167,8 +296,18 @@ class ShowdownCalibrator:
 
         # Hero 自己在这个板面的桶（meta-calibration 键的一部分）
         hero_bucket = ''
+        hero_made_subtype = ''
+        hero_hand_rank = ''
+        rel_dist: Dict[str, float] = {}
         if hero_cards is not None and len(hero_cards) >= 2:
             hero_bucket = hcat.categorize_cards(list(hero_cards), list(board))
+            hmi = hcat.made_hand_info(list(hero_cards), list(board))
+            hero_made_subtype = hmi.subtype
+            hero_hand_rank = hmi.hand_rank
+            if board and len(board) >= 5:
+                rel_dist = self._compute_vs_hero_dist(
+                    w_norm, list(board), list(hero_cards),
+                )
 
         record = PredictionRecord(
             hand_id=self._hand_id,
@@ -184,6 +323,23 @@ class ShowdownCalibrator:
             predicted_hero_eq_multi=predicted_hero_eq_multi,
             active_player_ids=active_player_ids,
             hero_bucket=hero_bucket,
+            hero_made_subtype=hero_made_subtype,
+            hero_hand_rank=hero_hand_rank,
+            board_texture=board_texture_key(board),
+            villain_vs_hero_dist=rel_dist,
+            position=position,
+            is_ip=bool(is_ip),
+            facing_action=facing_action,
+            preflop_action_type=preflop_action_type,
+            action_bet_ratio=float(action_bet_ratio or 0.0),
+            bet_size_bucket=bet_size_bucket or _bet_size_bucket(action_bet_ratio),
+            is_raise_over=bool(is_raise_over),
+            action_sequence=action_sequence,
+            board_features=_board_features(board),
+            hero_draw=_hero_draw_features(list(hero_cards or []), list(board)),
+            hero_blockers=_hero_blocker_features(list(hero_cards or []), list(board)),
+            posterior_weights=posterior_weights,
+            static_weights=static_weights,
         )
         self._hand_predictions.setdefault(player_id, []).append(record)
 
@@ -210,11 +366,15 @@ class ShowdownCalibrator:
         """所有 villain 亮牌采集完后调一次，对每个 (villain, 预测快照)
         计算 CalibrationResult（单挑 + 多人池）并写日志。"""
         all_results: List[CalibrationResult] = []
+        self._actual_eq_cache = {}
+        self._actual_eq_cache_hits = 0
+        self._actual_eq_cache_misses = 0
         for player_id, actual_cards in self._shown_cards.items():
             records = self._hand_predictions.get(player_id, [])
             for rec in records:
                 result = self._build_result(rec, actual_cards, hero_cards, final_board)
                 all_results.append(result)
+        self._log_actual_eq_cache_stats('finalize_hand_calibration')
         if self._logger is not None:
             for r in all_results:
                 self._logger.calibration_result(r)
@@ -237,10 +397,96 @@ class ShowdownCalibrator:
         for rec in records:
             result = self._build_result(rec, actual_cards, hero_cards, final_board)
             results.append(result)
+        self._log_actual_eq_cache_stats('emit_records_for')
         if self._logger is not None:
             for r in results:
                 self._logger.calibration_result(r)
         return results
+
+    def _log_actual_eq_cache_stats(self, source: str) -> None:
+        if not log.isEnabledFor(logging.DEBUG):
+            return
+        total = self._actual_eq_cache_hits + self._actual_eq_cache_misses
+        if total <= 0:
+            return
+        log.debug(
+            "actual equity cache %s hand=%s hits=%s misses=%s hit_rate=%.1f%% entries=%s",
+            source,
+            self._hand_id,
+            self._actual_eq_cache_hits,
+            self._actual_eq_cache_misses,
+            100.0 * self._actual_eq_cache_hits / total,
+            len(self._actual_eq_cache),
+        )
+
+    @staticmethod
+    def _cards_key(cards: List[Card] | None) -> tuple:
+        return tuple(sorted(str(c) for c in (cards or [])))
+
+    def _cached_actual_hero_eq_at_street(
+        self,
+        hero_cards: List[Card],
+        villain_cards: List[Card],
+        board_at_street: List[Card],
+    ) -> Optional[float]:
+        key = (
+            'hu_street',
+            self._cards_key(hero_cards),
+            self._cards_key(villain_cards),
+            tuple(str(c) for c in (board_at_street or [])),
+        )
+        if key in self._actual_eq_cache:
+            self._actual_eq_cache_hits += 1
+            return self._actual_eq_cache[key]
+        self._actual_eq_cache_misses += 1
+        value = self._actual_hero_eq_at_street(hero_cards, villain_cards, board_at_street)
+        self._actual_eq_cache[key] = value
+        return value
+
+    def _cached_actual_hero_eq_final(
+        self,
+        hero_cards: List[Card],
+        villain_cards: List[Card],
+        final_board: List[Card],
+    ) -> float:
+        key = (
+            'hu_final',
+            self._cards_key(hero_cards),
+            self._cards_key(villain_cards),
+            tuple(str(c) for c in (final_board or [])),
+        )
+        if key in self._actual_eq_cache:
+            self._actual_eq_cache_hits += 1
+            value = self._actual_eq_cache[key]
+            return 0.0 if value is None else float(value)
+        self._actual_eq_cache_misses += 1
+        value = self._actual_hero_eq(hero_cards, villain_cards, final_board)
+        self._actual_eq_cache[key] = value
+        return value
+
+    def _cached_actual_hero_eq_multi_at_street(
+        self,
+        hero_cards: List[Card],
+        villain_hands: List[List[Card]],
+        board_at_street: List[Card],
+        n_unshown: int = 0,
+    ) -> Optional[float]:
+        key = (
+            'multi_street',
+            self._cards_key(hero_cards),
+            tuple(self._cards_key(v) for v in villain_hands),
+            tuple(str(c) for c in (board_at_street or [])),
+            int(n_unshown),
+        )
+        if key in self._actual_eq_cache:
+            self._actual_eq_cache_hits += 1
+            return self._actual_eq_cache[key]
+        self._actual_eq_cache_misses += 1
+        value = self._actual_hero_eq_multi_at_street(
+            hero_cards, villain_hands, board_at_street, n_unshown=n_unshown,
+        )
+        self._actual_eq_cache[key] = value
+        return value
 
     def _build_result(
         self,
@@ -255,12 +501,35 @@ class ShowdownCalibrator:
         else:
             actual_bucket = hcat.categorize_cards(actual_cards, [])
         predicted_bucket_prob = rec.bucket_dist.get(actual_bucket, 0.0)
+        actual_combo_index = self._combo_index_from_cards(actual_cards)
+        actual_combo = (
+            self._combo_label(actual_combo_index)
+            if actual_combo_index is not None else ''
+        )
+        static_combo_prob = self._combo_probability(
+            rec.static_weights, actual_combo_index, rec.board, rec.hero_cards,
+        )
+        bayes_combo_prob = self._combo_probability(
+            rec.posterior_weights, actual_combo_index, rec.board, rec.hero_cards,
+        )
+        nll_static = (
+            -math.log(max(float(static_combo_prob), 1e-12))
+            if static_combo_prob is not None else None
+        )
+        nll_bayes = (
+            -math.log(max(float(bayes_combo_prob), 1e-12))
+            if bayes_combo_prob is not None else None
+        )
+        delta_nll = (
+            float(nll_static - nll_bayes)
+            if nll_static is not None and nll_bayes is not None else None
+        )
 
         # heads-up 实际胜率（单挑）
         actual_hero_eq_street = None
         eq_error_street = None
         if hero_cards is not None and len(hero_cards) >= 2:
-            actual_hero_eq_street = self._actual_hero_eq_at_street(
+            actual_hero_eq_street = self._cached_actual_hero_eq_at_street(
                 hero_cards, actual_cards, rec.board,
             )
             if (rec.predicted_hero_eq is not None
@@ -272,7 +541,7 @@ class ShowdownCalibrator:
         eq_error = None
         if (hero_cards is not None and len(hero_cards) >= 2
                 and final_board and len(final_board) >= 5):
-            actual_hero_eq_final = self._actual_hero_eq(
+            actual_hero_eq_final = self._cached_actual_hero_eq_final(
                 hero_cards, actual_cards, final_board,
             )
             if rec.predicted_hero_eq is not None:
@@ -299,12 +568,12 @@ class ShowdownCalibrator:
                     n_unshown += 1
             if shown_hands:
                 # 只用亮牌 villain 的版本——日志展示用（反映本手真实摊牌结果）
-                actual_hero_eq_multi_shown = self._actual_hero_eq_multi_at_street(
+                actual_hero_eq_multi_shown = self._cached_actual_hero_eq_multi_at_street(
                     hero_cards, shown_hands, rec.board, n_unshown=0,
                 )
                 # N-way 版本——hero_eq_calibrator 用（和 predicted 同口径）
                 if n_unshown > 0:
-                    actual_hero_eq_multi = self._actual_hero_eq_multi_at_street(
+                    actual_hero_eq_multi = self._cached_actual_hero_eq_multi_at_street(
                         hero_cards, shown_hands, rec.board, n_unshown=n_unshown,
                     )
                 else:
@@ -328,9 +597,77 @@ class ShowdownCalibrator:
             actual_hero_eq_street_multi=actual_hero_eq_multi,
             eq_prediction_error_street_multi=eq_error_multi,
             actual_hero_eq_street_multi_shown=actual_hero_eq_multi_shown,
+            predicted_relation_eq=(
+                relation_eq(rec.villain_vs_hero_dist)
+                if rec.villain_vs_hero_dist else None
+            ),
+            actual_relation=(
+                relation_from_actual_eq(actual_hero_eq_street)
+                if rec.board and len(rec.board) >= 5 else ''
+            ),
+            actual_combo=actual_combo,
+            actual_combo_index=actual_combo_index,
+            static_combo_prob=static_combo_prob,
+            bayes_combo_prob=bayes_combo_prob,
+            nll_static=nll_static,
+            nll_bayes=nll_bayes,
+            delta_nll=delta_nll,
+            nll_source='exact_showdown' if actual_combo_index is not None else '',
         )
 
     # ---------------- 辅助计算 ----------------
+
+    @staticmethod
+    def _combo_index_from_cards(cards: List[Card]) -> Optional[int]:
+        if not cards or len(cards) < 2:
+            return None
+        try:
+            c1 = hcm.card_to_int(cards[0])
+            c2 = hcm.card_to_int(cards[1])
+        except Exception:
+            return None
+        if c1 == c2:
+            return None
+        lo, hi = sorted((c1, c2))
+        return hcm.COMBO_TO_IDX.get((lo, hi))
+
+    @staticmethod
+    def _combo_label(combo_idx: int) -> str:
+        c1, c2 = hcm.cards_of(combo_idx)
+        return f"{c1}{c2}"
+
+    @staticmethod
+    def _combo_probability(
+        weights: Optional[np.ndarray],
+        combo_idx: Optional[int],
+        board: List[Card],
+        hero_cards: Optional[List[Card]],
+    ) -> Optional[float]:
+        if weights is None or combo_idx is None:
+            return None
+        try:
+            valid = np.array(weights, dtype=np.float64, copy=True).reshape(-1)
+        except Exception:
+            return None
+        if valid.size != 1326:
+            return None
+        valid[~np.isfinite(valid)] = 0.0
+        valid = np.maximum(valid, 0.0)
+        known_ints = set()
+        for card in list(board or []) + list(hero_cards or []):
+            try:
+                known_ints.add(hcm.card_to_int(card))
+            except Exception:
+                continue
+        blocked = hcm.blocked_by(known_ints) if known_ints else None
+        if blocked is not None:
+            if bool(blocked[combo_idx]):
+                return None
+            valid[blocked] = 0.0
+        total = float(valid.sum())
+        if total <= 1e-15:
+            return None
+        return max(0.0, float(valid[combo_idx] / total))
 
     @staticmethod
     def _compute_bucket_dist(w_norm: np.ndarray,
@@ -361,13 +698,44 @@ class ShowdownCalibrator:
         return buckets
 
     @staticmethod
+    def _compute_vs_hero_dist(
+        w_norm: np.ndarray,
+        board: List[Card],
+        hero_cards: List[Card],
+    ) -> Dict[str, float]:
+        if not board or len(board) < 5 or not hero_cards or len(hero_cards) < 2:
+            return {}
+
+        board_ints = {hcm.card_to_int(c) for c in board}
+        hero_ints = {hcm.card_to_int(c) for c in hero_cards}
+        blocked = hcm.blocked_by(board_ints | hero_ints)
+        valid = np.array(w_norm, dtype=np.float64, copy=True)
+        valid[blocked] = 0.0
+        total = float(valid.sum())
+        if total <= 1e-15:
+            return {}
+        valid /= total
+
+        hero_score = HandEvaluator.eval_int(list(hero_cards) + list(board))
+        win_w = tie_w = loss_w = 0.0
+        for idx in np.flatnonzero(valid):
+            c1, c2 = hcm.ALL_COMBOS[idx]
+            opp_cards = [hcm.int_to_card(c1), hcm.int_to_card(c2)]
+            opp_score = HandEvaluator.eval_int(opp_cards + list(board))
+            p = float(valid[idx])
+            if hero_score > opp_score:
+                win_w += p
+            elif hero_score == opp_score:
+                tie_w += p
+            else:
+                loss_w += p
+        return {'win': win_w, 'tie': tie_w, 'loss': loss_w}
+
+    @staticmethod
     def _compute_hero_eq(hero_cards: List[Card], board: List[Card],
                          w_norm: np.ndarray) -> float:
         """hero 对 villain 的 weighted range equity。river 精确枚举；前街 MC。
         复用 RangeEquityCalculator 接口。"""
-        from pokerfate.strategy.range_v2.range_equity_calculator import (
-            RangeEquityCalculator,
-        )
         return float(RangeEquityCalculator.weighted_equity(
             hero_cards, board, w_norm, num_opponents=1,
             n_samples=_PRED_EQ_SAMPLES,
@@ -378,9 +746,6 @@ class ShowdownCalibrator:
                                opp_ranges: List[np.ndarray]) -> float:
         """hero 赢过所有 opp_ranges 对手的多人池胜率。每个对手独立 range。
         与决策层 weighted_equity_multi 同口径。"""
-        from pokerfate.strategy.range_v2.range_equity_calculator import (
-            RangeEquityCalculator,
-        )
         return float(RangeEquityCalculator.weighted_equity_multi(
             hero_cards, board, opp_ranges, n_samples=_PRED_EQ_SAMPLES,
         ))

@@ -3,11 +3,12 @@
 local P = {}
 local PL = {}
 local function _initData()
-    local keys = {'id','eff','bg_small',}
+    local keys = {'id','eff','eff_bg','bg_small',}
     local bodys = {
-{1001,"Prefab/PKTable/Eff_Allin_fire","Icon[icon_nameplate_01]"},
-{1002,"Prefab/PKTable/Eff_Allin_neon","Icon[icon_nameplate_02]"},
-{1003,"Prefab/PKTable/Eff_Allin_feathers","Icon[icon_nameplate_03]"}
+{1001,"Prefab/PKTable/Eff_Allin_fire",nil,"Icon[icon_nameplate_01]"},
+{1002,"Prefab/PKTable/Eff_Allin_neon",nil,"Icon[icon_nameplate_02]"},
+{1003,"Prefab/PKTable/Eff_Allin_feathers",nil,"Icon[icon_nameplate_03]"},
+{1004,"views/table/Sayaka2026/SayakaNameplate","views/table/Sayaka2026/SayakaNameplate_bg","Icon[icon_nameplate_s6_01]"}
 }
     for _, v in pairs(bodys) do
         local m = {}

@@ -134,6 +134,9 @@ function P:setUid(uid, showUid)
         self.saveData._uid, self.saveData._showUid = uid, showUid
         self:onSave()
     end
+    if uid and bee.checkVersion("1.6.14") then
+        CS.ThirdManager.Instance:bindUserId(tostring(uid))
+    end
 end
 
 function P:getShowUid()
@@ -201,7 +204,20 @@ function P:getLoginToken()
     return self.saveData._loginToken
 end
 
-function P:getName()
+function P:getName(isRealName)
+    if not isRealName then
+        return GF.getMyName(self._name)
+    end
+    return self._name
+end
+
+function P:getNameIngame(isRealName)
+    if not isRealName then
+        if GameModel.data then
+            return GF.getMyName(self._name, GameModel.data:getPlayerSeatIndex(self:getUid()))
+        end
+        return self:getName()
+    end
     return self._name
 end
 
@@ -210,11 +226,15 @@ function P:setName(name)
 end
 
 function P:getAvatar()
-    return self._avatar
+    local scheme = DecorationModel:getCurScheme()
+    return scheme.avatar
+    --return self._avatar
 end
 
 function P:getAvatarIcon(avatar_id)
-    local d = tpl_props[avatar_id or self._avatar]
+    local scheme = DecorationModel:getCurScheme()
+    -- local d = tpl_props[avatar_id or self._avatar]
+    local d = tpl_props[avatar_id or scheme.avatar]
     if d then
         return d.icon
     end
@@ -226,11 +246,17 @@ function P:getGender()
 end
 
 function P:getFrame()
-    return self._frame
+    local scheme = DecorationModel:getCurScheme()
+    return scheme.frame
 end
 
 function P:getTitle()
-    return self._title
+    local scheme = DecorationModel:getCurScheme()
+    return scheme.title
+end
+function P:getTitle2()
+    local scheme = bee.isInGame() and DecorationModel:getInGameCurScheme() or DecorationModel:getCurScheme()
+    return scheme.title
 end
 
 function P:setIP(ip)
@@ -247,14 +273,6 @@ end
 
 function P:isGuest()
     return self._isGuest
-end
-
-function P:getCurId()
-    if self._login_region then
-        local d = tpl_shop_location[self._login_region]
-        return d and d.cur_id or 1
-    end
-    return 1
 end
 
 function P:setLoginRegion(login_region)
@@ -344,27 +362,11 @@ function P:setInfo(msg)
     self._register_time = msg.register_time
     self._auth_cert_url = msg.auth_cert_url
     self._auth_cert_time = msg.auth_cert_time
+    self:setIllustration(msg.using_illustration)
     ShopModel:setMonthlyCardLeftTime(msg.monthly_card_exp)
-    -- 动特效
-    if msg.brief.animations then
-        for k, v in pairs(msg.brief.animations) do
-            self:setAnimationInfo(v)
-        end
-    end
 
     if self._scheme_list then
         CharacterModel:updateUsingRole()
-    end
-end
-
--- 动画特效
-function P:setAnimationInfo(animInfo)
-    if animInfo.ftype == ACTION_TYPE.AllInEff then
-        self._allin_eff = animInfo.item_id
-    elseif animInfo.ftype == ACTION_TYPE.NameplateEff then
-        self._nameplate_eff = animInfo.item_id
-    elseif animInfo.ftype == ACTION_TYPE.CardFace then
-        self._card_face = animInfo.item_id
     end
 end
 
@@ -407,20 +409,6 @@ end
 
 function P:getCurLevel()
     return self._level
-end
-
--- 获取all in特效
-function P:getAllInEff()
-    return self._allin_eff or ItemModel:getDefaultDecoration(GPropKind.AllInEff)
-end
-
--- 获取铭牌特效
-function P:getNameplateEff()
-    return self._nameplate_eff or ItemModel:getDefaultDecoration(GPropKind.NameplateEff)
-end
-
-function P:getCardFace()
-    return self._card_face or ItemModel:getDefaultDecoration(GPropKind.CardFace)
 end
 
 function P:setCurLevel(level)
@@ -622,69 +610,6 @@ function P:setGreetingFlag(flag)
     self._isPlayedGreeting = flag
 end
 
--- ======================= 装扮 =======================
-
-function P:getCurCardBack()
-    if 0 == ItemModel.using_card_back or not tpl_props[ItemModel.using_card_back] then
-        return tpl_constdata.DefaultCardBack
-    end
-    return tpl_props[ItemModel.using_card_back].mapId
-end
-
-function P:getCurCardBackImage()
-    local cardBackId = self:getCurCardBack()
-    return tpl_card_back[cardBackId].image
-end
-
-function P:getCurCardTable()
-    if 0 == ItemModel.using_table or not tpl_props[ItemModel.using_table] then
-        return tpl_constdata.DefaultCardTable
-    end
-    return tpl_props[ItemModel.using_table].mapId
-end
-
-function P:getCurMusicLobby()
-    -- if 0 == ItemModel.using_lobby_music or not tpl_props[ItemModel.using_lobby_music] then
-    --     return tpl_constdata.DefaultMusicHall
-    -- end
-    -- return tpl_props[ItemModel.using_lobby_music].mapId
-    local schemeInfo = self:getCurScheme(true)
-    local list = {}
-    for k,v in pairs(schemeInfo.lobby_bgm_list) do
-        table.insert(list, tpl_props[v].mapId)
-    end
-    return list
-end
-
-function P:getLobbyMusicTag()
-    local schemeInfo = self:getCurScheme(true)
-    return schemeInfo.property_list[4]
-end
-
-function P:getCurMusicBattle()
-    if 0 == ItemModel.using_battle_music or not tpl_props[ItemModel.using_battle_music] then
-        return tpl_constdata.DefaultMusicBattle
-    end
-    return tpl_props[ItemModel.using_battle_music].mapId
-end
-
-function P:getCurLobbyScene()
-    local schemeInfo = self:getCurScheme(true)
-    return tpl_props[schemeInfo.lobby_scene_id].mapId
-end
-
-function P:getCurAllInEff()
-    return tpl_props[self:getAllInEff()].mapId
-end
-
-function P:getCurNameplateEff()
-    return tpl_props[self:getNameplateEff()].mapId
-end
-
-function P:getCurCardFace()
-    return tpl_props[self:getCardFace()].mapId
-end
-
 function P:setPayUser(flag)
     self.saveData._isPayUser = tonumber(flag) == 1
     self:onSave()
@@ -696,243 +621,6 @@ end
 
 function P:evt_serverTimeCrossDay()
     self._todayHands = 0
-end
-
--- 装饰方案
-function P:requestDecorationScheme()
-    Net:sendReq("pb.GetDCSchemeREQ", {})
-end
-
---[[
-    DCSchemeItem.property_list 是自定义列表
-    property_list[1] = 角色位置x
-    property_list[2] = 角色位置y
-    property_list[3] = 角色缩放
-    property_list[4] = 音乐播放标志 EnumConfig.MusicTag
-]]
-function P:evt_GetDCSchemeRSP(msg)
-    self._scheme_list = {}
-    table.sort(msg.scheme_list, function(a, b) return a.create_at < b.create_at end)
-    for i,v in ipairs(msg.scheme_list) do
-        v.index = i
-        table.insert(self._scheme_list, v)
-    end
-    -- 装饰方案
-    self._using_decoration_scheme = msg.using_decoration_scheme
-    self._rand_dc_scheme_flag = msg.rand_dc_scheme_flag
-    CharacterModel:updateUsingRole()
-    bee.emit("evt_initScheme")
-end
-
-function P:evt_SwitchRoleSkinRSP(msg)
-    self:requestDecorationScheme()
-end
-
--- 保存装饰方案
-function P:requestSaveDecorationScheme(scheme_id, skin_id, scene_id, bgm_list, property_list, isSave)
-    local args = {}
-    if not scheme_id then
-        args.operation_type = 0
-    else
-        args.operation_type = 1
-        args.scheme_id = scheme_id
-    end
-    args.skin_id = skin_id
-    args.lobby_scene_id = scene_id
-    args.lobby_bgm_list = bgm_list
-    args.property_list = property_list
-    args.set_as_using = isSave
-    Net:sendReq("pb.SaveDCSchemeREQ", args)
-end
-
--- 使用大厅bgm
-function P:useLobbyBgm(id)
-    local curScheme = self:getCurScheme()
-    local args = {}
-    args.scheme_id = curScheme.scheme_id
-    args.skin_id = curScheme.skin_id
-    args.lobby_scene_id = curScheme.lobby_scene_id
-    args.lobby_bgm_list = {id}
-    args.property_list = curScheme.property_list
-    args.operation_type = 1
-    Net:sendReq("pb.SaveDCSchemeREQ", args)
-end
-
--- 使用大厅背景
-function P:useLobbyScene(id)
-    local curScheme = self:getCurScheme()
-    local args = {}
-    args.scheme_id = curScheme.scheme_id
-    args.skin_id = curScheme.skin_id
-    args.lobby_scene_id = id
-    args.lobby_bgm_list = curScheme.lobby_bgm_list
-    args.property_list = curScheme.property_list
-    args.operation_type = 1
-    Net:sendReq("pb.SaveDCSchemeREQ", args)
-end
-
-function P:isSameBgmList(list1, list2)
-    if #list1 ~= #list2 then
-        return false
-    end
-
-    for k, v in pairs(list1) do
-        local isIn = false
-        for k1, v1 in pairs(list2) do
-            if v == v1 then
-                isIn = true
-                break
-            end
-        end
-        if not isIn then
-            return false
-        end
-    end
-    return true
-end
-
-function P:evt_SaveDCSchemeRSP(msg)
-    if msg.code ~= 0 then
-        return
-    end
-
-    bee.logEvent("lobby-custom-edit")
-
-    local isNew = true
-    local isNewBgm
-    for k,v in pairs(self._scheme_list) do
-        -- 已有主题，直接替换
-        if v.scheme_id == msg.scheme.scheme_id then
-            -- 判断是否有新bgm
-            isNewBgm = not self:isSameBgmList(v.lobby_bgm_list, msg.scheme.lobby_bgm_list)
-
-            for k1, v1 in pairs(msg.scheme) do
-                v[k1] = v1
-            end
-            isNew = false
-            break
-        end
-    end
-    if isNew then
-        msg.scheme.index = #self._scheme_list + 1
-        -- 新增主题
-        table.insert(self._scheme_list, msg.scheme)
-    end
-    
-    if msg.set_as_using and msg.scheme.scheme_id ~= PlayerModel:getCurSchemeId() then
-        self:requestChangeScheme(msg.scheme.scheme_id)
-    end
-
-    if msg.scheme.scheme_id == PlayerModel:getCurSchemeId() then
-        CharacterModel:updateUsingRole()
-        if isNewBgm then
-            Game:playLobbyBGM()
-        end
-    end
-
-
-    bee.emit("evt_updateScheme", msg.scheme)
-end
-
--- 切换装饰方案
-function P:requestChangeScheme(scheme_id)
-    Net:sendReq("pb.ChangeUsingDCSchemeREQ", {scheme_id = scheme_id})
-end
-
-function P:evt_ChangeUsingDCSchemeRSP(msg)
-    if msg.code ~= 0 then
-        return
-    end
-    self._using_decoration_scheme = msg.scheme_id
-    CharacterModel:updateUsingRole()
-    bee.emit("evt_changeScheme")
-    Game:playLobbyBGM()
-end
-
--- 切换方案是否随机
-function P:requestUpdateDCSchemeRandFlag(flag)
-    Net:sendReq("pb.UpdateDCSchemeRandFlagREQ", {random_scheme_flag = flag})
-end
-
-function P:evt_UpdateDCSchemeRandFlagRSP(msg)
-    if msg.code ~= 0 then
-        return
-    end
-    self._rand_dc_scheme_flag = msg.random_scheme_flag
-end
-
--- 删除装饰方案
-function P:requestDeleteDCSchemeREQ(scheme_id)
-    Net:sendReq("pb.DeleteDCSchemeREQ", {scheme_id = scheme_id})
-end
-
-function P:evt_DeleteDCSchemeRSP(msg)
-    if msg.code ~= 0 then
-        return
-    end
-
-    local list = {}
-    local index
-    for k,v in pairs(self._scheme_list) do
-        if v.scheme_id == msg.scheme_id then
-            index = k
-            break
-        end
-    end
-    if index then
-        table.remove(self._scheme_list, index)
-    end
-    table.sort(self._scheme_list, function(a, b) return a.create_at < b.create_at end)
-
-    for i,v in ipairs(self._scheme_list) do
-        v.index = i
-    end
-
-    bee.emit("evt_changeScheme")
-end
-
--- 获取装饰方案列表
-function P:getDecorationSchemeList()
-    return self._scheme_list or {}
-end
-
--- 获取当前装饰方案
-function P:getCurSchemeId()
-    return self._using_decoration_scheme
-end
-
-function P:getCurScheme(initDefault)
-    return self:getSchemeInfoById(self._using_decoration_scheme, initDefault)
-end
-
--- 是否随机装饰方案
-function P:isRandomDecorationScheme()
-    return self._rand_dc_scheme_flag == 1
-end
-
-function P:getSchemeInfoById(id, initDefault)
-    local schemeList = self:getDecorationSchemeList()
-    for k, v in pairs(schemeList) do
-        if id == v.scheme_id then
-            return v
-        end
-    end
-
-    if initDefault then
-        -- 默认方案
-        local defaultInfo = {}
-        local role = CharacterModel:getRoleData(tpl_constdata.DefaultCharacter)
-        defaultInfo.skin_id = role and role:getSkinData().id or 1001
-        defaultInfo.lobby_scene_id = ItemModel:getDefaultDecoration(GPropKind.LobbyScene)
-        defaultInfo.lobby_bgm_list = {ItemModel:getDefaultDecoration(GPropKind.MusicLobby)}
-        defaultInfo.property_list = {}
-        defaultInfo.property_list[1] = PlayerModel.CharacterDefaultPosX * 10
-        defaultInfo.property_list[2] = PlayerModel.CharacterDefaultPosY * 10
-        defaultInfo.property_list[3] = PlayerModel.CharacterDefaultPosSize * 100
-        defaultInfo.property_list[4] = MusicTag.Order
-
-        return defaultInfo
-    end
 end
 
 -- ======================= 兑换码 =======================
@@ -979,6 +667,27 @@ function P:requestRedeemCodeExchange(code, succCb, errCb, limitCb)
 
         ShopModel:showRewardView(data.item_list)
     end)
+end
+
+function P:isShowGameRoomNewPoint()
+    if self.saveData["gameRoomNew" .. PlayerModel:getUid()] then
+        return false
+    else
+        return true
+    end
+end
+
+function P:setGameRoomNewPoint()
+    self.saveData["gameRoomNew" .. PlayerModel:getUid()] = 1
+    self:onSave()
+end
+
+function P:setIllustration(id)
+    self._using_illustration = id
+end
+
+function P:getIllustrationId()
+    return self._using_illustration or ItemModel:getDefaultDecoration(GPropKind.Illustration)
 end
 
 return P

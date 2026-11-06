@@ -22,6 +22,7 @@ function P:onAwake()
         bee.logEvent("login-update-immediately")
         if self._params and self._params.onSure then
             self._params.onSure()
+            self._params.onSure = nil
         end
     end)
     bee.addClick(self.UpdateButton, function()
@@ -29,6 +30,7 @@ function P:onAwake()
         bee.logEvent("login-update-immediately")
         if self._params and self._params.onSure then
             self._params.onSure()
+            self._params.onSure = nil
         end
     end)
 end

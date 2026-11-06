@@ -115,6 +115,9 @@ bee.getServerTime = function(addTimeZone)
 end
 
 function bee.getShortNumber(num, show_sigh)
+	if not num then
+		return num
+	end
 	local ret = string.getBigNumStr(num)
 	if num > 0 and show_sigh then
 		ret = "+" .. ret
@@ -185,6 +188,63 @@ bee.convertMaskToSoftMask = function(obj)
 	end
 end
 
-_N = bee.getShortNumber
+-- 获取限制显示的资源，isDefaultLimit: 是否默认使用限制资源
+bee.getLimitViewRes = function(name, isDefaultLimit)
+	local d = tpl_limitview[name]
+	if not d then
+		local sname = name
+		local ns = string.split(sname, "/")
+		if #ns > 1 then
+			sname = ns[#ns]
+			ns = string.split(sname, ".")
+			if #ns > 1 then
+				sname = ns[1]
+			end
+			d = tpl_limitview[sname]
+		end
+	end
+	if d then
+		if d.avenues then
+			for _, v in ipairs(d.avenues) do
+				if v == G_CHNL_ID then
+					return d.path2
+				end
+			end
+		end
+		if bee.isLimitView then
+			return d.path2
+		end
+		if isDefaultLimit and LocalStore:getBoolForKey("pf_limit_view", true) then
+			return d.path2
+		end
+		return d.path1
+	end
+	return name
+end
+
+bee.setLimitViewIcon = function(obj, name, atlasName, nativeSize)
+	bee.setIcon(obj, bee.getLimitViewRes(name), atlasName, nativeSize)
+end
+
+bee.checkInputField = function(inputItem, title, maxCount, isPassword)
+	if bee.checkVersion("1.6.4") and G_CHNL_ID == 4 then
+		local inputField = inputItem:GetComponent("InputField")
+		local inputEx = inputItem:GetComponent("UiInputFieldEx")
+		
+		if inputEx then
+			inputEx.onPointerDown = function ()
+				local SII = CS.SteamInputField.Instance
+				if SII then
+					local str = bee.getText(inputItem, "InputField")
+					SII:OpenSteamKeyboard(inputField, title, str, maxCount or 99, isPassword or false)
+				else
+					inputField:ActivateInputField()
+				end
+			end
+		end
+	end
+end
+
+_N = bee.getShortNumber2
 _N1 = bee.getShortNumber1
 _N2 = bee.getShortNumber2

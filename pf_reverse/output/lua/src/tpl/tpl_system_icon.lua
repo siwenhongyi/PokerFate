@@ -6,12 +6,13 @@ local function _initData()
     local keys = {'id','icon',}
     local bodys = {
 {10010101,"Rankingslist[rankingslist_player_gameplay_icon_0]"},
-{10040101,"Rankingslist[rankingslist_player_gameplay_icon_3]"},
+{10040101,"Rankingslist[rankingslist_player_gameplay_icon_8]"},
 {10020101,"Rankingslist[rankingslist_player_gameplay_icon_1]"},
 {30030101,"Rankingslist[rankingslist_player_gameplay_icon_2]"},
 {30080101,"Rankingslist[rankingslist_player_gameplay_icon_6]"},
 {10050301,"Rankingslist[rankingslist_player_gameplay_icon_4]"},
-{10060301,"Rankingslist[rankingslist_player_gameplay_icon_5]"}
+{10060301,"Rankingslist[rankingslist_player_gameplay_icon_5]"},
+{10070401,"Rankingslist[rankingslist_player_gameplay_icon_7]"}
 }
     for _, v in pairs(bodys) do
         local m = {}

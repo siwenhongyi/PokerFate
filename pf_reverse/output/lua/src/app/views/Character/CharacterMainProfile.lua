@@ -4,10 +4,13 @@ function P:onAwake()
     P.super.onAwake(self)
 	self._closeAnim = ""
 
+    self.ReGuideButton = self:find("ReGuideButton", self.LeftTop)
+
     local Profile = self:find("Profile", self.Right)
 
     self.bg_character_bg_hellhound = self:find("bg_character_bg_hellhound", self.Center)
     self.TextName2 = self:find("TextName", Profile)
+    self.FactionIcon = self:find("FactionIcon", Profile)
 
     -- self.ImageBgs = {
     --     self:find("character_profile_list_bg_01", Profile),
@@ -54,6 +57,11 @@ function P:onAwake()
         self:find("Viewport/Content/FileCont/FileItems/FileItem5", self.FileList),
     }
 
+    bee.addClick(self.ReGuideButton, function()
+        Game:playSound("ui_button_confirm")
+        self:reGuide()
+    end)
+
     self.EditButton = self:find("EditButton", Profile)
     bee.addClick(self.EditButton, function()
         Game:playSound("ui_button_confirm")
@@ -93,6 +101,8 @@ function P:onAwake()
 
     RedManager:bind(self:find("VoiceToggle/Reddot", Tabs), RedTag.CharacterProfileVoices)
     RedManager:bind(self:find("FileToggle/Reddot", Tabs), RedTag.CharacterProfileFiles)
+
+    self._unlockText = {"", "LAB_CHAR_027", "LAB_CHAR_028", "LAB_CHAR_029", "LAB_CHAR_030", "LAB_CHAR_031", "LAB_CHAR_032"}
 end
 
 function P:onShow()
@@ -100,6 +110,7 @@ function P:onShow()
     self._role = self._params.data or self._datas[1]
     self._introExplsed = true
     self._filesExplsed = true
+    self._storyExplsed = true
 
     self:refreshLeftRight()
 
@@ -149,11 +160,23 @@ function P:initInfo1()
     for _, v in ipairs(self._baseInfoMap) do
         bee.setText(v[1], _T(self._role.info[v[2]]))
     end
+    bee.setText(self:find("faction", self.InfoItem1), _T(tpl_camp_detail[self._role.info.campInt].camp_name))
     bee.setText(self:find("character_profile_info_frame_02/TIPS", self.InfoItem3), _T(self._role.info.des))
 
     local emojis = get_tpl_subKey(tpl_emoji_list, "role", self._role.role_id)
-    for i = 1, 6 do
-        local item = self:find("Emoji" .. i, self.InfoItem2)
+    local emojisCount = #emojis
+    local emojiCont
+    if emojisCount <= 6 then
+        self:find("EmojiCont1", self.InfoItem2):SetActive(true)
+        self:find("EmojiCont2", self.InfoItem2):SetActive(false)
+        emojiCont = self:find("EmojiCont1", self.InfoItem2)
+    else
+        self:find("EmojiCont1", self.InfoItem2):SetActive(false)
+        self:find("EmojiCont2", self.InfoItem2):SetActive(true)
+        emojiCont = self:find("EmojiCont2", self.InfoItem2)
+    end
+    for i = 1, emojisCount do
+        local item = self:find("Emoji" .. i, emojiCont)
         local d = emojis[i]
         if not d then
             item:SetActive(false)
@@ -166,13 +189,28 @@ function P:initInfo1()
             bee.addClick(item, function()
                 Game:playSound("ui_button_confirm")
                 if not d.unlock or d.unlock > self._role:getBondLevel() then
-                    UiManager:showTip({
-                        text = d.unlock == (Config.AWAKEN_LEVEL + 1) and _T("LAB_CHAR_106") or _F("LAB_CHAR_105", d.unlock),
-                        onSure = function()
-                            UiManager:showUI("CharacterMainBonds", {data = self._role, from = "Character"})
-                            self:hideUI()
+                    if d.unlock == Config.AWAKEN_LEVEL + 1 then
+                        UiManager:showTip({
+                            text = d.unlock == (Config.AWAKEN_LEVEL + 1) and _T("LAB_CHAR_106") or _F("LAB_CHAR_105", d.unlock),
+                            onSure = function()
+                                UiManager:showUI("CharacterMainBonds", {data = self._role, from = "Character"})
+                                self:hideUI()
+                            end
+                        })
+                    elseif d.unlock == Config.SECOND_AWAKEN_LEVEL then
+                        if not self._role:isAwaken() then
+                            UiManager:showToast(_T("LAB_CHAR_ST_5"))
+                        else
+                            UiManager:showTip({
+                            text = _T("LAB_CHAR_ST_6"),
+                            onSure = function()
+                                UiManager:showUI("CharacterMainBonds", {data = self._role, from = "Character"})
+                                local skinCfg = tpl_character_skin[self._role.info.special_outfit]
+                                ItemModel:jumpView(skinCfg.accesses[1], self._role.role_id)
+                            end
+                        })
                         end
-                    })
+                    end
                     return
                 end
                 self.EmojiAnim:SetActive(false)
@@ -195,6 +233,7 @@ function P:initInfo2()
             title = 65,
             entry = 90,
         })
+        self.VoiceTree:setTopBottom(5, 5)
         self.VoiceTree:setCreateFunc(function(data)
             if data.__kind == "title" then
                 return CU.GameObject.Instantiate(self.VoiceTitle)
@@ -226,10 +265,26 @@ function P:_addToVoiceDatas(datas)
     for _, v in ipairs(datas) do
         local d = self._voiceDatas[v.tag]
         if d then
-            table.insert(d.children, {
-                __kind = "entry",
-                data = v,
-            })
+            if not v.language_type then
+                table.insert(d.children, {
+                    __kind = "entry",
+                    data = v,
+                })
+            else
+                local isIn = false
+                for _, v1 in pairs(v.language_type) do
+                    if LanguageManager:getLanguage() == v1 then
+                        isIn = true
+                        break
+                    end
+                end
+                if isIn then
+                    table.insert(d.children, {
+                        __kind = "entry",
+                        data = v,
+                    })
+                end
+            end
         end
     end
 end
@@ -267,7 +322,7 @@ function P:initInfo3()
         FileCont:SetActive(true)
         -- local Title = self:find("Title", self.FileList)
         -- self.Empty:SetActive(false)
-        self:find("Viewport", self.FileList):SetActive(self._filesExplsed)
+        -- self:find("Viewport", self.FileList):SetActive(self._filesExplsed)
         -- Title:SetActive(true)
         local lvl = self._role:getBondLevel()
         bee.setText(self:find("TextNum", FileTitle), string.format("<color=#5dc4ff>%d</color>/%d", (lvl - 1 > 0) and (lvl - 1) or 0, 5))
@@ -331,6 +386,167 @@ function P:initInfo3()
             self:find("arrow01", FileTitle):SetActive(self._filesExplsed == true)
         end, true)
     end
+
+    -- 剧情回顾
+    local StoryCont = self:find("Viewport/Content/StoryCont", self.FileList)
+    local unlockCount = 0
+    local newStory = 0
+    RedManager:bind(self:find("Title/Reddot", StoryCont), RedTag.CharacterProfileFilesStory)
+    local roleCfg = tpl_character[self._role.role_id]
+    local reviewList = {}
+    if roleCfg.plot_review then
+        local reviewCount = #roleCfg.plot_review
+        for i = 1, reviewCount, 2 do
+            local storyId = roleCfg.plot_review[i + 1]
+            if CharacterModel:checkStoryOpened(storyId) then
+                table.insert(reviewList, {themeId = roleCfg.plot_review[i], storyId = storyId})
+            end
+        end
+    end
+    local hasReview = #reviewList > 0
+    StoryCont:SetActive(hasReview)
+    if hasReview then
+        local StoryTitle = self:find("Title", StoryCont)
+        local StoryItems = self:find("StoryItems", StoryCont)
+        local StoryItem = self:find("StoryItem1", StoryCont)
+        StoryItem:SetActive(false)
+        local arrows1 = self:find("arrow01", StoryTitle)
+        local arrows2 = self:find("arrow02", StoryTitle)
+
+        arrows1:SetActive(self._storyExplsed)
+        arrows2:SetActive(not self._storyExplsed)
+        bee.addClick(StoryTitle, function ()
+            Game:playSound("ui_button_confirm")
+            self._storyExplsed = not self._storyExplsed
+            StoryItems:SetActive(self._storyExplsed)
+            arrows1:SetActive(self._storyExplsed)
+            arrows2:SetActive(not self._storyExplsed)
+        end, true)
+
+        local reviewPropId = tpl_constdata.Plot_Review_Unlock_Cost[1]
+        local reviewCost = tpl_constdata.Plot_Review_Unlock_Cost[2]
+
+        local storyItemCount = StoryItems.transform.childCount
+        local storyItemIndex = 0
+        for _,v in pairs(reviewList) do
+            local themeId = v.themeId
+            local reviewId = v.storyId
+            local item
+            storyItemIndex = storyItemIndex + 1
+            if storyItemIndex <= storyItemCount then
+                item = StoryItems.transform:GetChild(storyItemIndex - 1)
+            else
+                item = CU.GameObject.Instantiate(StoryItem, StoryItems.transform, false)
+            end
+            item.gameObject:SetActive(true)
+            local isLock = not CharacterModel:checkStoryUnlock(reviewId)
+            self:find("character_profile_file_item_on", item):SetActive(not isLock)
+            self:find("character_profile_file_item_off", item):SetActive(isLock)
+            if isLock then
+                local propCfg = tpl_props[reviewPropId]
+                bee.setIcon(self:find("character_profile_file_item_off/icon", item), propCfg.icon)
+                bee.setText(self:find("character_profile_file_item_off/cost"), "x"..tostring(reviewCost))
+            else
+                unlockCount = unlockCount + 1
+            end
+            -- bee.setText(self:find("character_profile_file_item_on/Value", item), string.format("%02d", storyItemIndex))
+            local title = _T(tpl_theme_activity[themeId].name)
+            bee.setText(self:find("character_profile_file_item_on/Title", item), title)
+            bee.setText(self:find("character_profile_file_item_off/Title", item), title)
+            local onNameObj = self:find("character_profile_file_item_on/Name", item)
+            local offNameObj = self:find("character_profile_file_item_off/Name", item)
+            local name = _T(tpl_theme_storys[reviewId].name)
+            bee.setText(self:find("Text", onNameObj), name)
+            bee.setText(self:find("Text", offNameObj), name)
+            local RedNew = self:find("RedNew", item)
+            local isNew = CharacterModel:isNewStory(reviewId)
+            RedNew:SetActive(isNew)
+            if isNew then
+                newStory = newStory + 1
+            end
+            local animator = item:GetComponent("Animator")
+            animator.enabled = false
+
+            --解锁情况
+            bee.addClick(item, function ()
+                if isNew then
+                    isNew = false
+                    CharacterModel:saveStory(reviewId)
+                    RedNew:SetActive(false)
+                    newStory = newStory - 1
+                    RedManager:addTagWithNum(newStory, RedTag.CharacterProfileFilesStory)
+                end
+                
+                if isLock then
+                    local itemData = ItemModel:getItem(reviewPropId, true)
+                    if not itemData then
+                        return
+                    end
+                    if itemData.num >= reviewCost then
+                        local propCfg = tpl_props[reviewPropId]
+                        UiManager:showTip({
+                            text = _F("LAB_CHAR_130", "<color=#FF59CD>".. _T(propCfg.name), reviewCost .. "</color>"),
+                            onSure = function()
+                                CharacterModel:reqUnlockRoleStory(reviewId)
+                            end
+                        })
+                    else
+                        UiManager:showToast(_F("LAB_SHOP_COMMON_24", _T(itemData.name)))
+                        UiManager:showUI("BackpackDetail", {data = itemData})
+                    end
+                else
+                    self:showStory(reviewId)
+                end
+            end, true)
+
+            local nameObj = isLock and offNameObj or onNameObj
+            local s = nameObj.transform.sizeDelta
+            local nameText = self:find("Text", nameObj)
+            local len = CS.Utils.GetTextWidth(nameText:GetComponent("Text"), name)
+            bee.Tween.killByTarget(nameText)
+            if len <= s.x then
+                nameText.transform.localPosition = bee.v3zero
+            else
+                local offset = (len - s.x) + 10
+                nameText.transform.localPosition = bee.v3(15, 0, 0)
+                bee.tween(nameText)
+                : to(5, {position = bee.v3(-offset, 0, 0)})
+                : delay(3)
+                : to(0, {position = bee.v3(15, 0, 0)})
+                : loop(-1)
+                : link()
+                : setTarget()
+            end
+        end
+        for i = storyItemIndex + 1, storyItemCount do
+            local item = StoryItems.transform:GetChild(i - 1)
+            item.gameObject:SetActive(false)
+        end
+        bee.setText(self:find("TextNum", StoryTitle), "/" .. tostring(#reviewList))
+        bee.setText(self:find("UnlockNum", StoryTitle), unlockCount)
+        RedManager:addTagWithNum(newStory, RedTag.CharacterProfileFilesStory)
+    end
+end
+
+function P:showStory(id)
+    local storyData = tpl_theme_storys[id]
+    local themeCfg = nil
+    for _,v in pairs(tpl_theme_activity) do
+        if v.storys == storyData.group then
+            themeCfg = v
+            break
+        end
+    end
+    local activityId = themeCfg and themeCfg.id or ActivityId.HotSpring
+    local themeName = ThemeName[activityId]
+    local record = themeName .. "Log"
+    local skip = activityId == ActivityId.HotSpring and themeName .. "Skip" or themeName .. "Plot"
+    UiManager:showUI("Story", {name = storyData.res, StoryRecord = record, StorySkip = skip})
+end
+
+function P:evt_UnlockStoryCallback(msg)
+    self:showList(3)
+    self:showStory(msg.id)
 end
 
 function P:refreshName()
@@ -340,6 +556,8 @@ function P:refreshName()
     bee.setText(self.TextCVInfo, nameCV)
     bee.setText(self.TextCVVoice, nameCV)
     bee.setText(self.TextCVFile, nameCV)
+
+    bee.setIcon(self.FactionIcon, "character_profile_camp_" .. self._role.info.campInt, "Character")
     
     self.EditButton:SetActive(not self._role.locked)
     self:setRoleSound()
@@ -374,6 +592,9 @@ end
 
 function P:refreshVoiceEntry(data, item)
     local isLock = data.data.unlock > self._role:getBondLevel()
+    if data.data.skin_voice then
+        isLock = not CharacterModel:isOwnedSkin(data.data.skin_voice)
+    end
     self._VoiceNodeData[item] = data
 
     local animator = item:GetComponent("Animator")
@@ -417,7 +638,11 @@ function P:refreshVoiceEntry(data, item)
     self:find("character_profile_voice_play_02", item):SetActive(not isLock)
     self:find("character_profile_voice_play", item):SetActive(false)
     if isLock then
-        bee.setText(self:find("icon_lock_02/TextLock", item), _T("LAB_CHAR_0" .. (25 + data.data.unlock)))
+        if data.data.unlock_prompt then
+            bee.setText(self:find("icon_lock_02/TextLock", item), _T(data.data.unlock_prompt))
+        else
+            bee.setText(self:find("icon_lock_02/TextLock", item), _T(self._unlockText[data.data.unlock]))
+        end
         bee.setText(self:find("character_profile_voice_item_off/TextName", item), "")
     end
 
@@ -478,15 +703,22 @@ function P:profileGuide()
 end
 
 function P:evt_guide_profile_voice()
-    local Tabs = self:find("Profile/Tabs", self.Right)
-    local toggle = self:find("VoiceToggle", Tabs):GetComponent("Toggle")
-    toggle.isOn = true
-    toggle.onValueChanged:Invoke(true)
+    self:changeToggle("VoiceToggle")
 end
 
 function P:evt_guide_profile_file()
+    self:changeToggle("FileToggle")
+end
+
+--重复引导
+function P:reGuide()
+    self:changeToggle("InfoToggle")
+    GuideManager:startSystemGuide(6001, 0, true)
+end
+
+function P:changeToggle(name)
     local Tabs = self:find("Profile/Tabs", self.Right)
-    local toggle = self:find("FileToggle", Tabs):GetComponent("Toggle")
+    local toggle = self:find(name, Tabs):GetComponent("Toggle")
     toggle.isOn = true
     toggle.onValueChanged:Invoke(true)
 end

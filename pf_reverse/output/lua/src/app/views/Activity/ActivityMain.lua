@@ -10,7 +10,14 @@ local SubView = {
 		[2] = {view = "views/ActivityGalaSeasonCheckin/ActivityGalaSeasonCheckin"},	-- 礼服季
 		[3] = {view = "views/ActivitySchoolCheckin/ActivitySchoolCheckin"},	-- 开学季
 		[4] = {view = "views/ActivityBunnyGirlCheckin/ActivityBunnyGirlCheckin"},	-- 兔女郎
-	}
+		[5] = {view = "views/ActivitySportsCheckin/ActivitySportsCheckin"},	-- 运动会
+		[6] = {view = "views/ActivitySayakaCheckin/ActivitySayakaCheckin"},	-- 联动
+		[7] = {view = "views/ActivityMatsuriCheckin/ActivityMatsuriCheckin"}, -- 夏日祭
+		[8] = {view = "views/ActivityRacingCheckin/ActivityRacingCheckin"},	-- 赛车季
+		[9] = {view = "views/ActivityFantasyCheckin/ActivityFantasyCheckin"},	-- 日幻
+	},
+	[ActivityId.RetentionSurvey] = {view = "views/Activity/ActivityRetentionSurvey"},
+
 }
 
 function P:onAwake()
@@ -41,6 +48,10 @@ function P:onStart()
 
 	self:initToggleList()
 	self:refreshToggle()
+
+	ActivityModel:getSurveyData(function ()
+		self:addRetentionSurvey()
+	end)
 end
 
 function P:initToggleList()
@@ -80,6 +91,12 @@ function P:refreshToggle()
 	self:refreshCenter()
 end
 
+function P:addRetentionSurvey()
+	self._showList = ActivityModel:addRetentionSurvey(self._showList)
+	self.tabtoggleList:setDatas(self._showList)
+	self:refreshTabToggle()
+end
+
 function P:refreshTabToggle()
 	for k, v in pairs(self.tabtoggleList:getDatas()) do
 		if v.node then
@@ -112,6 +129,8 @@ function P:setTabToggle(item, data)
 	RedManager:unbind(RedPoint)
 	if data.event_id == ActivityId.NewmanCheckin then
 		RedManager:bind(RedPoint, RedTag.ActivityNewmanCheckin)
+	elseif data.event_id == ActivityId.RetentionSurvey then
+		RedManager:bind(RedPoint, RedTag.ActivityRetentionSurvey)
 	else
 		RedPoint:SetActive(false)
 	end

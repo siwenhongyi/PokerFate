@@ -8,48 +8,23 @@ from typing import Optional
 from pokerfate.strategy.v3.context import DecisionCtx
 
 _MODE = _os.environ.get('PF_STACKOFF_GUARD_MODE', 'texture').strip().lower()
-_NON_NUT_TRIPS_RAISE_MAX_EQ = float(
-    _os.environ.get('PF_NON_NUT_TRIPS_RAISE_MAX_EQ', '0.86')
-)
-_NON_NUT_TRIPS_MIN_KICKER = int(
-    float(_os.environ.get('PF_NON_NUT_TRIPS_MIN_KICKER', '12'))
-)
-_PAIRED_UNDERPAIR_VALUE_JAM_MAX_EQ = float(
-    _os.environ.get('PF_PAIRED_UNDERPAIR_VALUE_JAM_MAX_EQ', '0.85')
-)
-_PAIRED_UNDERPAIR_EARLY_VALUE_JAM_MAX_EQ = float(
-    _os.environ.get('PF_PAIRED_UNDERPAIR_EARLY_VALUE_JAM_MAX_EQ', '0.75')
-)
-_RIVER_VALUE_JAM_MIN_WORSE_CALL = float(
-    _os.environ.get('PF_RIVER_VALUE_JAM_MIN_WORSE_CALL', '0.20')
-)
-_RIVER_RAISE_MAX_VILLAIN_NUTS = float(
-    _os.environ.get('PF_RIVER_RAISE_MAX_VILLAIN_NUTS', '0.35')
-)
-_PAIRED_BOARD_SPR_MAX = float(
-    _os.environ.get('PF_STACKOFF_PAIRED_BOARD_SPR_MAX', '2.8')
-)
-_NON_FLUSH_STACKOFF_MIN_EQ = float(
-    _os.environ.get('PF_NON_FLUSH_STACKOFF_MIN_EQ', '0.92')
-)
-_NON_FLUSH_STACKOFF_MAX_NUTS = float(
-    _os.environ.get('PF_NON_FLUSH_STACKOFF_MAX_NUTS', '0.16')
-)
-_NON_FLUSH_STACKOFF_MAX_REL_LOSS = float(
-    _os.environ.get('PF_NON_FLUSH_STACKOFF_MAX_REL_LOSS', '0.12')
-)
-_NON_FLUSH_STACKOFF_MIN_REL_WIN = float(
-    _os.environ.get('PF_NON_FLUSH_STACKOFF_MIN_REL_WIN', '0.85')
-)
-_FOUR_STRAIGHT_FRAGILE_MIN_EQ = float(
-    _os.environ.get('PF_FOUR_STRAIGHT_FRAGILE_MIN_EQ', '0.82')
-)
-_FOUR_STRAIGHT_MAX_NUTS = float(
-    _os.environ.get('PF_FOUR_STRAIGHT_MAX_NUTS', '0.18')
-)
-_FOUR_STRAIGHT_MAX_REL_LOSS = float(
-    _os.environ.get('PF_FOUR_STRAIGHT_MAX_REL_LOSS', '0.12')
-)
+_NON_NUT_TRIPS_RAISE_MAX_EQ = 0.86
+_NON_NUT_TRIPS_MIN_KICKER = 12
+_PAIRED_UNDERPAIR_VALUE_JAM_MAX_EQ = 0.85
+_PAIRED_UNDERPAIR_EARLY_VALUE_JAM_MAX_EQ = 0.75
+_RIVER_VALUE_JAM_MIN_WORSE_CALL = 0.20
+_RIVER_RAISE_MAX_VILLAIN_NUTS = 0.35
+_PAIRED_BOARD_SPR_MAX = 2.8
+_NON_FLUSH_STACKOFF_MIN_EQ = 0.92
+_NON_FLUSH_STACKOFF_MAX_NUTS = 0.16
+_NON_FLUSH_STACKOFF_MAX_REL_LOSS = 0.12
+_NON_FLUSH_STACKOFF_MIN_REL_WIN = 0.85
+_FOUR_STRAIGHT_FRAGILE_MIN_EQ = 0.82
+_FOUR_STRAIGHT_MAX_NUTS = 0.18
+_FOUR_STRAIGHT_MAX_REL_LOSS = 0.12
+_REL_CLEAR_MIN_WIN = 0.72
+_REL_CLEAR_MIN_EDGE = 0.30
+_REL_CLEAR_MAX_LOSS = 0.18
 
 _STACKOFF_PURPOSES = {
     'value_jam',
@@ -127,6 +102,25 @@ def _worse_call_mass(ctx: DecisionCtx) -> float:
     )
 
 
+def _relative_clear_value(ctx: DecisionCtx) -> bool:
+    """True when the hero-relative range says this is still clear value.
+
+    Bucket labels can overstate danger on coordinated boards. At stack-off
+    nodes we still guard non-nut hands, but do not block value when the
+    relative distribution says villain holds worse hands overwhelmingly.
+    """
+    rel = ctx.villain_vs_hero_dist or {}
+    if not rel:
+        return False
+    win = float(rel.get('win', 0.0) or 0.0)
+    loss = float(rel.get('loss', 0.0) or 0.0)
+    return (
+        win >= _REL_CLEAR_MIN_WIN
+        and win - loss >= _REL_CLEAR_MIN_EDGE
+        and loss <= _REL_CLEAR_MAX_LOSS
+    )
+
+
 def _is_stackoff_node(ctx: DecisionCtx, purpose_id: str, will_jam: bool) -> bool:
     if purpose_id not in _STACKOFF_PURPOSES:
         return False
@@ -179,6 +173,8 @@ def stackoff_guard_reason(
     subtype = ctx.hero_made_subtype or 'unknown'
     nuts = _villain_nuts(ctx)
     rel_loss = _villain_rel_loss(ctx)
+    if _relative_clear_value(ctx):
+        return None
 
     if (
         _texture_guards_enabled()

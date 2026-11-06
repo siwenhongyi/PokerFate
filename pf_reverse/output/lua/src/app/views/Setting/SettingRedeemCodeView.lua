@@ -11,6 +11,8 @@ function P:onAwake()
 	self.CloseButton = self:find("CloseButton", Center)
 	bee.setText(self.TipsText, "")
 
+	bee.checkInputField(self.InputFieldCode, _T("LAB_SETTINGS_101"))
+
 	bee.addClick(self.CancelButton, function()
 		self:hideUI()
 	end)
@@ -51,6 +53,9 @@ function P:onClickCommit()
 		else
 			bee.setText(self.TipsText, _T("LAB_SETTINGS_102"))
 		end
+	end
+	local succCb = function()
+		self:hideUI()
 	end
 	PlayerModel:requestRedeemCodeExchange(inputCode, succCb, errCb, limitCb)
 end

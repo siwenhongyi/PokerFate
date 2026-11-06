@@ -4,6 +4,7 @@ local P = class("Story", UiBlurBase)
 function P:onAwake()
 	self._openAnim, self._closeAnim = "UI_1_" .. self.__cname .. "_into", "UI_1_" .. self.__cname .. "_back"
     self.AnimRoot = self:find("AnimRoot")
+    self.Bg = self:find("Bg", self.AnimRoot)
     self.Scene = self:find("Scene", self.AnimRoot)
     self.Center = self:find("Center", self.AnimRoot)
     self.Bottom = self:find("Bottom", self.AnimRoot)
@@ -31,12 +32,18 @@ function P:onAwake()
     self.AutoPlayButton = self:find("AutoPlayButton", self.Auto)
 
     bee.addClick(self.SkipButton, function()
+        if self._params and self._params.fastSkip then
+            StoryModel:skipStory()
+            return
+        end
         local params = {}
         if self._params then
             params.hotSpringdata = self._params.hotSpringdata
         end
         params.curData = self._curNode and self._curNode._data or {}
-        UiManager:showUI(self._params and self._params.StorySkip or "StorySkip", params)
+        params.jsonName = self._params and self._params.name or ""
+        self._SkipName = self._params and self._params.StorySkip or "StorySkip"
+        UiManager:showUI(self._SkipName, params)
     end)
     bee.addClick(self.SkipTalkButton, function()
         self:onBtNextTalk()
@@ -49,7 +56,8 @@ function P:onAwake()
         self._isHideUI = true
     end)
     bee.addClick(self.ChatButton, function()
-        UiManager:showUI(self._params and self._params.StoryRecord or "StoryRecord")
+        self._RecordName = self._params and self._params.StoryRecord or "StoryRecord"
+        UiManager:showUI(self._RecordName)
     end)
     bee.addClick(self.PlayButton, function()
         self._isAutoPlay = true
@@ -109,13 +117,43 @@ function P:onStart()
             self:evt_loadStoryScene(self._curData.sceneId, true)
             self:startPlay()
         end
+
+        if self._params.hideScene then
+            self.Scene:SetActive(false)
+        end
+        if self._params.bg then
+            self.Bg:SetActive(true)
+            bee.setIcon(self.Bg, self._params.bg, true)
+        end
     end
     StoryModel.isSkip = nil
+end
+
+function P:preShow()
+	P.super.preShow(self)
+
+    if self._params and self._params.hideScene then
+	    bee.emit(EventDef.evt_uiBlur, true, self.__cname)
+    end
+end
+
+function P:preHide()
+    if self._params and self._params.hideScene then
+	    bee.emit(EventDef.evt_uiBlur, false, self.__cname)
+    end
+	return P.super.preHide(self)
 end
 
 function P:onHide()
     P.super.onHide(self)
     Game:playLobbyBGM()
+
+    if self._SkipName then
+        UiManager:hideUI(self._SkipName)
+    end
+    if self._RecordName then
+        UiManager:hideUI(self._RecordName)
+    end
 end
 
 function P:isAutoPlay()
@@ -178,10 +216,13 @@ function P:onBtNextTalk()
     if not self._curNode then
         return
     end
-    if self._params and self._params.hotSpringdata then
+    if self._params and self._params.hotSpringdata and self._params.themeStory then
         bee.logEvent("onse-plot_skip_single", self._params.hotSpringdata.id, self._params.hotSpringdata.group, self._curNode._data._index or 1)
-    elseif self._params and self._params.StoryRecord == "GalaSeasonLog" then
+    elseif self._params and self._params.StoryRecord == "GalaSeasonLog" and self._params.themeStory then
         bee.logEvent("galaseason-plot_skip_single", StoryModel.storyData.id, StoryModel.storyData.group, self._curNode._data._index or 1)
+    end
+    if self._params and self._params.themeStory then
+        bee.logEvent("activity-theme-plot-skip-single", ThemeModel:getConfId(), StoryModel.storyData.id, StoryModel.storyData.group, self._curNode._data._index)
     end
     if GuideManager:isInGuide() then
         bee.logEvent("guide-id-skip", GuideManager.curGuide.id, self._curNode._data._index or 1)
@@ -252,6 +293,13 @@ end
 
 function P:onStoryOver()
     bee.emit("evt_stageEnd")
+    if self._params and self._params.themeStory then
+        if ThemeModel:checkStory(self._params.jsonName) then
+            local isfirst = ThemeModel:isPlotRewarded(StoryModel.storyData.id) and 0 or 1
+            bee.logEvent("activity-theme-plot-finish", ThemeModel:getConfId(), StoryModel.storyData.id, StoryModel.storyData.group, isfirst)
+        end
+    end
+    
     if not self._inEdit then
         self:hideUI()
         GuideManager:doGuideEnd()
@@ -266,7 +314,7 @@ function P:switchScene(data, isSkip)
             obj = bee.createObj(d.prefab)
         elseif d and d.image then
             obj = CU.GameObject.Instantiate(self.ImageScene)
-            bee.setIcon(obj, d.image, true)
+            bee.setLimitViewIcon(obj, d.image, true)
         end
         if obj then
             obj.transform:SetParent(self.Scene.transform, false)
@@ -716,6 +764,7 @@ function P:showOptions(data)
             self:removeAllChildren(self.BgOptions)
             if not v.storyId or v.storyId <= 0 then
                 self:playNextNode()
+                StoryModel:setSelectData(v.option)
             elseif not self._inEdit then
                 local data = StoryModel:loadStageData(v.storyId)
                 if data then
@@ -842,7 +891,7 @@ function P:evt_loadStoryScene(sceneId, trans)
             self._curScene = CU.GameObject.Instantiate(self.ImageScene, self.Scene.transform, false)
             self._curScene:SetActive(true)
             if d and d.image then
-                bee.setIcon(self._curScene, d.image, true)
+                bee.setLimitViewIcon(self._curScene, d.image, true)
             end
         end
         if trans and self._curData.fadeInDt and self._curData.fadeInDt > 0 then

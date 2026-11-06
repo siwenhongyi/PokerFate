@@ -35,10 +35,12 @@ function P:onAwake()
 	local LeftTop = self:find("LeftTop", self.AnimRoot)
 	self.BackButton = self:find("BackButton", LeftTop)
 	bee.addClick(self.BackButton, function()
-		if self.characterCls then
-			self.characterCls:stopVoice()
-		end
 		self:hideUI()
+	end)
+	self.ReGuideButton = self:find("ReGuideButton", LeftTop)
+	bee.addClick(self.ReGuideButton, function()
+		Game:playSound("ui_button_confirm")
+		self:reGuide()
 	end)
 
 	bee.addClick2(self.DailyToggle, function()
@@ -110,6 +112,7 @@ function P:onStart()
         self.characterCls:setBubbleItem(self.BubbleItem)
         self:initClickVoice()
         self._characterInit = true
+		self.characterCls:setSkinRotate()
     end
 
     bee.setIconInAtlas(self.Point, tpl_props[GPropId.ActivePoint].icon)
@@ -336,14 +339,14 @@ function P:setTaskItem(item, data, isInit, index)
 	-- 任务描述
 	local showText = TaskModel:getTaskDesc(cfg, data)
 	local needValue = #data.value == 1 and data.value[1] or data.value[2]
-	if cfg.task_type == 313 then
+	if cfg.task_type == 313 or cfg.task_type == 111 then
 		needValue = data.value[3]
 	end
 	if data.current_value < needValue then
-		showText = showText .. " (" .. "<color=#ec0b7a>" .. _N(data.current_value) .. "</color>/" ..  _N(needValue) .. ")"
+		showText = showText .. " (" .. "<color=#ec0b7a>" .. _N2(data.current_value) .. "</color>/" ..  _N2(needValue) .. ")"
 	else
 		local cur = math.min(data.current_value, needValue)
-		showText = showText .. " (" .. _N(cur) .. "/" ..  _N(needValue) .. ")"
+		showText = showText .. " (" .. _N2(cur) .. "/" ..  _N2(needValue) .. ")"
 	end
 	bee.setText(TaskText, showText)
 
@@ -368,9 +371,9 @@ function P:setTaskItem(item, data, isInit, index)
 	end
 
 	bee.setIconInAtlas(Icon1, tpl_props[rewardId1].icon)
-	bee.setText(self:find("CountText", Icon1), _N(rewardCount1))
+	bee.setText(self:find("CountText", Icon1), _N2(rewardCount1))
 	bee.setIconInAtlas(Icon2, tpl_props[rewardId2].icon)
-	bee.setText(self:find("CountText", Icon2), _N(rewardCount2))
+	bee.setText(self:find("CountText", Icon2), _N2(rewardCount2))
 
 	bee.removeAllClick(Icon2)
 	bee.addClick(Icon2, function()
@@ -417,9 +420,6 @@ function P:setTaskItem(item, data, isInit, index)
 		-- 前往跳转
 		if cfg.jump then
 			if cfg.jump == 4001 then
-				if self.characterCls then
-					self.characterCls:stopVoice()
-				end
 				self:hideUI()
 			else
 				ItemModel:jumpView(cfg.jump)
@@ -480,6 +480,14 @@ function P:evt_BackpackClaimResultClose()
 	self._waitClaimResult = nil
 end
 
+function P:hideUI()
+	if self.characterCls then
+		self.characterCls:stopVoice()
+	end
+
+    P.super.hideUI(self)
+end
+
 --引导
 function P:taskGuide()
 	GuideManager:startSystemGuide(15001, 0.65)
@@ -495,6 +503,11 @@ end
 
 function P:evt_guide_turn_challenge()
 	self.ChallengeToggle:GetComponent("Button").onClick:Invoke()
+end
+
+function P:reGuide()
+	self.DailyToggle:GetComponent("Button").onClick:Invoke()
+	GuideManager:startSystemGuide(15001, 0, true)
 end
 
 

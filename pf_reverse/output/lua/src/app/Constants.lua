@@ -39,6 +39,9 @@ bee.isRelease = G_PACKAGE_TYPE == 4
 
 bee.isInTest = bee.isRelease or bee.isPre
 
+-- 是否限制游戏内显示
+bee.isLimitView = false
+
 -- 是否直接付费
 bee.isPayTest = bee.isTest
 
@@ -70,13 +73,11 @@ elseif bee.isRelease then
         G_HTTP_URL_2 = "http://121.196.174.32:8888/"
         G_HTTP_URL_3 = "https://ga-foreign.poker-fate.com/"
         G_HTTP_URL_4 = "https://awsb-entry.poker-fate.com/"
-        -- _HTTP_URL_5 = "http://106.15.91.81/"
     else
         G_HTTP_URL = "https://ga-foreign.poker-fate.com/"
         G_HTTP_URL_2 = "https://awsb-entry.poker-fate.com/"
-        -- G_HTTP_URL_3 = "https://zga-entry.allinmoe.com/"
-        -- G_HTTP_URL_4 = "https://zga-entry.poker-fate.net/"
-        -- G_HTTP_URL_5 = "http://106.15.91.81/"
+        G_HTTP_URL_3 = "http://8.163.49.33:8888/"
+        G_HTTP_URL_4 = "http://121.196.174.32:8888/"
     end
 end
 
@@ -132,23 +133,25 @@ G_WEBSITE_URL = "https://www.pokerfate.com/"
 if bee.isAndroid then
     if G_CHNL_ID == 5 then
         G_QGLK = "https://play.google.com/store/apps/details?id=com.pokerfate.play"
+    elseif G_CHNL_ID == 7 then
+        G_QGLK = "https://apps.qoo-app.com/app/157186"
     elseif G_CHNL_ID == 10 then
         G_WEBSITE_URL = "https://www.blufffate.com/"
-        G_QGLK = G_WEBSITE_URL
+        G_QGLK = "https://kktp-test.oss-cn-beijing.aliyuncs.com/dl/PokerFate_APK.apk"
         if bee.isPre then
             G_SHARE_URL = "https://share.blufffate.com/"
         elseif bee.isRelease then
             G_SHARE_URL = "https://share.blufffate.com/"
         end
     else
-        G_QGLK = G_WEBSITE_URL
+        G_QGLK = "https://aws.poker-fate.com/dl/PokerFate_Android.apk"
     end
 elseif bee.isIos then
     G_QGLK = "https://apps.apple.com/app/poker-fate/id6754012032"
 else
     if G_CHNL_ID == 9 then
         G_WEBSITE_URL = "https://www.blufffate.com/"
-        G_QGLK = G_WEBSITE_URL
+        G_QGLK = "https://bh-cn.oss-cn-shanghai.aliyuncs.com/dl/PokerFate_WIN.exe"
         if bee.isPre then
             G_SHARE_URL = "https://share.blufffate.com/"
         elseif bee.isRelease then
@@ -159,7 +162,7 @@ else
     elseif G_CHNL_ID == 8 then
         G_QGLK = "https://store.onstove.com/games/102875/"
     else
-        G_QGLK = G_WEBSITE_URL
+        G_QGLK = "https://aws.poker-fate.com/dl/PokerFate_Windows.exe"
     end
 end
 

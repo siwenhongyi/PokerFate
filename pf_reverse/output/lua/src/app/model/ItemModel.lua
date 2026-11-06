@@ -21,21 +21,6 @@ function P:ctor(logic)
 	self._itemMap = {}
     self._defaultItems = {}	-- 默认锁定物品
 
-	-- 外显使用 id
-    self.using_card_back = 0 -- 当前使用中的牌桌
-    self.using_table = 0 -- 当前使用中的牌桌
-    self.using_lobby_music = 0 -- 当前使用中的大厅音乐
-    self.using_battle_music = 0 -- 当前使用中的战斗音乐
-    self.using_lobby_scene = 0 -- 当前使用中的大厅场景
-
-	self.OutFitsKind = {
-		using_card_back = GPropKind.CardBack,
-		using_table = GPropKind.Table,
-		using_lobby_music = GPropKind.MusicLobby,
-		using_battle_music = GPropKind.MusicTable,
-		using_lobby_scene = GPropKind.LobbyScene,
-	}
-
 	self._newitems = nil
 	self._newframes = nil	-- 新的头像、头像框、称号
 end
@@ -287,14 +272,6 @@ function P:_sortItemList(list)
 		if v.num > 0 then
 			v._sortScore = v._sortScore + 10000
 		end
-		
-		if v.item_id == self.using_card_back or
-			v.item_id == self.using_table or
-			v.item_id == self.using_lobby_music or
-			v.item_id == self.using_battle_music or
-			v.item_id == self.using_lobby_scene then
-			v._sortScore = v._sortScore + 10000
-		end
 	end
 	local sortFunc = function(a, b)
 		local sumA = a._sortScore
@@ -386,7 +363,7 @@ function P:isCanShow(cfg)
 	end
 	if cfg.time_start then
 		local curTime = bee.getServerTime()
-		return curTime >= cfg.time_start or PlayerModel:isEventWhite()
+		return curTime >= cfg.time_start or PlayerModel:isEventWhite() or bee.isDev
 	end
 	return true
 end
@@ -397,17 +374,34 @@ function P:getAllShowItems(backpackId, showOwn)
 	for k, v in pairs(tpl_props) do
 		if self:isCanShow(v) then
 			if tpl_backpack[backpackId] and self:_isInList(v.type, tpl_backpack[backpackId].props_type) then
+				local isShow = true
 				local count = self:getItemNumById(v.id)
 				if count > 0 then
-					local data = {}
-					for k1, v1 in pairs(self:getItem(v.id)) do
-						data[k1] = v1
+					if v.type == GPropKind.Illustration then
+						if v.sameId and v.expirationTime and self:getItemNumById(v.sameId) then
+							isShow = false
+						end
 					end
-					data.cfg = v
-					data.typeSort = self:_getTypeSort(v.type)
-					table.insert(list, data)
+					if isShow then
+						local data = {}
+						for k1, v1 in pairs(self:getItem(v.id)) do
+							data[k1] = v1
+						end
+						data.cfg = v
+						data.typeSort = self:_getTypeSort(v.type)
+						table.insert(list, data)
+					end
 				elseif not showOwn then
-					table.insert(list, {item_id = v.id, num = count, cfg = v, typeSort = self:_getTypeSort(v.type)})
+					if v.type == GPropKind.Illustration then
+						if v.expirationTime then
+							isShow = false
+						elseif v.sameId and self:getItemNumById(v.sameId) > 0 then
+							isShow = false
+						end
+					end
+					if isShow then
+						table.insert(list, {item_id = v.id, num = count, cfg = v, typeSort = self:_getTypeSort(v.type)})
+					end
 				end
 			end
 		end
@@ -454,6 +448,7 @@ end
 function P:getPropTypeCount(propType)
 	local ownCount = 0
 	local totalCount = 0
+	local sameIdCount = 0
 
 	for k, v in pairs(tpl_props) do
 		if self:isCanShow(v) and v.type == propType then
@@ -461,9 +456,12 @@ function P:getPropTypeCount(propType)
 			if self:getItemNumById(v.id) and self:getItemNumById(v.id) > 0 then
 				ownCount = ownCount + 1
 			end
+			if v.sameId then
+				sameIdCount = sameIdCount + 1
+			end
 		end
 	end
-
+	totalCount = totalCount - (sameIdCount / 2)
 	return ownCount, totalCount
 end
 
@@ -492,10 +490,11 @@ function P:checkIsNewItem(id, isRefresh)
 	if not self._owned_item_dic then
 		return true
 	end
-
+	
 	local isNew = not self._owned_item_dic[id]
 	if isRefresh and isNew then
 		self._owned_item_dic[id] = true
+		bee.emit("evt_updateNewItem")
 	end
 	if isNew then
 		local isIn = false
@@ -674,11 +673,6 @@ function P:removeRedTagById(id)
 end
 
 function P:setInfo(info)
-    self.using_card_back = info.using_card_back
-    self.using_table = info.using_table
-    self.using_lobby_music = info.using_lobby_music
-    self.using_battle_music = info.using_battle_music
-    self.using_lobby_scene = info.using_lobby_scene
 end
 
 function P:reqUseItem(item)
@@ -686,6 +680,19 @@ function P:reqUseItem(item)
 		item_type = item.type or (item.cfg and item.cfg.type),
 		item_id = item.item_id,
 	})
+end
+
+function P:reqUseIllustration(id)
+	Net:sendReq("pb.ChangeIllustrationREQ", {
+		item_id = id,
+	})
+end
+
+function P:evt_ChangeIllustrationRSP(msg)
+	if msg.code ~= 0 then
+		return
+	end
+	PlayerModel:setIllustration(msg.item_id)
 end
 
 function P:reqChangeAnimation(item)
@@ -703,20 +710,6 @@ function P:reqChangeAnimation(item)
 	})
 end
 
-function P:setOutFits(msg)
-	for k, v in pairs(self.OutFitsKind) do
-		if v == msg.item_type then
-			self[k] = msg.item_id
-			if k == "using_lobby_scene" then
-				bee.emit(EventDef.evt_refreshLobbyScene)
-			elseif k == "using_lobby_music" then
-				bee.emit(EventDef.evt_refreshLobbyMusic)
-			end
-			break
-		end
-	end
-end
-
 -- 获取跳转id
 function P:_getJumpId(jumpCfg, jumpId)
 	if not jumpId then
@@ -731,7 +724,8 @@ function P:_getJumpId(jumpCfg, jumpId)
 	-- 道具跳转根据类型和跳转界面传入对应跳转id
 	if propCfg.type == GPropKind.Avatar then
 		-- 头像跳转
-		if jumpCfg.view == "GachaMain" or jumpCfg.view == "CharacterMainBonds" then
+		if jumpCfg.view == "GachaMain" or jumpCfg.view == "CharacterMainBonds"
+		or jumpCfg.id == 50001 then
 			jumpId = tpl_character_skin[propCfg.mapId].role
 		elseif jumpCfg.view == "Shop" and jumpCfg.sub_page and jumpCfg.sub_page[1] == 2 then
 			jumpId = tpl_character_skin[propCfg.mapId].id
@@ -767,14 +761,15 @@ function P:isCanJump(accesses, id)
 			-- 关联活动则判断活动是否开启
 			if not ActivityManager:isActivityOpen(ActivityId.Theme, jumpCfg.theme_activity_id) then
 				isOpen = false
-				break
 			end
 		end
 		if isOpen then
 			if jumpCfg.view == "Shop" then
 				if jumpCfg.sub_page and jumpCfg.sub_page[1] == 2 then
 					-- 皮肤商城
-					return ShopModel:getIsInShopSkin(self:_getJumpId(jumpCfg, id))
+					if ShopModel:getIsInShopSkin(self:_getJumpId(jumpCfg, id)) then
+						return true
+					end
 				elseif jumpCfg.sub_page and jumpCfg.sub_page[1] == 6 then
 					-- 装饰商城
 					if jumpCfg.sub_page[2] == 601 then
@@ -795,11 +790,70 @@ function P:isCanJump(accesses, id)
 							end
 						end
 					end
+				elseif jumpCfg.sub_page[1] == 4 then
+					-- 兑换商城
+					local shopPageCfg = tpl_shop_page[jumpCfg.sub_page[2]]
+					local list = ShopModel:getShopExchangeList(shopPageCfg.shop_type)
+					for k,v in pairs(list) do
+						if v.cfg.props[2] == id then
+							return true
+						end
+					end
 				else
 					return true
 				end
-			elseif jumpCfg.view == "GachaMain" and not jumpCfg.select then
-				return GachaModel:getContainCardPoolId(self:_getJumpId(jumpCfg, id))
+			elseif jumpCfg.id == 2001 then
+				-- 招募界面，需要判断卡池内是否有该道具
+				if tpl_character_skin[id] then
+					id = tpl_character_skin[id].role
+				end
+				if GachaModel:getContainCardPoolId(self:_getJumpId(jumpCfg, id)) then
+					return true
+				end
+			elseif jumpCfg.view == "ActivityGifts" then
+				local activityId = ThemeModel:getThemeConfId()
+				if activityId and activityId > 0 then
+					local data = ShopModel:getShopPackageList(SHOP_TYPE.activity_gifts)
+					for k, v in pairs(data) do
+						for i = 1, #v.cfg.props, 2 do
+							if not v.soldOut and v.cfg.props[i] == id then
+								return true
+							end
+						end
+					end
+				end
+			elseif jumpCfg.view == "ActivityShop" then
+				local activityId = ThemeModel:getThemeConfId()
+				if activityId and activityId > 0 and not ThemeModel:getConfData().pool_group then
+					local data = ShopModel:getShopExchangeList(SHOP_TYPE.activity_sports)
+					for k, v in pairs(data) do
+						for i = 1, #v.cfg.props, 3 do
+							if not v.soldOut and v.cfg.props[i + 1] == id then
+								return true
+							end
+						end
+					end
+				end
+			elseif jumpCfg.view == "ActivityLottery" then
+				local activityId = ThemeModel:getThemeConfId()
+				if activityId and activityId > 0 and ThemeModel:getConfData().pool_group then
+					local poolId = ThemeModel:getThemePoolId()
+					if not poolId then
+						return false
+					end
+					for k, v in pairs(get_tpl_subKey(tpl_theme_pool_list, "pool_id", poolId)) do
+						local num = ThemeModel:getThemePoolItemNum(v.id)
+						if v.rewards[1] == id then
+							if not v.num or ThemeModel:getThemePoolItemNum(v.id) < v.num then
+								return true
+							end
+						end
+					end
+				end
+			elseif jumpCfg.view == "DispatchMain" or jumpCfg.view == "DispatchSeasonPass" then
+				if DispatchModel:isOpenDispatch() then
+					return true
+				end
 			else
 				return true
 			end
@@ -816,7 +870,7 @@ function P:jumpViewByItemId(id)
 end
 
 -- 道具跳转
-function P:jumpView(id, jumpId, preHideCb)
+function P:jumpView(id, jumpId, preHideCb, params)
 	local jumpCfg = tpl_Jump_path[id]
 	if jumpCfg.func_id then
 		-- 判断系统是否开启
@@ -829,11 +883,41 @@ function P:jumpView(id, jumpId, preHideCb)
 
 	jumpId = self:_getJumpId(jumpCfg, jumpId)
 
-	-- 跳转到相同界面时先关闭界面，避免界面刷新问题
-	if UiManager:getUI(jumpCfg.view) then
-		UiManager:hideUIForce(jumpCfg.view)
+	local viewName
+	if jumpCfg.view == "ActivityGifts" then
+		local activityId = ThemeModel:getThemeConfId()
+		if activityId and tpl_activity_map[activityId] then
+			viewName = tpl_activity_map[activityId].activity_gifts
+		end
+	elseif jumpCfg.view == "ActivityShop" then
+		local activityId = ThemeModel:getThemeConfId()
+		if activityId and tpl_activity_map[activityId] then
+			viewName = tpl_activity_map[activityId].activity_shop
+		end
+	elseif jumpCfg.view == "ActivityLottery" then
+		local activityId = ThemeModel:getThemeConfId()
+		if activityId and tpl_activity_map[activityId] then
+			viewName = tpl_activity_map[activityId].activity_lottery
+		end
+	else
+		viewName = jumpCfg.view
 	end
-	UiManager:showUI(jumpCfg.view, {jump = jumpCfg, jumpId = jumpId, preHideCb = preHideCb})
+
+	if not viewName then
+		return
+	end
+
+	-- 跳转到相同界面时先关闭界面，避免界面刷新问题
+	if UiManager:getUI(viewName) then
+		UiManager:hideUIForce(viewName)
+	end
+	local p = {jump = jumpCfg, jumpId = jumpId, preHideCb = preHideCb}
+	if params then
+		for k,v in pairs(params) do
+			p[k] = v
+		end
+	end
+	UiManager:showUI(viewName, p)
 end
 
 -- 判断是否为装饰类型
@@ -842,6 +926,12 @@ function P:getGPropType(propType)
 	if n == 1 then
 		return GPropType.Consume
 	elseif n == 2 then
+		return GPropType.Display
+	elseif n == 4 then
+		-- 表情类型认为是装饰类型，表现与装饰类型相同
+		return GPropType.Display
+	elseif n == 5 then
+		-- 插画类型认为是装饰类型，表现与装饰类型相同
 		return GPropType.Display
 	end
 end
@@ -938,8 +1028,10 @@ function P:getItemDesText(id)
 	local cfg = tpl_props[id]
 	if cfg.type == GPropKind.Gift then
 		return _F(cfg.des, cfg.values[1], cfg.values[1] * 2)
-	elseif 	cfg.type == GPropKind.ExpCard then
+	elseif cfg.type == GPropKind.ExpCard then
 		return _F(cfg.des, cfg.values[1])
+	elseif cfg.id == GPropId.ExpDispatch or cfg.id == GPropId.BondDispatch then
+		return _F(cfg.des, VipModel:getFriendshipDispatch())
 	else
 		return _T(cfg.des)
 	end
@@ -971,6 +1063,45 @@ function P:evt_SelfUserInfoRSP()
 	if ItemModel:getItemNumById(PlayerModel:getFrame()) == 0 then
 		PlayerModel._frame = 0
 	end
+end
+
+---------- ui 辅助函数 ----------
+
+function P:setItemIcon(go, id)
+    if id and tpl_props[id] then
+        bee.setIcon(go, tpl_props[id].icon)
+    end
+end
+
+function P:bindPreviewButton(node, id)
+	bee.removeAllClick(node)
+	bee.addClick(node, function()
+		if bee.isNull(node) then
+			return
+		end
+		Game:playSound("ui_button_confirm")
+		local cfg = tpl_props[id]
+		if not cfg.preview then
+			return
+		end
+		UiManager:hideUI("CommonItemTip")
+		if cfg.type == GPropKind.MusicLobby or cfg.type == GPropKind.MusicTable then
+			UiManager:showUI("BackpackMusic", {data = self:getItem(cfg.id, true)})
+		elseif cfg.type == GPropKind.LobbyScene then
+			UiManager:showUI("BackpackLobbyPreview", {data = self:getItem(cfg.id, true), list = {self:getItem(cfg.id, true)}})
+		elseif cfg.type == GPropKind.AllInEff then
+			local skinCfg = DecorationModel:getSkinCfgInScheme()
+			UiManager:showUI(GameModel:getAllinUiName(cfg.id), {role = CharacterModel:getRoleData(skinCfg.role), skin = skinCfg})
+		elseif cfg.type == GPropKind.Illustration then
+			UiManager:showUI("BackpackIllustrationPreview", {data = self:getItem(cfg.id, true), list = {self:getItem(cfg.id, true)}})
+		else
+			local zOrder = nil
+			if bee.isInGame() then
+				zOrder = 32000
+			end
+			UiManager:showUI("BackpackPreview", {data = self:getItem(cfg.id, true), zOrder = zOrder})
+		end
+	end, true)
 end
 
 return P

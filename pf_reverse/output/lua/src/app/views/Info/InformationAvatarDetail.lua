@@ -1,4 +1,4 @@
-local P = class("InformationAvatarDetail", UiBase)
+local P = class("InformationAvatarDetail", UiDialog)
 
 function P:onAwake()
     self.AnimRoot = self:find("AnimRoot")
@@ -57,6 +57,11 @@ function P:onShow()
     self.ListAvatar:setDatas(self._datas)
 
     local skins = PlayerModel:getFavoriteRoles()
+    if self._currentSkins then
+        for _, v in ipairs(self._currentSkins) do
+            CU.GameObject.Destroy(v.item)
+        end
+    end
     self._currentSkins = {}
     for k, v in ipairs(skins) do
         self:addCurrentItem(v)

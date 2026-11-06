@@ -39,7 +39,7 @@ function P:onShow()
         local datas = {}
         local roomId = GameModel.data:getRoomId()
         for _, v in ipairs(friends) do
-            if v.roomid ~= roomId then
+            if v.roomid ~= roomId and not GameModel.data:getPlayerByUid(v.uid) then
                 table.insert(datas, v)
             end
         end
@@ -83,7 +83,7 @@ function P:refreshItem(data, item)
             self:startInviteCD(InviteButton, InviteButton, InvitedButton, 30, item)
             bee.logEvent("friendsroom-invite", GameModel.data:getRoomId(), PlayerModel:getUid(), data.uid)
         end
-    end)
+    end, true)
 end
 
 function P:startInviteCD(InviteButton, InviteButtonOn, InviteButtonOff, dt, item)

@@ -143,6 +143,15 @@ function P:clear()
         end
         self._items = {}
     end
+
+end
+function P:clearCaches()
+    for _,v in pairs(self._caches) do
+        if not bee.isNull(v) then
+            CU.GameObject.Destroy(v)
+        end
+    end
+    self._caches = {}
 end
 
 -- 设置基础数据 不规则大小的列表每个数据需要有 __kind 字段来标识它的大小和类型
@@ -224,6 +233,49 @@ function P:removeData(data, slideDt, noCache)
     end
 end
 
+-- 根据条件函数删除数据元素
+-- func: function(data) return boolean end，返回 true 表示删除该数据
+function P:removeDataByFunc(func, noCache)
+    if not func then
+        return
+    end
+
+    local removedData = nil
+    for i = #self._items, 1, -1 do
+        local v = self._items[i]
+        if v and v.data and func(v.data) then
+            if not bee.isNull(v.node) then
+                -- 将节点放入缓存或销毁
+                if not noCache then
+                    self._caches[#self._caches + 1] = {v.node, v.data.__kind}
+                    v.node:SetActive(false)
+                else
+                    CU.GameObject.Destroy(v.node)
+                end
+                v.node = nil
+            end
+            
+            -- 记录被删除的数据（如果需要返回最后一个或第一个，可根据需求调整）
+            removedData = v.data
+            
+            table.remove(self._items, i)
+        end
+    end
+
+    -- 如果有数据被删除，则更新索引、宽度和UI
+    if removedData then
+        for k, vv in ipairs(self._items) do
+            vv.index = k
+        end
+        self:refreshItemsW()
+        self._shows = {} -- 清空显示列表，强制刷新
+        self._isDirty = true
+        
+        self:refreshUi()
+    end
+
+    return removedData
+end
 -- 删除元素，slideDt: 不为空则表示需要使用动画进行合并
 -- noCache: node 不缓存到列表队列中
 -- 返回对应的数据 data
@@ -408,7 +460,7 @@ function P:refreshItemsW()
     end
     local s = self._content.transform.sizeDelta
     if self._horizontal then
-        self._size.x, self._size.y = pos + self._bottom, s.y 
+        self._size.x, self._size.y = pos + self._bottom, s.y
     else
         self._size.x, self._size.y = s.x, pos + self._bottom
     end
@@ -654,11 +706,13 @@ function P:getDatasCount()
     return #self._items
 end
 
-function P:switchScrollInertia(val)
-    if not val then
-        self._list.velocity = bee.v2(0, 0)
+function P:changeScrollInertia(cb)
+    self._list.velocity = bee.v2(0, 0)
+    self._list.inertia = false
+    if cb then
+        cb()
     end
-    self._list.inertia = val
+    self._list.inertia = true
 end
 
 return P

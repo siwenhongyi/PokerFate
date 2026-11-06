@@ -138,7 +138,7 @@ function P:onShow()
         end
     end
     bee.setText(self.TextChip, _N(self._params.chips))
-    bee.setTextCut(self.TextName, player.name, 420)
+    bee.setTextCut(self.TextName, GF.getOtherName(player.name, player.seatid, player.uid), 420)
     bee.setText(self.TextLevel, player.level)
     GF.setTitleImage(self.ImageTitle, player.title, true, true)
     if player.level > 0 then
@@ -174,10 +174,14 @@ function P:onShow()
         self.BgReward:SetActive(true)
         local msg = self._params.msg or {}
         local rewards = {{GPropId.FirePower, msg.fire_power}, {GPropId.Exp, msg.win_exp}, {GPropId.Bond, msg.bond_add}}
+        if msg.act_reward_list then
+            for _, v in ipairs(msg.act_reward_list) do
+                table.insert(rewards, {v.item_id, v.item_num})
+            end
+        end
         for _, v in ipairs(rewards) do
             if v[2] and v[2] > 0 then
-                local item = ItemModel:getItem(v[1], true)
-                item.num = v[2]
+                local item = {id = v[1], num = v[2]}
                 local itemNode = CU.GameObject.Instantiate(self.Item1, self.BgReward.transform, false)
                 itemNode:SetActive(true)
                 PropItem:create(itemNode, item)
@@ -190,23 +194,23 @@ function P:onShow()
     end
 
     self.SaveButton:SetActive(false)
-    if not GuideManager:isInGuide() and GameModel.data then
-        self:once(-1, function()
-            if GameModel.data and GameModel.data:isCanSaveRecord() then
-                self.SaveButton:SetActive(true)
-                if player:isMe() then
-                    local winType = GameModel.data:getWinType()
-                    if winType >= 1 then
-                        bee.setText(self:find("Tips/TextTips", self.SaveButton), _T("LAB_DEL_PLAYBACK_TIP2"))
-                    else
-                        bee.setText(self:find("Tips/TextTips", self.SaveButton), _T("LAB_DEL_PLAYBACK_TIP1"))
-                    end
-                else
-                    self:find("Tips", self.SaveButton):SetActive(false)
-                end
-            end
-        end)
-    end
+    -- if not GuideManager:isInGuide() and GameModel.data and not GameModel.data:isInObserve() then
+    --     self:once(-1, function()
+    --         if GameModel.data and GameModel.data:isCanSaveRecord() then
+    --             self.SaveButton:SetActive(true)
+    --             if player:isMe() then
+    --                 local winType = GameModel.data:getWinType()
+    --                 if winType >= 1 then
+    --                     bee.setText(self:find("Tips/TextTips", self.SaveButton), _T("LAB_DEL_PLAYBACK_TIP2"))
+    --                 else
+    --                     bee.setText(self:find("Tips/TextTips", self.SaveButton), _T("LAB_DEL_PLAYBACK_TIP1"))
+    --                 end
+    --             else
+    --                 self:find("Tips", self.SaveButton):SetActive(false)
+    --             end
+    --         end
+    --     end)
+    -- end
 
 	if cards then
         cards = PKHelper.getSortCards(cards)

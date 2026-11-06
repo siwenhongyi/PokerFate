@@ -1,0 +1,71 @@
+{
+  "flop action:raise_over": {
+    "gamma": 0.8569,
+    "theta": {
+      "air": -0.2295,
+      "draw": 0.0382,
+      "medium": 0.083,
+      "nuts": 0.3448,
+      "strong": -0.1808,
+      "weak_draw": -0.0558
+    }
+  },
+  "river action:bet": {
+    "gamma": 0.8579,
+    "theta": {
+      "air": -0.3752,
+      "medium": -0.1291,
+      "nuts": 0.8615,
+      "strong": -0.3601
+    }
+  },
+  "river action:call": {
+    "gamma": 0.9561,
+    "theta": {
+      "air": -0.5498,
+      "medium": 0.1668,
+      "nuts": 0.5738,
+      "strong": -0.1943
+    }
+  },
+  "river action:fold_other": {
+    "gamma": 0.9143,
+    "theta": {
+      "air": -0.6291,
+      "medium": 0.1009,
+      "nuts": 0.7867,
+      "strong": -0.2562
+    }
+  },
+  "river action:raise_over": {
+    "gamma": 0.92,
+    "theta": {
+      "air": -0.3482,
+      "medium": -0.0118,
+      "nuts": 0.7642,
+      "strong": -0.4037
+    }
+  },
+  "turn action:bet": {
+    "gamma": 0.8696,
+    "theta": {
+      "air": -0.252,
+      "draw": 0.0986,
+      "medium": 0.325,
+      "nuts": 0.2561,
+      "strong": -0.3738,
+      "weak_draw": -0.0538
+    }
+  },
+  "turn action:raise_over": {
+    "gamma": 0.8663,
+    "theta": {
+      "air": -0.2101,
+      "draw": 0.2608,
+      "medium": 0.1131,
+      "nuts": 0.4122,
+      "strong": -0.3904,
+      "weak_draw": -0.1855
+    }
+  }
+}

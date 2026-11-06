@@ -2,6 +2,8 @@ local pb = require "pb"
 local protoc = require "protoc"
 
 require "net.net_game"
+require "net.net_table_mtt"
+require "net.net_table_sng"
 require "net.net_table"
 require "net.net_pk"
 require "net.net_props"

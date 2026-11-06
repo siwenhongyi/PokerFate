@@ -5,6 +5,7 @@ function P:onAwake()
     local Panel = self:find("Panel", Center)
 
     self.NameInput = self:find("NameInput", Panel)
+    bee.checkInputField(self.NameInput, _T("LAB_CHAR_045"))
 
     bee.addClick(self:find("CloseButton", Panel), function()
         self:hideUI()

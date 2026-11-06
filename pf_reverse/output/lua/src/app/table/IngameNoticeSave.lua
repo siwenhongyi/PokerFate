@@ -6,15 +6,11 @@ function P:onAwake()
         self:hideUI()
     end)
     bee.addClick(self:find("ConfirmButton", self.Panel), function()
-        Net:post("/collCard/update", {
-            add_id = self._params.gameid,
-            roomid = tostring(self._params.roomid),
-            tid = tostring(self._params.tid),
-        }, function(d)
-            if 0 == d.code then
-                PlayerModel:setCurRecord(#d.gameids)
-            end
-        end)
+		RecordDataModel:addCollect(self._params.gameid, function(ok)
+			if ok then
+				RecordDataModel:markCollectDirty()
+			end
+		end, tostring(self._params.roomid), tostring(self._params.tid))
         self:hideUI()
     end)
     bee.addClick(self:find("CancelButton", self.Panel), function()

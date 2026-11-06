@@ -33,6 +33,8 @@ function P:onAwake()
 	self.GrayPriText = self:find("Pri/GrayPriText", self.ExchangeGrayButton)
 
 	self.InputFieldCount:GetComponent("InputField").contentType = CU.UI.InputField.ContentType.IntegerNumber
+	bee.checkInputField(self.InputFieldCount, "")
+	
 
 	bee.addClick(self.CloseButton, function()
 		self:hideUI()
@@ -73,20 +75,20 @@ function P:refreshCont()
 	end
 
 	local OwnCount = ItemModel:getItemNumById(exchangeCfg.id)
-	bee.setText(self.Own, _T("LAB_SHOP_COMMON_5") .. ":" .. OwnCount)
+	bee.setText(self.Own, _T("LAB_SHOP_COMMON_5") .. ": " .. OwnCount)
 
 	if cfg.limit_type == SHOP_LIMIT_TYPE.DAILY then
 		self.LimitText:SetActive(true)
-		bee.setText(self.LimitText, _T("LAB_SHOP_COMMON_11") .. ":" .. data.buyCount .. "/" .. cfg.limit_count)
+		bee.setText(self.LimitText, _T("LAB_SHOP_COMMON_11") .. ": " .. data.buyCount .. "/" .. cfg.limit_count)
 	elseif cfg.limit_type == SHOP_LIMIT_TYPE.WEEKLY then
 		self.LimitText:SetActive(true)
-		bee.setText(self.LimitText, _T("LAB_SHOP_COMMON_12") .. ":" .. data.buyCount .. "/" .. cfg.limit_count)
+		bee.setText(self.LimitText, _T("LAB_SHOP_COMMON_12") .. ": " .. data.buyCount .. "/" .. cfg.limit_count)
 	elseif cfg.limit_type == SHOP_LIMIT_TYPE.MONTHLY then
 		self.LimitText:SetActive(true)
-		bee.setText(self.LimitText, _T("LAB_SHOP_COMMON_13") .. ":" .. data.buyCount .. "/" .. cfg.limit_count)
+		bee.setText(self.LimitText, _T("LAB_SHOP_COMMON_13") .. ": " .. data.buyCount .. "/" .. cfg.limit_count)
 	elseif cfg.limit_type == SHOP_LIMIT_TYPE.PERMANENT then
 		self.LimitText:SetActive(true)
-		bee.setText(self.LimitText, _T("LAB_SHOP_COMMON_14") .. ":" .. data.buyCount .. "/" .. cfg.limit_count)
+		bee.setText(self.LimitText, _T("LAB_SHOP_COMMON_14") .. ": " .. data.buyCount .. "/" .. cfg.limit_count)
 	else
 		self.LimitText:SetActive(false)
 	end

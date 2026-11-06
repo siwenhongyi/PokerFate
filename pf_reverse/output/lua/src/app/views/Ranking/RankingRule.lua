@@ -148,7 +148,7 @@ function P:setRewardItem(item, data, index)
 			prop.transform.localScale = PropItemObj.transform.localScale
 		end
 		prop:SetActive(true)
-		PropItem:create(prop, v)
+		PropItem:create(prop, v):bindTips()
 	end
 
 	local rewardCount = #rewardList

@@ -1,0 +1,375 @@
+﻿using G5.Logic;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Threading.Tasks;
+using static G5.Logic.BotGameState;
+
+
+
+namespace G5Gym
+{
+    public class PythonAPI : IDisposable
+    {
+        private OpponentModeling _opponentModeling;
+        private Dictionary<string, BotGameState> _botGameStates = new Dictionary<string, BotGameState>();
+
+        private class SeedActionStatsDto
+        {
+            [JsonPropertyName("br")]
+            public int BetRaise { get; set; }
+
+            [JsonPropertyName("cc")]
+            public int CheckCall { get; set; }
+
+            [JsonPropertyName("fold")]
+            public int Fold { get; set; }
+        }
+
+        private class SeedPlayerStatsDto
+        {
+            [JsonPropertyName("name")]
+            public string Name { get; set; }
+
+            [JsonPropertyName("vpip_positive")]
+            public int VpipPositive { get; set; }
+
+            [JsonPropertyName("vpip_total")]
+            public int VpipTotal { get; set; }
+
+            [JsonPropertyName("preflop")]
+            public List<SeedActionStatsDto> PreFlop { get; set; }
+
+            [JsonPropertyName("postflop")]
+            public List<SeedActionStatsDto> PostFlop { get; set; }
+        }
+
+        public PythonAPI(int numPlayers, int recentHandsCount)
+        {
+            var opponentModelingOptions = new OpponentModeling.Options();
+
+            if (recentHandsCount < 0)
+                recentHandsCount = 15;
+
+            opponentModelingOptions.recentHandsCount = recentHandsCount;
+
+            string assemblyFolder = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+
+            if (numPlayers == 2)
+            {
+                _opponentModeling = new OpponentModeling(assemblyFolder + "/full_stats_list_hu.bin", 
+                    TableType.HeadsUp, 
+                    opponentModelingOptions);
+            }
+            else if (numPlayers > 2 && numPlayers <= 6)
+            {
+                _opponentModeling = new OpponentModeling(assemblyFolder + "/full_stats_list_6max.bin", 
+                    TableType.SixMax, 
+                    opponentModelingOptions);
+            }
+            else
+            {
+                throw new InvalidOperationException("Not supported table type");
+            }
+
+            Console.WriteLine("Created opponent modelling successfully");
+        }
+
+        public dynamic testCallArray()
+        {
+            return (new int[] { 1, 3, 5, 7, 9 }).ToList();
+        }
+
+        public dynamic testCallStruct()
+        {
+            return new { Amount = 108, Message = "Hello" };
+        }
+
+        // bigBlindSize int in cents. Eg. $0.04 is 4.
+        public dynamic createGame(
+            string gameName, 
+            string[] playerNames, 
+            int[] stackSizes, 
+            int heroInd, 
+            int buttonInd, 
+            int bigBlindSize, 
+            bool randomlySampleActions,
+            int preFlopChartsLevel)
+        {
+            _botGameStates[gameName] = new BotGameState(playerNames, 
+                stackSizes,
+                heroInd, 
+                buttonInd,
+                bigBlindSize,
+                PokerClient.PokerKing,
+                TableType.SixMax,
+                new G5.Logic.Estimators.ModelingEstimator(_opponentModeling, PokerClient.PokerKing),
+                randomlySampleActions,
+                preFlopChartsLevel);
+
+            Console.WriteLine($"Created {gameName} BotGameState successfully");
+            return gameName;
+        }
+
+        public int getPlayerToActInd(string gameName)
+        {
+            return _botGameStates[gameName].getPlayerToActInd();
+        }
+
+        public int getAmountToCall(string gameName)
+        {
+            return _botGameStates[gameName].getAmountToCall();
+        }
+
+        public dynamic getStackSize(string gameName, int playerIndex)
+        {
+            var players = _botGameStates[gameName].getPlayers();
+
+            if (playerIndex < 0 || playerIndex >= players.Count)
+                return 0;
+
+            return players[playerIndex].Stack;
+        }
+
+        public void setStackSize(string gameName, int playerIndex, int stackSize)
+        {
+            var players = _botGameStates[gameName].getPlayers();
+
+            if (playerIndex < 0 || playerIndex >= players.Count)
+                return;
+
+            players[playerIndex].SetStackSize(stackSize);
+        }
+
+        public dynamic getStakesSize(string gameName, int playerIndex)
+        {
+            var players = _botGameStates[gameName].getPlayers();
+
+            if (playerIndex < 0 || playerIndex >= players.Count)
+                return 0;
+
+            return players[playerIndex].MoneyInPot;
+        }
+
+        public dynamic getPlayerName(string gameName, int playerIndex)
+        {
+            var players = _botGameStates[gameName].getPlayers();
+
+            if (playerIndex < 0 || playerIndex >= players.Count)
+                return "Unknows player index";
+
+            return players[playerIndex].Name;
+        }
+
+        public void setPlayerName(string gameName, int playerIndex, string playerName)
+        {
+            var players = _botGameStates[gameName].getPlayers();
+
+            if (playerIndex < 0 || playerIndex >= players.Count)
+                return;
+
+            players[playerIndex].SetPlayerName(playerName);
+        }
+
+        public dynamic seedPlayerStatsJson(string json)
+        {
+            var options = new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+            };
+            var rows = JsonSerializer.Deserialize<List<SeedPlayerStatsDto>>(json, options) ?? new List<SeedPlayerStatsDto>();
+            var preFlopCount = PreFlopParams.getAllParams(_opponentModeling.TableType).Count;
+            var postFlopCount = PostFlopParams.getAllParams(_opponentModeling.TableType).Count;
+            int seeded = 0;
+
+            foreach (var row in rows)
+            {
+                if (row == null || string.IsNullOrWhiteSpace(row.Name))
+                    continue;
+
+                var preFlop = new ActionStats[preFlopCount];
+                var postFlop = new ActionStats[postFlopCount];
+
+                for (int i = 0; i < preFlop.Length; i++)
+                    preFlop[i] = toActionStats(row.PreFlop, i);
+
+                for (int i = 0; i < postFlop.Length; i++)
+                    postFlop[i] = toActionStats(row.PostFlop, i);
+
+                var playerStats = new PlayerStats(
+                    row.Name,
+                    PokerClient.PokerKing,
+                    _opponentModeling.TableType,
+                    Math.Max(0, Math.Min(row.VpipPositive, row.VpipTotal)),
+                    Math.Max(0, row.VpipTotal),
+                    preFlop,
+                    postFlop);
+
+                _opponentModeling.seedPlayerStats(playerStats);
+                seeded++;
+            }
+
+            return new { seeded = seeded };
+        }
+
+        private static ActionStats toActionStats(List<SeedActionStatsDto> rows, int index)
+        {
+            var stats = new ActionStats();
+            if (rows == null || index < 0 || index >= rows.Count || rows[index] == null)
+                return stats;
+
+            stats.BetRaiseSamples = Math.Max(0, rows[index].BetRaise);
+            stats.CheckCallSamples = Math.Max(0, rows[index].CheckCall);
+            stats.FoldSamples = Math.Max(0, rows[index].Fold);
+            return stats;
+        }
+
+        public dynamic getPlayerRange(string gameName, int playerIndex)
+        {
+            var players = _botGameStates[gameName].getPlayers();
+
+            if (playerIndex < 0 || playerIndex >= players.Count)
+                return "Unknows player index";
+
+            return players[playerIndex].Range.GetCompressedRange();
+        }
+
+        public dynamic isPlayerInIngame(string gameName, int playerIndex)
+        {
+            var players = _botGameStates[gameName].getPlayers();
+
+            if (playerIndex < 0 || playerIndex >= players.Count)
+                return false;
+
+            return players[playerIndex].StatusInHand != Status.Folded;
+        }
+
+        public dynamic getBoard(string gameName)
+        {
+            var board = _botGameStates[gameName].getBoard().Cards;
+            var result = new List<string>();
+
+            foreach (var card in board)
+            {
+                result.Add(card.ToString());
+            }
+
+            return result;
+        }
+
+        public dynamic getHoleCards(string gameName)
+        {
+            var holecards = _botGameStates[gameName].getHeroHoleCards();
+
+            return new List<string>
+            {
+                holecards.Card0.ToString(),
+                holecards.Card1.ToString()
+            };
+        }
+
+        public dynamic getButtonInd(string gameName)
+        {
+            return _botGameStates[gameName].getButtonInd();
+        }
+
+        public dynamic getSmallBlindInd(string gameName)
+        {
+            return _botGameStates[gameName].smallBlindInd();
+        }
+
+        public dynamic getBigBlindInd(string gameName)
+        {
+            return _botGameStates[gameName].bigBlindInd();
+        }
+
+        public dynamic getPotSize(string gameName)
+        {
+            return _botGameStates[gameName].potSize();
+        }
+
+        public void startNewHand(string gameName, int buttonInd, List<int> sittingOutPlayers)
+        {
+            _botGameStates[gameName].setButtonInd(buttonInd);
+            _botGameStates[gameName].startNewHand(sittingOutPlayers);
+        }
+
+        public void dealHoleCards(string gameName, string card0, string card1)
+        {
+            _botGameStates[gameName].dealHoleCards(new Card(card0), new Card(card1));
+        }
+
+        public void goToFlop(string gameName, string card0, string card1, string card2)
+        {
+            List<Card> cards = new List<Card> { new Card(card0), new Card(card1), new Card(card2) };
+            _botGameStates[gameName].goToNextStreet(cards);
+        }
+
+        public void goToTurn(string gameName, string card)
+        {
+            _botGameStates[gameName].goToNextStreet(new Card(card));
+        }
+
+        public void goToRiver(string gameName, string card)
+        {
+            _botGameStates[gameName].goToNextStreet(new Card(card));
+        }
+
+        public void playerCheckCalls(string gameName)
+        {
+            _botGameStates[gameName].playerCheckCalls();
+        }
+
+        public void playerBetRaisesBy(string gameName, int amount)
+        {
+            _botGameStates[gameName].playerBetRaisesBy(amount);
+        }
+
+        public void playerFolds(string gameName)
+        {
+            _botGameStates[gameName].playerFolds();
+        }
+
+        public dynamic calculateHeroAction(string gameName)
+        {
+            var bd = _botGameStates[gameName].calculateHeroAction();
+
+            return new {
+                actionType = bd.actionType,
+                byAmount = bd.byAmount,
+                checkCallEV = bd.checkCallEV,
+                betRaiseEV = bd.betRaiseEV,
+                timeSpentSeconds = bd.timeSpentSeconds,
+                message = bd.message
+            };
+        }
+
+        public void finishHand(string gameName, int winnings0, int winnings1, int winnings2, int winnings3, int winnings4, int winnings5)
+        {
+            var winnings = new List<int> { 
+                winnings0, 
+                winnings1, 
+                winnings2,
+                winnings3,
+                winnings4,
+                winnings5,
+            };
+
+            _botGameStates[gameName].finishHand(winnings);
+            _opponentModeling.addHand(_botGameStates[gameName].getCurrentHand());
+        }
+
+        public void Dispose()
+        {
+            foreach (var botGameState in _botGameStates)
+            {
+                botGameState.Value.Dispose();
+            }
+        }
+    }
+}

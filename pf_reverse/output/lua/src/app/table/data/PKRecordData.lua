@@ -3,7 +3,7 @@ local P = class("PKRecordData")
 
 function P:ctor(msg, title)
     self.msg = msg
-    self.title = title
+    self.title = title or GameModel:getReplayTitle(msg)
 
     self.roundIndex = 1
     self.curRound = nil -- 当前回合
@@ -112,8 +112,9 @@ function P:run()
             action_time = 15,
             seat_num = self.msg.seat_num or 6,
             game_type = self.msg.game_type,
-            room_type = GF.isOmahaGame(self.msg.game_type) and GAME_ROOM_TYPE.OMAHA or GAME_ROOM_TYPE.HOLDEM,
+            room_type = (GF.isOmahaGame(self.msg.game_type) or GF.isFriendOmaha(self.msg.game_type)) and GAME_ROOM_TYPE.OMAHA or GAME_ROOM_TYPE.HOLDEM,
         },
+        scheme = DecorationModel:getInGameCurScheme(),
     }
     for _, v in ipairs(self.msg.user) do
         local seat = self:addSeatStatus(v.seatid, v)
@@ -190,6 +191,13 @@ function P:onPreAction()
     local round = act1._round
     if not round then
         for i = self.respIndex, 1, -1 do
+            if self.resps[i]._evt == "ShowMyCardBRC" then
+                for _, info in ipairs(self.resps[i].info) do
+                    local player1 = GameModel.data:getPlayer(info.seatid + 1)
+                    player1.is_fold = true
+                    player1.hand_cards = nil
+                end
+            end
             if self.resps[i]._round then
                 if i - 1 > 1 then
                     self.respIndex = i - 1
@@ -271,6 +279,8 @@ function P:_doShowHandCard()
     local d = self.resps[self.respIndex]
     if d and d._evt == "ShowHandRSP" then
         self:emitNetUiEvent("evt_" .. d._evt, d)
+    elseif d and d._evt == "ShowMyCardBRC" then
+        self:emitNetUiEvent("evt_" .. d._evt, d)
     elseif d and d._evt == "WinnerRSP" then
         self:emitNetUiEvent("evt_" .. d._evt, d)
     end
@@ -293,6 +303,43 @@ function P:initResps()
     local isAllAllin = false
     self._isAddShowHand = nil
     for k, round in ipairs(self.msg.round) do
+        -- 处理 ante
+        local antes = nil
+        for _, act in ipairs(round.action) do
+            if act.action_type == POKER_ACTION.ANTE then
+                local msg = {
+                    seatid = act.seatid,
+                    action_type = act.action_type,
+                    chips = act.action_chips,
+                    hand_chips = act.hand_chips,
+
+                    _act = act,
+                    _evt = "ActionBRC",
+                    _round = round,
+                    _et = 0.1,
+                }
+                self:addResp(msg)
+                if not antes then
+                    antes = {}
+                end
+                table.insert(antes, msg)
+            end
+        end
+        if antes then
+            local pot = 0
+            for _, v in ipairs(antes) do
+                pot = pot + v.chips
+            end
+            local overRound = {
+                pool = {pot},
+                _evt = "RoundOverBRC",
+                _et = 2,
+                isAnte = true,
+            }
+            totalPot = pot
+            self:addResp(overRound)
+        end
+
         for _, v in ipairs(round.board) do
             table.insert(board, v)
         end
@@ -310,23 +357,25 @@ function P:initResps()
 
         local count, counts, totalBet = 0, {}, 0
         for _, act in ipairs(round.action) do
-            local msg = {
-                seatid = act.seatid,
-                action_type = act.action_type,
-                chips = act.action_chips,
-                hand_chips = act.hand_chips,
+            if act.action_type ~= POKER_ACTION.ANTE then
+                local msg = {
+                    seatid = act.seatid,
+                    action_type = act.action_type,
+                    chips = act.action_chips,
+                    hand_chips = act.hand_chips,
 
-                _act = act,
-                _evt = "ActionBRC",
-                _round = round,
-                _et = 3,
-            }
-            totalBet = totalBet + act.action_chips
-            self:addResp(msg)
-            if not act.is_allin and not GF.isFoldAction(act.action_type) then
-                counts[act.seatid] = 1
-            else
-                counts[act.seatid] = 0
+                    _act = act,
+                    _evt = "ActionBRC",
+                    _round = round,
+                    _et = 3,
+                }
+                totalBet = totalBet + act.action_chips
+                self:addResp(msg)
+                if not act.is_allin and not GF.isFoldAction(act.action_type) then
+                    counts[act.seatid] = 1
+                else
+                    counts[act.seatid] = 0
+                end
             end
         end
         for _, v in pairs(counts) do
@@ -355,7 +404,20 @@ function P:initResps()
             if totalBet > totalPot - round._totalPot then
                 local backChips = totalBet - (totalPot - round._totalPot)
                 local seatid, maxActionChips = -1, 0
+                local actors = {}
                 for _, act in ipairs(round.action) do
+                    if act.action_type ~= POKER_ACTION.ANTE then
+                        if not actors[act.seatid] then
+                            actors[act.seatid] = {
+                                seatid = act.seatid,
+                                action_chips = act.action_chips or 0,
+                            }
+                        else
+                            actors[act.seatid].action_chips = actors[act.seatid].action_chips + act.action_chips
+                        end
+                    end
+                end
+                for _, act in pairs(actors) do
                     if act.action_chips > maxActionChips then
                         maxActionChips = act.action_chips
                         seatid = act.seatid
@@ -404,13 +466,41 @@ end
 function P:addShowHandRSP()
     if self.msg.show_hand_info and #self.msg.show_hand_info > 0 and not self._isAddShowHand then
         self._isAddShowHand = true
+        
+        -- 检查玩家主动亮牌
+        local sd = {
+            gameid = self.msg.gameid,
+            info = {},
+            _evt = "ShowMyCardBRC",
+            _et = 0,
+        }
+        for _, v in ipairs(self.msg.user) do
+            if v.show_type_list then
+                local info = nil
+                for sk, sv in ipairs(v.show_type_list) do
+                    if sv == 2 then
+                        info = {
+                            seatid = v.seatid,
+                            hand_cards = v.hand_card,
+                        }
+                        for sk2, sv2 in ipairs(v.show_type_list) do
+                            if sv2 ~= 2 then
+                                info.hand_cards[sk2] = 0
+                            end
+                        end
+                        sd.info[#sd.info + 1] = info
+                        break
+                    end
+                end
+            end
+        end
+        if #sd.info > 0 then
+            self:addResp(sd)
+        end
+
+        -- 系统亮牌
         local d = {
             info = {},
-
-            -- _round = {
-            --     _totalBoard = clone(board),
-            --     _totalPot = totalPot,
-            -- },
 
             _evt = "ShowHandRSP",
         }
@@ -457,6 +547,7 @@ function P:doResp(index)
 
     self:emitNetUiEvent("evt_" .. d._evt, d)
     print("=== ggg doResp", d._evt, self._stopNetUiEvent)
+    
     return d
 end
 
@@ -465,12 +556,13 @@ function P:doStartAction()
     self.curRound = self.msg.round[self.roundIndex]
     self.curIndex = 1
     self.respIndex = 0
+    self._antes = {}
     self:initResps()
 
     self:doNextAction()
     while true do
         local v = self.resps[self.respIndex + 1]
-        if v and v.action_type == POKER_ACTION.SB or v.action_type == POKER_ACTION.BB or v.action_type == POKER_ACTION.FORCE_BB or v.action_type == POKER_ACTION.ANTE then
+        if v and v.action_type == POKER_ACTION.SB or v.action_type == POKER_ACTION.BB or v.action_type == POKER_ACTION.FORCE_BB or v.action_type == POKER_ACTION.ANTE or v.isAnte  or v.stage == POKER_ROUND.PRE_FLOP then
             self:doNextAction()
         else
             break
@@ -487,50 +579,6 @@ function P:doNextAction()
         return true
     end
     return false
-end
-
-function P:doShowHands()
-    if self.msg.show_hand_info and #self.msg.show_hand_info > 0 then
-        self.status = 2
-        self:addAction(function()
-            local d = {
-                info = {}
-            }
-            for _, v in ipairs(self.msg.show_hand_info) do
-                d.info[#d.info + 1] = {
-                    seatid = v.seatid,
-                    card1 = v.hand_card[1],
-                    card2 = v.hand_card[2],
-                    card3 = v.hand_card[3],
-                    card4 = v.hand_card[4],
-                }
-            end
-            net:ShowHandRSP(d)
-            self:emitNetUiEvent("evt_ShowHandRSP", d)
-        end, 1)
-    end
-    self:addAction(function()
-        self:doWinnerRSP()
-    end, 5)
-end
-
-function P:doWinnerRSP()
-    self.status = 3
-    local d = {
-        winner = {},
-        profit = {},
-    }
-    for _, v in ipairs(self.msg.winning_info) do
-        d.winner[#d.winner + 1] = {
-            seatid = v.seatid,
-            poolid = v.poolid,
-            chips = v.chips,
-            type = 0,
-            uid = v.uid,
-        }
-    end
-    net:WinnerRSP(d)
-    self:emitNetUiEvent("evt_WinnerRSP", d)
 end
 
 function P:emitNetUiEvent(name, d)
@@ -569,11 +617,6 @@ function P:onUpdate(dt)
             end
         end
     elseif self.status == 2 then
-        -- self._et = self._et - dt
-        -- if self._et <= 0 then
-        --     self._et = 1
-        --     self:doWinnerRSP()
-        -- end
     end
 end
 

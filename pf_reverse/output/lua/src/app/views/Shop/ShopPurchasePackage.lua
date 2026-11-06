@@ -42,16 +42,16 @@ function P:onStart()
 
 	if cfg.limit_type == SHOP_LIMIT_TYPE.DAILY then
 		self.LimitText:SetActive(true)
-		bee.setText(self.LimitText, _T("LAB_SHOP_COMMON_11") .. ":" .. data.buyCount .. "/" .. cfg.limit_count)
+		bee.setText(self.LimitText, _F("LAB_SHOP_COMMON_42", data.buyCount, cfg.limit_count))
 	elseif cfg.limit_type == SHOP_LIMIT_TYPE.WEEKLY then
 		self.LimitText:SetActive(true)
-		bee.setText(self.LimitText, _T("LAB_SHOP_COMMON_12") .. ":" .. data.buyCount .. "/" .. cfg.limit_count)
+		bee.setText(self.LimitText, _F("LAB_SHOP_COMMON_43", data.buyCount, cfg.limit_count))
 	elseif cfg.limit_type == SHOP_LIMIT_TYPE.MONTHLY then
 		self.LimitText:SetActive(true)
-		bee.setText(self.LimitText, _T("LAB_SHOP_COMMON_13") .. ":" .. data.buyCount .. "/" .. cfg.limit_count)
+		bee.setText(self.LimitText, _F("LAB_SHOP_COMMON_44", data.buyCount, cfg.limit_count))
 	elseif cfg.limit_type == SHOP_LIMIT_TYPE.PERMANENT then
 		self.LimitText:SetActive(true)
-		bee.setText(self.LimitText, _T("LAB_SHOP_COMMON_14") .. ":" .. data.buyCount .. "/" .. cfg.limit_count)
+		bee.setText(self.LimitText, _F("LAB_SHOP_COMMON_45", data.buyCount, cfg.limit_count))
 	else
 		self.LimitText:SetActive(false)
 	end

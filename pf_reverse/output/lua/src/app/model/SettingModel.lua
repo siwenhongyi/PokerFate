@@ -3,12 +3,15 @@ local P = class("SettingModel", BaseModel)
 function P:ctor()
     self.saveData = {
         preAction = true,
+        showIntensitys = {},
         autoByin = false,
         cardValue = true,
         showBB = false, -- 显示bb
         showCard = true, -- 主动秀牌
         saveGame = false,
         hideChat = false,
+        hideEmoji = false,
+        hideIEmoji = false,
         hideInvite = false,
         autoSwitch = false, -- 自动切换牌桌
         betCustomize = false, -- 自定义下注
@@ -68,6 +71,14 @@ function P:ctor()
 
     P.super.ctor(self)
 
+    self._defatltPrivacies = {
+        scrap = true,   -- 爆牌动画
+        originalSkin = false,   -- 显示默认皮肤
+        hideName = false,   -- 隐藏昵称
+        hideOther = false,   -- 显示其他玩家昵称
+    }
+    self.privacies = nil
+
     self._unlockSys = {}
     self._cdKeys = {}   -- cd keys
     self._tmpTags = {}  -- 临时 tags
@@ -81,6 +92,15 @@ function P:ctor()
     self._customizeSngBet = nil
     self._customizeFriendBet = nil
     self._tableSetting = nil
+
+    self._vipHideValue = true
+
+    -- 推送设置
+    self.noticesSetting = {
+        enable_push = 1,
+        active_type = {true,true,true,true,true,true},    -- 子类开关
+    }
+
 end
 
 function P:afterInit()
@@ -113,19 +133,46 @@ function P:afterLogin()
     self._tableSetting = self:getCloudKeyData("tableSetting")
     if not next(self._tableSetting) then
         self._tableSetting.preAction = self.saveData.preAction
+        self._tableSetting.showIntensitys = self.saveData.showIntensitys
         self._tableSetting.autoByin = self.saveData.autoByin
         self._tableSetting.showBB = self.saveData.showBB
         self._tableSetting.showCard = self.saveData.showCard
         self._tableSetting.saveGame = self.saveData.saveGame
         self._tableSetting.hideChat = self.saveData.hideChat
+        self._tableSetting.hideEmoji = self.saveData.hideEmoji
+        self._tableSetting.hideIEmoji = self.saveData.hideIEmoji
         self._tableSetting.hideInvite = self.saveData.hideInvite
         self._tableSetting.autoSwitch = self.saveData.autoSwitch
         self._tableSetting.betPrecise = self.saveData.betPrecise
     end
 
+    if self._tableSetting.showIntensitys == nil then
+        self._tableSetting.showIntensitys = self.saveData.showIntensitys
+    end
     if self._tableSetting.cardValue == nil then
         self._tableSetting.cardValue = self.saveData.cardValue
     end
+    if self._tableSetting.hideEmoji == nil then
+        self._tableSetting.hideEmoji = self.saveData.hideEmoji
+    end
+    if self._tableSetting.hideIEmoji == nil then
+        self._tableSetting.hideIEmoji = self.saveData.hideIEmoji
+    end
+
+    self.privacies = self:getCloudKeyData("privacies", self._defatltPrivacies)
+
+    Net:post("settings/push", {t = 1}, function(data)
+        self.noticesSetting.enable_push = data.enable_push == 0 and true or false
+        for k, v in ipairs(self.noticesSetting.active_type) do
+            self.noticesSetting.active_type[k] = false
+        end
+        if data.active_type then
+            for _, v in ipairs(data.active_type) do
+                self.noticesSetting.active_type[v] = true
+            end
+        end
+        self:checkNoticeSetting()
+    end)
 end
 
 function P:initDefaultBets(customizeBets)
@@ -153,12 +200,65 @@ function P:getCustomizeBets(gameType)
     return self._customizeLobbyBet
 end
 
+-- 获取 key 的值，key 用 . 分割来访问子表
+function P:getValue(key)
+    local ks = string.split(key, ".")
+    if 1 == #ks then
+        return self[ks[1]]
+    elseif 2 == #ks then
+        return self[ks[1]][ks[2]]
+    elseif 3 == #ks then
+        if tonumber(ks[3]) then
+            return self[ks[1]][ks[2]][tonumber(ks[3])]
+        end
+        return self[ks[1]][ks[2]][ks[3]]
+    end
+end
+
+function P:setValue(key, value)
+    local ks = string.split(key, ".")
+    if 1 == #ks then
+        self[ks[1]] = value
+    elseif 2 == #ks then
+        self[ks[1]][ks[2]] = value
+    elseif 3 == #ks then
+        if tonumber(ks[3]) then
+            self[ks[1]][ks[2]][tonumber(ks[3])] = value
+        end
+        self[ks[1]][ks[2]][ks[3]] = value
+    end
+end
+
 function P:isPreAction()
     return self._tableSetting.preAction
 end
 
 function P:setPreAction(flag)
     self._tableSetting.preAction = flag
+    self:onSave()
+end
+
+function P:isShowIntensity(gameType)
+    local intensity = true
+    for _,v in pairs(self._tableSetting.showIntensitys) do
+        if v.type == gameType then
+            intensity = v.value
+        end
+    end
+    return intensity
+end
+
+function P:setShowIntensity(gameType, flag)
+    local save = false
+    for k,v in pairs(self._tableSetting.showIntensitys) do
+        if v.type == gameType then
+            self._tableSetting.showIntensitys[k].value = flag
+            save = true
+        end
+    end
+    if not save then
+        table.insert(self._tableSetting.showIntensitys, {type = gameType, value = flag})
+    end
     self:onSave()
 end
 
@@ -220,6 +320,24 @@ end
 
 function P:setHideChat(flag)
     self._tableSetting.hideChat = flag
+    self:onSave()
+end
+
+function P:isHideEmoji()
+    return self._tableSetting.hideEmoji
+end
+
+function P:setHideEmoji(flag)
+    self._tableSetting.hideEmoji = flag
+    self:onSave()
+end
+
+function P:isHideIEmoji()
+    return self._tableSetting.hideIEmoji
+end
+
+function P:setHideIEmoji(flag)
+    self._tableSetting.hideIEmoji = flag
     self:onSave()
 end
 
@@ -306,12 +424,18 @@ end
 
 function P:setBetPkValue(index, value, gameType)
     if GF.isOmahaGame(gameType) then
-        self:getCustomizeBets(gameType).betOmahaValues[index] = value
-        self:onSave()
+        if self:getCustomizeBets(gameType).betOmahaValues[index] ~= value then
+            self:getCustomizeBets(gameType).betOmahaValues[index] = value
+            self:onSave()
+            return true
+        end
         return
     end
-    self:getCustomizeBets(gameType).betPkValues2[index] = value
-    self:onSave()
+    if self:getCustomizeBets(gameType).betPkValues2[index] ~= value then
+        self:getCustomizeBets(gameType).betPkValues2[index] = value
+        self:onSave()
+        return true
+    end
 end
 
 function P:getRaisePkValues(gameType, isCheckCustom, kind)
@@ -339,18 +463,33 @@ end
 function P:setRaisePkValue(index, value, kind, gameType)
     if GF.isOmahaGame(gameType) then
         if kind == 1 then
-            self:getCustomizeBets(gameType).raisePotOmahaValues[index] = value
+            if self:getCustomizeBets(gameType).raisePotOmahaValues[index] ~= value then
+                self:getCustomizeBets(gameType).raisePotOmahaValues[index] = value
+                self:onSave()
+                return true
+            end
         else
-            self:getCustomizeBets(gameType).raiseOmahaValues[index] = value
+            if self:getCustomizeBets(gameType).raiseOmahaValues[index] ~= value then
+                self:getCustomizeBets(gameType).raiseOmahaValues[index] = value
+                self:onSave()
+                return true
+            end
         end
         return
     end
     if kind == 1 then
-        self:getCustomizeBets(gameType).raisePotPkValues[index] = value
+        if self:getCustomizeBets(gameType).raisePotPkValues[index] ~= value then
+            self:getCustomizeBets(gameType).raisePotPkValues[index] = value
+            self:onSave()
+            return true
+        end
     else
-        self:getCustomizeBets(gameType).raisePkValues[index] = value
+        if self:getCustomizeBets(gameType).raisePkValues[index] ~= value then
+            self:getCustomizeBets(gameType).raisePkValues[index] = value
+            self:onSave()
+            return true
+        end
     end
-    self:onSave()
 end
 
 function P:isColorGameUnlock()
@@ -429,6 +568,10 @@ function P:addLevelUpPop()
         LocalStore:saveTableData("level_up_reward_level" .. PlayerModel:getUid(), levels)
         return
     end
+    if UiManager:getUI("DispatchMain") then
+        LocalStore:setBoolForKey("level_up_pop" .. PlayerModel:getUid(), true)
+        return
+    end
     bee.showUiTask("LevelUpgrade", nil, nil, LOBBY_POP_PRIORITY.LevelUpgrade)
     bee.runTask()
     self:checkNewUnlockSys()
@@ -463,7 +606,7 @@ end
 function P:checkNewUnlockSys()
     local ids = nil
     for _, v in ipairs(tpl_system_info_list) do
-        if v.level > 0 and v.level <= PlayerModel:getCurLevel() and not self:isSysUnlock(v.id) then
+        if v.level > 1 and v.level <= PlayerModel:getCurLevel() and not self:isSysUnlock(v.id) then
             if not ids then
                 ids = {v.id}
             else
@@ -474,10 +617,19 @@ function P:checkNewUnlockSys()
         end
     end
     if ids then
-        Net:sendReq("pb.UnlockNewModuleREQ", {ids = ids})
-        self:onSave()
+        local tarIds = {}
+        for _,v in pairs(ids) do
+            local infoCfg = tpl_system_info[v]
+            if infoCfg and infoCfg.level > 1 then
+                table.insert(tarIds, v)
+            end
+        end
+        if #tarIds > 0 then
+            Net:sendReq("pb.UnlockNewModuleREQ", {ids = tarIds})
+            self:onSave()
 
-        bee.emit(EventDef.evt_refreshSysunlock)
+            bee.emit(EventDef.evt_refreshSysunlock)
+        end
     end
 end
 
@@ -563,6 +715,46 @@ function P:isCanVibrate(kind)
     return self.saveData.vibrateOutGame
 end
 
+-- 是否显示爆牌动画
+function P:isShowScrap()
+    return self.privacies.scrap and not bee.isLimitView
+end
+
+function P:isShowSkin()
+    return not self.privacies.originalSkin and not bee.isLimitView
+end
+
+function P:isShowName()
+    return not self.privacies.hideName
+end
+
+function P:isShowOther()
+    return not self.privacies.hideOther
+end
+
+function P:checkNoticeSetting()
+    if bee.checkVersion("1.6.2") and self.noticesSetting.enable_push and not CS.MobileNotificationsMgr.Instance:GetSystemNotificationPermission() then
+        self.noticesSetting.enable_push = false
+        self:uploadNoticeSetting()
+    end
+end
+
+function P:getNoticeSetting()
+    return self.noticesSetting
+end
+
+function P:uploadNoticeSetting()
+    local active_type = {}
+    local enable_push = self.noticesSetting.enable_push and 0 or 1
+    for k, v in ipairs(self.noticesSetting.active_type) do
+        if 1 == v or true == v then
+            table.insert(active_type, k)
+        end
+    end
+    Net:post("settings/pushUpdate", {enable_push = enable_push, active_type = active_type, immediately = true}, function(data)
+    end)
+end
+
 -- 是否暂停刷新金币
 function P:setIsStopRefreshGold(flag)
     self._isStopRefreshGold = flag
@@ -633,6 +825,29 @@ end
 
 function P:evt_videoPlayerError(msg)
     G_VIDEO_ERROR_MSG = msg
+end
+
+function P:evt_onApplicationPause(paused)
+    if not paused then
+        if LoginModel:isOnLine() then
+            self:checkNoticeSetting()
+        end
+    end
+end
+
+function P:setVipHide(value)
+    local v = value % 10
+    self._vipHideValue = v == 0
+end
+
+function P:changeVipHide(value)
+    Net:post("player/setVipDisplay", {hide = value and 0 or 1}, function ()
+        self._vipHideValue = value
+    end)
+end
+
+function P:getVipHide()
+    return self._vipHideValue
 end
 
 return P

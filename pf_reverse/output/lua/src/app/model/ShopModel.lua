@@ -21,6 +21,10 @@ local SHOP_TYPE_CFG = {
     [17] = tpl_shop_exchange,
     [18] = tpl_shop_decoration,
     [19] = tpl_shop_activity_gifts,
+    [20] = tpl_shop_gifts_skin,
+    [21] = tpl_quick_purchase,
+    [22] = tpl_shop_passcard,
+    [23] = tpl_shop_dispatch,
     [10001] = tpl_shop_exchange,
     [10002] = tpl_shop_activity,
     [10003] = tpl_shop_activity,
@@ -38,12 +42,13 @@ function P:ctor()
     self._shopLimitList = {}
     self._newitems = {}
     self._timeLimitItems = {}
+    self._currency_id = 1
+    self._currency_code = tpl_shop_cur_type[self._currency_id].code
 
     P.super.ctor(self)
 end
 
 function P:afterLogin()
-    self._isShowShopPush = false
 	self._monthly_card_exp = nil
     self._shopLimitList = {}
     self._initShopLimitList = nil
@@ -74,15 +79,8 @@ function P:afterLogin()
 end
 
 function P:initInfo()
-    -- if not self._monthly_card_exp then
-    --     self:requestPayInfo()
-    -- end
-    if not self._initShopLimitList then
-        self:requestShopLimitList()
-    end
-    if not self._initShopPid then
-        self:requestShopPid()
-    end
+    self:requestShopLimitList()
+    self:requestShopPid()
     self:refreshShopNewTag()
 end
 
@@ -129,19 +127,12 @@ function P:getPidData(buy_id, avenue)
     return nil
 end
 
-function P:getPidDataByPid(pid, avenue)
-    if not avenue then
-        avenue = G_CHNL_ID
-    end
+function P:getPidDataByPid(pid)
     local datas = get_tpl_subKey(tpl_shop_pid_list, "pid", pid)
     if not datas then
         return
     end
-    for _, v in ipairs(datas) do
-        if v.avenue_id == avenue and v.pid == pid then
-            return v
-        end
-    end
+    return datas[1]
 end
 
 function P:getShopCfg(shop_type, buy_id)
@@ -173,7 +164,7 @@ function P:pay(data, cb, tag, parentTag)
     end
 
     if not PlayerModel:isCanPay() then
-        UiManager:showToast(_T("LAB_SHOP_COMMON_35"))
+        UiManager:showToast(_T("TAB_SHOP_TIPS_1"))
         return
     end
     UiManager:showLoadingMask("PayMask")
@@ -189,8 +180,8 @@ function P:pay(data, cb, tag, parentTag)
     args.id = data.id
     args.avenue_id = pidCfg.avenue_id
     args.pid = pidCfg.pid
-    args.cur_id = PlayerModel:getCurId()
-    args.currency = tpl_shop_cur_type[args.cur_id].code
+    args.cur_id = self._currency_id
+    args.currency = self._currency_code
     Net:post("shop/createOrder", args, function(info)
         if info.code ~= 0 then
             self:doPayFail(true)
@@ -238,7 +229,7 @@ function P:PayTest(data)
             self:doPayFail(true)
             return
         end
-        ShopModel:onPaySucces(args, data, 5)
+        ShopModel:onPaySucces(args, data)
         self:doPaySuc()
     end)
 end
@@ -273,8 +264,8 @@ function P:doPaySuc(info)
     -- self:onSave()
 end
 
-function P:onPaySucces(info, data, testId)
-    local pidData = self:getPidDataByPid(info.pid, testId)
+function P:onPaySucces(info, data)
+    local pidData = self:getPidDataByPid(info.pid)
     if pidData and data.item_list then
         local shopCfg = self:getShopCfg(pidData.shop_type, pidData.buy_id)
         -- 购买月卡后刷新
@@ -289,13 +280,19 @@ function P:onPaySucces(info, data, testId)
                 end
             end
         end
+        if shopCfg.limit_type and shopCfg.limit_count and shopCfg.limit_count > 0 then
+            self:addLimitGoodsCount(shopCfg)
+        end
+    end
+    if pidData and pidData.buy_id == tpl_constdata.Dispatch_Passcard then
+        DispatchModel:getPassInfo().has_pass_card = true
     end
     self:setShopPledgeGiftRole()
 
     -- 恭喜获得
     self:showRewardView(data.item_list)
 
-    bee.emit(EventDef.evt_pay_sucess)
+    bee.emit(EventDef.evt_pay_sucess, {info = info, data = data, pidData = pidData})
     self:requestShopLimitList()
 
     if bee.isRelease then
@@ -351,22 +348,46 @@ function P:buyWithProp(shop_type, id, num)
         num = num or 1,
         mask = "buyWithProp",
     }
+
+    local rewards
+    if shop_type == SHOP_TYPE.shop_role_skin or shop_type == SHOP_TYPE.skin_gifts then
+        local shopCfg = SHOP_TYPE_CFG[shop_type][id]
+        rewards = {}
+        if not CharacterModel:isOwnedSkin(shopCfg.role_skin) then
+            table.insert(rewards, {major_type = GMajorType.ROLE_SKIN, id = shopCfg.role_skin, num = 1})
+        end
+        local l = {}
+        if shopCfg.props_ex then
+            for i, v in ipairs(ShopModel:getRewardsList(shopCfg.props_ex)) do
+                table.insert(l, v)
+            end
+        end
+        if shopCfg.props then
+            for i, v in ipairs(ShopModel:getRewardsList(shopCfg.props)) do
+                table.insert(l, v)
+            end
+        end
+        for i, v in ipairs(l) do
+            if ItemModel:getGPropType(tpl_props[v.item_id].type) == GPropType.Display then
+                if not ItemModel:isOwned(v.item_id) then
+                    table.insert(rewards, v)
+                end
+            else
+                table.insert(rewards, v)
+            end
+        end
+    else
+        rewards = self:getShopRewardList(shop_type, id)
+    end
+    for _,v in pairs(rewards) do
+        v.num = v.num * num
+    end
+
     Net:post("shop/buyWithProp", args, function(data)
         if data.code ~= 0 then
             return
         end
         bee.emit("evt_buy_Success", {shop_type = shop_type, id = id})
-
-        local rewards
-        if shop_type == SHOP_TYPE.shop_role_skin then
-            local shopCfg = SHOP_TYPE_CFG[shop_type][id]
-            rewards = {{major_type = GMajorType.ROLE_SKIN, id = shopCfg.role_skin, num = 1}}
-        else
-            rewards = self:getShopRewardList(shop_type, id)
-        end
-        for k,v in pairs(rewards) do
-            v.num = v.num * num
-        end
         self:showRewardView(rewards)
 
         local cfg = SHOP_TYPE_CFG[shop_type][id]
@@ -377,6 +398,8 @@ function P:buyWithProp(shop_type, id, num)
             bee.logEvent("onsen-shop_exchange", id, num)
         elseif shop_type == SHOP_TYPE.gala_season then
             bee.logEvent("galaseason-shop_exchange", id, num)
+        elseif shop_type == SHOP_TYPE.activity_sports then
+            bee.logEvent("activity-theme-shop-exchange", ThemeModel:getConfId(), id, num)
         end
     end)
 end
@@ -401,6 +424,10 @@ function P:requestShopLimitList()
     end)
 end
 
+function P:getIsInitShopLimitList()
+    return self._initShopLimitList
+end
+
 -- 获取商品价格
 function P:requestShopPid()
     Net:post("shop/pid", {avenue_id = G_CHNL_ID}, function(data)
@@ -409,12 +436,32 @@ function P:requestShopPid()
         end
 
         self._initShopPid = true
+        self._currency_id = data.currency_id
+        self._currency_code = data.currency_code
         self._shopPidList = {}
         for k, v in pairs(data.list) do
             self._shopPidList[v.id] = v
         end
         bee.emit("evt_updateShopPid")
     end)
+end
+
+function P:addLimitGoodsCount(cfg)
+    if not cfg.shop_type or not cfg.id then return end
+
+    if not self._shopLimitList[cfg.shop_type] then
+        self._shopLimitList[cfg.shop_type] = {}
+    end
+    local d = self._shopLimitList[cfg.shop_type][cfg.id]
+    if not d then
+        self._shopLimitList[cfg.shop_type][cfg.id] = {
+            shop_type = cfg.shop_type,
+            id = cfg.id,
+            count = 1,
+        }
+    else
+        d.count = d.count + 1
+    end
 end
 
 -- 获取限购商品已购买次数
@@ -488,10 +535,19 @@ function P:getShopSubTabs(id)
 
     local list = {}
     for k,v in pairs(tpl_shop_page[id].sub_page) do
-        if v == 101 and self:isClaimedFirstRecharge() then
-        elseif v == 103 and self:isBoughtIceBreak() then
-        elseif tpl_shop_page[v].is_hide ~= 1 then
-            if v == 303 then
+        if tpl_shop_page[v].is_hide ~= 1 then
+            if v == 101 and self:isClaimedFirstRecharge() then
+            elseif v == 103 and not self:isCanShowIceBreak() then
+            elseif tpl_shop_page[v].shop_type == SHOP_TYPE.skin_gifts then
+                local ids = tpl_shop_page[v].gifts
+                for _, giftId in pairs(ids) do
+                    local shopCfg = SHOP_TYPE_CFG[tpl_shop_page[v].shop_type][giftId]
+                    if self:productIsCanShow(shopCfg) and not self:getProductIsSoldOut(shopCfg) then
+                        table.insert(list, tpl_shop_page[v])
+                        break
+                    end
+                end
+            elseif v == 303 then
                 local data = self:getShopPackageList(SHOP_TYPE.activity_gifts)
                 if next(data) then
                     table.insert(list, tpl_shop_page[v])
@@ -548,19 +604,23 @@ end
 
 function P:setShopLimitStr(textNode, limit_type, limit_count, buyCount)
     if limit_type == SHOP_LIMIT_TYPE.DAILY then
-		return bee.setText(textNode, _T("LAB_SHOP_COMMON_11") .. ":" .. buyCount .. "/" .. limit_count)
+		return bee.setText(textNode, _T("LAB_SHOP_COMMON_11") .. ": " .. buyCount .. "/" .. limit_count)
 	elseif limit_type == SHOP_LIMIT_TYPE.WEEKLY then
-		return bee.setText(textNode, _T("LAB_SHOP_COMMON_12") .. ":" .. buyCount .. "/" .. limit_count)
+		return bee.setText(textNode, _T("LAB_SHOP_COMMON_12") .. ": " .. buyCount .. "/" .. limit_count)
 	elseif limit_type == SHOP_LIMIT_TYPE.MONTHLY then
-		return bee.setText(textNode, _T("LAB_SHOP_COMMON_13") .. ":" .. buyCount .. "/" .. limit_count)
+		return bee.setText(textNode, _T("LAB_SHOP_COMMON_13") .. ": " .. buyCount .. "/" .. limit_count)
 	elseif limit_type == SHOP_LIMIT_TYPE.PERMANENT then
-		return bee.setText(textNode, _T("LAB_SHOP_COMMON_14") .. ":" .. buyCount .. "/" .. limit_count)
+		return bee.setText(textNode, _T("LAB_SHOP_COMMON_14") .. ": " .. buyCount .. "/" .. limit_count)
 	end
     return bee.setText(textNode, "")
 end
 
 -- 皮肤商城
 function P:getShopSkinList(isSort)
+    if bee.isLimitView then
+        return {}
+    end
+    
     local curTime = bee.getServerTime()
     local list = {}
     for k, v in pairs(tpl_shop_role_skin) do
@@ -595,6 +655,22 @@ function P:getShopSkinList(isSort)
     end
     for i,v in ipairs(list) do
         v.index = i
+    end
+    return list
+end
+
+-- 获取热销界面复刻皮肤列表
+function P:getShopSkinReissueList(id)
+    local cfg = tpl_shop_hot_sell[id]
+    if not cfg then
+        return {}
+    end
+    local list = {}
+    for k, v in pairs(cfg.shop_skin_id) do
+        local shopCfg = tpl_shop_role_skin[v]
+        if self:productIsCanShow(shopCfg) and not CharacterModel:isOwnedSkin(shopCfg.role_skin) then
+            table.insert(list, {cfg = shopCfg, isOwn = false})
+        end
     end
     return list
 end
@@ -636,8 +712,11 @@ function P:getShopPackageList(shop_type)
     for k, v in pairs(cfg) do
         if self:getPidData(v.buy_id) then
             if v.shop_type == shop_type and self:productIsCanShow(v) then
-                local buyCount = self:getLimitGoodsBoughtCount(shop_type, v.id)
-                table.insert(list, {cfg = v, soldOut = buyCount == v.limit_count, buyCount = buyCount})
+                if shop_type ~= SHOP_TYPE.activity_gifts or 
+                    (shop_type == SHOP_TYPE.activity_gifts and v.activity == ThemeModel:getConfId()) then
+                    local buyCount = self:getLimitGoodsBoughtCount(shop_type, v.id)
+                    table.insert(list, {cfg = v, soldOut = buyCount == v.limit_count, buyCount = buyCount})
+                end
             end
         end
     end
@@ -671,7 +750,7 @@ end
 function P:getShopExchangeList(shop_type)
     local list = {}
     local ownList = {}
-    for k, v in pairs(SHOP_TYPE_CFG[shop_type] or tpl_shop_exchange) do
+    for k, v in pairs(SHOP_TYPE_CFG[shop_type]) do
         if v.shop_type == shop_type then
             if self:productIsCanShow(v) then
                 local buyCount = self:getLimitGoodsBoughtCount(shop_type, v.id)
@@ -822,6 +901,17 @@ function P:isClaimedFirstRecharge()
     return self._shopLimitList[SHOP_TYPE.first_recharge][1].reward == 0
 end
 
+-- 是否可显示新会长礼包
+function P:isCanShowIceBreak()
+    if not self:productIsCanShow(SHOP_TYPE_CFG[SHOP_TYPE.new_comer][10001]) then
+        return false
+    end
+    if self:isBoughtIceBreak() then
+        return false
+    end
+    return true
+end
+
 -- 是否已购买新会长礼包
 function P:isBoughtIceBreak()
     return self:getLimitGoodsBoughtCount(SHOP_TYPE.new_comer, 10001) > 0
@@ -836,7 +926,7 @@ function P:showRewardView(rewards, closeCb)
     local showRewardList = {}
     local showNewList = {}
     for i, v in ipairs(rewards) do
-        v.num = v.num * (num or 1)
+        -- v.num = v.num * (num or 1)
         if v.major_type == GMajorType.ROLE then
             v.new = not CharacterModel:getRole(v.item_id)
             table.insert(showNewList, v)
@@ -1404,32 +1494,128 @@ function P:autoShowCharacterGift(characterId)
     return false
 end
 
+-- 获取推送列表
 function P:getShopPushList()
     local list = {}
+    for i,v in ipairs(tpl_shop_hot_sell_list) do
+        if v.shop_type == SHOP_TYPE.monthly_card then
+            -- 月卡
+            if self:isMonthlyCard() then
+                table.insert(list, {cfg = v, tag = true})
+            else
+                table.insert(list, {cfg = v, tag = false})
+            end
+        elseif v.shop_type == SHOP_TYPE.shop_recharge then
+            -- 轮盘彩晶
+            local isBought = false
+            local isCanShow = false
+            for _, v1 in pairs(self:getShopTopUpList(v.shop_type)) do
+                if not self:getIsCanDoubleReward(v1.cfg.shop_type, v1.cfg.id) then
+                    isBought = true
+                else
+                    isCanShow = true
+                end
+            end
+            if isCanShow then
+                table.insert(list, {cfg = v, tag = isBought})
+            end
+        elseif v.shop_type == SHOP_TYPE.activity_gifts and ThemeModel:getThemeConfId() == v.activity_id then
+            -- 活动礼包
+            local isCanShow = false
+            local tag = false
+            for _, v1 in pairs(SHOP_TYPE_CFG[v.shop_type]) do
+                if self:productIsCanShow(v1) then
+                    isCanShow = true
+                    if self:getLimitGoodsBoughtCount(v.shop_type, v1.id) > 0 then
+                        tag = true
+                        break
+                    end
+                end
+            end
+            if isCanShow then
+                table.insert(list, {cfg = v, tag = tag})
+            end
+        elseif v.shop_type == SHOP_TYPE.first_recharge then
+            -- 首充
+            if not self:isClaimedFirstRecharge() then
+                table.insert(list, {cfg = v})
+            end
+        elseif v.shop_type == SHOP_TYPE.new_comer then
+            -- 新会长专属礼
+            if self:isCanShowIceBreak() then
+                table.insert(list, {cfg = v})
+            end
+        elseif v.shop_type == SHOP_TYPE.skin_gifts then
+            -- 皮肤礼包
+            local shopCfg = SHOP_TYPE_CFG[v.shop_type][v.gifts[1]]
+            if self:productIsCanShow(shopCfg) then
+                if not self:getProductIsSoldOut(shopCfg) then
+                    if CharacterModel:isOwnedSkin(shopCfg.role_skin) then
+                        table.insert(list, {cfg = v, tag = true})
+                    else
+                        table.insert(list, {cfg = v, tag = false})
+                    end
+                end
+            end
+        elseif v.shop_type == SHOP_TYPE.shop_role_skin then
+            for _, v1 in ipairs(v.shop_skin_id) do
+                local shopCfg = SHOP_TYPE_CFG[v.shop_type][v1]
+                if self:productIsCanShow(shopCfg) and not CharacterModel:isOwnedSkin(shopCfg.role_skin) then
+                    table.insert(list, {cfg = v, tag = false})
+                    break
+                end
+            end
+            
+        end
+    end
 
-    -- 首充
-    if not self:isClaimedFirstRecharge() then
-        table.insert(list, {view = "views/Shop/ShopFirstRecharge", pos = bee.v3(0, 0, 0)})
-    end
-    -- 破冰礼包
-    if not self:isBoughtIceBreak() then
-        table.insert(list, {view = "views/Shop/ShopNewComerExclusive", pos = bee.v3(0, 0, 0)})
-    end
+    table.sort(list, function(a, b)
+        local sumA = 100
+        local sumB = 100
+
+        if not a.tag then
+            sumA = sumA + 10
+        end
+        if not b.tag then
+            sumB = sumB + 10
+        end
+
+        if a.cfg.order < b.cfg.order then
+            sumA = sumA + 1
+        end
+        if b.cfg.order < a.cfg.order then
+            sumB = sumB + 1
+        end
+
+        return sumA > sumB
+    end)
 
     return list
 end
 
--- 是否可推送新人特惠弹窗
-function P:isShowShopPush()
-    -- 本次登录已推送
-    if self._isShowShopPush then
+-- 是否可推送热销弹窗
+function P:getShopPushId()
+    if bee.getServerTime() - self:getShopPushTime() < tpl_constdata.Hot_Push_Time then
         return
     end
-    -- 今日已推送
-    if not LocalStore:isDailyTagValidCrossDay("shop_push" .. PlayerModel:getUid()) then
-        return
+
+    local list = self:getShopPushList()
+    for i,v in ipairs(list) do
+        if not v.tag then
+            if LocalStore:isDailyTagValidCrossDay("shop_push_" .. v.cfg.id .. "_" .. PlayerModel:getUid()) then
+                return v.cfg.id
+            end
+        end
     end
-    return #self:getShopPushList() > 0
+end
+
+function P:setShopPushTime()
+    self.cloud["shop_push_time" .. PlayerModel:getUid()] = bee.getServerTime()
+    self:onSave()
+end
+
+function P:getShopPushTime()
+    return self.cloud["shop_push_time" .. PlayerModel:getUid()] or 0
 end
 
 -- 记录自动推送新人优惠弹窗
@@ -1453,9 +1639,11 @@ function P:getPriText(pidCfg)
     else
         if not self._shopPidList then
             self:initInfo()
-            return tpl_shop_cur_type[PlayerModel:getCurId()].code .. " " .. pidCfg["pri_" .. PlayerModel:getCurId()]
+            return self._currency_code .. " " .. pidCfg["pri_" .. self._currency_id]
+        elseif self._shopPidList[pidCfg.id] then
+            return self._currency_code .. " " .. self._shopPidList[pidCfg.id]["pri_" .. self._currency_id]
         else
-            return tpl_shop_cur_type[PlayerModel:getCurId()].code .. " " .. self._shopPidList[pidCfg.id]["pri_" .. PlayerModel:getCurId()]
+            return self._currency_code .. " " .. pidCfg["pri_" .. self._currency_id]
         end
     end
 end
@@ -1471,6 +1659,19 @@ function P:productIsCanShow(cfg)
     if not cfg then
         return false
     end
+
+    if bee.isLimitView then
+        if cfg.shop_type == SHOP_TYPE.skin_gifts then
+            return false
+        end
+        if cfg.shop_type == SHOP_TYPE.new_comer then
+            return false
+        end
+        if cfg.shop_type == SHOP_TYPE.shop_role_skin then
+            return false
+        end
+    end
+
     if self:getShopTypePageIsHide(cfg.shop_type) then
         return false
     end
@@ -1494,19 +1695,20 @@ function P:productIsCanShow(cfg)
     return isCanShow
 end
 
+-- 是否已售罄
+function P:getProductIsSoldOut(cfg)
+    local boughtCount = self:getLimitGoodsBoughtCount(cfg.shop_type, cfg.id)
+    if not cfg.limit_count or boughtCount < cfg.limit_count then
+        return false
+    end
+    return true
+end
+
 function P:tryAutoPop()
-    -- 活动礼包
-    local data = ShopModel:getShopPackageList(SHOP_TYPE.activity_gifts)
-    for k, v in pairs(data) do
-        if not v.soldOut then
-            local activityId = ThemeModel:getConfId()
-            if activityId == ActivityId.BunnyGirl then
-                if LocalStore:isDailyTagValidCrossDay("activity_packet_push" .. PlayerModel:getUid()) then
-                    bee.showUiTask("BunnyGirlPackage", nil, nil, LOBBY_POP_PRIORITY.ActivityGift)
-                    return
-                end
-            end
-        end
+    local id = self:getShopPushId()
+    if id then
+        bee.showUiTask("ShopBestseller", {id = id}, nil, LOBBY_POP_PRIORITY.BestSeller)
+        self:setShopPushTime()
     end
 end
 

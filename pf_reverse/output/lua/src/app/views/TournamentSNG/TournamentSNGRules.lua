@@ -11,10 +11,16 @@ function P:onAwake()
     self.Chance = self:find("Chance", self.Content)
     self.League = self:find("League", self.Content)
 
+    self.VideoTip = self:find("AnimRoot/LeftTop/VideoTip")
+    self.VideoTip:SetActive(false)
+
     self.avatartitle_sng_01 = self:find("avatartitle_sng_01", self.League)
 
     bee.addClick(self:find("AnimRoot/RightTop/CloseButton"), function()
         self:hideUI()
+    end)
+    bee.addClick(self.VideoTip, function ()
+        self:videoEvent()
     end)
     bee.addClick(self.ButtonLeft, function()
         Game:playSound("ui_button_confirm")
@@ -74,11 +80,11 @@ function P:onShow()
     end
 
     local avatartitle_pos = {
-        jp = bee.v3(564, -439),
-        en = bee.v3(-450, -414),
-        tw = bee.v3(179, -234),
-        zh = bee.v3(144, -234),
-        ko = bee.v3(144, -234),
+        jp = bee.v3(564, -489),
+        en = bee.v3(-450, -464),
+        tw = bee.v3(179, -284),
+        zh = bee.v3(144, -284),
+        ko = bee.v3(144, -284),
     }
     self.avatartitle_sng_01.transform.localPosition = avatartitle_pos[LAN:getLanguage()] or avatartitle_pos["en"]
 
@@ -92,6 +98,10 @@ end
 
 function P:evt_hideUiWhenAction(isVisible)
     self:onUiBlur(not isVisible, "evt_hideUiWhenAction", true)
+end
+
+function P:videoEvent()
+    CU.Application.OpenURL("https://www.pokerfate.com/")
 end
 
 return P

@@ -47,11 +47,7 @@ function P:onAwake()
 
 	bee.addClick(self.ConfirmButton, function()
 		Game:playSound("ui_button_confirm")
-		Game:playLobbyBGM()
-		self:closeUI(true)
-		if CharacterModel:isGetNewRole() then
-			SdkHelper:startAppReview()
-		end
+		self:onBtClose()
 	end)
 	bee.addClick(self.RecruitButton, function()
 		self:onClickRecruit()
@@ -84,6 +80,7 @@ function P:onStart()
 	end
 	
 	self:setShareCont()
+	bee.emit("evt_gachaOver")
 end
 
 function P:evt_ItemChangeRSP(msg)
@@ -209,7 +206,7 @@ function P:setShowItem(item, data)
 			return
 		end
 		Game:playSound("ui_button_confirm")
-		if self._recruitNum == 1 and bee.isLongScreen then
+		if self._recruitNum == 1 and bee.isLongScreen() then
 			UiManager:showUI("CommonItemTipLR", {data = ItemModel:getItem(id, true), target = ItemBg})
 		else
 			UiManager:showUI("CommonItemTip", {data = ItemModel:getItem(id, true), target = ItemBg})
@@ -321,23 +318,6 @@ end
 
 function P:onClickRecruit()
 	Game:playSound("ui_button_confirm")
-	if not bee.checkCd("DrawCard", 2) then
-		return
-	end
-	-- if bee.checkCd("DrawCard", 2) then
-	-- 	-- 判断是否足够
-	-- 	if self._recruitNum == 10 then
-	-- 		GachaModel:checkRecruitTenCost(function(costList)
-	-- 			self._costList = costList
-	-- 			self:closeUI(true)
-	-- 		end)
-	-- 	else
-	-- 		GachaModel:checkRecruitOneCost(function(costList)
-	-- 			self._costList = costList
-	-- 			self:closeUI(true)
-	-- 		end)
-	-- 	end
-	-- end
 
     local drawCoin = tpl_constdata.CharacterDropCoin
     local drawCoinTen = tpl_constdata.CharacterDropCoinTen
@@ -373,13 +353,20 @@ function P:onClickRecruit()
     -- 数量不足跳转获取
     if not next(costList) then
         -- 跳转提示
-        local params = {}
-        local propCfg = tpl_props[GPropId.DrawTicket]
-        params.text = _F("LAB_GACHA_023", _T(propCfg.name))
-        params.onSure = function()
-            ItemModel:jumpView(propCfg.accesses[1])
+        UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(GPropId.DrawTicket, true)})
+        UiManager:showToast(_T("LAB_COMMON_TIPS_1"))
+        if self._recruitNum == 1 then
+        	bee.logEvent("recruit-click", self._params.pool_id, 0)
+        elseif self._recruitNum == 10 then
+        	bee.logEvent("recruit-click-10", self._params.pool_id, 0)
         end
-        UiManager:showTip(params)
+        return
+    end
+
+    if GachaModel:isShowDrawNotice() then
+        UiManager:showUI("GachaNoticeSmall", {poolId = self._params.pool_id, drawCount = self._recruitNum, confirmCb = function()
+        	self:hideUI()
+        end})
         return
     end
 
@@ -387,11 +374,14 @@ function P:onClickRecruit()
 	self:closeUI(true)
 end
 
-function P:reRecruit()
+function P:reRecruit()	
 	if self._costList and next(self._costList) then
+		bee.emit("evt_gachaStart")
 		if self._recruitNum == 10 then
+			bee.logEvent("recruit-click-10", self._params.pool_id, 1)
 			GachaModel:recruitTen(self._params.pool_id, self._costList)
 		else
+			bee.logEvent("recruit-click", self._params.pool_id, 1)
 			GachaModel:recruitOne(self._params.pool_id, self._costList)
 		end
 	end
@@ -451,6 +441,14 @@ function P:setShareCont()
     local Icon = self:find("Icon", self.ShareReward)
     local CountText = self:find("CountText", self.ShareReward)
     ShareModel:setShareCont(self.ShareReward, Icon, CountText, 3)
+end
+
+function P:onBtClose()
+	Game:playLobbyBGM()
+	self:closeUI(true)
+	if CharacterModel:isGetNewRole() then
+		SdkHelper:startAppReview()
+	end
 end
 
 return P

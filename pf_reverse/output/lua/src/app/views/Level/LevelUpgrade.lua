@@ -17,6 +17,9 @@ function P:onAwake()
     self.ShareReward = self:find("ShareReward", self.ShareCont)
 
     bee.addClick(self:find("CloseMask", self.Upgrade), function()
+        if self._params and self._params.cb then
+            self._params.cb()
+        end
         self:hideUI(nil, true)
     end)
     bee.addClick(self.ShareButton, function()

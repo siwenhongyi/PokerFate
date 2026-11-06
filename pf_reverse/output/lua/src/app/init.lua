@@ -28,6 +28,7 @@ require "app.Types.RedTag"
 require "app.Utils.utils"
 require "app.Utils.FontUtil"
 require "app.mgr.UrlManager"
+require "app.mgr.ShortcutKeyManager"
 
 ModelManager=require "app.mgr.ModelManager"
 require "app.Utils.UIDUtil"
@@ -48,13 +49,16 @@ UrlManager:init()
 
 LanguageManager:init()
 GameManager:init()
+-- ShortcutKeyManager:init()
 
 if not G_RUN_IN_JOB then
     ModelManager:init()
     GameABTestManager:init()
     
     require("app.mgr.MobileNotificationsManager")
-    MobileNotificationsManager:init()
+    if not bee.isPc then
+        MobileNotificationsManager:init()
+    end
 end
 
 
@@ -127,12 +131,34 @@ end
 
 -- 分辨率
 bee.getResolution = function()
-    return LocalStore:getIntegerForKey("cfg_Resolution", 1)
+    if G_CHNL_ID == 4 then
+        return LocalStore:getIntegerForKey("cfg_Resolution", 10)
+    else
+        return LocalStore:getIntegerForKey("cfg_Resolution", 1)
+    end
 end
 
 bee.setResolution = function(val)
     LocalStore:setIntegerForKey("cfg_Resolution", val)
     return val
+end
+
+--窗口模式
+bee.getScreenShowType = function()
+    local type = LocalStore:getIntegerForKey("ScreenShowType", 0)
+    if type == 0 then
+        if CU.Screen.fullScreen then
+            type = ScreenShowType.FullScreen
+        else
+            type = ScreenShowType.Window
+        end
+    end
+    return type
+end
+
+bee.setScreenShowType = function(flag)
+    LocalStore:setIntegerForKey("ScreenShowType", flag)
+    return flag
 end
 
 -- 全屏
@@ -146,16 +172,17 @@ bee.setFullScreen = function(flag)
 end
 
 bee.refreshScreen = function()
+    local showType = bee.getScreenShowType()
     if bee.isPc and not bee.isEditor then
         local info = CU.Screen.mainWindowDisplayInfo
-        if bee.isFullScreen() then
-            local info = CU.Screen.mainWindowDisplayInfo
+        if showType == ScreenShowType.FullScreen then
+            -- local info = CU.Screen.mainWindowDisplayInfo
             CU.Screen.SetResolution(info.width, info.height, CU.FullScreenMode.ExclusiveFullScreen)
             refreshScreenSize()
             if UiManager and CS.GameMain.Instance then
                 UiManager:resetScreenMatch()
             end
-        else
+        elseif showType == ScreenShowType.Window then
             local d = Config.Resolutions[bee.getResolution()]
             if d then
                 CU.Screen.SetResolution(d[1], d[2], bee.isFullScreen())
@@ -163,6 +190,12 @@ bee.refreshScreen = function()
                 if UiManager and CS.GameMain.Instance then
                     UiManager:resetScreenMatch()
                 end
+            end
+        elseif showType == ScreenShowType.Borderless then
+            CU.Screen.SetResolution(info.width, info.height, CU.FullScreenMode.FullScreenWindow)
+            refreshScreenSize()
+            if UiManager and CS.GameMain.Instance then
+                UiManager:resetScreenMatch()
             end
         end
     end
@@ -182,7 +215,7 @@ bee.refreshFrameRate = function()
     CU.Application.targetFrameRate = bee.getFrameRate()
 end
 
-if bee.isPc and not bee.isEditor and bee.isFullScreen() then
+if bee.isPc and not bee.isEditor and bee.getScreenShowType() ~= ScreenShowType.Window then
     bee.refreshScreen()
 end
 bee.refreshFrameRate()
@@ -248,9 +281,10 @@ function string.getBigNumStr(num)
     if num > 10000 and strLen<7 then
         sign = "K"
         if num % 1000 == 0 then
-            bigNumStr= string.format("%d",num/1000)
+            bigNumStr= string.format("%d", num/1000)
         else
-            bigNumStr= string.format("%0.1f",num/1000)
+            bigNumStr= string.format("%0.1f", math.floor(num/100) / 10)
+            -- bigNumStr= string.format("%0.1f",num/1000)
         end
     elseif  strLen>=7 and strLen<=10 then
         sign = "M"
@@ -415,6 +449,6 @@ end
 VibrateManager:init()
 math.randomseed(os.time())
 
-if bee.isPc then
+if LocalStore:getIntegerForKey("pf_vsyncCount", 1) == 0 then
     CS.Utils.SetvSyncCount(0)
 end

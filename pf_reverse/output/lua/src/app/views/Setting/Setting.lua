@@ -12,6 +12,7 @@ function P:onAwake()
         self:find("TabAudioList", self.Panel),
         self:find("TabAccount", self.Panel),
         self:find("TabIngame", self.Panel),
+        self:find("TabShortcutKey", self.Panel),
     }
     self.ViewSize = self.TabViews[1].transform.sizeDelta
     local TAB = self:find("TAB", self.Panel)
@@ -20,6 +21,7 @@ function P:onAwake()
         self:find("Tab2Toggle", TAB),
         self:find("Tab3Toggle", TAB),
         self:find("Tab4Toggle", TAB),
+        self:find("Tab5Toggle", TAB),
     }
     for k, v in ipairs(self.Tabs) do
         bee.addValueChanged(v, function(isOn)
@@ -29,6 +31,8 @@ function P:onAwake()
             end
         end)
     end
+    local shortcutKeyCtrlable = bee.checkVersion("1.6.4")
+    self.Tabs[5]:SetActive(shortcutKeyCtrlable and (bee.isPc or bee.isEditor))
 
     bee.addClick(self:find("CloseButton", self.Panel), function()
         self:hideUI()
@@ -68,6 +72,7 @@ function P:onShow()
         self.Tabs[4].transform.localPosition = bee.v3(0, 108)
         self.Tabs[1].transform.localPosition = bee.v3(0, 0)
         self.Tabs[2].transform.localPosition = bee.v3(0, -108)
+        self.Tabs[5].transform.localPosition = bee.v3(0, -216)
         self:doShowView(4)
 
         for _, v in ipairs(self.TabViews) do
@@ -103,6 +108,8 @@ function P:doShowView(index)
                 self:onShowTabAudioList()
             elseif 3 == index then
                 self:onShowTabAccount()
+            elseif 5 == index then
+                self:onShowTabShortcutKey()
             else
                 self:onShowTabIngame()
             end
@@ -117,6 +124,7 @@ end
 function P:onShowTabGeneral()
     self:initTabGeneral()
     self:refreshFilter()
+    self:refreshWinModelFilter()
     bee.setCheck(self.FullToggle, false, bee.isFullScreen())
     for k, v in ipairs(Config.Languages) do
         if v == LanguageManager:getLanguage() then
@@ -145,6 +153,10 @@ function P:onShowTabAccount()
     self:evt_refreshBindEmail()
 end
 
+function P:onShowTabShortcutKey()
+    --
+end
+
 function P:onShowTabIngame()
     self:initTabIngame()
 
@@ -159,11 +171,16 @@ function P:onShowTabIngame()
             self.ButtonAutoSwitch.transform.parent.gameObject:SetActive(false)
         elseif GameModel.data:isFriendsRoom() then
             self.ButtonAutoSwitch.transform.parent.gameObject:SetActive(false)
+        elseif GameModel.data:isAllinOrFold() then
+            self.ButtonAutoByin.transform.parent.gameObject:SetActive(false)
+            self.ButtonPrecise.transform.parent.gameObject:SetActive(false)
+            self.ButtonCustomize.transform.parent.gameObject:SetActive(false)
         end
         self.ButtonShowBB.transform.parent.gameObject:SetActive(not GameModel.data:isTrainingGame())
     end
     
     bee.setCheck(self.ButtonPreAction, false, SettingModel:isPreAction())
+    bee.setCheck(self.ButtonIntensity, false, SettingModel:isShowIntensity(self._gameType))
     bee.setCheck(self.ButtonCardValue, false, SettingModel:isCardValue())
     bee.setCheck(self.ButtonAutoByin, false, SettingModel:isAutoByin())
     bee.setCheck(self.ButtonShowCard, false, SettingModel:isShowCard())
@@ -173,9 +190,12 @@ function P:onShowTabIngame()
     bee.setCheck(self.ButtonAutoSwitch, false, SettingModel:isAutoSwitch())
     bee.setCheck(self.ButtonHideInvite, false, SettingModel:isHideInvite())
     bee.setCheck(self.ButtonHideChat, false, SettingModel:isHideChat())
+    bee.setCheck(self.ButtonHideEmoji, false, SettingModel:isHideEmoji())
+    bee.setCheck(self.ButtonHideIEmoji, false, SettingModel:isHideIEmoji())
+    
 
     if self.Panel3 then
-        self.Panel3:SetActive(SettingModel:isBetCustomize(self._gameType))
+        self.Panel3:SetActive(GameModel.data and not GameModel.data:isAllinOrFold() and SettingModel:isBetCustomize(self._gameType))
     end
 
 
@@ -201,6 +221,9 @@ end
 
 function P:initTabGeneral()
     if self._initview1 then return end
+
+    self.FilterModel = {size = 1, model = 2}
+    self._curFilterModel = nil
 
     self.FilterMask = self:find("Center/FilterMask", self.AnimRoot)
     self.FilterView = self:find("FilterView", self.FilterMask)
@@ -258,6 +281,17 @@ function P:initTabGeneral()
             end
         end)
     end
+    self.vSyncCountSwitch = self:find("panel1/Switch", GeneralItem3)
+    self.vsyncCount = LocalStore:getIntegerForKey("pf_vsyncCount", 1)
+    bee.setCheck(self.vSyncCountSwitch, nil, self.vsyncCount ~= 0)
+    bee.onCheck(self.vSyncCountSwitch, function(isOn)
+        self.vsyncCount = isOn and 1 or 0
+        
+        LocalStore:setIntegerForKey("pf_vsyncCount", self.vsyncCount)
+        Game:playSound("ui_button_disabled")
+        bee.logEvent("settings-vsync", isOn and 1 or 2)
+        CS.Utils.SetvSyncCount(self.vsyncCount)
+    end)
 
     self.GeneralItem4 = self:find("GeneralItem04", Content)
     self.Filter = self:find("Filter", self.GeneralItem4)
@@ -265,6 +299,7 @@ function P:initTabGeneral()
     self.GeneralItem4:SetActive(bee.isPc)
     self.FilterArrow = self:find("FilterArrow", self.Filter)
     self.FullToggle = self:find("CheckToggle", self.GeneralItem4)
+    self.ResolutionBtnIcon = self:find("common_panel_blue_filter_bg", self.Filter)
 
     bee.addValueChanged(self.FullToggle, function(isOn)
         Game:playSound("ui_button_disabled")
@@ -275,35 +310,8 @@ function P:initTabGeneral()
 
     bee.addClick(self.Filter, function()
         Game:playSound("ui_button_confirm")
+        self.FilterList:refreshSize()
         self:doShowResolution()
-    end)
-
-    bee.addClick2(self.FilterMask, function()
-        self.FilterMask:SetActive(false)
-        self:refreshFilter()
-    end)
-
-    self.FilterList = UiListEx:create(self.FilterView)
-    self.FilterList:setWidth(70)
-    self.FilterList:setTopBottom(4, 4)
-    self.FilterList:setCreateFunc(function(data)
-        return CU.GameObject.Instantiate(self.FilterItem)
-    end)
-    self.FilterList:setRefreshFunc(function(data, item)
-        bee.setText(self:find("On/TextValue", item), string.format("%dx%d", data[1], data[2]))
-        bee.setText(self:find("Off/TextValue", item), string.format("%dx%d", data[1], data[2]))
-        local cur = Config.Resolutions[bee.getResolution()]
-        self:find("On", item):SetActive(cur == data)
-        self:find("Off", item):SetActive(cur ~= data)
-
-        bee.addClick(item, function()
-            Game:playSound("ui_button_confirm")
-            bee.setResolution(data.index)
-            self.FilterMask:SetActive(false)
-            self:refreshFilter()
-            bee.refreshScreen()
-            bee.logEvent("settings-resolution", data.index)
-        end, true)
     end)
 
     self.GeneralItem5 = self:find("GeneralItem05", Content)
@@ -320,6 +328,182 @@ function P:initTabGeneral()
     self:bindVibrateSwitch("vibrateOutGame", self.VibrateSwitch3, function(isOn)
         bee.logEvent("settings-vibrate-outgame", isOn and 1 or 2)
     end)
+
+    self.GeneralItem6 = self:find("GeneralItem06", Content)
+    self:bindSettingSwitch(self.GeneralItem6, "privacies.scrap", "panel1/Switch", "settings-role-show-bust", "evt_privaciesScrap")
+    self:bindSettingSwitch(self.GeneralItem6, "privacies.originalSkin", "panel2/Switch", "settings-role-show-default", "evt_privaciesSkin")
+    bee.addClick(self:find("Title/InfoButton", self.GeneralItem6), function()
+        UiManager:showUI("CommonTextTipRL", {text = _T("LAB_SETTINGS_134"), target = self:find("Title/InfoButton", self.GeneralItem6), parent = self.node})
+        bee.logEvent("settings-role-show-rules")
+    end)
+
+    self.GeneralItem7 = self:find("GeneralItem07", Content)
+    self:bindSettingSwitch(self.GeneralItem7, "privacies.hideName", "panel1/Switch", "settings-privacy-self", "evt_privaciesName")
+    self:bindSettingSwitch(self.GeneralItem7, "privacies.hideOther", "panel2/Switch", "settings-privacy-other", "evt_privaciesOther")
+    -- self:bindSettingSwitch(self.GeneralItem7, "privacies.hideOther", "panel3/Switch", "settings-privacy-other", "evt_privaciesOther")
+    self:vipSwitch(self:find("panel3/Switch", self.GeneralItem7))
+    bee.addClick(self:find("Title/InfoButton", self.GeneralItem7), function()
+        UiManager:showUI("CommonTextTipRL", {text = _T("LAB_SETTINGS_171"), target = self:find("Title/InfoButton", self.GeneralItem7), parent = self.node})
+        bee.logEvent("settings-privacy-rules")
+    end)
+
+    self.GeneralItem8 = self:find("GeneralItem08", Content)
+    self.GeneralItem09 = self:find("GeneralItem09", Content)
+    if not bee.isEditor and (bee.isPc or not bee.checkVersion("1.6.2")) then
+        self.GeneralItem8:SetActive(false)
+        self.GeneralItem09:SetActive(false)
+    else
+        local uploadNoticeSetting = function()
+            SettingModel:uploadNoticeSetting()
+        end
+        self:bindSettingSwitch(self.GeneralItem8, "noticesSetting.enable_push", "Switch", nil, nil, function()
+            if SettingModel:getValue("noticesSetting.enable_push") and bee.checkVersion("1.6.2") and not CS.MobileNotificationsMgr.Instance:GetSystemNotificationPermission() then
+                UiManager:showTip({
+                    text = _T("LAB_SETTINGS_170"),
+                    onSure = function()
+                        self._onApplicationRusume = function()
+                            if CS.MobileNotificationsMgr.Instance:GetSystemNotificationPermission() then
+                                uploadNoticeSetting()
+                                self:refreshNoticeUI()
+                            else
+                                SettingModel:setValue("noticesSetting.enable_push", false)
+                                bee.setCheck(self:find("Switch", self.GeneralItem8), true, false)
+                            end
+                        end
+                        CS.MobileNotificationsMgr.Instance:SetSystemNotificationPermission()
+                    end,
+                    onCancel = function()
+                        SettingModel:setValue("noticesSetting.enable_push", false)
+                        bee.setCheck(self:find("Switch", self.GeneralItem8), true, false)
+                    end,
+                })
+            else
+                uploadNoticeSetting()
+                self:refreshNoticeUI()
+            end
+        end)
+        self:bindSettingSwitch(self.GeneralItem09, "noticesSetting.active_type.1", "Item1/panel1/ToggleCheck", nil, nil, uploadNoticeSetting)
+        self:bindSettingSwitch(self.GeneralItem09, "noticesSetting.active_type.2", "Item1/panel2/ToggleCheck", nil, nil, uploadNoticeSetting)
+        self:bindSettingSwitch(self.GeneralItem09, "noticesSetting.active_type.3", "Item2/panel3/ToggleCheck", nil, nil, uploadNoticeSetting)
+        self:bindSettingSwitch(self.GeneralItem09, "noticesSetting.active_type.4", "Item2/panel4/ToggleCheck", nil, nil, uploadNoticeSetting)
+        self:bindSettingSwitch(self.GeneralItem09, "noticesSetting.active_type.5", "Item3/panel5/ToggleCheck", nil, nil, uploadNoticeSetting)
+        bee.addClick(self:find("Title/InfoButton", self.GeneralItem8), function()
+            UiManager:showUI("CommonTextTipRL", {text = _T("LAB_SETTINGS_166"), target = self:find("Title/InfoButton", self.GeneralItem8), parent = self.node})
+            bee.logEvent("settings-notice-rules")
+        end)
+        self:refreshNoticeUI()
+    end
+
+    self.GeneralItem10 = self:find("GeneralItem10", Content)
+    self.WinModelFilter = self:find("Filter", self.GeneralItem10)
+    self.WinModelText = self:find("Text", self.WinModelFilter)
+    self.GeneralItem10:SetActive(bee.isPc)
+    self.WinModelFilterArrow = self:find("FilterArrow", self.WinModelFilter)
+
+    bee.addClick(self.WinModelFilter, function()
+        Game:playSound("ui_button_confirm")
+        self.FilterList:refreshSize()
+        self:doShowWinModel()
+    end)
+
+    bee.addClick2(self.FilterMask, function ()
+        self.FilterList:moveToYItem(1)
+        self.FilterMask:SetActive(false)
+        if self._curFilterModel == self.FilterModel.size then
+            self:refreshFilter()
+        elseif self._curFilterModel == self.FilterModel.model then
+            self:refreshWinModelFilter()
+        end
+    end)
+
+    self.FilterList = UiListEx:create(self.FilterView)
+    self.FilterList:setWidth(70)
+    self.FilterList:setTopBottom(4, 4)
+    self.FilterList:setCreateFunc(function(data)
+        return CU.GameObject.Instantiate(self.FilterItem)
+    end)
+
+    self.FilterList:setRefreshFunc(function(data, item)
+        if self._curFilterModel == self.FilterModel.size then
+            item.transform.sizeDelta = bee.v2(320, 50)
+            self:find("Off", item).transform.sizeDelta = bee.v2(288, 50)
+            self:find("On", item).transform.sizeDelta = bee.v2(288, 50)
+            self:setFilterSize(data, item)
+        elseif self._curFilterModel == self.FilterModel.model then
+            item.transform.sizeDelta = bee.v2(522, 50)
+            self:find("Off", item).transform.sizeDelta = bee.v2(480, 50)
+            self:find("On", item).transform.sizeDelta = bee.v2(480, 50)
+            self:setFilterModel(data, item)
+        end
+    end)
+end
+
+function P:refreshNoticeUI()
+    local flag = SettingModel:getValue("noticesSetting.enable_push")
+    self.GeneralItem09:SetActive(flag)
+end
+
+function P:setFilterSize(data, item)
+    bee.setText(self:find("On/TextValue", item), string.format("%dx%d", data[1], data[2]))
+    bee.setText(self:find("Off/TextValue", item), string.format("%dx%d", data[1], data[2]))
+    local cur = Config.Resolutions[bee.getResolution()]
+    self:find("On", item):SetActive(cur == data)
+    self:find("Off", item):SetActive(cur ~= data)
+
+    bee.addClick(item, function()
+        Game:playSound("ui_button_confirm")
+        bee.setResolution(data.index)
+        self.FilterMask:SetActive(false)
+        self:refreshFilter()
+        bee.refreshScreen()
+        bee.logEvent("settings-resolution", data.index)
+    end, true)
+end
+
+function P:setFilterModel(data, item)
+    local str = _T(ScreenShowTypeName[data.type])
+    bee.setText(self:find("On/TextValue", item), str)
+    bee.setText(self:find("Off/TextValue", item), str)
+    local cur = bee.getScreenShowType()
+    self:find("On", item):SetActive(cur == data.type)
+    self:find("Off", item):SetActive(cur ~= data.type)
+
+    bee.addClick(item, function()
+        Game:playSound("ui_button_confirm")
+        bee.setScreenShowType(data.type)
+        if data.type == ScreenShowType.Window then
+            bee.setFullScreen(false)
+            bee.refreshScreen()
+        elseif data.type == ScreenShowType.FullScreen then
+            bee.setFullScreen(true)
+            bee.refreshScreen()
+        elseif data.type == ScreenShowType.Borderless then
+            bee.setFullScreen(false)
+            bee.refreshScreen()
+            -- CS.ShortcutKeyManager.Instance:SetBorderlessWindow(2, false)
+        end
+
+        self.FilterMask:SetActive(false)
+        self:refreshWinModelFilter()
+    end, true)
+end
+
+function P:bindSettingSwitch(parent, key, switchName, logName, eventName, cb)
+    local switch = self:find(switchName, parent)
+    bee.setCheck(switch, nil, SettingModel:getValue(key))
+    bee.addValueChanged(switch, function(isOn)
+        Game:playSound("ui_button_disabled")
+        SettingModel:setValue(key, isOn)
+        if logName then
+            bee.logEvent(logName, isOn and 1 or 2)
+        end
+        if eventName then
+            bee.emit(eventName, isOn)
+        end
+        if cb then
+            cb(isOn)
+        end
+    end)
 end
 
 function P:bindVibrateSwitch(name, switch, onChange)
@@ -330,6 +514,14 @@ function P:bindVibrateSwitch(name, switch, onChange)
             onChange(isOn)
         end
         Game:playSound("ui_button_disabled")
+    end)
+end
+
+function P:vipSwitch(switch)
+    bee.setCheck(switch, nil, SettingModel:getVipHide())
+    bee.addValueChanged(switch, function(isOn)
+        Game:playSound("ui_button_disabled")
+        SettingModel:changeVipHide(isOn)
     end)
 end
 
@@ -598,6 +790,17 @@ function P:initTabAccount()
         UiManager:showUI("SettingBindEmail")
         bee.logEvent("settings-linkmail")
     end)
+
+    local emailBindText = self:find("Bind Email", AccountItem2)
+    self.emailTipButton = self:find("TipButton", AccountItem2)
+    bee.setText(emailBindText, _T("LAB_SETTINGS_035"))
+    local emailStrWidth = emailBindText:GetComponent("Text").preferredWidth
+    self.emailTipButton.transform.localPosition = bee.v3(-570 + emailStrWidth + 50, 54, 0)
+    bee.addClick(self.emailTipButton, function()
+        Game:playSound("ui_button_confirm")
+        self:reGuide()
+    end)
+
     bee.addClick(self:find("StoveButton", self.AccountItemStove), function()
         Game:playSound("ui_button_confirm")
         bee.logEvent("settings-linkstove")
@@ -636,6 +839,7 @@ function P:initTabIngame()
     self.Panel3 = self:find("Panel3", Content)
 
     self.ButtonPreAction = self:find("ButtonPreAction/Switch", Content)
+    self.ButtonIntensity = self:find("ButtonIntensity/Switch", Content)
     self.ButtonCardValue = self:find("ButtonCardValue/Switch", Content)
     self.ButtonShowBB = self:find("ButtonShowBB/Switch", Content)
     self.ButtonAutoByin = self:find("ButtonAutoByin/Switch", Content)
@@ -645,9 +849,12 @@ function P:initTabIngame()
     self.ButtonPrecise = self:find("ButtonPrecise/Switch", Content)
     self.ButtonHideInvite = self:find("ButtonHideInvite/Switch", Content)
     self.ButtonHideChat = self:find("ButtonHideChat/Switch", Content)
+    self.ButtonHideEmoji = self:find("ButtonHideEmoji/Switch", Content)
+    self.ButtonHideIEmoji = self:find("ButtonHideInteractEmoji/Switch", Content)
 
     self.IngameButtons = {
         self.ButtonPreAction,
+        self.ButtonIntensity,
         self.ButtonCardValue,
         self.ButtonShowBB,
         self.ButtonAutoByin,
@@ -657,6 +864,8 @@ function P:initTabIngame()
         self.ButtonPrecise,
         self.ButtonHideInvite,
         self.ButtonHideChat,
+        self.ButtonHideEmoji,
+        self.ButtonHideIEmoji,
     }
 
     if self.Panel3 then
@@ -742,8 +951,9 @@ function P:initTabIngame()
         self.BetSlider = UiSliderEx:create(self.SliderBet)
         self.BetSlider:onValueChanged(function(val, step)
             if self._curBetIndex then
-                SettingModel:setBetPkValue(self._curBetIndex, step, self._gameType)
-                self._isSetBets = true
+                if SettingModel:setBetPkValue(self._curBetIndex, step, self._gameType) then
+                    self._isSetBets = true
+                end
                 self:refreshBetValue()
             end
         end)
@@ -751,8 +961,9 @@ function P:initTabIngame()
         self.RaiseSlider = UiSliderEx:create(self.SliderRaise)
         self.RaiseSlider:onValueChanged(function(val, step)
             if self._curRaiseIndex then
-                SettingModel:setRaisePkValue(self._curRaiseIndex, step, self._curRaiseKind, self._gameType)
-                self._isSetRaises = true
+                if SettingModel:setRaisePkValue(self._curRaiseIndex, step, self._curRaiseKind, self._gameType) then
+                    self._isSetRaises = true
+                end
                 self:refreshRaiseValue()
             end
         end)
@@ -765,6 +976,12 @@ function P:initTabIngame()
         bee.logEvent("ingame-menu-setting-pre", GameModel.data:getGameType(), GameModel.data:getRoomId(), flag and 1 or 0)
         Game:playSound("ui_button_disabled")
     end, true)
+    bee.onCheck(self.ButtonIntensity, function ()
+        local flag = not SettingModel:isShowIntensity(self._gameType)
+        SettingModel:setShowIntensity(self._gameType, flag)
+        bee.emit("evt_switch_intensity")
+        Game:playSound("ui_button_disabled")
+    end)
     bee.onCheck(self.ButtonCardValue, function()
         local flag = not SettingModel:isCardValue()
         SettingModel:setCardValue(flag)
@@ -830,12 +1047,32 @@ function P:initTabIngame()
         local flag = not SettingModel:isHideChat()
         SettingModel:setHideChat(flag)
         -- self:setButtonFlag(self.ButtonHideChat, flag)
-        bee.logEvent("ingame-menu-setting-emoji", GameModel.data:getGameType(), GameModel.data:getRoomId(), flag and 1 or 0)
+        bee.logEvent("ingame-menu-setting-talk", GameModel.data:getGameType(), GameModel.data:getRoomId(), flag and 1 or 0)
+        Game:playSound("ui_button_disabled")
+    end, true)
+
+    bee.onCheck(self.ButtonHideEmoji, function()
+        local flag = not SettingModel:isHideEmoji()
+        SettingModel:setHideEmoji(flag)
+        bee.logEvent("ingame-menu-setting-emotes", GameModel.data:getGameType(), GameModel.data:getRoomId(), flag and 1 or 0)
+        Game:playSound("ui_button_disabled")
+    end, true)
+    bee.onCheck(self.ButtonHideIEmoji, function()
+        local flag = not SettingModel:isHideIEmoji()
+        SettingModel:setHideIEmoji(flag)
+        bee.logEvent("ingame-menu-setting-emojis", GameModel.data:getGameType(), GameModel.data:getRoomId(), flag and 1 or 0)
         Game:playSound("ui_button_disabled")
     end, true)
 end
 
 function P:doShowResolution()
+    local showType = bee.getScreenShowType()
+    if showType ~= ScreenShowType.Window then
+        return
+    end
+
+    self._curFilterModel = self.FilterModel.size
+    self:find("FilterView", self.FilterMask).transform.sizeDelta = bee.v2(320, 480)
     self.FilterMask:SetActive(true)
     self:refreshFilter()
 
@@ -858,12 +1095,42 @@ function P:doShowResolution()
     pos.y = pos.y + (self.FilterView.transform.sizeDelta.y / 2) + 29
     self.FilterView.transform.localPosition = pos
 end
-
 function P:refreshFilter()
     local data = Config.Resolutions[bee.getResolution()]
     -- bee.setText(self.TextResolution, string.format("%dx%d", data[1], data[2]))
     bee.setText(self.TextResolution, string.format("%dx%d", CU.Screen.width, CU.Screen.height))
     self.FilterArrow.transform.localScale = self.FilterMask.activeSelf and bee.v3(1, -1, 1) or bee.v3one
+end
+
+function P:doShowWinModel()
+    self._curFilterModel = self.FilterModel.model
+    self:find("FilterView", self.FilterMask).transform.sizeDelta = bee.v2(522, 218)
+    self.FilterMask:SetActive(true)
+    self:refreshWinModelFilter()
+
+    local data = {
+        [1] = {type = ScreenShowType.Window},
+        [2] = {type = ScreenShowType.FullScreen},
+        [3] = {type = ScreenShowType.Borderless},
+    }
+    self.FilterList:setDatas(data)
+    self.FilterView.transform.position = self.WinModelFilter.transform.position
+    local pos = self.FilterView.transform.localPosition
+    pos.y = pos.y + (self.FilterView.transform.sizeDelta.y / 2) + 29
+    self.FilterView.transform.localPosition = pos
+end
+function P:refreshWinModelFilter()
+    local showType = bee.getScreenShowType()
+    bee.setText(self.WinModelText, _T(ScreenShowTypeName[showType]))
+    self.WinModelFilterArrow.transform.localScale = self.FilterMask.activeSelf and bee.v3(1, -1, 1) or bee.v3one
+
+    if showType == ScreenShowType.Window then
+        bee.setColor(self.TextResolution, bee.colorHex("#C6C6C6"), "Text")
+        self.ResolutionBtnIcon:SetActive(true)
+    else
+        bee.setColor(self.TextResolution, bee.colorHex("#313431"), "Text")
+        self.ResolutionBtnIcon:SetActive(false)
+    end
 end
 
 function P:onHide()
@@ -876,7 +1143,7 @@ function P:onHide()
             val = self._bet_steps[v]
             s[#s + 1] = string.format("%.2f", val[1] / (val[2] or 1))
         end
-        bee.logEvent("ingame-menu-setting-custom-betting", GameModel.data:getGameType(), GameModel.data:getRoomId(), 1, table.concat(s, ","))
+        bee.logEvent("ingame-menu-setting-custom-betting", GameModel.data:getGameType(), GameModel.data:getRoomId(), 1, self._curRaiseKind, table.concat(s, ","))
     end
     if self._isSetRaises then
         local bets = SettingModel:getRaisePkValues(self._gameType, nil, self._curRaiseKind)
@@ -890,7 +1157,7 @@ function P:onHide()
                 s[#s + 1] = tostring(val)
             end
         end
-        bee.logEvent("ingame-menu-setting-custom-betting", GameModel.data:getGameType(), GameModel.data:getRoomId(), 2, table.concat(s, ","))
+        bee.logEvent("ingame-menu-setting-custom-betting", GameModel.data:getGameType(), GameModel.data:getRoomId(), 2, self._curRaiseKind, table.concat(s, ","))
     end
 end
 
@@ -988,9 +1255,11 @@ function P:evt_refreshBindEmail()
     if not email or "" == email then
         bee.setText(self.TextEmail, _T("LAB_SETTINGS_037"))
         self.LinkButton:SetActive(true)
+        self.emailTipButton:SetActive(true)
     else
         bee.setText(self.TextEmail, _F("LAB_SETTINGS_036", GF.getSecretEmail(email)))
         self.LinkButton:SetActive(false)
+        self.emailTipButton:SetActive(false)
     end
 end
 
@@ -1008,11 +1277,12 @@ function P:evt_lan_mod()
     if self.TextDelete then
         bee.setText(self.TextDelete, _T("LAB_SETTINGS_040"))
     end
+    bee.setText(self.WinModelText, _T(ScreenShowTypeName[bee.getScreenShowType()]))
     self._is_lan_mod = true
 
     local TAB = self:find("TAB", self.Panel)
-    local tabs = {self:find("Tab1Toggle", TAB), self:find("Tab2Toggle", TAB), self:find("Tab3Toggle", TAB), self:find("Tab4Toggle", TAB)}
-    local texts = {_T("LAB_SETTINGS_002"), _T("LAB_SETTINGS_003"), _T("LAB_SETTINGS_004"), _T("LAB_TABLE_SETTING")}
+    local tabs = {self:find("Tab1Toggle", TAB), self:find("Tab2Toggle", TAB), self:find("Tab3Toggle", TAB), self:find("Tab4Toggle", TAB), self:find("Tab5Toggle", TAB)}
+    local texts = {_T("LAB_SETTINGS_002"), _T("LAB_SETTINGS_003"), _T("LAB_SETTINGS_004"), _T("LAB_TABLE_SETTING"), _T("LAB_SETTINGS_159")}
     for k, v in ipairs(tabs) do
         bee.setText(self:find("common_panel_black_tab_01_off/TEXT", v), texts[k])
         bee.setText(self:find("common_panel_black_tab_01_on/TEXT", v), texts[k])
@@ -1034,6 +1304,11 @@ function P:evt_hideUiWhenAction(isVisible)
     self:onUiBlur(not isVisible, "evt_hideUiWhenAction", true)
 end
 
+function P:evt_refreshScreenType()
+    self:refreshFilter()
+    self:refreshWinModelFilter()
+end
+
 --引导
 function P:bindingGuide()
     if bee.isInGame() then
@@ -1052,6 +1327,19 @@ function P:bindingGuide()
 
         GuideManager:startSystemGuide(gid, 0.65)
     end
+end
+
+function P:evt_onApplicationPause(paused)
+    if not paused then
+        if self._onApplicationRusume then
+            self._onApplicationRusume()
+            self._onApplicationRusume = nil
+        end
+    end
+end
+
+function P:reGuide()
+    GuideManager:startSystemGuide(11001, 0, true)
 end
 
 return P

@@ -13,6 +13,7 @@ function P:onAwake()
     local Content = self:find("Detail/Viewport/Content", self.Step2)
     local TextInput = self:find("TextInput", Content)
     local InputFieldName = self:find("InputFieldName", Content)
+    bee.checkInputField(InputFieldName, _T("LAB_E_MAIL"))
 
     local CheckToggle = self:find("Check1Toggle", Content)
     bee.removeValueChanged(Check1Toggle)

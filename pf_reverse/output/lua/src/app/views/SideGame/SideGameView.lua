@@ -97,15 +97,15 @@ function P:evt_hideSideGame()
 end
 
 function P:evt_hideUiWhenAction(isVisible)
-    self:onUiBlur(not isVisible, "evt_hideUiWhenAction")
+    self:onUiBlur(not isVisible, "evt_hideUiWhenAction", true)
 end
 
 function P:evt_uiBlur(flag, name)
-    self:onUiBlur(flag, name)
+    self:onUiBlur(flag, name, true)
 end
 
 function P:evt_gameBlur(flag, name)
-    self:onUiBlur(flag, name)
+    self:onUiBlur(flag, name, true)
 end
 
 function P:evt_sideGameRecords(sw)

@@ -71,7 +71,7 @@ function P:refreshItem(data, item, isInit, index)
         end
         bee.logEvent("onsen-plot_play", data.id, data.group)
         StoryModel.hotSpringdata = data
-        UiManager:showUI("Story", {name = data.res, hotSpringdata = data, StoryRecord = "HotSpringHallLog", StorySkip = "HotSpringHallSkip", hideCb = function()
+        UiManager:showUI("Story", {name = data.res, hotSpringdata = data, StoryRecord = "HotSpringHallLog", StorySkip = "HotSpringHallSkip", themeStory = true, hideCb = function()
             local ret = ThemeModel:reqPlotReward(data.id, function()
                 -- self:find("hotspring_get_mask", Ani_root):SetActive(true)
                 self.ListPlot:refreshShowingUi()

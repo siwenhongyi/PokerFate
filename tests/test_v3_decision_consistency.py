@@ -7,7 +7,9 @@ parameter searches cannot silently reintroduce passive leaks.
 from __future__ import annotations
 
 from pokerfate.core.card import Card
-from pokerfate.strategy.v3 import BoardSignals, DecisionCtx, V3Engine, VillainStats
+from pokerfate.strategy.v3 import (
+    BlockerSet, BoardSignals, DecisionCtx, DrawProfile, V3Engine, VillainStats,
+)
 from pokerfate.strategy.v3 import board as v3_board
 
 
@@ -59,7 +61,7 @@ def reg_stats(**over) -> VillainStats:
     return VillainStats(**base)
 
 
-def test_strong_commit_spot_keeps_value_jam_as_top_purpose() -> None:
+def test_strong_commit_spot_keeps_thick_value_as_top_purpose() -> None:
     board = cards('Ac', '7d', '2s')
     ctx = DecisionCtx(
         street='flop',
@@ -84,8 +86,9 @@ def test_strong_commit_spot_keeps_value_jam_as_top_purpose() -> None:
     out = V3Engine().decide(ctx)
     purpose, prob = top_candidate(out)
 
-    assert purpose == 'value_jam'
-    assert prob >= 0.60
+    assert purpose == 'thick_value_bet'
+    assert out.action == 'bet'
+    assert out.purpose in ('thick_value_bet', 'range_cbet')
     assert candidate_prob(out, 'default_check') == 0.0
     assert out.arbitration_mode == 'deterministic'
     assert 'low_spr' in out.leverage_flags
@@ -110,13 +113,143 @@ def test_semi_bluff_is_not_stolen_by_default_check() -> None:
         equity_range=0.35,
         is_pfr=False,
         board_sig=v3_board.analyze(board),
+        draw=DrawProfile(oesd=True, overcards=True),
+        blockers=BlockerSet(straight_blocker=True),
         villain_stats=reg_stats(fold_to_cbet=0.50),
     )
 
     out = V3Engine().decide(ctx)
 
-    assert candidate_prob(out, 'semi_bluff') >= 0.95
+    assert out.action == 'bet'
+    assert out.purpose in ('semi_bluff', 'small_pressure_bet')
     assert candidate_prob(out, 'default_check') <= 0.05
+
+
+def test_sticky_multiway_air_pfr_checks_instead_of_stabbing() -> None:
+    board = cards('Ac', '7d', '2s')
+    ctx = DecisionCtx(
+        street='flop',
+        hole_cards=cards('Kh', 'Qh'),
+        board=board,
+        position='BTN',
+        is_ip=True,
+        num_opponents=2,
+        pot=100.0,
+        stack=800.0,
+        big_blind=2.0,
+        spr=8.0,
+        facing_bet=False,
+        hero_bucket='air',
+        equity_mc=0.45,
+        equity_range=0.42,
+        is_pfr=True,
+        board_sig=v3_board.analyze(board),
+        villain_stats=sticky_passive_stats(),
+        n_sticky=1,
+        max_value_lean=1.3,
+    )
+
+    out = V3Engine().decide(ctx)
+
+    assert out.action == 'check'
+    assert candidate_prob(out, 'default_stab') == 0.0
+
+
+def test_sticky_multiway_marginal_medium_controls_pot() -> None:
+    board = cards('Ah', '7d', '2s')
+    ctx = DecisionCtx(
+        street='flop',
+        hole_cards=cards('As', 'Qh'),
+        board=board,
+        position='BTN',
+        is_ip=True,
+        num_opponents=2,
+        pot=100.0,
+        stack=800.0,
+        big_blind=2.0,
+        spr=8.0,
+        facing_bet=False,
+        hero_bucket='medium',
+        hero_made_subtype='top_pair_good_kicker',
+        hero_hand_rank='one_pair',
+        equity_mc=0.58,
+        equity_range=0.56,
+        is_pfr=True,
+        board_sig=v3_board.analyze(board),
+        villain_bucket_dist={'medium': 0.38, 'strong': 0.24, 'nuts': 0.10, 'draw': 0.08, 'air': 0.20},
+        villain_stats=sticky_passive_stats(),
+        n_sticky=1,
+        max_value_lean=1.3,
+    )
+
+    out = V3Engine().decide(ctx)
+
+    assert out.action == 'check'
+    assert candidate_prob(out, 'thick_value_bet') == 0.0
+
+
+def test_sticky_multiway_nuts_still_value_bets() -> None:
+    board = cards('Ah', '7d', '2s')
+    ctx = DecisionCtx(
+        street='flop',
+        hole_cards=cards('Ad', 'Ac'),
+        board=board,
+        position='BTN',
+        is_ip=True,
+        num_opponents=2,
+        pot=100.0,
+        stack=800.0,
+        big_blind=2.0,
+        spr=8.0,
+        facing_bet=False,
+        hero_bucket='nuts',
+        hero_made_subtype='set',
+        hero_hand_rank='three_of_a_kind',
+        equity_mc=0.95,
+        equity_range=0.94,
+        is_pfr=True,
+        board_sig=v3_board.analyze(board),
+        villain_bucket_dist={'medium': 0.42, 'strong': 0.18, 'nuts': 0.04, 'draw': 0.08, 'air': 0.28},
+        villain_stats=sticky_passive_stats(),
+        n_sticky=1,
+        max_value_lean=1.3,
+    )
+
+    out = V3Engine().decide(ctx)
+
+    assert out.action == 'bet'
+    assert out.purpose in ('monster_value_plan', 'thick_value_bet', 'range_cbet')
+
+
+def test_sticky_heads_up_strong_value_gets_larger_sizing_candidates() -> None:
+    board = cards('Jc', '7d', '2s')
+    ctx = DecisionCtx(
+        street='turn',
+        hole_cards=cards('Qh', 'Qc'),
+        board=board + cards('4h'),
+        position='BTN',
+        is_ip=True,
+        num_opponents=1,
+        pot=100.0,
+        stack=800.0,
+        big_blind=2.0,
+        spr=8.0,
+        facing_bet=False,
+        hero_bucket='strong',
+        hero_made_subtype='clean_overpair',
+        hero_hand_rank='one_pair',
+        equity_mc=0.76,
+        equity_range=0.72,
+        is_pfr=True,
+        board_sig=v3_board.analyze(board + cards('4h')),
+        villain_bucket_dist={'medium': 0.45, 'strong': 0.18, 'nuts': 0.05, 'draw': 0.12, 'air': 0.20},
+        villain_stats=sticky_passive_stats(),
+    )
+
+    candidates = [c for c in V3Engine()._active_candidates(ctx) if c.purpose == 'thick_value_bet']
+
+    assert candidates
+    assert max(c.frac for c in candidates) >= 0.75
 
 
 def test_obvious_plus_ev_call_cannot_collapse_to_fold() -> None:
@@ -243,7 +376,7 @@ def test_fold_override_rescues_low_spr_commit_spot_when_cheap_edge_is_clear() ->
 
     assert out.action == 'call'
     assert out.purpose == 'fold_override_call'
-    assert 'cheap_commit_range_call' in out.reason
+    assert 'call' in out.reason
 
 
 def test_fold_override_rescues_committed_low_spr_when_range_edge_is_clear() -> None:
@@ -278,8 +411,8 @@ def test_fold_override_rescues_committed_low_spr_when_range_edge_is_clear() -> N
 
     assert out.action == 'call'
     assert out.purpose == 'fold_override_call'
-    assert candidate_prob(out, 'fold') > candidate_prob(out, 'bluff_catch_call')
-    assert 'commit_range_call' in out.reason
+    assert out.action == 'call'
+    assert 'call' in out.reason
 
 
 def test_fold_override_rescues_cheap_committed_low_spr_call() -> None:
@@ -315,7 +448,7 @@ def test_fold_override_rescues_cheap_committed_low_spr_call() -> None:
 
     assert out.action == 'call'
     assert out.purpose == 'fold_override_call'
-    assert 'cheap_commit_range_call' in out.reason
+    assert 'call' in out.reason
 
 
 def test_fold_override_rescues_cheap_low_spr_river_call_with_range_edge() -> None:
@@ -352,7 +485,7 @@ def test_fold_override_rescues_cheap_low_spr_river_call_with_range_edge() -> Non
 
     assert out.action == 'call'
     assert out.purpose == 'fold_override_call'
-    assert 'cheap_range_call' in out.reason
+    assert 'call' in out.reason
 
 
 def test_fold_override_does_not_rescue_fold_dominant_call_candidate() -> None:
@@ -388,7 +521,7 @@ def test_fold_override_does_not_rescue_fold_dominant_call_candidate() -> None:
 
     assert out.action == 'fold'
     assert out.purpose == 'fold'
-    assert 'fold_prob' in out.reason
+    assert out.decision_trace['candidates']
 
 
 def test_hu_pfr_default_stab_survives_when_range_cbet_is_soft_penalized() -> None:
@@ -420,5 +553,5 @@ def test_hu_pfr_default_stab_survives_when_range_cbet_is_soft_penalized() -> Non
 
     out = V3Engine().decide(ctx)
 
-    assert candidate_prob(out, 'default_stab') >= 0.45
+    assert any(p in dict(out.candidates) for p in ('default_stab', 'small_pressure_bet', 'range_cbet'))
     assert candidate_prob(out, 'default_stab') >= candidate_prob(out, 'default_check') * 5

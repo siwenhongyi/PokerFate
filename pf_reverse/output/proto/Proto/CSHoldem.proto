@@ -24,6 +24,7 @@ message RoundStartBRC
 message RoundOverBRC
 {
     repeated int64 pool = 1; //奖池
+    repeated PoolRD pool_rd = 2; // 底池详情
 }
 
 //发手牌
@@ -33,6 +34,7 @@ message HandCardRSP
     optional int32 card2 = 2;
     optional int32 card3 = 3;
     optional int32 card4 = 4;
+    optional int32 seatid = 5;
 }
 
 message PreActionREQ //预行动请求
@@ -70,6 +72,7 @@ message WinningProfit
     optional int32 win_exp = 4[default = 0]; // 胜利者获得的经验
     optional int32 bond_add = 5[default = 0]; // 胜利者获得的好感度
     optional int64 uid = 6;
+    repeated ItemIdUnit act_reward_list = 7; // 获得的活动奖励
 }
 
 message WinnerRSP
@@ -110,7 +113,7 @@ message DealerInfoRSP
 
 message TableGameOverRSP
 {
-    optional int32 type = 1; // 1 房间时间到   2 服务器停服   3 不够2人开局  4 热更解散旧房间
+    optional int32 type = 1; // 1 房间时间到   2 服务器停服   3 不够2人开局  4 热更解散旧房间 5:进入addon阶段
 }
 
 message ShowMyCardREQ
@@ -245,6 +248,7 @@ message PlayerHands
     optional int32 hand_type = 4; // 牌型,取值参考game_def.md中的holdem_hand_type
     optional bool is_fold = 5;  // true为弃牌，false则不是弃牌
     repeated int32 show_card_info = 6; // 玩家设置的show牌信息 show_card_info[0]表示左起第一张牌是否show，0表示不show，1表示show
+    optional int32 seatid = 7;
 }
 
 message HandsInfo
@@ -286,7 +290,49 @@ message BlindStatusBRC
 }
 
 //停止涨盲
-// message BlindStopBRC
-// {
-//     optional int32 type = 1; // 1 休息  2 addon
-// }
+message BlindStopBRC
+{
+    optional int32 type = 1; // 1 休息  2 addon
+}
+
+// 局内发表情请求
+message SendEmojiREQ
+{
+    optional int32 id = 1;//表情id
+    optional int64 to_uid = 2;//接收方
+}
+message SendEmojiRSP
+{
+    optional int32 code = 1;
+    optional int32 emoji_free_times = 2;//免费互动表情剩余次数
+}
+
+message EmojiBRC
+{
+    optional int64 uid = 1;             //发送方uid
+    optional int64 to_uid = 2;          //接收方uid
+    optional int32 id = 3;//表情id
+}
+
+message NoticeAddonBRC
+{
+    optional int32 addon_left_sec = 1; // addon剩余时间, 单位:秒
+    optional int32 type = 2; // 0:addon结束  1:addon开始
+}
+
+message AddonREQ
+{
+    optional int64 chips = 1;
+}
+
+message AddonBRC
+{
+    optional int32 code = 1;
+    optional int32 seatid = 2;
+    optional int64 chips = 3;
+}
+
+message RoomAvgChipsChangeBRC
+{
+    optional int64 avg_chips = 1; // 平均筹码, 仅用于爆衣
+}

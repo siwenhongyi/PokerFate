@@ -9,6 +9,42 @@ function net:GetRoomDataRSP(msg)
 	elseif bee.isInGame() then
 		bee.enterScene("MainScene")
 	end
+	
+	GameModel.data:clearHandInfos()
+end
+
+function net:ChangeTableRSP(msg)
+	if not GameModel.data then return end
+
+	GameModel.data.room_status = msg.room_status
+	GameModel.data.playing_status = msg.playing_status
+	GameModel.data.table_status = msg.table_status
+	GameModel.data:updateRoomInfo()
+	GameModel.data.seatid_being_observed = msg.seatid_being_observed
+
+	if GameModel.data:isMTT() then
+		GameModel.data:setRoomInfo(msg)
+	end
+
+
+	if GameModel.data.table_status then
+		GameModel.data:setDealerStatus(GameModel.data.table_status.dealer_status)
+	end
+
+	GameModel.data:updateSeatInfoList(GameModel.data.table_status.seat)
+
+	GameModel.data:clearHandInfos()
+end
+
+function net:ChangeObserveViewRSP(msg)
+    GameModel.stopGameMsg = nil
+	if not GameModel.data then return end
+	if msg.code == 0 then
+		GameModel.data.seatid_being_observed = msg.seatid_being_observed
+		if msg.playing_status then
+			GameModel.data:setThinkTime(msg.playing_status.think_time)
+		end
+	end
 end
 
 function net:QuickStartRSP(msg)
@@ -35,8 +71,10 @@ function net:EnterRoomRSP(msg)
 	if code == 0 then
 		GameModel.stopGameMsg = nil
         local data
-		if GF.isSNG(msg.game_type) then
+		if GF.isSNG(msg.game_type) or GF.isFriendSNG(msg.game_type) then
 			data = require("app.table.data.PKDataSNG"):create(msg)
+		elseif GF.isMTT(msg.game_type) then
+			data = require("app.table.data.PKDataMTT"):create(msg)
 		else
 			data = require("app.table.data.PKData"):create(msg)
 		end
@@ -45,6 +83,8 @@ function net:EnterRoomRSP(msg)
 		bee.enterScene("GameScene", {onEnter = function()
 			if data:isSNG() then
 				UiManager:showUI("PKTable3DSNG", {data = data})
+				-- elseif data:isAllinOrFold() then
+				-- UiManager:showUI("PKTable3DAllin", {data = data})
 			else
 				UiManager:showUI("PKTable3D", {data = data})
 			end
@@ -118,6 +158,9 @@ function net:LeaveRoomRSP(msg)
 	GameModel.over_bond_settle_info = nil
 	GameModel.summary = nil
 	if code == 0 or code == 2 or code == 3 then
+		if GameModel.data and GameModel.data:getRoomId() == msg.roomid then
+			GameModel.data:setRoomOver(msg.summary)
+		end
 		GameModel.bond_settle_info = msg.bond_settle_info
 		if GameModel.bond_settle_info then
 			GameModel.bond_settle_info.game_type = msg.game_type
@@ -140,23 +183,70 @@ function net:LeaveRoomRSP(msg)
 		if msg.client_str and "" ~= msg.client_str then
 			info = json.decode(msg.client_str)
 			if info and info.key == "invite" then
-				Net:sendReq("pb.EnterRoomREQ", {
-					roomid = info.roomid,
-					uid = PlayerModel:getUid(),
-					byin_chips = 0,
-					client_str = msg.client_str,
-				})
+				if info.loading then
+					UiManager:showUI("LoadingLayer", {cb = function()
+						Net:sendReq("pb.EnterRoomREQ", {
+							roomid = info.roomid,
+							uid = PlayerModel:getUid(),
+							byin_chips = 0,
+							client_str = msg.client_str,
+						})
+					end})
+				else
+					Net:sendReq("pb.EnterRoomREQ", {
+						roomid = info.roomid,
+						uid = PlayerModel:getUid(),
+						byin_chips = 0,
+						client_str = msg.client_str,
+					})
+				end
 				return
 			elseif info and info.key == "switch_table" then
 				UiManager:showUI("LoadingLayer", {cb = function()
 					Net:sendReq("pb.QuickStartREQ", info)
 				end})
 				return
+			elseif info and info.key == "enterroom" then
+				if info.loading then
+					UiManager:showUI("LoadingLayer", {cb = function()
+						Net:sendReq("pb.EnterRoomREQ", {
+							roomid = info.roomid,
+							uid = PlayerModel:getUid(),
+						})
+					end})
+				else
+					Net:sendReq("pb.EnterRoomREQ", {
+						roomid = info.roomid,
+						uid = PlayerModel:getUid(),
+					})
+				end
+				return
+			elseif info and info.key == "mtt_sign" then
+				TournamentModel:reqMttSign({
+					tour_id = info.tour_id,
+					multiple = info.multiple,
+				}, info.item_id, function(ret)
+					if ret.code == 0 then
+						UiManager:showUI("LoadingLayer", {cb = function()
+							Net:sendReq("pb.EnterRoomREQ", {
+								roomid = info.roomid,
+								uid = PlayerModel:getUid(),
+							})
+						end})
+					else
+						bee.enterScene("GameScene", {onEnter = function()
+							UiManager:showUI("TournamentLobby")
+						end})
+					end
+				end)
 			end
 		end
 
-		if not GameModel:isStopLeaveRoom() then
-			bee.enterScene("MainScene", {info = info})
+		if not GameModel:isStopLeaveRoom() and not msg.back_wait then
+			bee.showUiTask("LoadingLayer", {cb = function()
+				bee.enterScene("MainScene", {info = info})
+			end}, nil, LOBBY_POP_PRIORITY.Loading)
+			bee.runTask()
 		end
 		if code == 2 then --no limit table 2局未操作被踢出
 			bee.once(1.5, function ()
@@ -181,13 +271,21 @@ function net:LeaveRoomRSP(msg)
 				-- end
 			-- end
 		end
+		if "" ~= msg.reason then
+			code = tonumber(msg.reason)
+			if code then
+				bee.once(1.5, function()
+					Net:onErrorCode({code = code})
+				end)
+			end
+		end
 	end
 end
 
 --其他玩家进入房间
 function net:OtherEnterRoomBRC(msg)
 	if GameModel.data then
-		GameModel.data:onVisitorIn(user)
+		GameModel.data:onVisitorIn(msg.user)
 		GameModel.data:updatePlayerNum(msg.num, msg.player)
 	end
 	-- G.friendsMgr:updateOtherPlayerInfo(msg.user)
@@ -240,14 +338,13 @@ function net:SitDownRSP(msg)
 		GameModel.data:updateSelfInfo(msg.seatid, msg.chips, msg.enter_buff_id, msg.enter_buff_time)
 		
 		bee.once(0.5, function()
+			if not GameModel.data then
+				return
+			end
 			local r = CharacterModel:getUsingRole()
-			if r and GameModel.data and (not GameModel.data:isSNG() and not GameModel.data:isMTT()) then
-				local skin = r:getSkinData()
-				if skin and skin.kind == SKIN_KIND.AWAKEN then
-					Game:playRoleInVoice(CharacterModel:getUsingRoleId(), ROLE_VOICE.take_a_seat_awakened)
-				else
-					Game:playRoleInVoice(CharacterModel:getUsingRoleId(), ROLE_VOICE.take_a_seat)
-				end
+			local player = GameModel.data:getMyPlayerInfo()
+			if player and GameModel.data and (not GameModel.data:isSNG() and not GameModel.data:isMTT()) then
+				GameModel:playSitdownVoice(player.skin_id)
 			end
 		end)
 	elseif code == 1 then

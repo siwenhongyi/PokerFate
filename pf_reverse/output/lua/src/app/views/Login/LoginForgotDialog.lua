@@ -13,6 +13,9 @@ function P:onStart()
     self.TextErrorEmail = self:find("TextError", self.BgEmail)
     self.TextErrorVerify = self:find("TextError", self.BgVerify)
 
+    self.InputFieldName = self:find("InputFieldName", self.BgAccount)
+    bee.checkInputField(self.InputFieldName, _T("LAB_VERIF_EMAIL"))
+
     bee.addClick(self:find("Panel/CloseButton", Center), function()
         bee.emit("evt_showRegister")
         self:hideUI()
@@ -51,7 +54,7 @@ function P:getSecretEmail(email)
 end
 
 function P:onClickSearch()
-    local name = bee.getText(self:find("InputFieldName", self.BgAccount), "InputField")
+    local name = bee.getText(self.InputFieldName, "InputField")
 
     if name == "" then
         -- UiManager:showToast(_T("LAB_RECOVER_INFO"))

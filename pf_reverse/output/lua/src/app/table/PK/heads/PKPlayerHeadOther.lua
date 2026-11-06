@@ -24,12 +24,24 @@ function P:onAwake()
 	self.TextChipBlue:SetActive(false)
 	self.TextChipPurple:SetActive(false)
 	self.TextChip = self.TextChipGreen
+
+	self.ImageObserve = self:find("ImageObserve")
+	self.ImageObserve:SetActive(false)
+
+	bee.addClick2(self.ImageObserve, function()
+        Net:sendReq("pb.ChangeObserveViewREQ", {tid = self.data:getTid(), seatid_being_observed = self.seatid - 1})
+	end)
 end
 
 function P:setShowIndex(index, self_index, infoIndex)
 	P.super.setShowIndex(self, index, self_index, infoIndex)
-	-- local x = index >= self_index and -self.originCardX or self.originCardX
-	-- self.cardController:setDefaultPos(x)
+
+	local pos = self.ImageObserve.transform.localPosition
+	if index >= self.self_index then
+		self.ImageObserve.transform.localPosition = bee.v3(-math.abs(pos.x), pos.y, pos.z)
+	else
+		self.ImageObserve.transform.localPosition = bee.v3(math.abs(pos.x), pos.y, pos.z)
+	end
 end
 
 function P:reset()
@@ -54,6 +66,7 @@ function P:refreshUI()
 	end
 	self.TextChip:SetActive(true)
 	self._isInTopupStatus = nil
+	self.ImageObserve:SetActive(self.data:isInObserve())
 
 	P.super.refreshUI(self)
 	
@@ -78,29 +91,7 @@ function P:refreshSittingOut()
 end
 
 function P:refreshAddingChips(is_adding, chips, type)
-	if self._isInTopupStatus then
-		return
-	end
-	bee.Tween.killByTarget(self.BgStatus)
-	if is_adding and self.data:getRebuyRemainTime(self.seatid) > 0 then
-		self.BgStatus:SetActive(true)
-		bee.setText(self:find("TextStatus", self.BgStatus), _T("LAB_BUYINGING"))
-	else
-		self.BgStatus:SetActive(false)
-	end
-	if type == "topup" then
-		self._isInTopupStatus = true
-		self.BgStatus:SetActive(true)
-		bee.setText(self:find("TextStatus", self.BgStatus), _F("LAB_GAME_030", _N(chips or 0)))
-		bee.tween(self.BgStatus)
-		: delay(1)
-		: onComplete(function()
-			self._isInTopupStatus = nil
-			self.BgStatus:SetActive(false)
-		end)
-		: link()
-		: setTarget()
-	end
+	self:_refreshAddingChips(is_adding, chips, type)
 end
 
 return P

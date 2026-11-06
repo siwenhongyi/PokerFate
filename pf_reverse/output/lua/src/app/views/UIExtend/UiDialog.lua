@@ -27,8 +27,8 @@ function P:evt_gameBlur(flag, name)
     self:onUiBlur(flag, name)
 end
 
-function P:onBtClose()
-    self:hideUI()
-end
+-- function P:onBtClose()
+--     self:hideUI()
+-- end
 
 return P

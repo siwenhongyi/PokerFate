@@ -88,6 +88,7 @@ Config = {
     ROLE_OTHER_SCALE = bee.v3(1, 1, 1), -- 其它角色的 spine 显示缩放
 
     AWAKEN_LEVEL = 5,   -- 觉醒等级
+    SECOND_AWAKEN_LEVEL = 7,        -- 二次觉醒后等级
 
     -- ui 层级
     UI_LAYER_BALL = 6,
@@ -154,7 +155,9 @@ if DT then
     DT.DOTween.SetTweensCapacity(500, 250);
 end
 
-bee.isLongScreen = SCREEN_WIDTH / SCREEN_HEIGHT > 1.78
+bee.isLongScreen = function()
+    return SCREEN_WIDTH / SCREEN_HEIGHT > 1.78
+end
 
 bee.on("evt_onScreenChanged", function()
     refreshScreenSize()

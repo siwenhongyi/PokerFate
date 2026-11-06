@@ -6,17 +6,20 @@ function P:ctor(params, scene)
 	self.user_num = 0
 	self.play_num = 0
 	self:initRoomInfo(params)
+
+	self._ingame_scheme = params.scheme
 end
 
 function P:initRoomInfo(params)
 	self.user_num = params.user_num
 	self.play_num = params.user_num
+	self.seatid_being_observed = params.seatid_being_observed or -1
 	self:assignRoomInfo(params)
 	if not self.table_status then
 		self.table_status = params.table_status
 	end
 	self:updateRoomInfo()
-	self.friend_room_info = params.friend_room_info
+	self.friend_room_info = params.friend_room_info or {}
 end
 
 function P:assignRoomInfo(params)
@@ -70,11 +73,23 @@ function P:isOmaha()
 end
 
 function P:isAllinOrFold()
-	return self:getGameType() == GAME_GAME_TYPE.LOBBY_HOLDEM_ALLIN
+	return GF.isAllinPoker(self:getGameType())
 end
 
 function P:isFriendsRoom()
 	return GF.isFriendsRoom(self:getGameType())
+end
+
+function P:isFriendPoker()
+	return GF.isFriendPoker(self:getGameType())
+end
+
+function P:isFriendOmaha()
+	return GF.isFriendOmaha(self:getGameType())
+end
+
+function P:isFriendSNG()
+	return GF.isFriendSNG(self:getGameType())
 end
 
 function P:isSNG()
@@ -86,11 +101,11 @@ function P:isRegular()
 end
 
 function P:isMTT()
-	return self:getRoomSubType() == GAME_SUB_TYPE.NORMAL_MTT
+	return GF.isMTT(self:getGameType())
 end
 
-function P:isTournament()
-	return self:isSNG() or self:isMTT()
+function P:isTournament(isAll)
+	return self:isSNG() or self:isMTT() or (isAll and self:isFriendSNG())
 end
 
 function P:isTrainingGame()
@@ -115,13 +130,13 @@ function P:getGameName()
 end
 
 function P:getChipIcon()
-	if self:isSNG() then
+	if self:isSNG() or self:isMTT() then
 		return tpl_props[GPropId.SNGChip].icon
 	end
 end
 
 function P:getChipEft()
-	if self:isSNG() then
+	if self:isSNG() or self:isMTT() then
 		return "Prefab/PKTable/Eff_poker_ingame_chouma_sng"
 	end
 	return "Prefab/PKTable/Eff_poker_ingame_chouma"
@@ -135,6 +150,15 @@ function P:getMttConfigId()
 end
 
 function P:getRoomId()
+	return self.room_info.roomid
+end
+
+function P:getSrcRoomId()
+	if self:isOpenObserve() then
+		if self.room_info.src_roomid and self.room_info.src_roomid > 0 then
+			return self.room_info.src_roomid
+		end
+	end
 	return self.room_info.roomid
 end
 
@@ -295,6 +319,23 @@ function P:getPlayerByUidOld(uid)
 	return nil
 end
 
+function P:getPlayerSeatIndex(uid)
+	local info, i = self:getPlayerByUid(uid)
+	if info then
+		return info.seat_index
+	end
+	return 0
+end
+
+function P:getPlayerByShowIndex(index)
+	for _, info in ipairs(self:getAllPlayers()) do
+		if info.show_index == index and info.on_seat then
+			return info
+		end
+	end
+	return nil
+end
+
 function P:getPlayerDataByKey(index, key)
 	local player = self:getPlayer(index) or {}
 	return player[key]
@@ -318,6 +359,9 @@ function P:getVisitor(uid)
 end
 
 function P:getMyPosition()
+	if self:isInObserve() then
+		return self:getObserveSeatid()
+	end
 	return self.my_position
 end
 
@@ -357,7 +401,7 @@ function P:updateOtherInfo(info)
 	local index = info.seatid + 1
 	local player = self:getPlayer(index)
 	if not player then return end
-	if index == self:getMyPosition() then
+	if index == self:getMyPosition() and index ~= self:getObserveSeatid() then
 		return player
 	end
 	self:updateUserInfo(player, info.player)
@@ -429,17 +473,37 @@ function P:isMePlaying()
 	end
 end
 
+function P:isInObserve()
+	return self.seatid_being_observed and self.seatid_being_observed >= 0
+end
+
+function P:getObserveSeatid()
+	return self.seatid_being_observed + 1
+end
+
+function P:isOpenObserve()
+	return self.room_info.open_observer or (self.room_info.src_roomid and self.room_info.src_roomid > 0)
+end
+
+function P:isInOpenObserve()
+	return self:isInObserve() and self:isOpenObserve()
+end
+
+function P:getOpenObserveStartTime()
+	return self.room_status.delay_ob_start_time or 0
+end
+
 function P:getRoomDuration()
 	return self.room_info.game_time ~= 0 and self.room_info.game_time or -1
 end
 
 function P:refreshRoomTimeStamp()
-	self.left_time_stamp = bee:getServerTime()
+	self.left_time_stamp = bee.getServerTime()
 end
 
 function P:getRoomTimeLeft()
 	if self:isTableStarted() then
-		return self.room_status.time_left - bee:getServerTime() + self.left_time_stamp
+		return self.room_status.time_left - bee.getServerTime() + self.left_time_stamp
 	else
 		return self.room_status.time_left
 	end
@@ -487,6 +551,10 @@ end
 
 function P:onVisitorIn(info)
 	if info then
+		local player, i = self:getPlayerByUid(info.uid)
+		if player then
+			player:resetBriefInfo(info)
+		end
 		for _, visitor in ipairs(self.visitor_info) do
 			if visitor.uid == info.uid then
 				return
@@ -550,114 +618,8 @@ function P:getOpenPage()
 end
 
 function P:sendLocalLog(format, ...)
-	-- if format then
-	-- 	local room_type = self:getRoomType()
-	-- 	local game_mode = self:getGameMode()
-	-- 	local room_mode = self:getRoomMode()
-	-- 	local kind
-	-- 	local lvl = self:getLobbyLevel()
-	-- 	local args
-	-- 	if room_type == GAME_ROOM_TYPE.TP then
-	-- 		if self:isSNG() then
-	-- 			kind = "sng_tpclassic"
-	-- 		elseif self:isMTT() then
-	-- 			kind = "mtt_table"
-	-- 			lvl = self.mttroom_info.config_id
-	-- 			args = 2
-	-- 		elseif game_mode == D.TEEN_GAME_MODE.CLASSIC then
-	-- 			kind = "tp_classic"
-	-- 		elseif game_mode == D.TEEN_GAME_MODE.POT_BLIND then
-	-- 			kind = "tp_potblind"
-	-- 		elseif game_mode == D.TEEN_GAME_MODE.JOKER then
-	-- 			kind = "tp_joker"
-	-- 		elseif game_mode == D.TEEN_GAME_MODE.AK47 then
-	-- 			kind = "tp_ak47"
-	-- 		elseif game_mode == D.TEEN_GAME_MODE.MUFLIS then
-	-- 			kind = "tp_muflis"
-	-- 		elseif game_mode == D.TEEN_GAME_MODE.HUKAM then
-	-- 			kind = "tp_hukam"
-	-- 		end
-	-- 	elseif room_type == GAME_ROOM_TYPE.POKER then
-	-- 		if self:isMTT() then
-	-- 			kind = "mtt_table"
-	-- 			lvl = self.mttroom_info.config_id
-	-- 			args = 1
-	-- 		else
-	-- 			kind = "poker_reg"
-	-- 		end
-	-- 	elseif room_type == GAME_ROOM_TYPE.POKER_MTT then
-	-- 		kind = "mtt_table"
-	-- 		lvl = self.mttroom_info.config_id
-	-- 		args = 1
-	-- 	elseif room_type == GAME_ROOM_TYPE.JACKPOT then
-	-- 		kind = "poker_jackpot"
-	-- 	elseif room_type == GAME_ROOM_TYPE.POKER_SNG then
-	-- 		kind = "sng_poker"
-	-- 	elseif room_type == GAME_ROOM_TYPE.POKET_PRIVATE_ROOM then
-	-- 		kind = "poker_private"
-	-- 	elseif room_type == GAME_ROOM_TYPE.CASINOWAR then
-	-- 		if room_mode == D.GAME_ROOM_MODE.PVP then
-	-- 		else
-	-- 			kind = "luckywar_reg"
-	-- 		end
-	-- 	elseif room_type == GAME_ROOM_TYPE.ADBH then
-	-- 		if room_mode == D.GAME_ROOM_MODE.PVP then
-	-- 		else
-	-- 			kind = "ab_reg"
-	-- 		end
-	-- 	elseif room_type == GAME_ROOM_TYPE.RUMMY then
-	-- 		kind = "rummy"
-	-- 	elseif room_type == GAME_ROOM_TYPE.RUMMY_1V1 then
-	-- 		kind = "rummy_1v1"
-	-- 	elseif room_type == GAME_ROOM_TYPE.CHATAI then
-	-- 		kind = "chatai"
-	-- 	elseif room_type == GAME_ROOM_TYPE.DRAGON_TIGER then
-	-- 		kind = "dragon_tiger_reg"
-	-- 		if self:getGameType() == D.DT_GAME_TYPE.CLASSIC then
-	-- 			kind = "dragon_tiger_classic"
-	-- 		end
-	-- 	elseif room_type == GAME_ROOM_TYPE.CARDS_32 then
-	-- 		kind = "32_reg"
-	-- 		if self:getGameType() == D.C32_GAME_TYPE.LOW_POINT then
-	-- 			kind = "32_lowpoint"
-	-- 		end
-	-- 	elseif room_type == GAME_ROOM_TYPE.WINGO then
-	-- 		kind = "wingo_lottery_reg"
-	-- 	elseif room_type == GAME_ROOM_TYPE.JHANDI_MUNDA then
-	-- 		kind = "JhandiMunda_reg"
-	-- 	elseif room_type == GAME_ROOM_TYPE.CHESS_WHEEL then
-	-- 		kind = "chess_wheel_reg"
-	-- 	elseif room_type == GAME_ROOM_TYPE.COWBOY then
-	-- 		kind = "Cowboy_Beauty_classic"
-	-- 	end
-	-- 	if kind then
-	-- 		if args then
-	-- 			G.logTool:addLocalLog(string.format(format, kind), lvl, args, ...)
-	-- 		else
-	-- 			G.logTool:addLocalLog(string.format(format, kind), lvl, ...)
-	-- 		end
-	-- 	end
-	-- end
 end
 
---牌桌内玩家的n倍经验卡信息
-function P:updatePlayerNewItemBuffInfo(uid, buff_list)
-	-- local player = self:getPlayerByUid(uid)
-	-- if player then
-	-- 	player.item_buff = {}
-	-- 	local bu
-	-- 	for _, buff in ipairs(buff_list) do
-	-- 		if buff.buff_type == D.BAG_ITEM_LOGICTYPE.ADD_EXP_N then
-	-- 			bu = {}
-	-- 			bu.buff_type = buff.buff_type
-	-- 			bu.expire_time = buff.expire_time
-	-- 			bu.cur_time = os.time()
-				
-	-- 			player.item_buff[#player.item_buff+1] = bu
-	-- 		end
-	-- 	end
-	-- end
-end
 
 function P:setDealerStatus(status)
 	self.dealer_status = status
@@ -764,6 +726,13 @@ function P:setShowCardInfo(pos, flag)
 		self.playing_status.show_card_info = {0,0,0,0}
 	end
 	self.playing_status.show_card_info[pos] = flag
+end
+
+function P:getIngameScheme()
+	if self._ingame_scheme and self._ingame_scheme.table ~= 0 then
+		return self._ingame_scheme
+	end
+	return DecorationModel:getDefaultInGameCurScheme()
 end
 
 return P

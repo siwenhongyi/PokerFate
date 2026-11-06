@@ -1,0 +1,84 @@
+{
+  "book_version": "v2",
+  "solver": "postflop-solver@9d1509f",
+  "abstraction_hash": "2d4e4d02fe7d434f90b8a97ff766eefc928a216c85dc19ebd15752daebda2ee1",
+  "range_hash": "70500758b444ecf9a9845e1f4e0bc5f92ef64b09c42ef464a2cdf519aee86e9d",
+  "ranges_id": "greenline_v1",
+  "canonical_algo": "suit-canonical-v1",
+  "cluster": {
+    "algo": "feature-kmedoids-v1",
+    "k": 200
+  },
+  "target_exploitability_pct": 0.5,
+  "rake": {
+    "rate": 0.09,
+    "cap": 0.0
+  },
+  "scenarios": [
+    {
+      "id": "UTGvBB_srp100",
+      "oop": "BB",
+      "ip": "UTG",
+      "pot": 6.5,
+      "effective_stack": 97.0,
+      "flop_count": 200,
+      "exploitability_pct": {
+        "p50": 0.464,
+        "p95": 0.495,
+        "max": 0.498
+      }
+    },
+    {
+      "id": "MPvBB_srp100",
+      "oop": "BB",
+      "ip": "MP",
+      "pot": 6.5,
+      "effective_stack": 97.0,
+      "flop_count": 200,
+      "exploitability_pct": {
+        "p50": 0.468,
+        "p95": 0.497,
+        "max": 0.5
+      }
+    },
+    {
+      "id": "COvBB_srp100",
+      "oop": "BB",
+      "ip": "CO",
+      "pot": 5.5,
+      "effective_stack": 97.5,
+      "flop_count": 200,
+      "exploitability_pct": {
+        "p50": 0.468,
+        "p95": 0.494,
+        "max": 0.499
+      }
+    },
+    {
+      "id": "BTNvBB_srp100",
+      "oop": "BB",
+      "ip": "BTN",
+      "pot": 5.5,
+      "effective_stack": 97.5,
+      "flop_count": 200,
+      "exploitability_pct": {
+        "p50": 0.465,
+        "p95": 0.497,
+        "max": 0.499
+      }
+    },
+    {
+      "id": "SBvBB_srp100",
+      "oop": "SB",
+      "ip": "BB",
+      "pot": 6.0,
+      "effective_stack": 97.0,
+      "flop_count": 200,
+      "exploitability_pct": {
+        "p50": 0.464,
+        "p95": 0.497,
+        "max": 0.499
+      }
+    }
+  ]
+}

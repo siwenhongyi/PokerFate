@@ -23,7 +23,7 @@ local NOTIFICATION_TYPE =
 }
 
 local NOTIFICATION_TYPE_STORE_NAME_STR = "notifications_type_"
-local NOT_USE_FIREBASE = string.find(SdkHelper:getDeviceModel(), "HUAWEI") 
+local NOT_USE_FIREBASE = string.find(SdkHelper:getDeviceModel(), "HUAWEI") or bee.isPc
 -- NOT_USE_FIREBASE = true
 function P:init()
 	if self._isInited then
@@ -31,22 +31,53 @@ function P:init()
 	end
 	self._isInited = true
 	print("==== gggggggg MobileNotificationsManager init ====", NOT_USE_FIREBASE)
-	if NOT_USE_FIREBASE then return end
+
 	bee.on("evt_onApplicationPause", function(paused)
 		if paused then
-			if bee.checkCd("CalculatePushNotifications", 2) then
-				-- 计算可能需要的通知
-				self:CalculatePushNotifications()
-				self.isLog = false
-			end
+			-- if bee.checkCd("CalculatePushNotifications", 2) then
+			-- 	-- 计算可能需要的通知
+			-- 	self:CalculatePushNotifications()
+			-- 	self.isLog = false
+			-- end
 		else
-			if bee.checkCd("CheckNotificationIntentData", 2) then
-				-- 清除所有已安排通知
-				CS.MobileNotificationsMgr.Instance:CancelAllNotifications()
-				self:CheckNotificationIntentData()
+			-- if bee.checkCd("CheckNotificationIntentData", 2) then
+			-- 	-- 清除所有已安排通知
+			-- 	CS.MobileNotificationsMgr.Instance:CancelAllNotifications()
+			-- 	self:CheckNotificationIntentData()
+			-- end
+			if bee.checkVersion("1.6.2") then
+				CS.MobileNotificationsMgr.Instance:CheckAndHandleNotificationLaunch()
+				if bee.isInGame() or bee.isInHome() then
+					self:checkLauncherData()
+				end
 			end
 		end
 	end)
+	bee.on("evt_GetFirebaseToken", function()
+		SdkHelper:getPushToken()
+	end)
+
+	bee.on("evt_NotificationLaunch", function(data)
+		if data and "" ~= data then
+			local d = json.decode(data)
+			if d and d.jump_id then
+				if bee.isInHome() then
+					local id = tonumber(d.jump_id)
+					if id then
+						ItemModel:jumpView(id)
+					end
+				end
+			end
+		end
+	end)
+
+	CS.MobileNotificationsMgr.Instance:AskPermission()
+	if NOT_USE_FIREBASE then
+		if bee.checkVersion("1.6.2") then
+			CS.SdkHelper.InitPush()
+		end
+		return
+	end
 
 	bee.on("evt_GetFirebaseToken", self["evt_GetFirebaseToken"], self)
 
@@ -58,6 +89,12 @@ end
 
 function P:evt_GetFirebaseToken()
 	if NOT_USE_FIREBASE then return end
+end
+
+function P:checkLauncherData()
+	if bee.checkVersion("1.6.2") then
+		CS.MobileNotificationsMgr.Instance:ConsumePendingNotificationData()
+	end
 end
 
 -- 计算恢复下一点体力时间
@@ -238,63 +275,63 @@ function P:CalculatePushNotifications()
 		return
 	end
 
-	-- 今日刷新时间戳
-	local refreshTime = TimeLib.string2time(self:GetTimeStr(PUSH_REFRESH_TIME))
+	-- -- 今日刷新时间戳
+	-- local refreshTime = TimeLib.string2time(self:GetTimeStr(PUSH_REFRESH_TIME))
 
-	local notificationsList = {}
+	-- local notificationsList = {}
 
-	-- 遍歷配置表，計算所有需要推送的消息
-	for _, cfg in pairs(tpl_systemPush) do
+	-- -- 遍歷配置表，計算所有需要推送的消息
+	-- for _, cfg in pairs(tpl_systemPush) do
 
-		if not notificationsList[cfg.pushType] then
-			notificationsList[cfg.pushType] = {}
-		end
+	-- 	if not notificationsList[cfg.pushType] then
+	-- 		notificationsList[cfg.pushType] = {}
+	-- 	end
 
-		-- -- 当前类型剩余推送次数
-		-- local notificationResidueDegree = self:CalculateNotificationsAllowTimes(refreshTime, cfg.pushType, cfg.times)
+	-- 	-- -- 当前类型剩余推送次数
+	-- 	-- local notificationResidueDegree = self:CalculateNotificationsAllowTimes(refreshTime, cfg.pushType, cfg.times)
 
-		-- -- 判断当前类型是否还有推送次数
-		-- if notificationResidueDegree > 0 then
+	-- 	-- -- 判断当前类型是否还有推送次数
+	-- 	-- if notificationResidueDegree > 0 then
 
-			local fireTime = self:CalculateFireTime(cfg.pushType, cfg.param)
+	-- 		local fireTime = self:CalculateFireTime(cfg.pushType, cfg.param)
 
-			-- 判断是否会触发该事件
-			if fireTime > 0 then
+	-- 		-- 判断是否会触发该事件
+	-- 		if fireTime > 0 then
 
-				local notification = {}
-				notification.title = LanguageManager:getString(NOTIFICATION_TITLE_KEY)
-				notification.text = LanguageManager:getString(cfg.text)
-				notification.fireTime = fireTime
-				notification.priority = cfg.priority
-				notification.pushType = cfg.pushType
+	-- 			local notification = {}
+	-- 			notification.title = LanguageManager:getString(NOTIFICATION_TITLE_KEY)
+	-- 			notification.text = LanguageManager:getString(cfg.text)
+	-- 			notification.fireTime = fireTime
+	-- 			notification.priority = cfg.priority
+	-- 			notification.pushType = cfg.pushType
 
-				local isCanPush, highFireTimeIndex, lowPriorityIndex
+	-- 			local isCanPush, highFireTimeIndex, lowPriorityIndex
 
-				-- 根据时间和优先级判断是否可以推送
-				isCanPush, lowPriorityType, lowPriorityIndex = self:CalIsCanPushByPriority(notificationsList, notification)
-				if lowPriorityType and lowPriorityIndex then
-					table.remove(notificationsList[lowPriorityType], lowPriorityIndex)
-				end
+	-- 			-- 根据时间和优先级判断是否可以推送
+	-- 			isCanPush, lowPriorityType, lowPriorityIndex = self:CalIsCanPushByPriority(notificationsList, notification)
+	-- 			if lowPriorityType and lowPriorityIndex then
+	-- 				table.remove(notificationsList[lowPriorityType], lowPriorityIndex)
+	-- 			end
 
-				-- -- 根据限制次数判断是否可以推送
-				-- isCanPush, highFireTimeIndex = self:CalIsCanPushByTimes(notificationsList[cfg.pushType], notification, notificationResidueDegree)
-				-- if highFireTimeIndex then
-				-- 	table.remove(notificationsList[cfg.pushType], highFireTimeIndex)
-				-- end
+	-- 			-- -- 根据限制次数判断是否可以推送
+	-- 			-- isCanPush, highFireTimeIndex = self:CalIsCanPushByTimes(notificationsList[cfg.pushType], notification, notificationResidueDegree)
+	-- 			-- if highFireTimeIndex then
+	-- 			-- 	table.remove(notificationsList[cfg.pushType], highFireTimeIndex)
+	-- 			-- end
 
-				if isCanPush then
-					table.insert(notificationsList[cfg.pushType], notification)
-				end
-			-- end
-		end
-	end
+	-- 			if isCanPush then
+	-- 				table.insert(notificationsList[cfg.pushType], notification)
+	-- 			end
+	-- 		-- end
+	-- 	end
+	-- end
 
-	-- 推送消息
-	for _, notificationTypeList in pairs(notificationsList) do
-		for _, notification in pairs(notificationTypeList) do
-			CS.MobileNotificationsMgr.Instance:PushNotification(notification.title, notification.text, notification.fireTime, notification.pushType)
-		end
-	end
+	-- -- 推送消息
+	-- for _, notificationTypeList in pairs(notificationsList) do
+	-- 	for _, notification in pairs(notificationTypeList) do
+	-- 		CS.MobileNotificationsMgr.Instance:PushNotification(notification.title, notification.text, notification.fireTime, notification.pushType)
+	-- 	end
+	-- end
 end
 
 -- 判断是否足够存入次数（触发时间短的先触发，并占用一次次数）

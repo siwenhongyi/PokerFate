@@ -115,6 +115,10 @@ function P:onBtSure()
     self:hideUI()
 end
 
+function P:onBtClose()
+    self:onBtCancel()
+end
+
 function P:onBtCancel(isClose)
     if self._params.onCancel then
         if self._params.onCancel(isClose) then return end

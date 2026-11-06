@@ -61,7 +61,11 @@ local function _initData()
 {"shop_pledge_button_through_tw","Character[shop_pledge_button_through_zh]","Character[shop_pledge_button_through_tw]","Character[shop_pledge_button_through_en]","Character[shop_pledge_button_through_jp]","Character[shop_pledge_button_through_ko]"},
 {"shop_newcomer_title_tw","Shop[shop_newcomer_title_zh]","Shop[shop_newcomer_title_tw]","Shop[shop_newcomer_title_en]","Shop[shop_newcomer_title_jp]","Shop[shop_newcomer_title_ko]"},
 {"character_bond_title_tw","Character[character_bond_title_zh]","Character[character_bond_title_tw]","Character[character_bond_title_en]","Character[character_bond_title_jp]","Character[character_bond_title_ko]"},
-{"avatartitle_non_01_tw","Avatartitle[avatartitle_non_01_zh]","Avatartitle[avatartitle_non_01_tw]","Avatartitle[avatartitle_non_01_en]","Avatartitle[avatartitle_non_01_jp]","Avatartitle[avatartitle_non_01_tw]"}
+{"avatartitle_non_01_tw","Avatartitle[avatartitle_non_01_zh]","Avatartitle[avatartitle_non_01_tw]","Avatartitle[avatartitle_non_01_en]","Avatartitle[avatartitle_non_01_jp]","Avatartitle[avatartitle_non_01_tw]"},
+{"shop_tag_bestoffer","Shop[shop_tag_bestoffer_zh]","Shop[shop_tag_bestoffer_tw]","Shop[shop_tag_bestoffer_en]","Shop[shop_tag_bestoffer_jp]","Shop[shop_tag_bestoffer_en]"},
+{"shop_tag_hot","Shop[shop_tag_hot_zh]","Shop[shop_tag_hot_tw]","Shop[shop_tag_hot_en]","Shop[shop_tag_hot_jp]","Shop[shop_tag_hot_en]"},
+{"shop_tag_welfare","Shop[shop_tag_welfare_zh]","Shop[shop_tag_welfare_tw]","Shop[shop_tag_welfare_en]","Shop[shop_tag_welfare_jp]","Shop[shop_tag_welfare_en]"},
+{"shop_tag_tl","Shop[shop_tag_tl_zh]","Shop[shop_tag_tl_tw]","Shop[shop_tag_tl_en]","Shop[shop_tag_tl_jp]","Shop[shop_tag_welfare_en]"}
 }
     for _, v in pairs(bodys) do
         local m = {}

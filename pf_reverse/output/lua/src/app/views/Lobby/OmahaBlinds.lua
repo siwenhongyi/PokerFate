@@ -1,10 +1,5 @@
 local P = class("OmahaBlinds", UiFullView)
 
-local SYS_GUIDES = {
-    [GAME_GAME_TYPE.LOBBY_HOLDEM_GAME] = 12001,
-    [GAME_GAME_TYPE.LOBBY_OMAHA_GAME] = 13001,
-}
-
 function P:onAwake()
 	self._openAnim, self._closeAnim = "UI_1_" .. self.__cname .. "_into", "UI_1_" .. self.__cname .. "_back"
     self.Center = self:find("AnimRoot/Center")
@@ -12,10 +7,12 @@ function P:onAwake()
     self.RightTop = self:find("AnimRoot/RightTop")
     self.LeftBottom = self:find("AnimRoot/LeftBottom")
     self.TextGold = self:find("Ticket/CountText", self.RightTop)
-    self.QuickByButton = self:find("QuickByButton", self.RightTop)
+    self.QuickByButton = self:find("Buttons/QuickByButton", self.RightTop)
+    self.LimitPackageButton = self:find("Buttons/LimitPackageButton", self.RightTop)
 
     self.blinds_title_omaha = self:find("blinds_title_poker/blinds_title_omaha", self.Center)
     self.blinds_title_poker = self:find("blinds_title_poker/blinds_title_poker", self.Center)
+    self.blinds_title_allin = self:find("blinds_title_poker/blinds_title_allin", self.Center)
 
     self.RoomList = self:find("RoomList", self.Center)
     self.RoomView = self:find("RoomView", self.Center)
@@ -32,7 +29,7 @@ function P:onAwake()
     end
     bee.addClick(self:find("Ticket", self.RightTop), function()
         Game:playSound("ui_button_confirm")
-        ItemModel:jumpViewByItemId(GPropId.Gold)
+        UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(GPropId.Gold, true)})
     end)
     bee.addClick(self:find("Ticket/Icon", self.RightTop), function()
         Game:playSound("ui_button_confirm")
@@ -67,15 +64,17 @@ function P:onShow()
     if self._params and self._params.jump and self._params.jump.select then
         self._gameType = self._params.jump.select
     end
+
     if self.blinds_title_poker then
-        if GF.isOmahaGame(self._gameType) then
-            self.blinds_title_omaha:SetActive(true)
-            self.blinds_title_poker:SetActive(false)
-        else
-            self.blinds_title_omaha:SetActive(false)
-            self.blinds_title_poker:SetActive(true)
-        end
+        self.blinds_title_poker:SetActive(GF.isPokerGame(self._gameType))
     end
+    if self.blinds_title_omaha then
+        self.blinds_title_omaha:SetActive(GF.isOmahaGame(self._gameType))
+    end
+    if self.blinds_title_allin then
+        self.blinds_title_allin:SetActive(GF.isAllinPoker(self._gameType))
+    end
+
     self._datas = GF.getTableDatas(self._gameType)
     for k, v in ipairs(self._datas) do
         v.index = k
@@ -84,7 +83,7 @@ function P:onShow()
 
     local View = self.RoomView
     local isMoved = false
-    if SCREEN_WIDTH < w then
+    if SCREEN_WIDTH_SAFE < w then
         View = self:find("Viewport/Content", self.RoomList)
 
         if #self._datas >= 4 then
@@ -106,13 +105,13 @@ function P:onShow()
     self._lastSelectIndex = self._curStep
 
     self.CurItems = {}
+    local TmpItems = {}
+    for k, v in ipairs(self.Items) do
+        TmpItems[k] = v
+    end
     for k, v in ipairs(self._datas) do
-        local item 
-        if self._gameType == GAME_GAME_TYPE.LOBBY_HOLDEM_ALLIN then
-            item = self.Items[k]
-        else
-            item = self.Items[v.bg_color] or CU.GameObject.Instantiate(self.Items[#self.Items])
-        end
+        local item = TmpItems[v.bg_color] or CU.GameObject.Instantiate(self.Items[v.bg_color])
+        TmpItems[v.bg_color] = nil
         item:SetActive(true)
         if k > 1 then
             self:find("Root", item):SetActive(false)
@@ -123,33 +122,25 @@ function P:onShow()
         self:refreshItem(v, item)
         table.insert(self.CurItems, item)
     end
-    bee.setTextGold(self.TextGold, _N(PlayerModel:getGold()))
+    bee.setTextGold(self.TextGold, _N2(PlayerModel:getGold()))
     if GuideManager:isInGuide() then
         self:once(1, function()
             self.animator.enabled = false
             View:GetComponent("HorizontalLayoutGroup").enabled = false
             View:GetComponent("ContentSizeFitter").enabled = false
         end)
-    elseif GF.isTrainingGame(self._datas[1].gameType) and not GuideManager:isInGuide() and GuideManager:isSysGuideValid(SYS_GUIDES[self._gameType]) ~= 0 then
-        self:once(1, function()
-            self.animator.enabled = false
-            View:GetComponent("HorizontalLayoutGroup").enabled = false
-            View:GetComponent("ContentSizeFitter").enabled = false
-        end)
-        if SCREEN_WIDTH < w then
-            self._horizontalNormalizedPosition = 1
-        end
     else
-        if SCREEN_WIDTH < w then
-            if not isMoved then
-                if self._curStep >= 4 then
-                    self.RoomList:GetComponent("ScrollRect").horizontalNormalizedPosition = 1
-                elseif self._curStep == 3 then
-                    self.RoomList:GetComponent("ScrollRect").horizontalNormalizedPosition = 0.5
-                end
+        if SCREEN_WIDTH_SAFE < w then
+            local offset = 436
+            local x = self._curStep * offset - offset / 2
+            local sw = self.RoomList.transform.rect.width
+            local pos = 0
+            if x < sw / 2 then
+                pos = 0
             else
-                self.RoomList:GetComponent("ScrollRect").horizontalNormalizedPosition = 1
+                pos = (x - sw / 2) / (w - sw)
             end
+            self.RoomList:GetComponent("ScrollRect").horizontalNormalizedPosition = pos > 1 and 1 or pos
         end
     end
 
@@ -170,6 +161,8 @@ function P:onShow()
         if not bee.isNull(obj) then
             obj.transform:SetParent(self.LeftBottom.transform, false)
             obj.transform.localPosition = bee.v3(-78, -122)
+            local c = ObjectPool:getCls(obj)
+            c:setParams({game_type = self._gameType})
             self.HotSpringAddition = obj
             if View then
                 local pos = View.transform.localPosition
@@ -185,12 +178,8 @@ function P:onShow()
     end
 
     QuickByModel:addButtonItem(self.uiName, self.QuickByButton)
-end
+    QuickByModel:addLimitButtonItem(self.uiName, self.LimitPackageButton)
 
-function P:afterShow()
-    if not GuideManager:isInGuide() then
-        GuideManager:startSystemGuide(SYS_GUIDES[self._gameType], 0.65)
-    end
 end
 
 function P:refreshItem(data, item)
@@ -208,6 +197,15 @@ function P:refreshItem(data, item)
     if self:find("blinds_selected", Root) then
         self:find("blinds_selected", Root):SetActive(self._lastSelectIndex == data.index)
     end
+
+    if data.fee > 0 then
+        if GF.isAllinPoker(self._gameType) then
+            bee.setText(self:find("Buy-in", Root), _T("LAB_BUYIN"))
+        else
+            bee.setText(self:find("Buy-in", Root), _T("LAB_MM_BUYIN"))
+        end
+    end
+
     local Locked = self:find("Locked", Root)
     if Locked then
         if data.level_limit > PlayerModel:getCurLevel() then
@@ -267,6 +265,14 @@ function P:refreshItem(data, item)
                 bee.setColor(self:find("TextMMBuyin", Root), bee.colorHex("#ff4747"), "Text")
             end
         end
+    else
+        if data.byin > PlayerModel:getGold() then
+            if data.id <= 4 then
+                bee.setColor(self:find("TextMMBuyin", Root), bee.colorHex("#dc2c2c"), "Text")
+            else
+                bee.setColor(self:find("TextMMBuyin", Root), bee.colorHex("#ff4747"), "Text")
+            end
+        end
     end
 
     bee.addClick(item, function()
@@ -274,7 +280,7 @@ function P:refreshItem(data, item)
             UiManager:showToast(_F("LAB_LEVEL_TEXT_16", data.level_limit))
             return
         end
-        if PlayerModel:getGold() < (data.min_byin or data.byin) then
+        if not GF.isTrainingGame(data.gameType) and PlayerModel:getGold() < (data.min_byin or data.byin) then
             if data.id <= 1 then
                 UiManager:showToast(_T("LAB_GOLD_LACK"))
             else
@@ -291,8 +297,10 @@ function P:refreshItem(data, item)
                         byin_chips = data.byin,
                         ip = PlayerModel:getIP(),
                     }
-                    Net:sendReq("pb.QuickStartREQ", params)
-                    self:hideUI()
+                    UiManager:showUI("LoadingLayer", {cb = function()
+                        Net:sendReq("pb.QuickStartREQ", params)
+                        self:hideUI()
+                    end})
                 else
                     UiManager:showUI("LobbyByinDialog", {data = data})
                     self._closeAnim = ""
@@ -410,7 +418,7 @@ function P:evt_RoomWinnerRewardsInfoRSP(msg)
 end
 
 function P:evt_refreshTopInfo()
-    bee.setTextGold(self.TextGold, _N(PlayerModel:getGold()))
+    bee.setTextGold(self.TextGold, _N2(PlayerModel:getGold()))
     self._curStep = 0
     for i = #self._datas, 1, -1 do
         if PlayerModel:getGold() >= self._datas[i].recommend and (not self._datas[i].level_limit or self._datas[i].level_limit <= PlayerModel:getCurLevel()) then
@@ -439,7 +447,18 @@ function P:evt_refreshTopInfo()
             else
                 bee.setColor(self:find("TextMMBuyin", Root), bee.colorHex("#262626"), "Text")
             end
+        else
+            if v.byin > PlayerModel:getGold() then
+                if v.id <= 4 then
+                    bee.setColor(self:find("TextMMBuyin", Root), bee.colorHex("#dc2c2c"), "Text")
+                else
+                    bee.setColor(self:find("TextMMBuyin", Root), bee.colorHex("#ff4747"), "Text")
+                end
+            else
+                bee.setColor(self:find("TextMMBuyin", Root), bee.colorHex("#262626"), "Text")
+            end
         end
+
         if self._lastSelectIndex == v.index then
             Root.transform.localScale = bee.v3(1.04, 1.04, 1.04)
         else
@@ -448,21 +467,10 @@ function P:evt_refreshTopInfo()
     end
 end
 
-function P:evt_sys_guide_end(guide)
-    if guide.id == SYS_GUIDES[self._gameType] then
-        if self._horizontalNormalizedPosition then
-            bee.Tween.toFloat(0, self._horizontalNormalizedPosition, 0.5, function(value)
-                if not bee.isNull(self.node) and not self:isHiding() then
-                    self.RoomList:GetComponent("ScrollRect").horizontalNormalizedPosition = value
-                end
-            end)
-        end
-    end
-end
-
 function P:hideUI()
 	P.super.hideUI(self)
 	QuickByModel:hideButton(self.QuickByButton)
+    QuickByModel:hideLimitButton(self.LimitPackageButton)
 end
 
 return P

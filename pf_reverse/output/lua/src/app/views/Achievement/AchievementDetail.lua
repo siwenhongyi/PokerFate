@@ -137,6 +137,7 @@ function P:refreshThemeItem(data, item, isInit, index)
     reddot:SetActive(RedManager:isTag(AchievementModel.reddotLink[data.data.id]))
 
     bee.addClick(item, function()
+        bee.logEvent("achievement-tag-theme", data.data.id)
         Game:playSound("ui_tab_switch_1")
         if self.curThemeType == data.data.id then
             return
@@ -248,19 +249,17 @@ function P:refreshContent()
             themeInProgress:SetActive(true)
         end
 
-        -- self.ContentList1:clear()
-        self.ContentList1:switchScrollInertia(false)
-        self.ContentList1:moveToYItem(1, false)
-        self.ContentList1:setDatas(achs)
-        self.ContentList1:switchScrollInertia(true)
+        self.ContentList1:changeScrollInertia(function ()
+            self.ContentList1:moveToYItem(1, false)
+            self.ContentList1:setDatas(achs)
+        end)
     else
         scrollRoot = self.ContentScrollRoot2
 
-        -- self.ContentList2:clear()
-        self.ContentList2:switchScrollInertia(false)
-        self.ContentList2:moveToYItem(1, false)
-        self.ContentList2:setDatas(achs)
-        self.ContentList2:switchScrollInertia(true)
+        self.ContentList2:changeScrollInertia(function ()
+            self.ContentList2:moveToYItem(1, false)
+            self.ContentList2:setDatas(achs)
+        end)
     end
 
     local emptyDatas = table.nums(achs) == 0
@@ -301,10 +300,10 @@ end
 function P:sortCT(a, b)
     if self.curSortState == self.sortState.Up then
         if a.data.status >= 2 and b.data.status >= 2 then
-            if a.data.updated_at == b.data.updated_at then
+            if a.data.created_at == b.data.created_at then
                 return a.cfg.id < b.cfg.id
             else
-                return a.data.updated_at > b.data.updated_at
+                return a.data.created_at > b.data.created_at
             end
         elseif a.data.status == 1 and b.data.status == 1 then
             return a.cfg.id < b.cfg.id
@@ -313,10 +312,10 @@ function P:sortCT(a, b)
         end
     else
         if a.data.status >= 2 and b.data.status >= 2 then
-            if a.data.updated_at == b.data.updated_at then
+            if a.data.created_at == b.data.created_at then
                 return a.cfg.id > b.cfg.id
             else
-                return a.data.updated_at < b.data.updated_at
+                return a.data.created_at < b.data.created_at
             end
         elseif a.data.status == 1 and b.data.status == 1 then
             return a.cfg.id > b.cfg.id
@@ -379,7 +378,7 @@ function P:refreshContentItem(data, item, isInit, index)
 
     --描述
     bee.setText(name, _T(cfg.name))
-    local desStr = _F(cfg.des, _N(needValue), gameStr)
+    local desStr = _F(cfg.des, _N2(needValue), gameStr)
     if cfg.task_type == 204 then
         local nameStr = _T(tpl_character[cfg.value[1]].name)
         desStr = _F(cfg.des, nameStr)
@@ -429,12 +428,12 @@ function P:refreshContentItem(data, item, isInit, index)
         schedule:SetActive(true)
         completed:SetActive(false)
         local progress = self:find("Value", schedule)
-        bee.setText(progress, string.format("<color=#FFDBA3>%s</color>/%s", _N(d.current_value), _N(needValue)))
+        bee.setText(progress, string.format("<color=#FFDBA3>%s</color>/%s", _N2(d.current_value), _N2(needValue)))
     else
         schedule:SetActive(false)
         completed:SetActive(true)
         local time = self:find("Time", completed)
-        local timeDate = TimeHelp:getDateStr(d.updated_at, "/")
+        local timeDate = TimeHelp:getDateTimeStr(d.created_at, "/", ":")
         bee.setText(time, timeDate)
     end
 
@@ -461,6 +460,7 @@ function P:changeState(isOn, state)
     end
 
     self.curSelectState = state
+    bee.logEvent("achievement-tag-filtration", self.curThemeType, self.curSelectState)
     self:refreshContent()
 end
 
@@ -470,6 +470,7 @@ function P:sortEvent()
     self.SortDown:SetActive(self.curSortState == self.sortState.Down)
     self.SortUp:SetActive(self.curSortState == self.sortState.Up)
     self:refreshContent()
+    bee.logEvent("achievement-sort-change", self.curThemeType, self.curSortState)
 end
 
 --筛选
@@ -495,6 +496,7 @@ function P:InitDropDown()
             bee.setText(self.FilterText, str)
             self:refreshContent()
             self:switchDropDown(false)
+            bee.logEvent("achievement-sort-condition", self.curThemeType, self.curFilterState)
         end)
         table.insert(self.dropItems, item)
     end

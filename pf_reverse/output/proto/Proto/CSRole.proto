@@ -84,6 +84,12 @@ message RoleBondChangeRSP
     optional int32 bond_inc = 4; // 好感度变化值
 }
 
+// 角色溢出好感度变化通知
+message RoleOverBondChangeRSP
+{
+    optional OverBondSettleInfo over_info = 1; //超出好感度信息
+}
+
 // 角色觉醒请求
 message RoleAwakenREQ
 {

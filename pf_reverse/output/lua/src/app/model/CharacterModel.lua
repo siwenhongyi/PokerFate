@@ -3,8 +3,18 @@ local CharacterData = require("app.model.CharacterData")
 local P = class("CharacterModel", BaseModel)
 
 local LunarFestival = {
-    -- 中秋节
-    [1] = {{2026, 9, 25}, {2027, 9, 15}, {2028, 10, 3}},
+    -- 中秋节 (农历八月十五)
+    [1] = {{2026, 9, 25}, {2027, 9, 15}, {2028, 10, 3}, {2029, 9, 22}, {2030, 9, 12},
+           {2031, 10, 1}, {2032, 9, 19}, {2033, 9, 8}, {2034, 9, 27}, {2035, 9, 16},
+           {2036, 10, 4}, {2037, 9, 24}, {2038, 9, 13}, {2039, 10, 2}, {2040, 9, 20},
+           {2041, 9, 10}, {2042, 9, 28}, {2043, 9, 17}, {2044, 10, 5}, {2045, 9, 25},
+           {2046, 9, 15}, {2047, 10, 4}, {2048, 9, 22}, {2049, 9, 11}, {2050, 9, 30}},
+    -- 七夕 (农历七月初七, 基于19年Metonic周期推算)
+    [4] = {{2026, 8, 19}, {2027, 8, 8}, {2028, 8, 26}, {2029, 8, 16}, {2030, 8, 5},
+           {2031, 8, 24}, {2032, 8, 12}, {2033, 8, 1}, {2034, 8, 20}, {2035, 8, 10},
+           {2036, 8, 28}, {2037, 8, 17}, {2038, 8, 7}, {2039, 8, 25}, {2040, 8, 14},
+           {2041, 8, 4}, {2042, 8, 22}, {2043, 8, 10}, {2044, 8, 29}, {2045, 8, 19},
+           {2046, 8, 8}, {2047, 8, 26}, {2048, 8, 16}, {2049, 8, 5}, {2050, 8, 24}},
 }
 
 -- 牌手角色系统
@@ -48,6 +58,13 @@ function P:ctor(logic)
     self._awakenreds = nil
     self._getroleguide = nil
     self._profilereds = nil
+    self._storys = nil
+    self._openedStorys = nil
+    self._secondAwakenNew = nil
+    self._waitSecondAwaken = {}
+
+    self.unlockStoryList = {}
+    self.openedStoryList = {}
 end
 
 function P:afterInit()
@@ -79,11 +96,16 @@ function P:afterLogin()
     self._skinreds = self:getCloudKeyData("skinreds")
     self._awakenreds = self:getCloudKeyData("awakenreds")
     self._profilereds = self:getCloudKeyData("profilereds")
+    self._storys = self:getCloudKeyData("storys")
+    self._openedStorys = self:getCloudKeyData("openedStorys")
     self._getroleguide = self.cloud["getroleguide" .. PlayerModel:getUid()]
+    self._secondAwakenNew = self:getCloudKeyData("secondawakennew")
 
     for _, v in ipairs(self._defaultRoles) do
         v:setData({role_id = v.role_id, locked = true})
     end
+
+    self._roleTaskList = {}
 end
 
 function P:removeNewroleRed(role_id)
@@ -148,13 +170,18 @@ function P:removeFilered(role_id, level)
 end
 
 function P:removeFiletagRed(role_id)
+    local exchange = self:saveOpenedStory(role_id)
     for k, v in ipairs(self._filetagreds) do
         if v == role_id then
             table.remove(self._filetagreds, k)
-            self:onSave()
-            self:refreshReddot(role_id)
+            exchange = true
             break
         end
+    end
+
+    if exchange then
+        self:onSave()
+        self:refreshReddot(role_id)
     end
 end
 
@@ -270,6 +297,27 @@ function P:removeAwakenRed(role_id)
     end
 end
 
+function P:isRoleSecondAwakenNewRed(role_id)
+    for k,v in pairs(self._secondAwakenNew) do
+        if v == role_id then
+            return true
+        end
+    end
+    return false
+end
+
+function P:removeSecondAwakenNewRed(role_id)
+    for k, v in ipairs(self._secondAwakenNew) do
+        if v == role_id then
+            table.remove(self._secondAwakenNew, k)
+            self:onSave()
+            self:refreshReddot(role_id)
+            bee.emit(EventDef.evt_role_role_red, role_id)
+            break
+        end
+    end
+end
+
 function P:setGetroleguide()
     self._getroleguide = true
     self.cloud["getroleguide" .. PlayerModel:getUid()] = true
@@ -331,6 +379,18 @@ function P:refreshReddot(role_id)
             end
         end
     end
+
+    if self._secondAwakenNew then
+        for _, v in ipairs(self._secondAwakenNew) do
+            local r = self:getRole(v)
+            if r.role_id == role_id then
+                roleIds[v] = v
+            end
+        end
+    end
+    if self._waitSecondAwaken[role_id] and self._waitSecondAwaken[role_id] == 1 then
+        roleIds[role_id] = role_id
+    end
     
     for _, v in pairs(roleIds) do
         num = num + 1
@@ -346,6 +406,11 @@ function P:refreshReddot(role_id)
             if v == role_id then
                 fileTagNum = fileTagNum + 1
                 break
+            end
+        end
+        if self._openedStorys then
+            if self:checkNewOpened(role_id) then
+                fileTagNum = fileTagNum + 1
             end
         end
         for _, v in ipairs(self._voicetagreds) do
@@ -389,34 +454,38 @@ function P:getCurRole()
     return self._roleMap[self.using_role_id]
 end
 
-function P:changeUsingRole(roleId)
-    if roleId == self.using_role_id then
-        return
-    end
-    local schemeInfo = PlayerModel:getCurScheme()
-    local skin_id = self:getRole(roleId):getSkinData().id
-    local property_list = {}
-    property_list[1] = PlayerModel.CharacterDefaultPosX * 10
-    property_list[2] = PlayerModel.CharacterDefaultPosY * 10
-    property_list[3] = PlayerModel.CharacterDefaultPosSize * 100
-    property_list[4] = schemeInfo.property_list[4]
-    PlayerModel:requestSaveDecorationScheme(schemeInfo.scheme_id, skin_id, schemeInfo.lobby_scene_id, schemeInfo.lobby_bgm_list, property_list, true)
-end
+-- function P:changeUsingRole(roleId)
+--     if roleId == self.using_role_id then
+--         return
+--     end
+--     local schemeInfo = DecorationModel:getCurScheme()
+--     local skin_id = self:getRole(roleId):getSkinData().id
+--     local property_list = {}
+--     property_list[1] = PlayerModel.CharacterDefaultPosX * 10
+--     property_list[2] = PlayerModel.CharacterDefaultPosY * 10
+--     property_list[3] = PlayerModel.CharacterDefaultPosSize * 100
+--     property_list[4] = schemeInfo.property_list[4]
+--     property_list[5] = schemeInfo.property_list[5]
+--     DecorationModel:requestSaveDecorationScheme(
+--         schemeInfo.scheme_id, skin_id, schemeInfo.lobby_scene_id, schemeInfo.lobby_bgm_list, schemeInfo.avatar, schemeInfo.frame, schemeInfo.title, property_list, true)
+-- end
 
-function P:changeUsingSkin(skinId)
-    local skinCfg = tpl_character_skin[skinId]
-    local schemeInfo = PlayerModel:getCurScheme()
-    local property_list = schemeInfo.property_list
-    if skinCfg.role ~= self:getUsingRoleId() then
-        property_list[1] = PlayerModel.CharacterDefaultPosX * 10
-        property_list[2] = PlayerModel.CharacterDefaultPosY * 10
-        property_list[3] = PlayerModel.CharacterDefaultPosSize * 100
-    end
-    PlayerModel:requestSaveDecorationScheme(schemeInfo.scheme_id, skinId, schemeInfo.lobby_scene_id, schemeInfo.lobby_bgm_list, schemeInfo.property_list, true)
-end
+-- function P:changeUsingSkin(skinId)
+--     local skinCfg = tpl_character_skin[skinId]
+--     local schemeInfo = DecorationModel:getCurScheme()
+--     local property_list = schemeInfo.property_list
+--     if skinCfg.role ~= self:getUsingRoleId() then
+--         property_list[1] = PlayerModel.CharacterDefaultPosX * 10
+--         property_list[2] = PlayerModel.CharacterDefaultPosY * 10
+--         property_list[3] = PlayerModel.CharacterDefaultPosSize * 100
+--         property_list[5] = 0
+--     end
+--     DecorationModel:requestSaveDecorationScheme(
+--         schemeInfo.scheme_id, skinId, schemeInfo.lobby_scene_id, schemeInfo.lobby_bgm_list, schemeInfo.avatar, schemeInfo.frame, schemeInfo.title, schemeInfo.property_list, true)
+-- end
 
 function P:updateUsingRole()
-    local schemeInfo = PlayerModel:getCurScheme()
+    local schemeInfo = DecorationModel:getCurScheme()
     if schemeInfo then
         local skinCfg = tpl_character_skin[schemeInfo.skin_id]
         local r = self:getRole(skinCfg.role)
@@ -441,9 +510,13 @@ function P:getUsingRoleId()
     end
     return tpl_character_list[1].id
 end
-
 function P:getUsingRole()
-    return self._roleMap[self.using_role_id]
+    return self._roleMap[self:getUsingRoleId()]
+end
+function P:getUsingRoleSkin()
+    local scheme = bee.isInGame() and DecorationModel:getInGameCurScheme() or DecorationModel:getCurScheme()
+    local skinId = scheme.skin_id
+    return tpl_character_skin[skinId]
 end
 
 function P:setRoles(roles)
@@ -490,9 +563,13 @@ function P:addRole(role)
 end
 
 function P:sortRoles(datas)
+    local isRandom = DecorationModel:isInGameSchemeRandom()
+    for _, v in ipairs(datas) do
+        v.__is_in_user = DecorationModel:checkRoleInScheme(SchemeTag.Ingame, not isRandom, v.role_id)
+    end
     table.sort(datas, function(a, b)
-        if a.role_id == self.using_role_id or b.role_id == self.using_role_id then
-            return a.role_id == self.using_role_id
+        if a.__is_in_user ~= b.__is_in_user then
+            return a.__is_in_user
         end
         if a.is_star ~= b.is_star then
             return a.is_star
@@ -644,7 +721,30 @@ function P:setRoleLevelUp(role_id, level)
             table.insert(vs, v.key)
         end
     end
-    if #vs > 0 then
+    self:_addVoiceTags(vs, role_id)
+
+    if level + 1 == Config.AWAKEN_LEVEL then
+        table.addValue(self._awakenreds, role_id)
+    end
+    
+    if level == Config.AWAKEN_LEVEL then
+        local role = self:getRole(role_id)
+        if role:isCanSecondAwaken() then
+            table.addValue(self._secondAwakenNew, role_id)
+            self:onSave()
+        end
+    elseif level == Config.SECOND_AWAKEN_LEVEL then
+        self._waitSecondAwaken[role_id] = nil
+    end
+
+    self:onSave()
+    self:refreshReddot(self._red_role_id)
+
+    bee.emit(EventDef.evt_role_role_red, role_id)
+end
+
+function P:_addVoiceTags(vs, role_id)
+    if vs and #vs > 0 then
         local vd = table.getValue(self._voices, "role_id", role_id)
         if not vd then
             vd = {role_id = role_id, voices = {}}
@@ -661,15 +761,6 @@ function P:setRoleLevelUp(role_id, level)
 
         table.addValue(self._voicetagreds, role_id)
     end
-
-    if level + 1 == Config.AWAKEN_LEVEL then
-        table.addValue(self._awakenreds, role_id)
-    end
-
-    self:onSave()
-    self:refreshReddot(self._red_role_id)
-
-    bee.emit(EventDef.evt_role_role_red, role_id)
 end
 
 function P:setNewRole(role_id)
@@ -687,6 +778,18 @@ function P:setNewSkin(skin_id)
         table.addValue(self._skinreds, skin_id)
         self:onSave()
         self:refreshReddot(self._red_role_id)
+    end
+
+    if skinData then
+        local role_id = skinData.role
+        local vs = {}
+        local ds = get_tpl_subKey(tpl_chat_list, "role", role_id)
+        for _, v in ipairs(ds) do
+            if v.skin_voice == skin_id then
+                table.insert(vs, v.key)
+            end
+        end
+        self:_addVoiceTags(vs, role_id)
     end
 end
 
@@ -853,6 +956,20 @@ function P:getRoleBondsRewards(role_id, lvl)
     return rewards
 end
 
+-- 获取皮肤专用语音
+function P:getSkinChatData(skin_id, kind)
+    local skin = tpl_character_skin[skin_id]
+    if skin then
+        local ds = get_tpl_subKey(tpl_chat_list, "role", skin.role)
+        for _, v in ipairs(ds) do
+            if v.skin_voice == skin_id and v.kind == kind then
+                return v
+            end
+        end
+    end
+    return nil
+end
+
 function P:evt_serverTimeCrossDay()
     self.send_gift_cnt = 0
 end
@@ -901,7 +1018,11 @@ function P:_isInFestival(id)
     elseif id == 3 then -- 愚人节
         return curDate.month == 4 and curDate.day == 1
     elseif id == 4 then -- 七夕节
-        return curDate.month == 7 and curDate.day == 7
+        if LAN:getLanguage() == "jp" then
+            return curDate.month == 7 and curDate.day == 7
+        else
+            return self:_isInLunarFestival(id)
+        end
     elseif id == 5 then -- 圣诞节
         return curDate.month == 12 and curDate.day == 25
     elseif id == 6 then -- 万圣节
@@ -973,6 +1094,15 @@ function P:getCharacterChatList(skin_id)
             end
         end
     end
+    -- 二次觉醒语音
+    if skinCfg.awakened2_click_voice then
+        local role = self:getRole(skinCfg.role)
+        if role:isSecondAwaken() then
+            for i = 1, #skinCfg.awakened2_click_voice, 3 do
+                table.insert(character_sound_list, {sound = skinCfg.awakened2_click_voice[i], face = skinCfg.awakened2_click_voice[i + 1], text = skinCfg.awakened2_click_voice[i + 2]})
+            end
+        end
+    end
     -- 季节问候语音
     if skinCfg.season_voice then
         local curSeason = tostring(self:getCurSeason())
@@ -988,7 +1118,7 @@ end
 
 function P:getCharacterSound()
     -- 每次刷新语音的时候刷新一下播放列表
-    local schemeInfo = PlayerModel:getCurScheme()
+    local schemeInfo = DecorationModel:getCurScheme()
     local skinId = schemeInfo.skin_id
     self._character_sound_list = self:getCharacterChatList(skinId)
     self._max_sound_count = #self._character_sound_list
@@ -1003,5 +1133,251 @@ function P:getCharacterSound()
     end
     return self._character_sound_list[self._sound_index]
 end
+
+
+-- ================================= 二次誓约任务 =================================
+
+-- 获取所有可二次觉醒角色的任务
+function P:reqAllTaskList()
+    for k, v in pairs(self._roles) do
+        self:reqRoleTaskList(v.role_id)
+    end
+end
+
+-- 获取角色二次觉醒任务
+function P:reqRoleTaskList(role_id)
+    if not role_id then
+        return
+    end
+
+    local role = self:getRole(role_id)
+    if not role then
+        bee.emit("evt_updateCharacterTask", {role_id = role_id})
+        return
+    end
+    if not role:isCanSecondAwaken() then
+        return
+    end
+    if role:isSecondAwaken() then
+        return
+    end
+
+    Net:post("task/roleTaskList", {role_id = role_id}, function(data)
+        if data.code ~= 0 then
+            return
+        end
+        self._roleTaskList[role_id] = data.list
+
+        local isComplete = true
+        for k,v in pairs(data.list) do
+            if v.status ~= TaskStatus.Completed then
+                isComplete = false
+                break
+            end
+        end
+        if isComplete and not self:getRole(role_id):isSecondAwaken() then
+            self._waitSecondAwaken[role_id] = 1
+        else
+            self._waitSecondAwaken[role_id] = nil
+        end
+        self:refreshReddot(role_id)
+        bee.emit("evt_updateCharacterTask")
+    end)
+end
+
+function P:getRoleTaskList(role_id)
+    local list = self._roleTaskList[role_id]
+    if list then
+        table.sort(list, function(a, b)
+            local sumA = 100
+            local sumB = 100
+            if a.status == TaskStatus.InProgress then
+                sumA = sumA + 10
+            end
+            if b.status == TaskStatus.InProgress then
+                sumB = sumB + 10
+            end
+            if a.sort < b.sort then
+                sumA = sumA + 1
+            end
+            if b.sort < a.sort then
+                sumB = sumB + 1
+            end
+            return sumA > sumB
+        end)
+        return self._roleTaskList[role_id]
+    else
+        local roleCfg = tpl_character[role_id]
+        if not roleCfg.tasks then
+            return {}
+        end
+        local list = get_tpl_subKey(tpl_character_task_list, "group", roleCfg.tasks)
+        table.sort(list, function(a, b) return a.sort < b.sort end)
+        return list
+    end
+end
+
+function P:reqRecRoleTaskRw(role, succCb)
+    if not role then
+        return
+    end
+    
+    if not role:isAwaken() or role:isSecondAwaken() then
+        return
+    end
+
+    Net:post("task/recRoleTaskRw", {role_id = role.role_id}, function(data)
+        if data.code ~= 0 then
+            return
+        end
+        if succCb then
+            succCb()
+        end
+        role.level_info.level = Config.SECOND_AWAKEN_LEVEL
+        self:setRoleLevelUp(role.role_id, Config.SECOND_AWAKEN_LEVEL)
+    end)
+end
+
+function P:evt_NoticeBRC(params)
+    if params.type == tpl_PushConsts.ROLE_TASK_REFRESH.code then
+        self:reqAllTaskList()
+    end
+end
+
+function P:isWaitSecondAwaken(role_id)
+    if not self._waitSecondAwaken then
+        return false
+    end
+    return self._waitSecondAwaken[role_id] == 1
+end
+
+-- =============================== 角色剧情 ===============================
+
+--获取角色剧情数据
+function P:getRoleThemeStory()
+    Net:post("activity/themeStory", nil, function (data)
+        if data.code ~= 0 then
+            return
+        end
+        self.unlockStoryList = data.id_arr or {}
+    end)
+end
+
+--解锁角色剧情
+function P:reqUnlockRoleStory(id)
+    -- table.insert(self.unlockStoryList, id)
+    -- bee.emit("evt_UnlockStoryCallback", {id = id})
+    Net:post("activity/unlockThemeStory", {id = id}, function (data)
+        if data.code ~= 0 then
+            return
+        end
+        table.insert(self.unlockStoryList, id)
+        bee.emit("evt_UnlockStoryCallback", {id = id})
+    end)
+end
+
+--开放的角色剧情
+function P:getOpenedStory()
+    self.openedStoryList = {}
+    
+    local inThemeing, curThemeId, overThemeId = self:getThemeData()
+    for _,v in pairs(tpl_theme_storys) do
+        if (not inThemeing and v.group <= overThemeId) or (inThemeing and v.group < curThemeId) then
+            table.insert(self.openedStoryList, v.id)
+        end
+    end
+end
+
+--是否有新增开放的角色剧情
+function P:checkNewOpened(id)
+    if id == nil or id == 0 then
+        return false
+    end
+    local inThemeing, curThemeId, overThemeId = self:getThemeData()
+    local roleCfg = tpl_character[id]
+    if roleCfg.plot_review then
+        local reviewCount = #roleCfg.plot_review
+        for i = 1, reviewCount, 2 do
+            local themeId = roleCfg.plot_review[i]
+            local storyId = roleCfg.plot_review[i + 1]
+            if (not inThemeing and themeId <= overThemeId) or (inThemeing and themeId < curThemeId) then
+                if table.keyof(self._openedStorys, storyId) == nil then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+--记录开放的角色剧情
+function P:saveOpenedStory(id)
+    local exchange = false
+    if id == nil or id == 0 then
+        return exchange
+    end
+    local inThemeing, curThemeId, overThemeId = self:getThemeData()
+    local roleCfg = tpl_character[id]
+    if roleCfg.plot_review then
+        local reviewCount = #roleCfg.plot_review
+        for i = 1, reviewCount, 2 do
+            local themeId = roleCfg.plot_review[i]
+            local storyId = roleCfg.plot_review[i + 1]
+            if (not inThemeing and themeId <= overThemeId) or (inThemeing and themeId < curThemeId) then
+                if table.keyof(self._openedStorys, storyId) == nil then
+                    table.insert(self._openedStorys, storyId)
+                    exchange = true
+                end
+            end
+        end
+    end
+    return exchange
+end
+
+--活动信息
+function P:getThemeData()
+    local curThemeId = ThemeModel:getConfId()
+    local themeCfg = tpl_theme_activity[curThemeId]
+    local ct = bee.getServerTime()
+    local inThemeing = false
+    --是否在活动中
+    if ct > themeCfg.time_start and ct < themeCfg.time_end then
+        inThemeing = true
+    end
+    --最后结束的活动
+    local overThemeId = 0
+    if not inThemeing then
+        for _,v in pairs(tpl_theme_activity) do
+            if ct > v.time_start and ct > v.time_end then
+                if v.id > overThemeId then
+                    overThemeId = v.id
+                end
+            end
+        end
+    end
+    return inThemeing, curThemeId, overThemeId
+end
+
+--剧情是否开放
+function P:checkStoryOpened(id)
+    return table.keyof(self.openedStoryList, id) ~= nil
+end
+
+--剧情是否解锁
+function P:checkStoryUnlock(id)
+    return table.keyof(self.unlockStoryList, id) ~= nil
+end
+
+--新剧情判定
+function P:isNewStory(id)
+    return table.keyof(self._storys, id) == nil
+end
+
+--剧情观看记录
+function P:saveStory(id)
+    table.insert(self._storys, id)
+    self:onSave()
+    self:refreshReddot(self._red_role_id)
+end
+
 
 return P

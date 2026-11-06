@@ -9,6 +9,7 @@ function P:onAwake()
     self.SwitchButton = self:find("SwitchButton", self.Menu)
     self.NextExitButton = self:find("NextExitButton", self.Menu)
     self.CancelExitButton = self:find("CancelExitButton", self.Menu)
+    self.ExitButton = self:find("ExitButton", self.Menu)
 
     bee.addClick(self:find("ImageBg"), function()
         self:hideUI()
@@ -20,7 +21,7 @@ function P:onAwake()
     bee.addClick(self:find("RulesButton", self.Menu), function() self:onBtRules() end)
     bee.addClick(self.NextExitButton, function() self:onBtNextExit() end)
     bee.addClick(self.CancelExitButton, function() self:onBtCancelExit() end)
-    bee.addClick(self:find("ExitButton", self.Menu), function() self:onBtExit() end)
+    bee.addClick(self.ExitButton, function() self:onBtExit() end)
     bee.addClick(self.SwitchButton, function() self:onBtSwitch() end)
 end
 
@@ -45,14 +46,22 @@ function P:refreshUI()
             self.ByinButton:SetActive(true)
         end
 
-        if GameModel.data:isSNG() then
+        if GameModel.data:isSNG() or GameModel.data:isMTT() or GameModel.data:isFriendSNG() then
             self.SwitchButton:SetActive(false)
             self.NextExitButton:SetActive(false)
             self.CancelExitButton:SetActive(false)
+            self.ByinButton:SetActive(false)
         else
             if GameModel.data:isFriendsRoom() then
                 self.SwitchButton:SetActive(false)
             end
+        end
+
+        if GameModel.data:isInObserve() then
+            self.ByinButton:SetActive(false)
+            self.SwitchButton:SetActive(false)
+            self.NextExitButton:SetActive(false)
+            self.CancelExitButton:SetActive(false)
         end
     end
 end
@@ -98,15 +107,6 @@ function P:onBtByin()
 end
 
 function P:onBtSetting()
-    -- if GameModel.data:isAllinOrFold() then
-    --     local ui = UiManager:getUI("AllinSettings")
-    --     if ui and not bee.isNull(ui.node) then
-    --         ui.transform.localPosition = bee.v3zero
-    --     else
-    --         UiManager:showUI("AllinSettings")
-    --     end
-    -- else
-    -- end
     local ui = UiManager:getUI("Setting")
     if ui and not bee.isNull(ui.node) then
         ui.transform.localPosition = bee.v3zero
@@ -122,6 +122,8 @@ function P:onBtRules()
     local name = "IngameRules"
     if GameModel.data:isSNG() then
         name = "TournamentSNGRules"
+    elseif GameModel.data:isMTT() then
+        name = "TournamentMTTRules"
     end
     local ui = UiManager:getUI(name)
     if ui and not bee.isNull(ui.node) then
@@ -141,7 +143,7 @@ function P:onBtSwitch()
         GameModel:switchTable(true)
     end
     self:hideUI()
-    bee.logEvent("ingame-menu-switch", GameModel.data:getGameType(), GameModel.data:getRoomId())
+    bee.logEvent("ingame-menu-switch-table", GameModel.data:getGameType(), GameModel.data:getRoomId())
 end
 
 function P:onBtNextExit()
@@ -156,13 +158,17 @@ function P:onBtCancelExit()
 end
 
 function P:onBtExit()
-    if GameModel.data:isPlaying() and GameModel.data:isMePlaying() and not GameModel.data:isMeFold() then
-        UiManager:showTip({
-            text = GameModel.data:isSNG() and _T("LAB_TOURNAMENT_SNG_INFO31") or _T("LAB_SURE_EXIT"),
-            onSure = function()
-                Net:sendReq("pb.LeaveRoomREQ", {})
-            end
-        })
+    if not GameModel.data:isInObserve() and GameModel.data:isPlaying() and GameModel.data:isMePlaying() and not GameModel.data:isMeFold() then
+        if GameModel.data:isTournament(true) then
+            UiManager:showTip({
+                text = GameModel.data:isTournament(true) and _T("LAB_TOURNAMENT_SNG_INFO31") or _T("LAB_SURE_EXIT"),
+                onSure = function()
+                    Net:sendReq("pb.LeaveRoomREQ", {})
+                end
+            })
+        else
+            UiManager:showToast(_T("LAB_GAME_089"))
+        end
         bee.logEvent("ingame-menu-exit-ongoing", GameModel.data:getGameType(), GameModel.data:getRoomId())
     else
         Net:sendReq("pb.LeaveRoomREQ", {})
@@ -182,6 +188,11 @@ function P:evt_gameBlur(flag, name)
     if flag then
         self:hideUIForce()
     end
+end
+
+function P:evt_shortcutExitTable()
+    local btn = self.ExitButton:GetComponent("Button")
+    btn.onClick:Invoke()
 end
 
 return P

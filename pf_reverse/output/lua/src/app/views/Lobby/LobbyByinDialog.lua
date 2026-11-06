@@ -23,7 +23,8 @@ function P:onAwake()
 
     self.SliderHandle = self:find("Handle Slide Area/Handle", self.Slider)
 
-    bee.addClick(self:find("CloseButton", self.Panel), function()
+    self.CloseButton = self:find("CloseButton", self.Panel)
+    bee.addClick(self.CloseButton, function()
         self:onBtClose()
     end)
     bee.addClick(self.InfoButton, function()
@@ -51,7 +52,9 @@ function P:onAwake()
                 wait_blind = not bee.isCheck(self.CheckToggle),
                 ip = PlayerModel:getIP(),
             }
-            Net:sendReq("pb.QuickStartREQ", params)
+            UiManager:showUI("LoadingLayer", {cb = function()
+                Net:sendReq("pb.QuickStartREQ", params)
+            end})
             LocalStore:setBoolForKey("poker_pay_bb_byin", bee.isCheck(self.CheckToggle))
             LocalStore:setIntegerForKey(self:getLobbyByinStepKey(), self._curStep)
         end
@@ -101,13 +104,13 @@ function P:onShow()
     end
 
     if GF.isTrainingGame(self._params.data.gameType) then
-        bee.setText(self.TextMin, _N(self._params.data.min_byin / self._params.data.bb) .. "BB")
-        bee.setText(self.TextMax, _N(self._params.data.max_byin / self._params.data.bb) .. "BB")
+        bee.setText(self.TextMin, _N2(self._params.data.min_byin / self._params.data.bb) .. "BB")
+        bee.setText(self.TextMax, _N2(self._params.data.max_byin / self._params.data.bb) .. "BB")
     else
-        bee.setText(self.TextMin, _N(self._params.data.min_byin))
-        bee.setText(self.TextMax, _N(self._params.data.max_byin))
+        bee.setText(self.TextMin, _N2(self._params.data.min_byin))
+        bee.setText(self.TextMax, _N2(self._params.data.max_byin))
     end
-    bee.setTextGold(self.TextGold, _N(PlayerModel:getGold()))
+    bee.setTextGold(self.TextGold, _N2(PlayerModel:getGold()))
 
     self.BgTips:SetActive(GF.isTrainingGame(self._params.data.gameType) and GameModel.data == nil)
     self.Chip:SetActive(not GF.isTrainingGame(self._params.data.gameType))

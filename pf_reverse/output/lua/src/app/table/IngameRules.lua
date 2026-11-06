@@ -11,8 +11,14 @@ function P:onAwake()
     self.RulesOmaha = self:find("RulesOmaha", self.Center)
     self.RulesPoker = self:find("Rules", self.Content)
 
+    self.VideoTip = self:find("AnimRoot/LeftTop/VideoTip")
+    self.VideoTip:SetActive(false)
+
     bee.addClick(self:find("AnimRoot/RightTop/CloseButton"), function()
         self:hideUI()
+    end)
+    bee.addClick(self.VideoTip, function ()
+        self:videoEvent()
     end)
     bee.addClick(self.ButtonLeft, function()
         Game:playSound("ui_button_confirm")
@@ -76,6 +82,11 @@ end
 
 function P:evt_hideUiWhenAction(isVisible)
     self:onUiBlur(not isVisible, "evt_hideUiWhenAction", true)
+end
+
+function P:videoEvent()
+    local isOmaha = GameModel.data and GameModel.data:isOmaha()
+    CU.Application.OpenURL("https://www.pokerfate.com/")
 end
 
 return P

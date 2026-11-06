@@ -1,7 +1,7 @@
 local P = class("SideGameModel", BaseModel)
 
 function P:ctor(logic)
-	self.saveData = {}
+	self.saveData = {cloud = {}}
 	P.super.ctor(self)
 end
 
@@ -78,6 +78,71 @@ end
 
 function P:isPinballUnlock()
     return tpl_system_info[101].level <= PlayerModel:getCurLevel()
+end
+
+function P:getPinballLastLv()
+	return self.saveData["pinballLastLv" .. PlayerModel:getUid()]
+end
+
+function P:setPinballLastLv(lv)
+	self.saveData["pinballLastLv" .. PlayerModel:getUid()] = lv
+	self:onSave()
+end
+
+function P:getPinballLastChip()
+	return self.saveData["pinballLastChip" .. PlayerModel:getUid()]
+end
+
+function P:setPinballLastChip(chip)
+	self.saveData["pinballLastChip" .. PlayerModel:getUid()] = chip
+	self:onSave()
+end
+
+function P:getPinballLastBallCount()
+	return self.saveData["pinballLastBallCount" .. PlayerModel:getUid()]
+end
+
+function P:setPinballLastBallCount(ballCount)
+	self.saveData["pinballLastBallCount" .. PlayerModel:getUid()] = ballCount
+	self:onSave()
+end
+
+function P:getColorGameLastLv()
+	return self.saveData["colorGameLastLv" .. PlayerModel:getUid()]
+end
+
+function P:setColorGameLastLv(lv)
+	self.saveData["colorGameLastLv" .. PlayerModel:getUid()] = lv
+	self:onSave()
+end
+
+function P:getColorGameLastChipIndex()
+	return self.saveData["colorGameLastChipIndex" .. PlayerModel:getUid()]
+end
+
+function P:setColorGameLastChipIndex(chipIndex)
+	self.saveData["colorGameLastChipIndex" .. PlayerModel:getUid()] = chipIndex
+	self:onSave()
+end
+
+function P:getColorGameLastBets()
+	local list = {}
+	if not self.saveData["colorGameLastBets" .. PlayerModel:getUid()] then
+		return list
+	end
+	for k, v in pairs(self.saveData["colorGameLastBets" .. PlayerModel:getUid()]) do
+		table.insert(list, {id = v.id, value = v.value})
+	end
+	return list
+end
+
+function P:setColorGameLastBets(lastBets)
+	local list = {}
+	for k, v in pairs(lastBets) do
+		table.insert(list, {id = v.id, value = v.value})
+	end
+	self.saveData["colorGameLastBets" .. PlayerModel:getUid()] = list
+	self:onSave()
 end
 
 return P

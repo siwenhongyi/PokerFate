@@ -87,7 +87,9 @@ function P:getTableData(tag)
 	local cacheStr = CU.PlayerPrefs.GetString(tag, "")
 	if cacheStr and cacheStr ~= "" then
 		dataTb = json.decode(cacheStr)
-		self._datas[tag] = dataTb
+		if type(dataTb) == "table" then
+			self._datas[tag] = dataTb
+		end
 	end
 	return dataTb
 end
@@ -118,11 +120,15 @@ end
 
 function P:DeleteAll(key, val)
 	local app_full_version = self:getStringForKey("app_full_version")
+	-- local app_update_version = self:getStringForKey("app_update_version")
 	local load_slient_result = self:getStringForKey("load_slient_result")
 	CU.PlayerPrefs.DeleteAll()
 	if app_full_version and "" ~= app_full_version then
 		self:setStringForKey("app_full_version", app_full_version)
 	end
+	-- if app_update_version and "" ~= app_update_version then
+	-- 	self:setStringForKey("app_update_version", app_update_version)
+	-- end
 	if load_slient_result and "" ~= load_slient_result then
 		self:setStringForKey("load_slient_result", load_slient_result)
 	end
@@ -151,9 +157,13 @@ end
 
 function P:getIntegerForKey(key, default)
 	if G_RUN_IN_JOB then return default end
-	local ret = CU.PlayerPrefs.GetInt(key, 0)
-	if default and 0 == ret then
-		ret = default
+	local ret = CU.PlayerPrefs.GetInt(key, -64432)
+	if -64432 == ret then
+		if default then
+			ret = default
+		else
+			ret = 0
+		end
 	end
 	return ret
 end

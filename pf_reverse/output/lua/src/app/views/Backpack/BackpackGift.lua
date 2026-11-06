@@ -98,6 +98,7 @@ function P:setItem(item, data, isInit, index)
 	local Favorite = self:find("Favorite", item)
 
 	InputFieldCount:GetComponent("InputField").contentType = CU.UI.InputField.ContentType.IntegerNumber
+	bee.checkInputField(InputFieldCount, "")
 
 	if data.major_type == GMajorType.PROP then
 		PropItemObj:SetActive(true)

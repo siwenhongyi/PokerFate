@@ -1,7 +1,7 @@
 local P = class("BackpackClaimResult", UiDialog)
 
 function P:onAwake()
-    self._closeAnim = ""
+    self._openAnim, self._closeAnim = "", ""
     
     local Center = self:find("AnimRoot/Center")
 
@@ -12,16 +12,24 @@ function P:onAwake()
     self.Content2 = self:find("Content", Center)
     self.TitleText = self:find("common_result_title/TitleText", Center)
 
-    bee.addClick2(self:find("common_panel_mask", Center), function()
+    self.MaskButton = self:find("common_panel_mask", Center)
+    bee.addClick2(self.MaskButton, function()
+        self:onBtClose()
+    end)
+
+    self.ContinueButton = self:find("ContinueButton", Center)
+    self.Buttons = self:find("Buttons", Center)
+    self.DecorationButton = self:find("Decoration", self.Buttons)
+    self.ConfirmButton = self:find("Confirm", self.Buttons)
+    bee.addClick(self.DecorationButton, function ()
         if self._params.delay and math.abs(os.time() - self._startDt) < self._params.delay then
             return
         end
-        if self._params.cb then
-            self._params.cb()
-        end
-        self:hideUI()
-        ItemModel:refreshReddot()
-        bee.emit("evt_BackpackClaimResultClose")
+        ItemModel:jumpView(13001)
+        self.MaskButton:GetComponent("Button").onClick:Invoke()
+    end)
+    bee.addClick(self.ConfirmButton, function ()
+        self.MaskButton:GetComponent("Button").onClick:Invoke()
     end)
 
     Game:playSound("ui_reward_gain")
@@ -39,27 +47,32 @@ function P:onShow()
     for k,v in pairs(self._params.items) do
         -- 判断是否为新道具
         local d = v.org_item or v
-        if not d.major_type or d.major_type == GMajorType.PROP then
+        if not d.major_type then
+            d.major_type = GMajorType.PROP
+        end
+        if d.major_type == GMajorType.PROP and tpl_props[d.item_id or d.id] then
             d.new = ItemModel:checkIsNewItem(d.item_id or d.id, true)
-        end
-        if v.decompose_item then
-            v.decompose_item.new = ItemModel:checkIsNewItem(d.item_id or d.id, true)
-        end
+            if v.decompose_item then
+                v.decompose_item.new = ItemModel:checkIsNewItem(d.item_id or d.id, true)
+            end
 
-        local isIn = false
-        for k1, v1 in pairs(self._items) do
-            local d1 = v1.org_item or v1
-            if v.decompose_item and v.decompose_item.item_id and v.decompose_item.item_id > 0 then
-            else
-                -- 分解道具不合并
-                if d.item_id and d1.item_id == d.item_id then
-                    d1.num = d.num + d1.num
-                    isIn = true
-                    break
+            local isIn = false
+            for k1, v1 in pairs(self._items) do
+                local d1 = v1.org_item or v1
+                if v.decompose_item and v.decompose_item.item_id and v.decompose_item.item_id > 0 then
+                else
+                    -- 分解道具不合并
+                    if d.item_id and d1.item_id == d.item_id then
+                        d1.num = d.num + d1.num
+                        isIn = true
+                        break
+                    end
                 end
             end
-        end
-        if not isIn then
+            if not isIn then
+                table.insert(self._items, v)
+            end
+        else
             table.insert(self._items, v)
         end
     end
@@ -136,6 +149,8 @@ function P:onShow()
     if self._params and self._params.title then
         bee.setIcon(self.TitleText, _I(self._params.title))
     end
+
+    self:checkButtons()
 end
 
 function P:_doShowAnim()
@@ -185,7 +200,7 @@ function P:_doShowAnim()
                 self:once(0.5, function()
                     for _, vv in ipairs(self._items) do
                         if vv.is_decompose then
-                            AnimationMgr:playUIEffect("Prefab/Eff_poker_fenjie", itemKV[vv].transform, bee.v3zero, 1, true)
+                            AnimationMgr:playUIEffect("Prefab/Eff_poker_fenjie", itemKV[vv].transform, bee.v3(0, -14.8, 0), 1, true)
                             self:_refreshItem(vv.decompose_item, itemKV[vv])
                         end
                     end
@@ -274,6 +289,37 @@ function P:isMusicItem(data)
         return true
     end
     return false
+end
+
+function P:checkButtons()
+    local isDecorationItem = false
+    for _,v in pairs(self._items) do
+        if v.major_type == GMajorType.ROLE or v.major_type == GMajorType.ROLE_SKIN then
+            isDecorationItem = true
+        end
+        if not isDecorationItem then
+            local cfg = tpl_props[v.item_id]
+            if cfg and cfg.type > 200 and cfg.type < 300 then
+                isDecorationItem = true
+                break
+            end
+        end
+    end
+
+    self.Buttons:SetActive(isDecorationItem)
+    self.ContinueButton:SetActive(not isDecorationItem)
+end
+
+function P:onBtClose()
+    if self._params.delay and math.abs(os.time() - self._startDt) < self._params.delay then
+        return
+    end
+    if self._params.cb then
+        self._params.cb()
+    end
+    self:hideUI()
+    ItemModel:refreshReddot()
+    bee.emit("evt_BackpackClaimResultClose")
 end
 
 return P

@@ -9,6 +9,8 @@ function P:onAwake()
     self.TextTip = self:find("TextTip", Panel)
     self.TextName = self:find("TextName", Panel)
 
+    bee.checkInputField(self.NameInput, _T("LAB_GUIDE_2"))
+
     bee.addClick(self:find("CloseButton", Panel), function()
         self:hideUI()
     end)

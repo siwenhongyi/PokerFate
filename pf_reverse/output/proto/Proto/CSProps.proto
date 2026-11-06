@@ -78,6 +78,17 @@ message ChangeFrameRSP
     optional int32 item_id = 2; // 新头像框的配置id
 }
 
+message ChangeIllustrationREQ
+{
+    optional int32 item_id = 1; // 新插画配置id
+}
+
+message ChangeIllustrationRSP
+{
+    optional int32 code = 1;
+    optional int32 item_id = 2; // 新插画配置id
+}
+
 message ChangeTitleREQ
 {
     optional int32 item_id = 1; // 新称号的配置id, 0表示卸下称号
@@ -144,6 +155,12 @@ message DCSchemeItem
     repeated int32 lobby_bgm_list = 4; // 大厅背景音乐的配置id列表
     optional int32 create_at = 5; // 方案创建的时间戳
     repeated int32 property_list = 6; // 属性列表
+    optional int32 title = 7;//称号
+    optional int32 frame = 8;//头像框
+    optional int32 avatar = 9;//头像
+    optional int32 card_back = 10;//牌背
+    optional int32 card_front = 11;//牌面
+    optional string name = 12;      // 方案名称
 }
 
 // 保存装饰方案
@@ -156,6 +173,12 @@ message SaveDCSchemeREQ
     repeated int32 lobby_bgm_list = 5; // 大厅背景音乐的配置id, 如果有修改则传入新值,否则传入当前值
     repeated int32 property_list = 6; // 属性列表, 如果有修改则传入新值,否则传入当前值
     optional bool set_as_using = 7; // 是否设置为当前使用的方案
+    optional int32 title = 8;//称号
+    optional int32 frame = 9;//头像框
+    optional int32 avatar = 10;//头像
+    optional int32 card_back = 11;//牌背
+    optional int32 card_front = 12;//牌面
+    optional string name = 13;// 方案名称
 }
 message SaveDCSchemeRSP
 {
@@ -167,27 +190,39 @@ message SaveDCSchemeRSP
 // 获取装饰方案列表
 message GetDCSchemeREQ
 {
+
 }
 message GetDCSchemeRSP
 {
     optional int32 code = 1;
-    repeated DCSchemeItem scheme_list = 2; // 装饰方案列表
-    optional string using_decoration_scheme = 3; // 当前使用的装饰方案id
+    repeated DCSchemeItem scheme_list = 2; // 大厅装饰方案列表
+    optional string using_decoration_scheme = 3; // 当前使用的装饰方案id      
     optional int32 rand_dc_scheme_flag = 4; // 是否随机装饰方案 0:不随机 1:随机
+    repeated string lobby_rand_schemes = 5; //大厅随机方案id列表
+    optional string lobby_specify_scheme = 6; //指定方案id
+    repeated RoomDCScheme room_scheme_list = 7; //房间装饰方案列表
+    repeated string room_rand_schemes= 8; //随机方案id列表
+    optional string room_specify_scheme = 9; //指定方案id
+    optional int32 room_mode = 10; //模式  1-随机 0-指定
 }
 
 // 删除装饰方案,使用中的方案不能删除
 message DeleteDCSchemeREQ
 {
     optional string scheme_id = 1;
+    optional int32 type = 2;//1大厅 2房间
 }
 message DeleteDCSchemeRSP
 {
     optional int32 code = 1;
     optional string scheme_id = 2; // 被删除的装饰方案id
+    optional int32 type = 3;//1大厅 2房间
+    optional string specify_scheme = 4;//指定方案id
+    repeated string rand_schemes = 5;//随机方案如果为空或者长度为0则不更新
+    optional string using_decoration_scheme = 6;//大厅正在使用方案为空或者为0则不更新
 }
 
-// 切换使用的装饰方案
+// 切换使用的装饰方案 1.5.7后废弃
 message ChangeUsingDCSchemeREQ
 {
     optional string scheme_id = 1;
@@ -198,7 +233,7 @@ message ChangeUsingDCSchemeRSP
     optional string scheme_id = 2; // 当前使用的装饰方案id
 }
 
-// 更新是否随机方案标志
+// 更新是否随机方案标志 1.5.7后废弃
 message UpdateDCSchemeRandFlagREQ
 {
     optional int32 random_scheme_flag = 1; // 是否随机方案 0:不随机 1:随机
@@ -207,6 +242,72 @@ message UpdateDCSchemeRandFlagRSP
 {
     optional int32 code = 1;
     optional int32 random_scheme_flag = 2; // 是否随机方案 0:不随机 1:随机
+}
+
+message RoomDCScheme {
+    optional string scheme_id = 1; // 方案ID
+    optional string name = 2;      // 方案名称
+    optional int32 create_at = 3;  // 方案创建的时间戳
+    optional int32 rand = 4;       // 2进制 是否随机 0-不随机 1-随机 ROOM_RAND_DECORATION_TYPE 0音乐 1 all in 2 铭牌动效 3牌面 4 牌桌 5 牌背
+    repeated int32 emojis = 5;    // 表情列表
+    repeated int32 title = 6;     // 称号列表
+    repeated int32 table = 7;     // 牌桌列表
+    repeated int32 card_back = 8; // 牌背列表
+    repeated int32 card_front = 9; // 牌面列表
+    repeated int32 all_in_animation = 10; // all in动效列表
+    repeated int32 bgm_list = 11; // 背景音乐列表
+    repeated int32 skin_id = 12;  //皮肤列表
+    repeated int32 show_card = 13;//铭牌动效
+    repeated int32 open_card = 14;//开牌特效
+    optional int32 frame = 15;//头像框
+    optional int32 avatar = 16;//头像
+}
+
+message SetSchemeNameREQ {
+    optional string name = 1;
+    optional string scheme_id = 2;
+    optional int32 operation_type = 3;//1 局外 2局内
+}
+message SetSchemeNameRSP {
+    optional int32 code = 1;
+    optional string name = 2;
+    optional string scheme_id = 3;
+    optional int32 operation_type = 4;//1 局外 2局内
+}
+
+//局内装饰保存请求
+message SaveRoomDCSchemeREQ
+{
+    optional int32 operation_type = 1; // 操作类型 0:新增 1:修改
+    optional RoomDCScheme scheme = 2;//
+}
+message SaveRoomDCSchemeRSP
+{
+    optional int32 code = 1;
+    optional int32 operation_type = 2; // 操作类型 0:新增 1:修改
+    optional RoomDCScheme scheme = 3;//
+}
+
+message SetSchemeInfoREQ
+{
+    optional int32 type = 1;    //1大厅 2房间
+    optional int32 mod_type = 2;//0:不随机 1:随机
+    repeated string schemes = 3;//选择方案列表 scheme_id
+}
+message SetSchemeInfoRSP
+{
+    optional int32 code = 1;
+    optional int32 type = 2;    //1大厅 2房间
+    optional int32 mod_type = 3;//0:不随机 1:随机
+    repeated string schemes = 4;//选择方案列表 scheme_id
+    optional string specify_scheme = 5;//指定方案id 有则更新
+}
+
+//装饰方案更新通知
+message SchemeChangeBRC
+{
+    repeated DCSchemeItem scheme_list = 1; // 大厅装饰方案列表 有则更新
+    repeated RoomDCScheme room_scheme_list = 2; //房间装饰方案列表 有则更新
 }
 
 // 设置房间内动效播放
@@ -222,4 +323,5 @@ message ChangeAnimationRSP
     optional int32 ftype = 2;   //动效类型
     optional int32 item_id = 3; //动效id, 0表示卸下
 }
+
 ////////////////////////////////////////////////////////////////////

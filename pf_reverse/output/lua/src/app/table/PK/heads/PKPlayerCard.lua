@@ -2,46 +2,6 @@ local P = class("PKPlayerCard", Object)
 
 -- 玩家的手牌
 
-local CARD_NUMBER_VOICE_NAMES = {
-    [2] = "2",
-    [3] = "3",
-    [4] = "4",
-    [5] = "5",
-    [6] = "6",
-    [7] = "7",
-    [8] = "8",
-    [9] = "9",
-    [10] = "T",
-    [11] = "J",
-    [12] = "Q",
-    [13] = "K",
-    [14] = "A",
-}
-
-local function getHoleCardVoiceKey(cards)
-    if not cards or not cards[1] or not cards[2] then
-        return nil
-    end
-
-    local n1, n2 = GF.getCardNumber(cards[1]), GF.getCardNumber(cards[2])
-    local r1, r2 = CARD_NUMBER_VOICE_NAMES[n1], CARD_NUMBER_VOICE_NAMES[n2]
-    if not r1 or not r2 then
-        return nil
-    end
-
-    if n1 == n2 then
-        return r1 .. r2
-    end
-
-    local s1, s2 = GF.getCardSuit(cards[1]), GF.getCardSuit(cards[2])
-    if n1 > n2 then
-        n1, n2 = n2, n1
-        r1, r2 = r2, r1
-    end
-
-    return r1 .. r2 .. (s1 == s2 and "s" or "o")
-end
-
 function P:setData(data, seatid, head)
     self.data = data
     self.seatid = seatid
@@ -56,19 +16,6 @@ function P:playSound(key)
 			Game:playRoleInVoice(d.role, key)
 		end
 	end
-end
-
-function P:playHoleCardVoice(info, fallbackKey)
-    if info and info.hand_cards and self.data and self.data:getHandCardNum() == 2 then
-        local key = getHoleCardVoiceKey(info.hand_cards)
-        if key then
-            self:playSound(key)
-            return
-        end
-    end
-    if fallbackKey then
-        self:playSound(fallbackKey)
-    end
 end
 
 function P:onAwake()
@@ -175,7 +122,7 @@ end
 
 function P:refreshCard(is_reset)
 	if not bee.isNull(self._cardNode) then
-		GameModel.layer:putEffectItem(self._cardNode)
+		GameModel:putEffectItem(self._cardNode)
 		self._cardNode = null
 	end
 	self.BgHandType:SetActive(false)
@@ -191,7 +138,7 @@ function P:refreshCard(is_reset)
 		end
 	end
 	local info = self.data:getPlayer(self.seatid)
-	if not self.data:isPlaying() or not info or not info.has_card or not info.hand_cards or info.hand_cards[1] == 0 then
+	if not self.data:isPlaying() or not info or not info.has_card or ((not info.hand_cards or info.hand_cards[1] == 0) and info.seatid ~= self.data:getObserveSeatid() and not self.data:isInOpenObserve()) then
 		for _, v in ipairs(self.ImageCards) do
 			v:SetActive(false)
 			local eft = self:find("Eff_poker_card_sg", v)
@@ -307,7 +254,7 @@ function P:showCardAndFlop(isDealing)
 					isCb = true
 					Game:playSound("ui_card_turn")
 					self._isDealing = isDealing
-					if isDealing then
+					if isDealing and GameModel.layer then
 						GameModel.layer:refreshCardType()
 					end
 					self._isDealing = nil
@@ -318,7 +265,7 @@ function P:showCardAndFlop(isDealing)
 end
 
 function P:showCardStatus()
-	self._cardNode = GameModel.layer:playUIEffect("views/table/PK/CardStatus", self.node.transform, nil, -1)
+	self._cardNode = GameModel:playUIEffect("views/table/PK/CardStatus", self.node.transform, nil, -1)
 end
 
 function P:showCardType(cardType, cards, isDealing, pkType)
@@ -358,9 +305,9 @@ function P:showCardType(cardType, cards, isDealing, pkType)
             self.BgCardValue:SetActive(false)
 			if self._isDealing then
 				if info.hand_cards and GF.getCardNumber(info.hand_cards[1]) == GF.getCardNumber(info.hand_cards[2]) then
-					self:playHoleCardVoice(info, ROLE_VOICE.one_pair)
+					self:playSound(ROLE_VOICE.one_pair)
 				else
-					self:playHoleCardVoice(info, ROLE_VOICE.high_card)
+					self:playSound(ROLE_VOICE.high_card)
 				end
 			end
 		elseif boards and #boards > 0 then
@@ -372,22 +319,22 @@ function P:showCardType(cardType, cards, isDealing, pkType)
                 self:find("ImageBar1", self.BgCardValue):SetActive(true)
                 self:find("ImageBar2", self.BgCardValue):SetActive(false)
                 if self._isDealing then
-                    self:playHoleCardVoice(info, ROLE_VOICE.strong_cards)
+                    self:playSound(ROLE_VOICE.strong_cards)
                 end
             elseif 2 == handValue then
                 self:find("ImageBar1", self.BgCardValue):SetActive(false)
                 self:find("ImageBar2", self.BgCardValue):SetActive(true)
                 if self._isDealing then
-                    self:playHoleCardVoice(info, ROLE_VOICE.weak_cards)
+                    self:playSound(ROLE_VOICE.weak_cards)
                 end
             else
                 self:find("ImageBar1", self.BgCardValue):SetActive(false)
                 self:find("ImageBar2", self.BgCardValue):SetActive(true)
                 if self._isDealing then
 					if info.hand_cards and GF.getCardNumber(info.hand_cards[1]) == GF.getCardNumber(info.hand_cards[2]) then
-						self:playHoleCardVoice(info, ROLE_VOICE.one_pair)
+						self:playSound(ROLE_VOICE.one_pair)
 					else
-						self:playHoleCardVoice(info, ROLE_VOICE.high_card)
+						self:playSound(ROLE_VOICE.high_card)
 					end
                 end
             end
@@ -503,26 +450,26 @@ function P:showWinNodes(flag)
 	end
 	self.ImageWin:SetActive(flag)
     if flag then
-        local anim = "Prefab/PKTable/Eff_poker_logo_win"
+		local anim = "Prefab/PKTable/Eff_poker_logo_win"
 		local winType = self.data:getWinType(self.seatid)
 		if 1 == winType then
 			anim = "Prefab/PKTable/Eff_poker_logo_bigwin"
 		elseif 2 == winType then
 			anim = "Prefab/PKTable/Eff_poker_logo_magewin"
 		end
-		self._WinAnim = GameModel.layer:playUIEffect(anim, self.node.transform, self.ImageWin.transform.localPosition, 4)
-    	local info = self.data:getPlayer(self.seatid)
+		self._WinAnim = GameModel:playUIEffect(anim, self.node.transform, self.ImageWin.transform.localPosition, 4)
+		local info = self.data:getPlayer(self.seatid)
 		if info:isMe() then
 			self._WinAnim.transform.localScale = bee.v3one
 		else
 			self._WinAnim.transform.localScale = bee.v3(1.6, 1.6, 1.6)
 		end
 		if not bee.isNull(self._PKWinRate) then
-			GameModel.layer:putEffectItem(self._PKWinRate)
+			GameModel:putEffectItem(self._PKWinRate)
 			self._PKWinRate = nil
 		end
 	elseif not bee.isNull(self._WinAnim) then
-		GameModel.layer:putEffectItem(self._WinAnim)
+		GameModel:putEffectItem(self._WinAnim)
 		self._WinAnim = nil
     end
 end
@@ -537,7 +484,7 @@ function P:showLoseNodes(flag)
 	end
 	self.ImageLose:SetActive(flag)
 	if flag then
-		self._LoseAnim = GameModel.layer:playUIEffect("Prefab/PKTable/Eff_poker_logo_lose", self.node.transform, self.ImageLose.transform.localPosition, 4)
+		self._LoseAnim = GameModel:playUIEffect("Prefab/PKTable/Eff_poker_logo_lose", self.node.transform, self.ImageLose.transform.localPosition, 4)
 		local info = self.data:getPlayer(self.seatid)
 		if info:isMe() then
 			self._LoseAnim.transform.localScale = bee.v3one
@@ -545,11 +492,11 @@ function P:showLoseNodes(flag)
 			self._LoseAnim.transform.localScale = bee.v3(1.6, 1.6, 1.6)
 		end
 		if not bee.isNull(self._PKWinRate) then
-			GameModel.layer:putEffectItem(self._PKWinRate)
+			GameModel:putEffectItem(self._PKWinRate)
 			self._PKWinRate = nil
 		end
 	elseif not bee.isNull(self._LoseAnim) then
-		GameModel.layer:putEffectItem(self._LoseAnim)
+		GameModel:putEffectItem(self._LoseAnim)
 		self._LoseAnim = nil
 	end
 end
@@ -585,22 +532,34 @@ function P:refreshWinRate()
     local info = self.data:getPlayer(self.seatid)
 	if not self.data:isAllAllin() or not info or info.is_fold or not self.data:isCanShowWinRate() then
 		if not bee.isNull(self._PKWinRate) then
-			GameModel.layer:putEffectItem(self._PKWinRate)
+			GameModel:putEffectItem(self._PKWinRate)
 			self._PKWinRate = nil
 		end
 	else
 		local isNew = false
 		if bee.isNull(self._PKWinRate) then
-			self._PKWinRate = GameModel.layer:playUIEffect("views/table/PK/PKWinRate", self.node.transform, self.ImageWin.transform.localPosition, -1)
+			if bee.isDev or bee.checkVersion("1.5.3") then
+				self._PKWinRate = GameModel:playUIEffect("views/table/PK/PKWinRate2", self.node.transform, self.ImageWin.transform.localPosition, -1)
+			else
+				self._PKWinRate = GameModel:playUIEffect("views/table/PK/PKWinRate", self.node.transform, self.ImageWin.transform.localPosition, -1)
+			end
 			isNew = true
 		end
 		local info = self.data:getPlayer(self.seatid)
 		if info then
 			local TextRate = self:find("AnimRoot/TextRate", self._PKWinRate)
-			if math.floor(info.win_rate) == info.win_rate then
-				bee.setText(TextRate, string.format("%d%%", info.win_rate))
+			if info.win_rate > 0 and info.win_rate < 1 then
+				bee.setText(TextRate, "<1%")
 			else
 				bee.setText(TextRate, string.format("%d%%", math.floor(info.win_rate)))
+			end
+			local TextEqually = self:find("AnimRoot/TextEqually", self._PKWinRate)
+			if TextEqually then
+				if info.equally_rate > 0 and info.equally_rate < 1 then
+					bee.setText(TextEqually, "<1%")
+				else
+					bee.setText(TextEqually, string.format("%d%%", math.floor(info.equally_rate)))
+				end
 			end
 			if not isNew then
 				TextRate.transform.localScale = bee.v3one
@@ -659,7 +618,7 @@ function P:recyclingCards()
 
 	self:refreshWinRate()
 	if not bee.isNull(self._cardNode) then
-		GameModel.layer:putEffectItem(self._cardNode)
+		GameModel:putEffectItem(self._cardNode)
 		self._cardNode = null
 	end
 end

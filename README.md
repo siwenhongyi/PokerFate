@@ -10,10 +10,10 @@
 游戏客户端
     │  WSS (TLS)
     ▼
-pf_intercept/proxy.py        ← MITM WebSocket 代理，拦截并解码 Protobuf 帧
+pf_intercept/proxy/         ← MITM 代理包，拦截并解码 Protobuf 帧
     │  S2C 事件流
     ▼
-pf_intercept/bot.py          ← BotBridge：将游戏事件翻译为 API 调用，注入 C2S 行动
+pf_intercept/bot/bridge.py  ← BotBridge：将游戏事件翻译为 API 调用，注入 C2S 行动
     │
     ▼
 pokerfate/api.py             ← 对外接口：手牌管理、决策请求、对手建模
@@ -64,15 +64,16 @@ request_action()
 
 | 文件 | 职责 |
 |------|------|
-| `proxy.py` | 主代理：TLS 握手、帧解码、事件分发、C2S 注入 |
-| `bot.py` | BotBridge：状态机管理（seat/blinds/筹码/锁仓），翻译游戏事件 |
-| `config.py` | 所有可调参数（服务器地址、盈利锁仓阈值、delay 等） |
-| `codec.py` | Protobuf 编解码（基于逆向得到的 pb 定义） |
-| `framing.py` | 游戏私有帧格式解析 |
-| `dns_server.py` | 伪 DNS 服务（Android 模式下将游戏域名解析到本机） |
-| `gen_cert.py` | 生成本地 CA + 服务端证书（一次性操作） |
-| `gamedata_fetcher.py` | 拉取游戏 REST API 的 30 天玩家统计数据，并提供合并到对手模型的 helper |
-| `pb/` | 逆向得到的 Protobuf 定义编译结果 |
+| `proxy/` | 主代理包：WSS runtime、TCP 透传、路由选择、TLS、日志和监控 |
+| `bot/bridge.py` | BotBridge：状态机管理（seat/blinds/筹码/锁仓），翻译游戏事件 |
+| `config/` | 所有可调参数（服务器地址、盈利锁仓阈值、delay 等） |
+| `wire/codec.py` | Protobuf 编解码（基于逆向得到的 pb 定义） |
+| `wire/framing.py` | 游戏私有帧格式解析 |
+| `wire/pb/` | 逆向得到的 Protobuf 定义编译结果 |
+| `dns/server.py` | 伪 DNS 服务（Android 模式下将游戏域名解析到本机） |
+| `certificates/generator.py` | 生成本地 CA + 服务端证书（一次性操作） |
+| `game_api/` | 游戏 REST API helper，包括玩家统计和收藏牌局接口 |
+| `tools/gen_pb2.sh` | 根据 `pf_reverse/output/proto/Proto` 重新生成 `wire/pb` |
 
 **关键自动行为（BotBridge）**：
 
@@ -103,6 +104,13 @@ request_action()
 ### `pf_reverse/` — 逆向工程
 
 协议逆向过程的产出与笔记，见 `pf_reverse/REVERSE_NOTES.md`。不参与运行时。
+
+客户端更新后，直接用新 APK 重建 proto/lua，再重新生成 pb：
+
+```bash
+.venv/bin/python pf_reverse/extract_resources.py ~/Downloads/PokerFate_Android.apk
+bash pf_intercept/tools/gen_pb2.sh
+```
 
 ---
 
@@ -135,7 +143,7 @@ request_action()
 在 `C:\Windows\System32\drivers\etc\hosts` 添加：
 
 ```
-127.0.0.1  zga-entry.poker-fate.net
+127.0.0.1  ga-foreign.poker-fate.com
 ```
 
 **Android**（DNS 模式）：
@@ -165,7 +173,7 @@ request_action()
    ```
    插件会：
    - 自动从登录响应中提取 `authorization` token，写入 `data/auth_token.txt`（无需手动填写）
-   - 过滤服务器列表，只保留证书覆盖范围内的域名服务器，并将首选域名记录到 `pf_intercept/discovered_server.json`
+   - 过滤服务器列表，只保留证书覆盖范围内的域名服务器，并将首选域名记录到 `data/discovered_server.json`
 4. 手机首次使用需安装 mitmproxy 的 CA 证书（访问 `mitm.it` 下载后安装）。
 5. 游戏登录完成后（`force_domain.py` 打印出保留的服务器），再按方式一启动
    `pf_intercept.dns_server`，让后续 WSS 连接走到本机代理。
@@ -188,9 +196,8 @@ request_action()
 参数含义：
 
 - `--max-auto-rebuy`：最大自动续入次数（默认 1）。
-- `--profit-lock-bb`：盈利锁仓阈值；不传则使用 `config.py`。
+- `--profit-lock-bb`：盈利锁仓阈值；不传则使用 `pf_intercept.config`。
 - `--equity-mode`：`range` 为默认 range_v2，`eqr` 为旧 EQR/蒙卡压缩路径。
-- `--role-id` / `--skin-id`：本地展示层篡改本人角色和皮肤 ID。
 
 启动后打开游戏客户端正常进桌，proxy 自动检测 seat/blinds 并开始决策。
 
@@ -203,7 +210,7 @@ http://127.0.0.1:9022
 http://<电脑局域网IP>:9022
 ```
 
-页面里可以设置彩球的起始筹码、最大筹码、倍投倍率和循环次数。彩球任务的选色统计只存在于本次任务内：第一局随机选色，后续按本次任务已开出的彩球中出现次数最少的颜色下注。任务结束后会把本次每局盈亏写入：
+页面里可以设置彩球的起始筹码、最大筹码、倍投倍率、循环次数和选球模式，也可以在运行参数页动态修改 `max_auto_rebuy` 和 `profit_lock_bb`。选球模式支持每个循环固定少见球、每次重选少见球、每次随机选择、最近 3 次结果最多；其中“每次”和“最近 3 次”都按每次开奖结果响应统计，不按循环统计。任务结束后会把本次每局盈亏写入：
 
 ```text
 data/entertainment_color_records.json
@@ -219,7 +226,7 @@ data/entertainment_color_records.json
 
 ---
 
-## 关键配置（`pf_intercept/config.py`）
+## 关键配置（`pf_intercept/config/`）
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|

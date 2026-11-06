@@ -19,8 +19,27 @@ function P:onAwake()
     self.BgTipUi = self:find("BgTipUi")
     self.GuideHand = self:find("GuideHand", self.Finger)
     self.GuideSpine = self:find("GuideSpine", self.Finger)
+    self.PanelTouch = self:find("PanelTouch")
+    self.Skips = self:find("Skips")
+    self.SkipButtonPoints = {}
+    for i = 1, self.Skips.transform.childCount do
+        local btnItem = self.Skips.transform:GetChild(i - 1)
+        if i == 1 then
+            btnItem.localPosition = btnItem.localPosition + bee.v3(Config.UI_OFFSET_RIGHT, Config.UI_OFFSET_TOP, 0)
+        elseif i == 2 then
+            btnItem.localPosition = btnItem.localPosition + bee.v3(Config.UI_OFFSET_LEFT, Config.UI_OFFSET_TOP, 0)
+        elseif i == 3 then
+            btnItem.localPosition = btnItem.localPosition + bee.v3(Config.UI_OFFSET_RIGHT, Config.UI_OFFSET_BOTTOM, 0)
+        else
+            btnItem.localPosition = btnItem.localPosition + bee.v3(Config.UI_OFFSET_LEFT, Config.UI_OFFSET_BOTTOM, 0)
+        end
+        self.SkipButtonPoints[i] = btnItem
+    end
+    self.SkipButton = self:find("SkipButton")
 
     bee.addClick(self.Bg, function() self:_checkNext() end)
+    bee.addClick(self.PanelTouch, function() self:_checkNext() end)
+    bee.addClick(self.SkipButton, function() self:skipEvent() end)
     self.BgButton = self.Bg:GetComponent("Button")
     self.ImageTipPos = self.ImageTip.transform.localPosition
 end
@@ -33,14 +52,22 @@ function P:onShow()
     else
         self._data = self._datas[1]
     end
+    self.reguide = self._params.reguide or false
+    self.Skips:SetActive(self.reguide)
+    self.SkipButton:SetActive(self.reguide)
+
     self.InitHollow = false
     self.HollowItems = {}
     self:initUI(false, self._params.delay)
     self:initEvent()
+
+    bee.emit(EventDef.evt_guide_ui_show)
 end
 
 function P:onDestroy()
     P.super.onDestroy(self)
+
+    bee.emit(EventDef.evt_guide_ui_hide)
 end
 
 function P:showUI()
@@ -102,6 +129,8 @@ function P:initUI(fade, delay)
     elseif GuideKind.WaitScene == self._data.kind then
         self._waitSceneName = self._data.v1
     end
+
+    self.PanelTouch:SetActive(1 == self._data.stop_touch)
 end
 
 function P:initEvent()
@@ -150,6 +179,16 @@ function P:showImageTip(empty)
         elseif Config.DIR_LEFT == self._data.tip_pos[3] then
             self:find("Tips", self.ImageTip).transform.localPosition = bee.v3(-600, 0)
         end
+
+        --skip
+        if self.reguide then
+            if self._data.skip_pos == nil then
+                self._data.skip_pos = 1
+            end
+            self.SkipButton.transform:SetParent(self.SkipButtonPoints[self._data.skip_pos], false)
+            self.SkipButton.transform.localPosition = bee.v3zero
+        end
+
     else
         self.ImageTip:SetActive(false)
     end
@@ -337,7 +376,7 @@ function P:addShowUiTip(n)
             self._needClickNum = nil
         end
         self:_checkNext()
-        self:_checkLog()
+        -- self:_checkLog()
     end
     local tipbtn = tipUi:GetComponent("Button")
     if not bee.isNull(tipbtn) then
@@ -477,11 +516,11 @@ function P:_doNext(d)
     bee.logEvent("guide-id", d.id)
 end
 
-function P:_checkLog()
-    if self._data.id == 4001 then
-        bee.logEvent("guide-id-preview", 4001)
-    end
-end
+-- function P:_checkLog()
+--     if self._data.id == 4001 then
+--         bee.logEvent("guide-id-preview", 4001)
+--     end
+-- end
 
 function P:doClose()
 	self:hideUiTip()
@@ -578,6 +617,12 @@ function P:setHollow(show, pos, area)
     else
         self.Hollow:SetActive(false)
     end
+end
+
+function P:skipEvent()
+    Game:playSound("ui_close")
+    bee.logEvent("guide-id-replay-skip", self._data.id)
+    self:_doGuideEnd()
 end
 
 

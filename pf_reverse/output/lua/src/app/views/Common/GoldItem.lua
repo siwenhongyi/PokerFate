@@ -4,7 +4,7 @@ function P:setItemId(id)
     bee.removeAllClick(self.node)
     bee.addClick(self.node, function()
         Game:playSound("ui_button_confirm")
-        ItemModel:jumpViewByItemId(id)
+        UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(id, true)})
         if self._cb then
             self._cb()
         end

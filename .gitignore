@@ -2,6 +2,7 @@
 .venv/
 __pycache__/
 *.py[cod]
+target/
 *.egg-info/
 dist/
 build/
@@ -14,7 +15,7 @@ build/
 pf_intercept/certs/
 
 # Dynamic server discovery (written at runtime by force_domain.py)
-pf_intercept/discovered_server.json
+data/discovered_server.json
 
 # Runtime logs and captures (may contain credentials / game data)
 *.log
@@ -34,9 +35,22 @@ pokerfate/slum/auth.json
 win/
 logs/
 .tmp/
-docs/
+docs/*
+!docs/g5-integration.md
+!docs/realtime_cfr_integration.md
 data/
+# 逆向产物里的 data 目录是游戏 lua 源码（PKData.lua 等），不应被上面的 data/ 命中
+!pf_reverse/output/lua/src/app/table/data/
+# Runtime calibration worker queue.  Jobs/results are local IPC files.
+data/runtime_calibration/live_spool/
 !pokerfate/data
+pokerfate/data/local_models/
+
+# Vendored G5 build outputs. Keep source/redist tracked; build artifacts stay local.
+pokerfate/g5/**/bin/
+pokerfate/g5/**/obj/
+pokerfate/g5/src/DecisionMaking/*.o
 
 # PokerFate reverse local workspace
 pf_reverse/local/
+pf_reverse/poker_chase/

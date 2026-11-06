@@ -126,6 +126,10 @@ function P:onAwake()
         exp_tournament = self:find('shop_vip_img_biao5/exp_tournament', self.ShopVipList),
         friendship_tournament = self:find('shop_vip_img_biao6/friendship_tournament', self.ShopVipList),
         recent_history_limit = self:find('shop_vip_img_biao10/recent_history_limit', self.ShopVipList),
+        lobby_limit = self:find('shop_vip_img_biao11/lobby_limit', self.ShopVipList),
+        ingame_limit = self:find('shop_vip_img_biao12/ingame_limit', self.ShopVipList),
+        exp_dispatch = self:find('shop_vip_img_biao13/exp_dispatch', self.ShopVipList),
+        friendship_dispatch = self:find('shop_vip_img_biao14/friendship_dispatch', self.ShopVipList),
     }
 
     if bee.isInTest then
@@ -218,18 +222,20 @@ function P:refreshAttrs()
     self:removeAllChildren(self.Content)
     self.Items = {}
     for i = 1, #d.rewards - 1, 2 do
-        local item = CU.GameObject.Instantiate(self.Item01, self.Content.transform, false)
-        item:SetActive(true)
-        PropItem:bindItemNode(item, {id = d.rewards[i], num = d.rewards[i + 1]}): bindTips()
-        self:find("Mask", item):SetActive(flag)
-        table.insert(self.Items, item)
+        if tpl_props[d.rewards[i]] then
+            local item = CU.GameObject.Instantiate(self.Item01, self.Content.transform, false)
+            item:SetActive(true)
+            PropItem:bindItemNode(item, {id = d.rewards[i], num = d.rewards[i + 1]}): bindTips()
+            self:find("Mask", item):SetActive(flag)
+            table.insert(self.Items, item)
+        end
     end
 end
 
 function P:evt_refreshTopInfo()
-    bee.invoke(self.Gold, "setCount", _N(PlayerModel:getGold()))
-    bee.invoke(self.Ticket1, "setCount", _N(ItemModel:getItemNumById(GPropId.TicketDraw)))
-    bee.invoke(self.Ticket2, "setCount", _N(ItemModel:getItemNumById(GPropId.TicketDress)))
+    bee.invoke(self.Gold, "setCount", _N2(PlayerModel:getGold()))
+    bee.invoke(self.Ticket1, "setCount", _N2(ItemModel:getItemNumById(GPropId.TicketDraw)))
+    bee.invoke(self.Ticket2, "setCount", _N2(ItemModel:getItemNumById(GPropId.TicketDress)))
 end
 
 function P:evt_vipLevelUp()

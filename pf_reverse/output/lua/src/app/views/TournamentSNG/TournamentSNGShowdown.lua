@@ -22,18 +22,15 @@ function P:onAwake()
 
     self.BuyIn = self:find("BuyIn", self.Bottom)
     self.NextButton = self:find("NextButton", self.Bottom)
+    self.ObserveButton = self:find("ObserveButton", self.Bottom)
     self.CloseButton = self:find("CloseButton", self.RightTop)
-
 
     self.Eliminated = self:find("Eliminated", self.Center)
     self.WIN = self:find("WIN", self.Center)
 
     bee.addClick(self.CloseButton, function()
-		Game:playSound("ui_button_confirm")
-        bee.enterScene("MainScene", { info = {
-            key = "tournament",
-            kind = 2,
-        }})
+        Game:playSound("ui_button_confirm")
+        self:onBtClose()
     end)
     bee.addClick(self.NextButton, function()
 		Game:playSound("ui_button_confirm")
@@ -49,20 +46,32 @@ function P:onAwake()
             return
         end
         TournamentModel:reqSngSign(self._data, self.signItem and self.signItem.item_id or 0, function()
+            self:nextBtnClose()
         end)
+    end)
+    bee.addClick(self.ObserveButton, function()
+        Game:playSound("ui_button_confirm")
+        bee.logEvent("tournament-view", 1, GameModel.data.room_info.tour_id)
+		Net:sendReq("pb.EnterRoomREQ", {roomid = GameModel.data:getRoomId(), is_observer = true, uid_being_observed = PlayerModel:getUid()})
     end)
     bee.addClick(self.ShareButton, function()
         Game:playSound("ui_button_confirm")
         self.CloseButton:SetActive(false)
         self.NextButton:SetActive(false)
         self.BuyIn:SetActive(false)
+        self.ObserveButton:SetActive(false)
         self.ShareButton:SetActive(false)
         self.Sharetips:SetActive(false)
         UiManager:showUI("ShareMain", {id = 6})
         self:once(1, function()
             self.CloseButton:SetActive(true)
-            self.NextButton:SetActive(true)
-            self.BuyIn:SetActive(true)
+            
+            if GameModel.data:isFriendSNG() then
+            else
+                self.NextButton:SetActive(true)
+                self.BuyIn:SetActive(true)
+            end
+            self.ObserveButton:SetActive(self._data.rank > 2)
             self.ShareButton:SetActive(true)
         end)
     end)
@@ -77,19 +86,31 @@ function P:onShow()
     self._data = self._params and self._params.data or {rank = 1, champion_points = 10, sign_item_list = {{item_num = 30000, item_id = 10100001}}, reward = {{item_id = 10100001, item_num = 1000}}, bond_inc = 10, exp_inc = 10, tour_name = {}, tour_id=16}
 
     local skin = tpl_character_skin[self._data.skin_id or 0]
-    bee.setTextCut(self.TextName, PlayerModel:getName(), 460)
+    
+    bee.setTextCut(self.TextName, PlayerModel:getNameIngame(), 460)
     bee.setText(self.TextLevel, PlayerModel:getCurLevel())
     if PlayerModel:getCurLevel() > 0 then
         bee.setIcon(self:find("Rank/icon_rank_01", self.Player), tpl_level[PlayerModel:getCurLevel()].icon)
     end
-    GF.setTitleImage(self.ImageTitle, PlayerModel:getTitle(), true, true)
+    GF.setTitleImage(self.ImageTitle, PlayerModel:getTitle2(), true, true)
 
-    -- self.Eliminated:SetActive(self._data.rank ~= 1)
-    -- self.WIN:SetActive(self._data.rank == 1)
-    for _, v in ipairs(self._data.tour_name) do
-        if v.lang == LAN:getLanguage() then
-            bee.setText(self.TextTitle, v.text)
-            break
+    if GameModel.data:isFriendSNG() then
+        bee.setText(self.TextTitle, _F("LAB_FRIROOM_059", GameModel.data:getSeatNum()))
+        self.NextButton:SetActive(false)
+        self.BuyIn:SetActive(false)
+    else
+        self.NextButton:SetActive(true)
+        self.BuyIn:SetActive(true)
+
+        local pos = self.ObserveButton.transform.localPosition
+        pos.y = 0
+        self.ObserveButton.transform.localPosition = pos
+
+        for _, v in ipairs(self._data.tour_name) do
+            if v.lang == LAN:getLanguage() then
+                bee.setText(self.TextTitle, v.text)
+                break
+            end
         end
     end
 
@@ -115,6 +136,7 @@ function P:onShow()
     end
     TournamentModel:setByinText(self:find("tournament_lobby_frame_01/TextByin", self.BuyIn), self.signItem, true)
 
+    self.ObserveButton:SetActive(self._data.rank > 2)
     if 1 == self._data.rank and self.ShareButton then
         bee.invoke(self.CharacterImage, "setSkin", skin or CharacterModel:getUsingRole():getSkinData(), false)
         Game:playSound("sound_SNG_win")
@@ -171,6 +193,14 @@ function P:onShow()
             item:SetActive(true)
             PropItem:create(item, {id = GPropId.ExpSNG, num = self._data.exp_inc, format = {VipModel:getExpTournament()}}): bindTips()
         end
+        if self._data.act_reward_list then
+            for _, v in ipairs(self._data.act_reward_list) do
+                flag = true
+                local item = CU.GameObject.Instantiate(Item3, BgView.transform, false)
+                item:SetActive(true)
+                PropItem:create(item, {id = v.item_id, num = v.item_num}): bindTips()
+            end
+        end
         Rewards02:SetActive(flag)
         if not flag then
             Rewards01.transform.localPosition = bee.v3(0, 100, 0)
@@ -179,7 +209,9 @@ function P:onShow()
         end
     else
         bee.invoke(self.CharacterImage, "setSkin", skin or CharacterModel:getUsingRole():getSkinData(), false)
-        bee.invoke(self.CharacterImage, "playAnim", "idle", "skin2", "shame")
+        if SettingModel:isShowScrap() then
+            bee.invoke(self.CharacterImage, "playAnim", "idle", "skin2", "shame")
+        end
         Game:playSound("sound_SNG_lose")
         -- self.ShareButton:SetActive(false)
         -- self.Sharetips:SetActive(false)
@@ -216,6 +248,14 @@ function P:onShow()
             item:SetActive(true)
             PropItem:create(item, {id = GPropId.ExpSNG, num = self._data.exp_inc, format = {VipModel:getExpTournament()}}): bindTips()
         end
+        if self._data.act_reward_list then
+            for _, v in ipairs(self._data.act_reward_list) do
+                flag = true
+                local item = CU.GameObject.Instantiate(Item3, BgView.transform, false)
+                item:SetActive(true)
+                PropItem:create(item, {id = v.item_id, num = v.item_num}): bindTips()
+            end
+        end
         Rewards01:SetActive(not flag)
         Rewards02:SetActive(flag)
         if flag then
@@ -224,6 +264,7 @@ function P:onShow()
             bee.setText(self:find("TextRank", Rewards01), _T("LAB_TOURNAMENT_SNG_INFO34") .. _N(self._data.rank))
         end
     end
+    bee.invoke(self.CharacterImage, "setSkinRotate")
     Game:stopMusic()
 end
 
@@ -235,6 +276,26 @@ function P:onHide()
     GameModel:setStopLeaveRoom(nil)
     bee.emit("evt_gameBlur", false, self.__cname)
     P.super.onHide(self)
+end
+
+function P:onBtClose()
+    if GameModel.data:isSNG() then
+        bee.enterScene("MainScene", { info = {
+            key = "tournament",
+            kind = 2,
+        }})
+    else
+        bee.enterScene("MainScene")
+    end
+end
+
+function P:nextBtnClose()
+    local tourId = GameModel.data.room_info.tour_id
+    bee.enterScene("MainScene", { info = {
+        key = "tournamentDetail",
+        kind = 2,
+        tour_id = tourId,
+    }})
 end
 
 return P

@@ -18,6 +18,9 @@ function P:onShow()
         self:hideUI()
     end)
 
+    if bee.isInHome() then
+        bee.invoke(self.CharacterImage, "setShowReal", true)
+    end
     if self._params and self._params.role then
         if self._params.skin then
             bee.invoke(self.CharacterImage, "setSkin", self._params.skin, false, true)
@@ -26,10 +29,20 @@ function P:onShow()
         end
         bee.setTextCut(self.TextName, PlayerModel:getName(), 460)
         bee.setText(self.TextLevel, PlayerModel:getCurLevel())
-        GF.setTitleImage(self.ImageTitle, PlayerModel:getTitle(), true, true)
+        local title = self._params.title or PlayerModel:getTitle2()
+        GF.setTitleImage(self.ImageTitle, title, true, true)
         if PlayerModel:getCurLevel() > 0 then
             bee.setIcon(self:find("Rank/icon_rank_01", self.Player), tpl_level[PlayerModel:getCurLevel()].icon)
         end
+        
+        local skin = self._params.skin or self._params.role:getSkinData()
+        local key = ROLE_VOICE.all_in
+        if skin.kind == SKIN_KIND.AWAKEN then
+            key = ROLE_VOICE.all_in_awakened
+        elseif skin.kind == SKIN_KIND.SECOND_AWAKEN then
+            key = ROLE_VOICE.all_in_awakened2
+        end
+        Game:playRoleInVoice(self._params.role.role_id, key[math.random(#key)])
         return
     end
     
@@ -39,7 +52,7 @@ function P:onShow()
         bee.invoke(self.CharacterImage, "setSkin", skin, false, true)
     end
 
-    bee.setTextCut(self.TextName, player.name, 460)
+    bee.setTextCut(self.TextName, GF.getOtherName(player.name, player.seatid, player.uid), 460)
     bee.setText(self.TextLevel, player.level)
     GF.setTitleImage(self.ImageTitle, player.title, true, true)
     if player.level > 0 then

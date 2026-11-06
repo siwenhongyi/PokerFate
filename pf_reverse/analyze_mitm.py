@@ -26,8 +26,8 @@ from pathlib import Path
 _ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_ROOT))
 
-from pf_intercept.framing import FrameBuffer
-from pf_intercept import codec
+from pf_intercept.wire.framing import FrameBuffer
+from pf_intercept.wire import codec
 
 try:
     HTTPFlow = importlib.import_module("mitmproxy.http").HTTPFlow

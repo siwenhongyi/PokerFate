@@ -1,5 +1,5 @@
 
-local P = class("PKData", require("app.table.data.PKData"))
+local P = class("PKDataSNG", require("app.table.data.PKData"))
 
 function P:assignRoomInfo(params)
 	P.super.assignRoomInfo(self, params)
@@ -59,6 +59,15 @@ function P:getNextBlindInfo()
 		end
 	end
 	return nil
+end
+
+function P:getBlindLevel()
+	for k, v in ipairs(self.room_info.blind_list) do
+		if v.small_blind == self.room_info.sb then
+			return k
+		end
+	end
+	return 1
 end
 
 function P:setBlindStatus(msg)

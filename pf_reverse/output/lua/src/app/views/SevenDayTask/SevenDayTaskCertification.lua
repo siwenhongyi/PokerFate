@@ -48,6 +48,7 @@ function P:onAwake()
 				self.CertificationEff:SetActive(true)
 				self:once(1.7, function()
 					self.CertificationEff:SetActive(false)
+					self.SignTimeText:SetActive(true)
 					self:refreshSign(url)
 				end)
 			end})
@@ -74,7 +75,7 @@ function P:onStart()
 	elseif self._params.info then
 		-- 查看
 		local info = self._params.info
-		bee.setText(self.NameText, info.name)
+		bee.setText(self.NameText, GF.getOtherName(info.name, nil, info.uid))
 		local registerTime = os.date("*t", info.register_time)
 		bee.setText(self.TimeText, _F("LAB_SEVEN_DAY_TASKS_DEC_33", registerTime.year, registerTime.month, registerTime.day))
 		local time = os.date("*t", info.auth_cert_time)
@@ -82,6 +83,7 @@ function P:onStart()
 
 		self.SignatureArea:SetActive(false)
 		self:refreshSign(info.auth_cert_url)
+		self.SignTimeText:SetActive(true)
 
 		if info.uid == PlayerModel:getUid() and not self._params.isCertification and not self._isFromTable then
 			self.EditButton:SetActive(true)
@@ -96,7 +98,6 @@ function P:refreshSign(url)
 		-- self.SignatureImg:GetComponent("LoadImage"):DownloadImage(url)
 		bee.getDownloadImage(self.SignatureImg, url)
 
-		self.SignTimeText:SetActive(true)
 		self:setShareCont()
 
 		if (self._params.isCertification or self._params.info.uid == PlayerModel:getUid()) and not self._isFromTable then

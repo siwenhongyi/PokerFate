@@ -11,11 +11,15 @@
 
 | 项目 | 内容 |
 |------|------|
-| 客户端引擎 | Unity，IL2CPP 编译（非 Mono）|
+| 客户端引擎 | Unity 2022.3.62f3，IL2CPP 编译（非 Mono），metadata v31 |
 | 脚本框架 | XLua（游戏逻辑全部用 Lua 编写，C# 只是壳）|
 | 网络通信 | WebSocket Secure（WSS），端口 9012 |
 | 消息编码 | Protocol Buffers（protobuf2）|
-| 资产加密 | XXTEA |
+| 资产加密 | 两层：bundle 整包 XENC 异或流（2026-11 起）+ 包内 MonoBehaviour XXTEA |
+| 风控 | 网易易盾 `NTESRiskSecProtect` + `DeviceFingerprint`，登录参数带 `yidun_risk_check` |
+
+当前产物对应的客户端：2026-11-05 下载的 `PokerFate_Android.apk`（66 个源码 bundle，
+8 proto + 683 lua）。
 
 ---
 
@@ -71,8 +75,9 @@ for path, obj in env.container.items():
 因为是 IL2CPP，无法直接反编译 C# 代码。使用 Il2CppDumper 提取类结构：
 
 ```bash
-# 修改 runtimeconfig.json 兼容 .NET 10
-dotnet Il2CppDumper.dll \
+# Il2CppDumper 6.7.46 是 net6 构建，用 DOTNET_ROLL_FORWARD 跑在新版 .NET 上；
+# 想要 stringliteral.json / script.json，config.json 里 GenerateStruct 需为 true
+DOTNET_ROLL_FORWARD=Major dotnet Il2CppDumper.dll \
   lib/arm64-v8a/libil2cpp.so \
   assets/bin/Data/Managed/Metadata/global-metadata.dat \
   il2cpp_dump/
@@ -125,12 +130,85 @@ message UserLoginREQ { ... }
 
 ### 第七步：批量解密所有资产
 
-用同一密钥解密所有 proto 文件和 Lua 源码：
+**proto 和 lua 用的是不同密钥**（都在 stringliteral.json 里）：
 
 ```python
-KEY = b'bee#happy&pkproto'
-plain = xxtea_decrypt(cipher, KEY)
+PROTO_KEY = b'bee#happy&pkproto'    # Assets/GameRes/Proto/*.proto
+LUA_KEY   = b'bee#happy&pkproject'  # Assets/GameRes/src/**/*.lua
 ```
+
+XXTEA 为 Ma Bingyao 变体：解密后最后一个 uint32 存原始长度（includeLength），
+按它截断去掉尾部填充。
+
+### 第八步：bundle 整包加密 XENC（2026-11 版本起）
+
+新版 APK 里所有 bundle 不再以 `UnityFS` 开头，而是 `XENC`，UnityPy 直接读出 0 个对象。
+对比新旧 `dump.cs` 的类型列表，新增：
+
+```csharp
+public static class AesCryptoUtil {            // 名字叫 Aes，实际是自定义异或流
+    public const string FILE_MAGIC = "XENC";
+    public const int HEADER_SIZE = 20;
+    private const int KEY_BLOCK = 64;
+    private const ulong BLOCK_CONST = 11400714819323198485;   // 0x9E3779B97F4A7C15
+    private static readonly byte[] _secret;
+    public static AesCryptoUtil.XorStream CreateDecryptStream(Stream s) { }
+}
+public class EncryptedBundleProvider : ResourceProviderBase { }  // Addressables 自定义 provider
+```
+
+反汇编 `libil2cpp.so`（`objdump -d --start-address=<RVA>`）还原出的算法：
+
+1. 头：`"XENC"(4) + nonce(16)`，正文从偏移 20 开始。
+2. `secret_seed = u64le(_secret[0:8] 每字节 ^ 0x3D)`（只用前 8 字节）。
+3. `seed = splitmix64(u64le(nonce[0:8]) ^ u64le(nonce[8:16])) ^ secret_seed`。
+4. 正文第 p 字节：块号 `p >> 6`，块密钥由
+   `x = 块号 * 0x9E3779B97F4A7C15 + seed`，循环 64 次
+   `x ^= x<<13; x ^= x>>7; 取 x 低 8 位; x ^= x<<17` 生成，明文 = 密文 ^ 块密钥[p & 63]。
+
+`_secret` 在 `.cctor` 里用 `RuntimeHelpers.InitializeArray` 初始化。定位方式：
+`.cctor` 中 `adrp/ldr` 取的 GOT 槽 → `objdump -R` 查 `R_AARCH64_RELATIVE` 目标 →
+`script.json` 的 `ScriptMetadata` 得到
+`Field$<PrivateImplementationDetails>.57551730F4ED...63A6` → `dump.cs` 里该字段标注
+`Metadata offset 0x69AE20` → 从 `global-metadata.dat` 该偏移读 16 字节：
+
+```
+XENC_SECRET = 2e498d51247d0392f13e6928533a2b7c
+```
+
+解出来是标准 `UnityFS`（Unity 2022.3.62f3），之后的流程与以前相同。
+客户端升级后若提取脚本报「没有解出任何 proto/lua」，先看 bundle 头是否变了，
+再按上面的路径重新定位 `_secret`（RVA 和 metadata offset 每个版本都会变）。
+
+---
+
+## 一键提取脚本
+
+`pf_reverse/extract_resources.py`：读 bundle → 去 XENC 外层 → UnityPy 解析 →
+按路径选密钥 XXTEA 解密 → 写 `output/{proto,lua}`。单向更新：对本次提供的顶层分组整组替换。
+
+来源可以直接给 `.apk` 文件（脚本从压缩包里只读 proto/src bundle，不用解压 1.6GB），
+也可以给 bundle 目录：
+
+```bash
+# 先 APK（基线），再 remote_res 拉取目录（热更，覆盖）
+.venv/bin/python pf_reverse/extract_resources.py ~/Downloads/PokerFate_Android.apk [<remote_res_dir>]
+```
+
+### 两个来源（关键！）
+
+游戏走 Unity Addressables，lua/proto 分散在两处，必须都覆盖才完整：
+
+| 来源 | 内容 | 更新频率 |
+|------|------|----------|
+| **APK 内置** `assets/aa/Android/gameres_assets_src*` | 全量基线，**含 `app/scenes`**（remote_res 从不下发） | 随 APK 版本（少） |
+| **设备 remote_res** `/sdcard/Android/data/com.pokerfate.play/files/remote_res/` | 热更内容，覆盖 APK 同名资源 | 频繁（每次开服可能变）|
+
+remote_res 里 lua 又分两块，**别只拉文件夹漏了根 bundle**：
+- `gameres_assets_src/` 文件夹 → `app/appload/net/sdk/tpl`
+- `gameres_assets_src_<hash>.bundle` 根文件 → `engine/manager/ui/perf/main.lua/protoc.lua`
+
+判断是否有更新：对比 `remote_res/catalog_1.0.0.hash` 与上次。
 
 ---
 
@@ -171,8 +249,8 @@ pf_reverse/output/
 
 | 项目 | 值 |
 |------|----|
-| 加密算法 | XXTEA |
-| 加密密钥 | `bee#happy&pkproto` |
+| bundle 外层 | XENC 异或流，secret `2e498d51247d0392f13e6928533a2b7c` |
+| 包内加密 | XXTEA，proto 密钥 `bee#happy&pkproto`，lua 密钥 `bee#happy&pkproject` |
 | 网络协议 | WSS，端口 9012 |
 | 消息格式 | Protobuf2（package `pb`）|
 | Lua 框架 | XLua，游戏逻辑全在 Lua |
@@ -185,18 +263,20 @@ pf_reverse/output/
 
 | 工具 | 用途 |
 |------|------|
-| `unzip` | 解包 APK |
 | `UnityPy` | 读取 Unity Asset Bundle |
-| `jadx` | 反编译 Java 层（classes.dex）|
-| `Il2CppDumper` | 提取 IL2CPP C# 类结构 + 字符串表 |
-| `objdump` | ARM64 反汇编辅助分析 |
-| Python XXTEA | 自实现解密 |
+| `Il2CppDumper` 6.7.46 | 提取 IL2CPP C# 类结构 + 字符串表（本地放在 `pf_reverse/poker_chase/tools/`，不入库）|
+| `objdump`（Xcode 自带 llvm） | ARM64 反汇编、`-R` 查动态重定位 |
+| `jadx` | 反编译 Java 层（classes.dex，目前没用上）|
+| Python XENC / XXTEA | 自实现解密，见 `extract_resources.py` |
 
 ---
 
-## 下一步
+## 新版本更新流程
 
-1. 用 `CSHoldem.proto` + `CSGame.proto` 编译出 Python protobuf 类
-2. 分析 `net_pk.lua` 了解消息 ID 和收发逻辑
-3. 分析 `manager/Net.lua` 了解 WebSocket 连接建立和鉴权流程
-4. 编写 Python WSS 客户端，接入游戏服务器
+1. `extract_resources.py <新 apk> [<remote_res 目录>]` 重建 `output/`，`git diff` 看 proto/lua 变化。
+2. `bash pf_intercept/tools/gen_pb2.sh` 重新生成 `pf_intercept/wire/pb/*_pb2.py`。
+3. 用新 APK 的 `libil2cpp.so` + `global-metadata.dat` 跑 Il2CppDumper，
+   把 `dump.cs`、`stringliteral.json` 覆盖到 `reference/`（只保留这两个，`il2cpp.h`/`script.json` 太大不入库）。
+4. 重点检查 `app/EnumConfig.lua` 的 `POKER_ACTION`（`wire/action_types.py` 依赖）
+   和 `manager/Net.lua` 的签名逻辑（`game_api/gamedata.py` 依赖）有没有变。
+5. 解包、dump 都放临时目录，用完删掉，不要把 APK 或中间产物留在项目里。

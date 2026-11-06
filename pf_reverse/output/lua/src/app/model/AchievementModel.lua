@@ -10,7 +10,17 @@ function P:ctor(logic)
     self.newTagDic = {}
     self.clearDic = {}
 
+    self.saveIds = {}
 
+    self.pauseTipType = 
+    {
+        none = 0,
+        oath = 1, --誓约
+        gacha = 2, --抽卡
+        pinball = 3, --弹球
+        colorgame = 4, --彩球
+    }
+    self.pauseTip = self.pauseTipType.none
 
     self.reddotLink = {
         [101] = RedTag.AchTheme1,
@@ -38,12 +48,35 @@ function P:getTotalNum(ach_level)
 end
 
 function P:evt_clearAchievement(msg)
-    UiManager:showUI("AchievementTips", {clearIds = msg.clearIds})
+    local filterMsg = {}
     for _,v in pairs(msg.clearIds) do
+        if tpl_achievement_task[v] ~= nil then
+            table.insert(filterMsg, v)
+        end
+    end
+    if #filterMsg <= 0 then
+        return
+    end
+
+    local tipUI = UiManager:getUI("AchievementTips")
+    if tipUI == nil then
+        UiManager:showUI("AchievementTips", {clearIds = filterMsg})
+    else
+        for _,v in pairs(filterMsg) do
+            table.insert(self.saveIds, v)
+        end
+    end
+    
+    for _,v in pairs(filterMsg) do
         local cfg = tpl_achievement_task[v]
-        self.clearDic[cfg.ach_level] = self.clearDic[cfg.ach_level] + 1
+        if self.clearDic[cfg.ach_level] ~= nil then
+            self.clearDic[cfg.ach_level] = self.clearDic[cfg.ach_level] + 1
+        end
     end
     RedManager:addTag(RedTag.Achievement)
+end
+function P:clearSaveIds()
+    self.saveIds = {}
 end
 
 function P:getLocalSaveData()
@@ -106,7 +139,11 @@ function P:refreshLobbyRedPoint(dataList)
         end
         --主题奖励未领取判定
         if themeData.themeGetable then
-            subRedTag = true
+            --是否有主题奖励
+            local themeCfg = tpl_achievement_theme[v.ach]
+            if themeCfg and themeCfg.rewards then
+                subRedTag = true
+            end
         end
 
         --主题红点
@@ -124,10 +161,12 @@ end
 
 function P:refreshThemeRedPoint(themeId)
     local redThemeType = self.reddotLink[themeId]
+    local themeCfg = tpl_achievement_theme[themeId]
     RedManager:removeTag(redThemeType)
     
     local datas = self.newTagDic[themeId]
-    if table.nums(datas.newList) > 0 or table.nums(datas.rewardList) > 0 or datas.themeReward then
+    if table.nums(datas.newList) > 0 or table.nums(datas.rewardList) > 0 or 
+            (datas.themeReward and themeCfg and themeCfg.rewards) then
         RedManager:addTag(redThemeType)
     end
     bee.emit("evt_refreshAchievementThemeReddot", themeId)
@@ -145,7 +184,9 @@ function P:requestAchTaskList()
         end
         for _,v in pairs(data.list) do
             local cfg = tpl_achievement_task[v.task_id]
-            table.insert(self.achDic[cfg.ach_type], {data = v, cfg = cfg})
+            if cfg then
+                table.insert(self.achDic[cfg.ach_type], {data = v, cfg = cfg})
+            end
         end
         self.getedRewardIds = data.ids_arr or {}
 
@@ -322,7 +363,7 @@ end
 --获取条件值参数
 function P:getDesValue(cfg)
     local needValue = #cfg.value == 1 and cfg.value[1] or cfg.value[2]
-    if cfg.task_type == 313 then
+    if cfg.task_type == 313 or cfg.task_type == 111 then
         needValue = cfg.value[3]
     elseif cfg.task_type == 204 then
         needValue = 1
@@ -347,6 +388,49 @@ function P:getAllServerProgress(rate, hasCompleted)
             return 0
         end
     end
+end
+
+--##特定情况延后提示成就
+
+function P:checkPuase()
+    return self.pauseTip ~= self.pauseTipType.none
+end
+
+--誓约
+function P:evt_oathStart()
+    self.pauseTip = self.pauseTipType.oath
+end
+function P:evt_oathOver()
+    self:clearPause()
+end
+
+--抽卡
+function P:evt_gachaStart()
+    self.pauseTip = self.pauseTipType.gacha
+end
+function P:evt_gachaOver()
+    self:clearPause()
+end
+
+--弹球
+function P:evt_pinballStart()
+    self.pauseTip = self.pauseTipType.pinball
+end
+function P:evt_pinballOver()
+    self:clearPause()
+end
+
+--彩球
+function P:evt_colorgameStart()
+    self.pauseTip = self.pauseTipType.colorgame
+end
+function P:evt_colorgameOver()
+    self:clearPause()
+end
+
+
+function P:clearPause()
+    self.pauseTip = self.pauseTipType.none
 end
 
 return P

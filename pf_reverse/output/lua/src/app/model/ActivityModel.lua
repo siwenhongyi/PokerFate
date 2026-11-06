@@ -6,6 +6,8 @@ function P:ctor(logic)
     self._followedMediaList = {}
     self._linkEmailRwRemain = 0
 
+	self.questionData = {}
+
     P.super.ctor(self)
 end
 
@@ -13,6 +15,7 @@ end
 function P:initActInfo()
 	self:requestFollowMedia()
 	self:getBindRw()
+	self:getSurveyData()
 end
 
 -- 获取活动页签展示列表
@@ -34,11 +37,28 @@ function P:getActShowList()
 			if ActivityNewmanCheckinModel:isActivityOpen() then
 				table.insert(showList, v)
 			end
+		elseif v.type == ActivityType.TimeLimit and v.event_id == ActivityId.RetentionSurvey then
+		-- 	--问卷调查
+		-- 	if self.questionData.id ~= nil and self.questionData.status == 0 then
+		-- 		table.insert(showList, v)
+		-- end
 		else
 			table.insert(showList, v)
 		end
 	end
 
+	table.sort(showList, function(a, b) return a.index < b.index end)
+	return showList
+end
+function P:addRetentionSurvey(showList)
+	for k, v in pairs(tpl_event_tab) do
+		if v.type == ActivityType.TimeLimit and v.event_id == ActivityId.RetentionSurvey then
+			--问卷调查
+			if self.questionData.id ~= nil and self.questionData.status == 0 then
+				table.insert(showList, v)
+			end
+		end
+	end
 	table.sort(showList, function(a, b) return a.index < b.index end)
 	return showList
 end
@@ -156,6 +176,92 @@ function P:isShowLinkEmail()
 		return false
 	end
 	return true
+end
+
+-- ============================== 问卷调查 ==============================
+
+--获取答题数据
+function P:getSurveyData(cb)
+	Net:post("activity/survey", {avenue_id = G_CHNL_ID}, function (data)
+		if data.code ~= 0 then
+            return
+        end
+		
+		self.questionData.id = data.id
+		self.questionData.status = data.status
+		self.questionData.list = data.questions
+		self.questionData.rewards = data.rewards
+
+		if cb then
+			cb()
+		end
+
+		self:refreshQuestionReddot()
+	end)
+end
+
+--提交答案
+function P:submitSurveyAnswer(id, answer, order)
+	local args = {}
+	args.id = id
+	args.answers = {}
+	for _,v in pairs(order) do
+		local data = {}
+		for _,av in pairs(answer) do
+			if av.qid == v then
+				data.question_id = av.qid
+				if av.sltIndex then
+					data.option_id = {av.sltIndex}
+				end
+				if av.sltIndexs then
+					data.option_id = av.sltIndexs
+				end
+				if av.str then
+					data.content = av.str
+				end
+				table.insert(args.answers, data)
+				break
+			end
+		end
+	end
+	
+	Net:post("activity/survey/answer", args, function (data)
+		if data.code ~= 0 then
+			return
+		end
+		UiManager:showUI("BackpackClaimResult", {items = data.rewards})
+		self.questionData.status = 2
+		bee.emit("evt_getQuestionRewardCallback")
+		self:refreshQuestionReddot()
+	end)
+end
+
+--领取奖励
+function P:getQuestionRewards(id)
+	-- Net:post("activity/survey/claimReward", {id = id}, function (data)
+	-- 	if data.code ~= 0 then
+	-- 		return
+	-- 	end
+	-- 	UiManager:showUI("BackpackClaimResult", {items = data.rewards})
+	-- 	self.questionData.status = 2
+	-- 	bee.emit("evt_getQuestionRewardCallback")
+	-- end)
+end
+
+function P:getQuestionData()
+	return self.questionData
+end
+
+function P:refreshQuestionReddot()
+	RedManager:removeTag(RedTag.ActivityRetentionSurvey)
+	if self.questionData.id == nil then
+		return
+	end
+		
+	local reddot = self.questionData.status < 2
+	if reddot then
+		RedManager:addTag(RedTag.ActivityRetentionSurvey)
+	end
 end
 
 return P

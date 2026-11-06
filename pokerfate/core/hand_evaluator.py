@@ -5,15 +5,17 @@ Format: (HandRank, *tiebreakers)
 """
 
 from __future__ import annotations
+
+import importlib
+from collections import Counter
 from enum import IntEnum
 from itertools import combinations
 from typing import List, Tuple
-from collections import Counter
 
 from pokerfate.core.card import Card
 
 try:
-    import eval7 as _eval7
+    _eval7 = importlib.import_module("eval7")
     _HAS_EVAL7 = True
 except ImportError:
     _eval7 = None

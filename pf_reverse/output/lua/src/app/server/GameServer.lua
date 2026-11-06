@@ -184,6 +184,7 @@ function P:doRoundStartBRC()
             self:doResp("HandCardRSP", {
                 card1 = v.card1,
                 card2 = v.card2,
+                seatid = v.seatid,
             })
         end
     end

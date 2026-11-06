@@ -47,16 +47,19 @@ end
 function P:initUI()
 	self.ItemBg = self:find("ItemBg")
 	self.Icon = self:find("Icon")
-	self.CountText = self:find("CountText")
+	self.CountText = self:find("CountText") or self:find("TextCount")
 	self.TimeTag = self:find("TimeTag")
 	self.TimeText = self:find("TimeText", self.TimeTag)
 	self.LinkTag = self:find("LinkTag")
+
+	self.PropAvatar = self:find("PropAvatar")
 end
 
 local ICON_SCALE = 128 / 160
 function P:setData(data)
 	self.data = data
 	self.id = data.item_id or data.id
+	self.num = data.item_num or data.num
 	self.icon = data.icon
 
 	self:refreshUI()
@@ -71,10 +74,15 @@ function P:refreshUI()
 	end
 
 	-- 图标
-	if self.icon then
-		bee.setIconInAtlas(self.Icon, self.icon, self.ItemBg ~= nil)
+	local icon = self.icon or cfg.icon
+	if (cfg.type == GPropKind.RoleCard or cfg.type == GPropKind.SkinCard) and self.PropAvatar then
+		self.PropAvatar:SetActive(true)
+		bee.setIcon(self:find("Mask/ImageIcon", self.PropAvatar), icon)
 	else
-		bee.setIconInAtlas(self.Icon, cfg.icon, self.ItemBg ~= nil)
+		bee.setIconInAtlas(self.Icon, icon, self.ItemBg ~= nil)
+		if self.PropAvatar then
+			self.PropAvatar:SetActive(false)
+		end
 	end
 
 	-- 背景
@@ -90,14 +98,20 @@ function P:refreshUI()
 			local s1, s2 = self.ItemBg.transform.sizeDelta, self.Icon.transform.sizeDelta
 			local s = ICON_SCALE * s1.x / s2.x
 			self.Icon.transform.localScale = bee.v3(s, s, 1)
+		elseif cfg.type == GPropKind.Title then
+			local s = self.Icon.transform.sizeDelta
+			local titleWithScale = 1.5
+			s.x = s.x * titleWithScale
+			s.y = s.x * 60 / 340
+			self.Icon.transform.sizeDelta = s
 		end
 	end
 
 	-- 数量
 	if self.CountText then
-		if self.data.num and self.data.num > 0 and ItemModel:getGPropType(cfg.type) ~= GPropType.Display then
+		if self.num and self.num > 0 and ItemModel:getGPropType(cfg.type) ~= GPropType.Display and cfg.type ~= GPropKind.RoleCard and cfg.type ~= GPropKind.SkinCard then
 			self.CountText:SetActive(true)
-			bee.setTextGold(self.CountText, _N(self.data.num))
+			bee.setTextGold(self.CountText, _N2(self.num))
 		else
 			self.CountText:SetActive(false)
 		end
@@ -110,6 +124,11 @@ function P:refreshUI()
 	else
 		if self.TimeTag then
 			self.TimeTag:SetActive(false)
+		end
+	end
+	if cfg.type == GPropKind.Emoji then
+		if self.data.deadline and self.data.deadline > 0 then
+			self:setTimeText(self.data.deadline)
 		end
 	end
 
@@ -173,13 +192,19 @@ function P:bindDetail(cb, jumpCb)
 	return self
 end
 
-function P:bindTips(parent)
+function P:bindTips(parent, clickCb)
+	if self.data.id == GPropId.DispatchBonus then
+		return
+	end
 	bee.removeAllClick(self.node)
 	bee.addClick(self.node, function()
 		if bee.isNull(self.node) then
 			return
 		end
 		Game:playSound("ui_button_confirm")
+		if clickCb then
+			clickCb()
+		end
 		UiManager:showUI("CommonItemTip", {data = self.data, target = self.node, parent = parent})
 	end, true)
 	return self
@@ -201,8 +226,17 @@ function P:bindPreview()
 			UiManager:showUI("BackpackMusic", {data = ItemModel:getItem(self.id, true)})
 		elseif cfg.type == GPropKind.LobbyScene then
 			UiManager:showUI("BackpackLobbyPreview", {data = ItemModel:getItem(self.id, true), list = {ItemModel:getItem(self.id, true)}})
+		elseif cfg.type == GPropKind.AllInEff then
+			local skinCfg = DecorationModel:getSkinCfgInScheme()
+			UiManager:showUI(GameModel:getAllinUiName(cfg.id), {role = CharacterModel:getRoleData(skinCfg.role), skin = skinCfg})
+		elseif cfg.type == GPropKind.Illustration then
+			UiManager:showUI("BackpackIllustrationPreview", {data = ItemModel:getItem(self.id, true), list = {ItemModel:getItem(self.id, true)}})
 		else
-			UiManager:showUI("BackpackPreview", {data = ItemModel:getItem(self.id, true)})
+			local zOrder = nil
+			if bee.isInGame() then
+				zOrder = 32000
+			end
+			UiManager:showUI("BackpackPreview", {data = ItemModel:getItem(self.id, true), zOrder = zOrder})
 		end
 	end, true)
 	return self

@@ -106,24 +106,24 @@ function P:onAwake()
     bee.addClick(self.GiftButton, function()
         Game:playSound("ui_button_confirm")
         if self._selectGift.num <= 0 then
-            if not ShopModel:autoShowCharacterGift(self._role.role_id) then
+            if not ShopModel:autoShowCharacterGift(self._role.role_id) and not GuideManager:isInGuide() then
                 UiManager:showUI("BackpackDetail", {data = self._selectGift, characterId = self._role.role_id})
             end
             return
         end
         if CharacterModel:getLeftGiftCnt() <= 0 and not self._lovesSpc[self._selectGift.item_id] then
-            if not ShopModel:autoShowCharacterGift(self._role.role_id) then
-                UiManager:showUI("CharacterGiftResult", {data = self._selectGift})
+            if not ShopModel:autoShowCharacterGift(self._role.role_id) and not GuideManager:isInGuide() then
+                UiManager:showUI("CharacterGiftResult", {data = self._selectGift, characterId = self._role.role_id})
             end
             return
         end
         if self._selectGift.locked then
-            if not ShopModel:autoShowCharacterGift(self._role.role_id) then
+            if not ShopModel:autoShowCharacterGift(self._role.role_id) and not GuideManager:isInGuide() then
                 UiManager:showUI("BackpackDetail", {data = self._selectGift, characterId = self._role.role_id})
             end
             return
         end
-        if self._lovesSpc[self._selectGift.item_id] == 2 and LocalStore:isTagValid("character_bond_gift_prompt" .. PlayerModel:getUid()) then
+        if self._lovesSpc[self._selectGift.item_id] == 2 and LocalStore:isTagValid("character_bond_gift_prompt" .. PlayerModel:getUid()) and not GuideManager:isInGuide() then
             UiManager:showUI("CharacterMainPrompt", {
                 data = self._selectGift,
                 onSure = function()
@@ -154,7 +154,6 @@ function P:onAwake()
 
     bee.addClick(self:find("BackButton", self.LeftTop), function()
         self:onBtClose()
-        bee.emit(EventDef.evt_role_back_to_main, self.__cname)
     end, true)
 
     if bee.isDev then
@@ -314,7 +313,7 @@ function P:refreshInfos(isAmin)
     self:find("Heart01/character_bond_level_heart_02", self.BondLevel):SetActive(self._role:isAwaken())
     self.TextCurLevel:SetActive(not self._role:isAwaken())
     self.TextCurLevel2:SetActive(self._role:isAwaken())
-    local lvl = self._role:getBondLevel()
+    local lvl = math.min(self._role:getBondLevel(), Config.AWAKEN_LEVEL + 1)
     local d = tpl_character_level[lvl]
     local val = self._bondProgress[lvl]
     local to = val
@@ -509,6 +508,11 @@ function P:showBondsUpAnim()
             end})
         end)
     end)
+end
+
+function P:onBtClose()
+    P.super.onBtClose(self)
+    bee.emit(EventDef.evt_role_back_to_main, self.__cname)
 end
 
 function P:evt_testBondsup()

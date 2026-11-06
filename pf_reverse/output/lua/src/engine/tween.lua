@@ -205,6 +205,24 @@ bee._tweenMeta = {
         return o
     end,
 
+    pause = function(o)
+        if o.seq then
+            o.seq:Pause()
+        elseif o.act then
+            o.act:Pause()
+        end
+        return o
+    end,
+
+    resume = function(o)
+        if o.seq then
+            o.seq:Play()
+        elseif o.act then
+            o.act:Play()
+        end
+        return o
+    end,
+
     kill = function(o)
         if o.seq then
             o.seq:Kill()

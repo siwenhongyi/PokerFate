@@ -21,7 +21,9 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[A-Za-z]")
-_DEFAULT_LOG_FILE = str(pathlib.Path(__file__).resolve().parent / "logs" / "pokerfate.log")
+_DEFAULT_LOGS_DIR = pathlib.Path(__file__).resolve().parent / "logs"
+_DEFAULT_LOG_FILE = str(_DEFAULT_LOGS_DIR / "pokerfate.log")
+_DEFAULT_RUNTIME_LOG_NAMES = ("pokerfate.log", "pokerfate_console.log", "g5.log")
 
 
 # ---------------------------------------------------------------------------
@@ -38,7 +40,23 @@ class _C:
     WHITE  = "\033[97m"
     MAGENTA = "\033[95m"
 
+
+def _env_truthy(name: str) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return False
+    return value.strip().lower() not in {"", "0", "false", "no", "off"}
+
+
 def _no_color() -> bool:
+    force_color = (
+        _env_truthy("PF_FORCE_COLOR")
+        or _env_truthy("FORCE_COLOR")
+        or _env_truthy("CLICOLOR_FORCE")
+        or _env_truthy("PYCHARM_HOSTED")
+    )
+    if force_color:
+        return False
     return not sys.stdout.isatty() or bool(os.environ.get("NO_COLOR"))
 
 
@@ -63,6 +81,95 @@ def _fmt_card(card_str: str, use_color: bool) -> str:
 
 def _fmt_cards(cards: List[str], use_color: bool) -> str:
     return "  ".join(_fmt_card(c, use_color) for c in cards)
+
+
+def _card_rank_value(card) -> int:
+    try:
+        return int(card.rank)
+    except Exception:
+        text = str(card)
+        rank = text[:-1].upper() if len(text) > 1 else text.upper()
+        return {
+            "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7,
+            "8": 8, "9": 9, "T": 10, "J": 11, "Q": 12, "K": 13, "A": 14,
+        }.get(rank, 0)
+
+
+def _card_suit_value(card) -> str:
+    try:
+        return str(card.suit)
+    except Exception:
+        text = str(card)
+        return text[-1:].lower()
+
+
+def _early_street_board_flags(board: List[object]) -> List[str]:
+    if len(board) < 3:
+        return []
+    ranks = [_card_rank_value(c) for c in board]
+    suits = [_card_suit_value(c) for c in board]
+    flags: List[str] = []
+    if len(set(ranks)) < len(ranks):
+        flags.append("paired")
+    flop = board[:3]
+    if len(flop) == 3 and len({_card_suit_value(c) for c in flop}) == 1:
+        flags.append("mono")
+    suit_counts: Dict[str, int] = {}
+    for suit in suits:
+        suit_counts[suit] = suit_counts.get(suit, 0) + 1
+    if max(suit_counts.values(), default=0) >= 4:
+        flags.append("4flush")
+    rank_set = set(ranks)
+    if 14 in rank_set:
+        rank_set.add(1)
+    for start in range(1, 11):
+        if len(set(range(start, start + 5)) & rank_set) >= 4:
+            flags.append("4straight")
+            break
+    return flags
+
+
+def _street_relative_calibration_watch(result) -> Optional[Dict]:
+    rec = result.record
+    if rec.street not in {"flop", "turn"}:
+        return None
+    if result.actual_bucket not in {"strong", "nuts"}:
+        return None
+    if not str(rec.trigger or "").startswith("action:"):
+        return None
+    subtype = getattr(rec, "hero_made_subtype", "") or ""
+    fragile = {
+        "clean_overpair",
+        "board_pair_pocket_pair",
+        "board_pair_pocket_underpair",
+        "board_pair_hero_pair",
+        "board_pair_kicker",
+        "trips",
+        "trips_top_kicker",
+        "trips_weak_kicker",
+        "board_trips_kicker",
+        "top_pair_weak_kicker",
+    }
+    if subtype not in fragile and not subtype.startswith("board_pair_"):
+        return None
+    flags = _early_street_board_flags(rec.board)
+    if not flags:
+        return None
+    return {
+        "street": rec.street,
+        "actual_bucket": result.actual_bucket,
+        "predicted_bucket_prob": round(float(result.predicted_bucket_prob or 0.0), 4),
+        "predicted_hero_eq": (
+            round(float(rec.predicted_hero_eq), 4)
+            if rec.predicted_hero_eq is not None else None
+        ),
+        "actual_hero_eq_street": (
+            round(float(result.actual_hero_eq_street), 4)
+            if result.actual_hero_eq_street is not None else None
+        ),
+        "hero_made_subtype": subtype,
+        "board_flags": flags,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +207,7 @@ def _pos(p: str) -> str:
 class _JsonlWriter:
     def __init__(self, filepath: str):
         os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
-        _rotate_log(filepath)
+        _archive_runtime_log(filepath)
         self._f = open(filepath, "w", encoding="utf-8", buffering=1)
 
     def write(self, event: dict):
@@ -124,12 +231,17 @@ class PokerLogger:
         log_file: Optional[str] = _DEFAULT_LOG_FILE,
         console: bool = True,
         hand_number_ref: Optional[list] = None,
+        robot_log_file: Optional[str] = None,
     ):
         self._console = console
         self._writer = _JsonlWriter(log_file) if log_file else None
         self._hand_num = hand_number_ref if hand_number_ref is not None else [0]
         self._color = not _no_color()
         self._bot_name = "PokerFate"
+        self._current_hand_lines: List[str] = []
+        self._recording_hand = False
+        self._robot_hand_pending = False
+        self._robot_hand_meta: List[Dict] = []
 
         # Plain-text mirror of console output (no ANSI codes)
         self._text_log = None
@@ -137,8 +249,14 @@ class PokerLogger:
             p = pathlib.Path(log_file)
             text_path = p.with_name(p.stem + "_console" + p.suffix)
             text_path.parent.mkdir(parents=True, exist_ok=True)
-            _rotate_log(str(text_path))
-            self._text_log = open(text_path, "w", encoding="utf-8", buffering=1)
+            _archive_runtime_log(text_path)
+            self._text_log = open(text_path, "a", encoding="utf-8", buffering=1)
+
+        self._robot_log = None
+        if robot_log_file:
+            robot_path = pathlib.Path(robot_log_file)
+            robot_path.parent.mkdir(parents=True, exist_ok=True)
+            self._robot_log = open(robot_path, "a", encoding="utf-8", buffering=1)
 
     # ------------------------------------------------------------------
     # Public event methods
@@ -150,8 +268,13 @@ class PokerLogger:
         players: List[Dict],
         dealer_id: int,
         big_blind: float = 1.0,
+        hero_id: Optional[int] = None,
     ):
         self._hand_num[0] = hand_number
+        self._current_hand_lines = []
+        self._recording_hand = True
+        self._robot_hand_pending = False
+        self._robot_hand_meta = []
         self._file({
             "event": "hand_start",
             "hand": hand_number,
@@ -178,9 +301,10 @@ class PokerLogger:
 
         bb = max(big_blind, 1.0)
         def _seat_str(p: dict) -> str:
-            ptype = p.get("player_type", "")
-            tag = f"({ptype})" if ptype else ""
-            return f"{p['name']}{tag} {p['stack'] / bb:.0f}bb [{_pos(p.get('pos', ''))}]"
+            text = f"{p['name']} {p['stack'] / bb:.0f}bb [{_pos(p.get('pos', ''))}]"
+            if self._color and hero_id is not None and p.get("id") == hero_id:
+                return f"{_C.YELLOW}{text}{_C.RESET}{_C.BOLD}"
+            return text
         seats = "   ".join(_seat_str(p) for p in players)
         hand_tag = f"  第 {hand_number} 手"
         self._raw(f"{hand_tag:<12}{seats}", bold=True)
@@ -206,8 +330,6 @@ class PokerLogger:
         *,
         big_blind: float = 0.0,
         pot: float = 0.0,
-        player_type: str = "",
-        pwi: float = 0.0,
         range_pct: float = 0.0,
         bucket_dist: Optional[Dict[str, float]] = None,
         vs_hero: Optional[Dict[str, float]] = None,
@@ -221,7 +343,6 @@ class PokerLogger:
             "action": action,
             "amount": amount,
             "street": street,
-            "player_type": player_type or None,
             "range_pct": round(range_pct, 3) if range_pct > 0 else None,
             "bucket_dist": {k: round(v, 3) for k, v in (bucket_dist or {}).items() if v > 0.01} or None,
             "vs_hero": {k: round(v, 3) for k, v in (vs_hero or {}).items()} or None,
@@ -232,15 +353,6 @@ class PokerLogger:
 
         cn = _ACTION_CN.get(action, action)
         bb = big_blind if big_blind > 0 else 1.0
-
-        # ── 标签：type/PWI ──
-        tag = ""
-        if player_type and player_type != 'unknown':
-            _TYPE_SHORT = {
-                'nit': '紧手', 'reg': 'reg', 'maniac': '疯狂',
-                'whale': '鲸鱼', 'fish': '鱼', 'calling_station': '跟注站',
-            }
-            tag = f"[{_TYPE_SHORT.get(player_type, player_type)}/PWI{pwi:+.0f}]"
 
         # ── 范围信息 ──
         range_str = ""
@@ -287,19 +399,19 @@ class PokerLogger:
             if to_call > 0:
                 call_str = f"  需跟{to_call / bb:.0f}bb 赔率{to_call / (pot + to_call):.0%}"
             self._raw(
-                f"    {player_name:<12}  {cn}  {amt_bb:.0f}bb  {size_str}  {tag}  {range_str}{call_str}",
+                f"    {player_name:<12}  {cn}  {amt_bb:.0f}bb  {size_str}  {range_str}{call_str}",
                 color=_C.YELLOW,
             )
         elif action == "fold":
             self._raw(f"    {player_name:<12}  {cn}", color=_C.RED, dim=True)
         elif action == "call":
             self._raw(
-                f"    {player_name:<12}  {cn}  {tag}  {range_str}",
+                f"    {player_name:<12}  {cn}  {range_str}",
                 dim=True,
             )
         elif action == "check":
             self._raw(
-                f"    {player_name:<12}  {cn}  {tag}  {range_str}" if range_str else
+                f"    {player_name:<12}  {cn}  {range_str}" if range_str else
                 f"    {player_name:<12}  {cn}",
                 dim=True,
             )
@@ -321,6 +433,9 @@ class PokerLogger:
         equity_mode: Optional[str] = None,
         gto_refs: Optional[dict] = None,
         elapsed_ms: Optional[float] = None,
+        timing: Optional[Dict] = None,
+        river_relative: Optional[Dict] = None,
+        street_relative: Optional[Dict] = None,
     ):
         """Log the bot's own decision."""
         rec: Dict = {
@@ -341,6 +456,12 @@ class PokerLogger:
             rec["equity_mode"] = equity_mode
         if elapsed_ms is not None:
             rec["elapsed_ms"] = round(elapsed_ms, 1)
+        if timing:
+            rec["timing"] = timing
+        if river_relative:
+            rec["river_relative"] = river_relative
+        if street_relative:
+            rec["street_relative"] = street_relative
         self._file(rec)
         if not self._console:
             return
@@ -382,11 +503,137 @@ class PokerLogger:
         if gto_refs:
             key = gto_refs.get("chart_key", "")
             hand = gto_refs.get("hand", "")
+            pg = gto_refs.get("pokergto", "—")
+            pg_key = gto_refs.get("pokergto_chart_key") or key
             gl = gto_refs.get("greenline", "—")
-            pk = gto_refs.get("pekarstas", "—")
+            source = gto_refs.get("primary_source", "")
+            source_note = f" 主={source}" if source else ""
+            self._raw(f"      📊 [PokerGTO]  {pg_key} {hand} → {pg}{source_note}", dim=True)
             self._raw(f"      📊 [Greenline]  {key} {hand} → {gl}", dim=True)
-            if pk != "—":
-                self._raw(f"      📊 [Pekarstas]  {key} {hand} → {pk}", dim=True)
+
+    def g5_shadow_decision(
+        self,
+        *,
+        status: str,
+        street: str = "",
+        action: str = "",
+        amount: float = 0.0,
+        reasoning: str = "",
+        elapsed_ms: Optional[float] = None,
+        result: Optional[Dict] = None,
+        reason: str = "",
+    ) -> None:
+        """Log a non-authoritative g5 decision for comparison."""
+        status_key = str(status or "").lower()
+        rec: Dict = {
+            "event": "g5_shadow_decision",
+            "hand": self._hand_num[0],
+            "status": status_key,
+        }
+        if street:
+            rec["street"] = street
+        if action:
+            rec["action"] = action
+            rec["amount"] = amount
+        if reasoning:
+            rec["reasoning"] = reasoning
+        if elapsed_ms is not None:
+            rec["elapsed_ms"] = round(float(elapsed_ms), 1)
+        if result is not None:
+            rec["result"] = result
+        if reason:
+            rec["reason"] = reason
+        self._file(rec)
+        if not self._console:
+            return
+
+        if status_key == "folded":
+            self._raw("      ◇ g5已提前弃牌", dim=True)
+            return
+
+        if status_key == "disabled":
+            suffix = f"  {reason}" if reason else ""
+            self._raw(f"      ◇ g5跳过{suffix}", dim=True)
+            return
+
+        if status_key in {"unavailable", "error"}:
+            suffix = f"  {reason}" if reason else ""
+            self._raw(f"      ◇ g5不可用{suffix}", dim=True)
+            return
+
+        if status_key != "ok":
+            return
+
+        cn = _ACTION_CN.get(action, action or "unknown")
+        if action == "raise":
+            action_col = f"{cn} {amount:.0f}"
+        elif action == "call":
+            action_col = cn
+        elif action == "fold":
+            action_col = cn
+        else:
+            action_col = cn
+
+        detail = reasoning.strip()
+        if elapsed_ms is not None:
+            rpc = f"rpc={float(elapsed_ms):.0f}ms"
+            detail = f"{detail}  {rpc}" if detail else rpc
+        self._raw(f"      ◇ g5决策  {action_col:<12}  {detail}", dim=True)
+
+    def local_shadow_decision(
+        self,
+        *,
+        status: str,
+        street: str = "",
+        action: str = "",
+        amount: float = 0.0,
+        reasoning: str = "",
+        elapsed_ms: Optional[float] = None,
+        diagnostics: Optional[Dict] = None,
+        reason: str = "",
+    ) -> None:
+        """Log a non-authoritative PokerFate decision while g5 is active."""
+        status_key = str(status or "").lower()
+        rec: Dict = {
+            "event": "local_shadow_decision",
+            "hand": self._hand_num[0],
+            "status": status_key,
+        }
+        if street:
+            rec["street"] = street
+        if action:
+            rec["action"] = action
+            rec["amount"] = amount
+        if reasoning:
+            rec["reasoning"] = reasoning
+        if elapsed_ms is not None:
+            rec["elapsed_ms"] = round(float(elapsed_ms), 1)
+        if diagnostics is not None:
+            rec["diagnostics"] = diagnostics
+        if reason:
+            rec["reason"] = reason
+        self._file(rec)
+        if not self._console:
+            return
+
+        if status_key in {"unavailable", "error"}:
+            suffix = f"  {reason}" if reason else ""
+            self._raw(f"      ◇ 本地旁路不可用{suffix}", dim=True)
+            return
+        if status_key != "ok":
+            return
+
+        cn = _ACTION_CN.get(action, action or "unknown")
+        if action == "raise":
+            action_col = f"{cn} {amount:.0f}"
+        else:
+            action_col = cn
+
+        detail = reasoning.strip()
+        if elapsed_ms is not None:
+            rpc = f"calc={float(elapsed_ms):.0f}ms"
+            detail = f"{detail}  {rpc}" if detail else rpc
+        self._raw(f"      ◇ 本地旁路  {action_col:<12}  {detail}", dim=True)
 
     def hand_result(
         self,
@@ -441,6 +688,51 @@ class PokerLogger:
         self._raw("")
         self._raw(f"  ✔ {winners_str} 赢得 {pot:.0f}    {delta_str}{my_combo_str}{stacks_str}",
                   color=color, bold=True)
+
+    def mark_robot_showdown_hand(self, robot_players: List[Dict]) -> None:
+        """Mark the current hand for copy-out to the robot hand log.
+
+        The actual write is delayed until the API finishes all end-of-hand
+        logging, so showdown learner / calibration lines are copied too.
+        """
+        if not robot_players:
+            return
+        self._robot_hand_pending = True
+        self._robot_hand_meta = [dict(p) for p in robot_players]
+
+    def flush_robot_hand_if_needed(self) -> None:
+        if not self._robot_hand_pending:
+            return
+        self._robot_hand_pending = False
+        if not self._robot_log or not self._current_hand_lines:
+            return
+
+        hand = self._hand_num[0]
+        ts = datetime.now().astimezone().isoformat(timespec="seconds")
+        players = []
+        for p in self._robot_hand_meta:
+            name = str(p.get("name") or p.get("player_id") or "")
+            uid = str(p.get("uid") or "")
+            seat = p.get("seat")
+            if seat is None:
+                seat = p.get("player_id")
+            cards = p.get("cards") or []
+            card_text = " ".join(str(c) for c in cards)
+            if uid:
+                players.append(f"{name}({uid}) {card_text}".strip())
+            elif seat is not None:
+                players.append(f"{name}(seat{seat}) {card_text}".strip())
+            else:
+                players.append(f"{name} {card_text}".strip())
+        meta = "；".join(x for x in players if x)
+
+        self._robot_log.write("\n")
+        self._robot_log.write("━" * _W + "\n")
+        self._robot_log.write(f"[{ts}] 第 {hand} 手  机器人摊牌: {meta}\n")
+        self._robot_log.write("━" * _W + "\n")
+        for line in self._current_hand_lines:
+            self._robot_log.write(line + "\n")
+        self._robot_log.write("\n")
 
     def showdown_calibration(
         self,
@@ -578,7 +870,8 @@ class PokerLogger:
         # 无法形成有效对比（未亮牌/无 hero 卡/阶段实值缺失）时，不写日志
         if rec.predicted_hero_eq is None or result.actual_hero_eq_street is None:
             return
-        self._file({
+        street_rel_watch = _street_relative_calibration_watch(result)
+        payload = {
             "event": "calibration_result",
             "hand": rec.hand_id,
             "street": rec.street,
@@ -589,6 +882,18 @@ class PokerLogger:
             "actual_cards": [str(c) for c in result.actual_cards],
             "actual_bucket": result.actual_bucket,
             "predicted_bucket_prob": round(result.predicted_bucket_prob, 4),
+            "hero_made_subtype": getattr(rec, "hero_made_subtype", ""),
+            "hero_hand_rank": getattr(rec, "hero_hand_rank", ""),
+            "board_texture": getattr(rec, "board_texture", ""),
+            "villain_vs_hero_dist": {
+                k: round(float(v), 4)
+                for k, v in (getattr(rec, "villain_vs_hero_dist", {}) or {}).items()
+            },
+            "predicted_relation_eq": (
+                round(result.predicted_relation_eq, 4)
+                if result.predicted_relation_eq is not None else None
+            ),
+            "actual_relation": result.actual_relation or "",
             "predicted_hero_eq": (round(rec.predicted_hero_eq, 4)
                                   if rec.predicted_hero_eq is not None
                                   else None),
@@ -617,7 +922,10 @@ class PokerLogger:
             "eq_prediction_error": (round(result.eq_prediction_error, 4)
                                     if result.eq_prediction_error is not None
                                     else None),
-        })
+        }
+        if street_rel_watch:
+            payload["street_relative_watch"] = street_rel_watch
+        self._file(payload)
         if not self._console:
             return
 
@@ -661,10 +969,34 @@ class PokerLogger:
 
         bucket_part = (f"实际桶={bucket_str}({actual_cards_str},"
                        f"此桶={result.predicted_bucket_prob:.0%})")
+        rel_part = ""
+        if result.predicted_relation_eq is not None and result.actual_relation:
+            rel_short = {'win': '胜', 'tie': '平', 'loss': '负'}.get(
+                result.actual_relation, result.actual_relation,
+            )
+            rel_part = f" rel预={result.predicted_relation_eq:.0%}/实{rel_short}"
+
+        street_rel_part = ""
+        if street_rel_watch:
+            flags = ",".join(street_rel_watch.get("board_flags", []) or [])
+            actual = _CAT_SHORT.get(
+                street_rel_watch.get("actual_bucket", ""),
+                street_rel_watch.get("actual_bucket", ""),
+            )
+            pred_eq = street_rel_watch.get("predicted_hero_eq")
+            actual_eq = street_rel_watch.get("actual_hero_eq_street")
+            eq_part = ""
+            if pred_eq is not None and actual_eq is not None:
+                eq_part = f" eq{float(pred_eq):.0%}→{float(actual_eq):.0%}"
+            street_rel_part = (
+                f" street_rel校={actual} 桶"
+                f"{float(street_rel_watch.get('predicted_bucket_prob', 0.0)):.0%}"
+                f"{eq_part} board={flags}"
+            )
 
         self._raw(
             f"      ⚖ {rec.street} {rec.player_name} {rec.trigger} "
-            f"{bucket_part} {hu_part}{multi_part}",
+            f"{bucket_part} {hu_part}{multi_part}{rel_part}{street_rel_part}",
             color=color,
         )
 
@@ -697,10 +1029,13 @@ class PokerLogger:
         self._file(event)
 
     def close(self):
+        self.flush_robot_hand_if_needed()
         if self._writer:
             self._writer.close()
         if self._text_log:
             self._text_log.close()
+        if self._robot_log:
+            self._robot_log.close()
 
     def __enter__(self):
         return self
@@ -734,10 +1069,14 @@ class PokerLogger:
         bold: bool = False,
         dim: bool = False,
     ):
+        plain = _strip_ansi(msg)
+        if self._recording_hand:
+            self._current_hand_lines.append(plain)
+
         # Write plain text to file (always, regardless of console setting)
         if self._text_log:
-            ts = datetime.now().strftime("%H:%M:%S")
-            self._text_log.write(f"[{ts}] {_strip_ansi(msg)}\n")
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._text_log.write(f"[{ts}] {plain}\n")
 
         if not self._console:
             return
@@ -764,13 +1103,34 @@ def _strip_ansi(s: str) -> str:
     return _ANSI_RE.sub("", s)
 
 
-def _rotate_log(filepath: str) -> None:
-    """如果文件已存在，将其内容追加到 *.bak.log，然后清空原文件。"""
+def archive_runtime_logs_on_startup(
+    logs_dir: str | pathlib.Path | None = None,
+    names: tuple[str, ...] = _DEFAULT_RUNTIME_LOG_NAMES,
+) -> None:
+    """Archive current-run logs into the daily archive folder and truncate them."""
+    root = pathlib.Path(logs_dir) if logs_dir is not None else _DEFAULT_LOGS_DIR
+    for name in names:
+        _archive_runtime_log(root / name)
+
+
+def _archive_runtime_log(filepath: str | pathlib.Path) -> None:
+    """Append a runtime log to logs/archive/YYYY-MM-DD.<name>.bak.log and clear it."""
     p = pathlib.Path(filepath)
-    if not p.exists():
+    if not p.exists() or p.stat().st_size <= 0:
         return
-    bak = p.with_name(p.stem + ".bak" + p.suffix)
+    archive_dir = p.parent / "archive"
+    date_key = datetime.now().strftime("%Y-%m-%d")
+    bak = archive_dir / f"{date_key}.{p.stem}.bak{p.suffix}"
     bak.parent.mkdir(parents=True, exist_ok=True)
-    with open(bak, "a", encoding="utf-8") as dst, \
-         open(p, "r", encoding="utf-8") as src:
-        dst.write(src.read())
+    data = p.read_text(encoding="utf-8", errors="replace")
+    if data:
+        with bak.open("a", encoding="utf-8") as dst:
+            dst.write(data)
+            if not data.endswith("\n"):
+                dst.write("\n")
+    p.write_text("", encoding="utf-8")
+
+
+def _rotate_log(filepath: str) -> None:
+    """Backward-compatible alias for the daily archive runtime-log rotation."""
+    _archive_runtime_log(filepath)

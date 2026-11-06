@@ -48,14 +48,3 @@ function net:ChangeTitleRSP(msg)
     end
 end
 
-function net:ChangeOutFitsRSP(msg)
-    if 0 == msg.code then
-        ItemModel:setOutFits(msg)
-    end
-end
-
-function net:ChangeAnimationRSP(msg)
-    if 0 == msg.code then
-        PlayerModel:setAnimationInfo(msg)
-    end
-end

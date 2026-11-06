@@ -10,7 +10,7 @@ function P:onShow()
 end
 
 function P:evt_refreshTopInfo()
-    bee.invoke(self.GoldItem, "setCount", _N(PlayerModel:getGold()))
+    bee.invoke(self.GoldItem, "setCount", _N2(PlayerModel:getGold()))
 end
 
 return P

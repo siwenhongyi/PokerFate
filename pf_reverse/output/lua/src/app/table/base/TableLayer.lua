@@ -70,6 +70,10 @@ function P:onAwake()
 		end
 	end
 
+	self.EmojiLayer = self:find("EmojiLayer")
+	self.EmojiBase = self:find("Emoji", self.EmojiLayer)
+	self.EmojiBase:SetActive(false)
+
 	self:initSeats()
 	self:initDealer()
 end
@@ -88,6 +92,8 @@ end
 function P:afterShow()
 	P.super.afterShow(self)
 	GF.dealDeepLinkParams()
+
+	TournamentModel:refreshMatchingTip()
 end
 
 function P:onHide()
@@ -154,7 +160,7 @@ function P:refreshUI()
 		end
 	end
 
-	local cfg = tpl_card_table[PlayerModel:getCurCardTable()]
+	local cfg = tpl_card_table[DecorationModel:getCurCardTable(self.data:getIngameScheme())]
 	if cfg then
 		bee.setSprite(self.ImageBg, cfg.bg_image)
 		bee.setSprite(self.ImageTable, cfg.image)
@@ -285,6 +291,9 @@ function P:playUIEffect(name, parent, localPos, autoRemoveDt, noCache,layer)
 			eft.gameObject.layer=layer
 			CS.Utils.SetAllChildLayer(eft.transform,layer)
 		end
+		if not parent then
+			parent = self.transform
+		end
 		eft.transform:SetParent(parent, false)
 		if localPos then
 			eft.transform.localPosition = localPos
@@ -317,6 +326,11 @@ function P:evt_OtherEnterRoomBRC(msg)
 			self:showTopTips(_F("LAB_JOIN_MSG", user.name), 2)
 		end
 		self:refreshVisitorNum()
+
+		local player, i = self.data:getPlayerByUid(msg.user.uid)
+		if player then
+			self.seatController[i]:emitFunc("refreshRole")
+		end
 	end
 end
 
@@ -356,15 +370,6 @@ function P:evt_SitDownBRC(msg)
 	local from_st = self.data:isMeOnSeat() and SEAT_ST.EMPTY_INVITE or SEAT_ST.EMPTY_SIT
 	self:updateSeatNode(seatid, SEAT_ST.HAS_PLAYER, from_st)
 	local player = self.data:getPlayer(seatid)
-	if self.dealer then
-		if player then
-			local name = player.name
-			local level = player.vip_level
-			if player.uid == PlayerModel:getUid() and self.data:getLobbyType() ~= LOBBY_ROOM_TYPE.ANTI_CHEATING then
-			end
-			self.dealer:welcomePlayer(name, level, seatid)
-		end
-	end
 	self:refreshVisitorNum()
 
 	local controller = self.seatController[seatid]
@@ -373,14 +378,7 @@ function P:evt_SitDownBRC(msg)
 			controller:showSitdownAni()
 		end
 	end
-    local skin = tpl_character_skin[player.skin_id]
-    if skin and not self.data:isSNG() and not self.data:isMTT() then
-        if skin.kind == SKIN_KIND.AWAKEN then
-            Game:playRoleInVoice(skin.role, ROLE_VOICE.take_a_seat_awakened)
-        else
-            Game:playRoleInVoice(skin.role, ROLE_VOICE.take_a_seat)
-        end
-    end
+	GameModel:playSitdownVoice(player.skin_id)
 end
 
 function P:evt_StandUpRSP(msg)
@@ -449,12 +447,12 @@ function P:evt_LevelUpBRC(msg)
 end
 
 function P:evt_FaceBRC(msg)
-	if SettingModel:isHideChat() and msg.seatid + 1 ~= self.data:getMyPosition() then
+	if SettingModel:isHideEmoji() and (msg.seatid + 1 ~= self.data:getMyPosition() or self.data:isInObserve()) then
 		return
 	end
 	if 0 == msg.code then
 		local player = self.data:getPlayer(msg.seatid + 1)
-		if player and PlayerModel:isBlockChat(player.uid) then
+		if player and (PlayerModel:isBlockChat(player.uid) or FriendModel:getBlockedInfo(player.uid)) then
 			return
 		end
 		local seat = self.seatController[msg.seatid + 1]
@@ -465,12 +463,24 @@ function P:evt_FaceBRC(msg)
 end
 
 function P:evt_TextBRC(msg)
-	if SettingModel:isHideChat() and msg.seatid + 1 ~= self.data:getMyPosition()  then
+	if SettingModel:isHideChat() and (msg.seatid + 1 ~= self.data:getMyPosition() or self.data:isInObserve())  then
 		return
 	end
 	local player = self.data:getPlayer(msg.seatid + 1)
-	if player and PlayerModel:isBlockChat(player.uid) then
+	if player and (PlayerModel:isBlockChat(player.uid) or FriendModel:getBlockedInfo(player.uid)) then
 		return
+	end
+	if tpl_chat[msg.id].language_type then
+		local isIn = false
+		for k,v in pairs(tpl_chat[msg.id].language_type) do
+			if v == LanguageManager:getLanguage() then
+				isIn = true
+				break
+			end
+		end
+		if not isIn then
+			return
+		end
 	end
 	local seat = self.seatController[msg.seatid + 1]
 	if seat and tpl_chat[msg.id] then
@@ -493,6 +503,101 @@ function P:evt_GetRoomDataRSP(msg)
 	UiManager:hideUI("IngameResult")
 	self._nodeCache:clearAll()
 	self:refreshUI()
+end
+
+function P:evt_ChangeTableRSP(msg)
+	UiManager:hideUI("IngameAllin")
+	UiManager:hideUI("IngameResult")
+	self._nodeCache:clearAll()
+	self:refreshUI()
+end
+
+function P:evt_FriendRoomOwnerChangeBRC(msg)
+	local info, i = self.data:getPlayerByUid(msg.owner.uid)
+	if info then
+		self.seatController[i]:emitFunc("refreshFriendOwner", info)
+	end
+end
+
+function P:evt_ChangeObserveViewRSP()
+	self:evt_GetRoomDataRSP()
+end
+
+--局内交互表情
+function P:evt_EmojiBRC(msg)
+	if SettingModel:isHideIEmoji() and msg.uid ~= PlayerModel:getUid() then
+		return
+	end
+	
+	if PlayerModel:isBlockChat(msg.uid) or FriendModel:getBlockedInfo(msg.uid) then
+		return
+	end
+
+	local sender = nil
+	local receiver = nil
+	for _,v in pairs(self.data.player_info) do
+		if v.uid == msg.uid then
+			sender = v
+		end
+		if v.uid == msg.to_uid then
+			receiver = v
+		end
+	end
+    self:playEmoji(sender, receiver, msg.id)
+end
+
+function P:evt_IngameEmojiTest(msg)
+	local cfg = tpl_table_emoji[msg.id]
+	local sendPt = self.seatController[msg.sid]
+	local spt = self:find("EmojiPoint", sendPt.node)
+	if spt == nil then
+		spt = CS.UnityEngine.GameObject('EmojiPoint')
+		spt.transform:SetParent(sendPt.node.transform, false)
+		spt.transform.localPosition = bee.v3(0, 0, 0)
+	end
+	-- spt.transform.localPosition = bee.v3(0 + (cfg.send_offset and cfg.send_offset[1] or 0), (cfg.send_offset and cfg.send_offset[2] or 0), 0)
+	
+	local receiverPt = self.seatController[msg.rid]
+	local rpt = self:find("EmojiPoint", receiverPt.node)
+	if rpt == nil then
+		rpt = CS.UnityEngine.GameObject('EmojiPoint')
+		rpt.transform:SetParent(receiverPt.node.transform, false)
+		rpt.transform.localPosition = bee.v3(0, 0, 0)
+	end
+	--rpt.transform.localPosition = bee.v3(0 + (cfg.receive_offset and cfg.receive_offset[1] or 0), (cfg.receive_offset and cfg.receive_offset[2] or 0), 0)
+	
+	local obj = CU.GameObject.Instantiate(self.EmojiBase)
+	obj.transform:SetParent(self.EmojiLayer.transform, false)
+	obj:SetActive(true)
+	EmojiModel:playEmoji(obj, spt.transform.position, rpt.transform.position, msg.id)
+end
+
+function P:playEmoji(sender, receiver, id)
+	local cfg = tpl_table_emoji[id]
+	local senderData = self.seatController[sender.seatid].playerCls
+	local sendPos = nil
+	local sendEmojiPoint = senderData and self:find("EmojiPoint/OffsetPoint", senderData.node) or nil
+	if sendEmojiPoint then
+		local seatOffset = EmojiModel.seatOffsetPos[self.seatController[sender.seatid].show_index]
+		sendEmojiPoint.transform.localPosition = cfg.send_offset and bee.v3(cfg.send_offset[1] + seatOffset[1], cfg.send_offset[2] + seatOffset[2], 0) or bee.v3zero
+		sendPos = sendEmojiPoint.transform.position
+	end
+
+	local receiverData = self.seatController[receiver.seatid].playerCls
+	local receivePos = nil
+	local receiveEmojiPoint = receiverData and self:find("EmojiPoint/OffsetPoint", receiverData.node) or nil
+	if receiveEmojiPoint then
+		local seatOffset = EmojiModel.seatOffsetPos[self.seatController[receiver.seatid].show_index]
+		receiveEmojiPoint.transform.localPosition = cfg.receive_offset and bee.v3(cfg.receive_offset[1] + seatOffset[1], cfg.receive_offset[2] + seatOffset[2], 0) or bee.v3zero
+		receivePos = receiveEmojiPoint.transform.position
+	end
+
+	if sendPos and receivePos then
+		local obj = CU.GameObject.Instantiate(self.EmojiBase)
+		obj.transform:SetParent(self.EmojiLayer.transform, false)
+		obj:SetActive(true)
+		EmojiModel:playEmoji(obj, sendPos, receivePos, id)
+	end
 end
 
 function P:hideWaitTip()
