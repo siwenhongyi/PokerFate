@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 
 import pytest
 
@@ -169,6 +170,7 @@ class _RecordingBridge:
         self.handled: list[tuple[str, dict]] = []
         self.room_ids: list[int] = []
         self.injects: dict[str, list] = {}
+        self.slow: dict[str, float] = {}   # seconds a handler blocks (runs in a worker thread)
 
     def note_seen_room_id(self, rid):
         self.room_ids.append(rid)
@@ -177,6 +179,7 @@ class _RecordingBridge:
         return frame_room_id or (self.room_ids[-1] if self.room_ids else 0)
 
     def handle(self, type_name, msg):
+        time.sleep(self.slow.get(type_name, 0.0))
         self.handled.append((type_name, msg))
         return self.injects.get(type_name)
 
@@ -283,4 +286,23 @@ def test_session_closes_after_missed_heartbeats(monkeypatch):
         await asyncio.wait_for(sess.wait_closed(), timeout=2.0)
         assert ws.closed
         assert sess.stats.heartbeats_missed == 1
+    asyncio.run(run())
+
+
+def test_slow_bridge_does_not_starve_heartbeat(monkeypatch):
+    """A slow bridge handler (e.g. post-showdown learning after WinnerRSP, which
+    took 10s+ live) must not block the receive loop — otherwise HeartBeatRSP sits
+    unread and the session is wrongly closed as 'heartbeat lost'."""
+    async def run():
+        bridge = _RecordingBridge()
+        bridge.slow["pb.WinnerRSP"] = 0.6          # ~12 beats @ 0.05s, far over the 2-miss limit
+        sess, ws = await _connect_with_fake(monkeypatch, bridge)
+        try:
+            ws.push("pb.WinnerRSP", {"winner": [{"seatid": 1, "chips": "10"}]})
+            await asyncio.sleep(0.9)
+            assert sess.connected, "session wrongly closed while the bridge was busy"
+            assert sess.stats.heartbeats_missed == 0
+            assert any(t == "pb.WinnerRSP" for t, _ in bridge.handled)   # still processed, in the end
+        finally:
+            await sess.close()
     asyncio.run(run())

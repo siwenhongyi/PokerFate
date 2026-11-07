@@ -105,6 +105,9 @@ class HeadlessSession:
         self._queue_pos: int | None = None
         self._closed = asyncio.Event()
         self._bridge_lock = asyncio.Lock()
+        # Frames for the bot are queued and handled by a dedicated worker, so a
+        # slow handler never blocks the receive loop (and with it HeartBeatRSP).
+        self._bridge_queue: asyncio.Queue = asyncio.Queue()
         self._pending_hb = 0
         self._tasks: list[asyncio.Task] = []
 
@@ -139,9 +142,11 @@ class HeadlessSession:
         self._closed.clear()
         self._login_done.clear()
         self._login_code = None
+        self._bridge_queue = asyncio.Queue()
         self._tasks = [
             asyncio.create_task(self._recv_loop(), name="headless-recv"),
             asyncio.create_task(self._heartbeat_loop(), name="headless-heartbeat"),
+            asyncio.create_task(self._bridge_worker(), name="headless-bridge"),
         ]
         await self.send("pb.UserLoginREQ", {
             "uid": int(self.login.uid),
@@ -279,11 +284,27 @@ class HeadlessSession:
         if type_name not in config.WATCH_S2C:
             return
         self.stats.frames_bot += 1
-        # Bridge work (equity / CFR) can take seconds; keep heartbeat + recv alive.
-        async with self._bridge_lock:
-            result = await asyncio.to_thread(self.bridge.handle, type_name, msg)
-        for inject in _iter_injects(result):
-            asyncio.create_task(self._inject(inject, room_id), name="headless-inject")
+        # Hand off to the bridge worker: handlers (CFR / equity, and the post-
+        # showdown learning after WinnerRSP, which took 10s+ live) can be slow,
+        # and the receive loop must keep reading so HeartBeatRSP is consumed.
+        self._bridge_queue.put_nowait((type_name, msg, room_id))
+
+    async def _bridge_worker(self) -> None:
+        """Process bot-bound frames one at a time, in arrival order."""
+        try:
+            while True:
+                type_name, msg, room_id = await self._bridge_queue.get()
+                try:
+                    async with self._bridge_lock:
+                        result = await asyncio.to_thread(self.bridge.handle, type_name, msg)
+                    for inject in _iter_injects(result):
+                        asyncio.create_task(self._inject(inject, room_id), name="headless-inject")
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    log.exception("[BOT] bridge handler failed on %s", type_name)
+        except asyncio.CancelledError:
+            raise
 
     async def _inject(self, inject: tuple, frame_room_id: int) -> None:
         type_name = str(inject[0])

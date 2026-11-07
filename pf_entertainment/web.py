@@ -88,6 +88,11 @@ class EntertainmentWebServer:
         try:
             request = await self._read_request(reader)
             status, headers, body = await self._route(request)
+        except (asyncio.IncompleteReadError, ConnectionError):
+            # Browser/phone dropped the connection mid-request (page switched or
+            # refreshed while polling) — normal, nothing to answer.
+            writer.close()
+            return
         except Exception as exc:
             self.log.exception("[娱乐游戏] Web 请求失败")
             status, headers, body = self._json_response(
@@ -97,6 +102,8 @@ class EntertainmentWebServer:
         try:
             writer.write(self._build_response(status, headers, body))
             await writer.drain()
+        except (ConnectionError, OSError):
+            pass  # peer went away before we finished writing (BrokenPipe etc.)
         finally:
             writer.close()
             try:

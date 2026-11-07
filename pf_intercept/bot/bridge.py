@@ -343,7 +343,7 @@ class BotBridge:
         # Auto-rebuy when chips hit 0 (NoticeRebyRSP）。
         # _max_auto_rebuy：启动时 CLI 上限，仅盈利锁仓成功回桌时 +1。
         # _auto_rebuy_done：本代理进程内累计已自动续入次数，进/出房间不重置（避免反复进出刷爆亏损）。
-        self._max_auto_rebuy: int = max(1, min(20, int(max_auto_rebuy)))
+        self._max_auto_rebuy: int = max(0, min(20, int(max_auto_rebuy)))  # 0 = 破产不补买
         self._auto_rebuy_done: int = 0
 
         # 盈利锁仓：WinnerRSP 达标后立刻设置服务端「下一手离桌」
