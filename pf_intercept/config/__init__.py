@@ -125,7 +125,7 @@ ROOM_ESCAPE_CONSECUTIVE_BUSTS = 2
 # 条件：四条 / 同花顺 / 皇家同花顺。
 AUTO_COLLECT_SPECIAL_HANDS_ENABLED = True
 
-GAME_HTTP_VERSION = "1.5.1"
+GAME_HTTP_VERSION = "1.7.0"  # G_UPDATE_VERSION in versionconfig.lua; also sent as UserLoginREQ.ver
 
 # ── GameData API (30-day player stats) ───────────────────────────────────────
 # HTTP API host — from the login response's server list (UrlManager.getHttpUrl).
