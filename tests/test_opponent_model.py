@@ -392,3 +392,51 @@ class TestOpponentStatsToVillainStats:
 
     def test_opponent_stats_no_discrete_player_type_label(self):
         assert not hasattr(OpponentStats(), 'player_type')
+
+
+# ── Persistence must be atomic ───────────────────────────────────────────────
+
+def test_save_is_atomic_and_leaves_no_temp_file(tmp_path):
+    import json
+    import os
+    from pokerfate.bot.opponent_model import OpponentModel
+
+    m = OpponentModel()
+    m.get(7)  # ensure one opponent exists
+    target = tmp_path / "opponents.json"
+    m.save(str(target))
+    assert json.loads(target.read_text(encoding="utf-8"))["players"]
+    assert [p for p in os.listdir(tmp_path) if p.endswith(".tmp")] == []
+
+
+def test_failed_save_keeps_previous_file_intact(tmp_path, monkeypatch):
+    import json
+    import os
+    from pokerfate.bot import opponent_model as om
+
+    target = tmp_path / "opponents.json"
+    target.write_text('{"players": {"1": {"name": "keep", "stats": {}}}, "name_archive": {}}', encoding="utf-8")
+
+    def boom(*_a, **_k):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(om.json, "dump", boom)
+    model = om.OpponentModel()
+    model.get(9)
+    with pytest.raises(RuntimeError):
+        model.save(str(target))
+    # Old content survives; no half-written temp file remains.
+    assert json.loads(target.read_text(encoding="utf-8"))["players"]["1"]["name"] == "keep"
+    assert [p for p in os.listdir(tmp_path) if p.endswith(".tmp")] == []
+
+
+def test_wtsd_cap_is_pool_relative_and_yields_to_fold_evidence():
+    from pokerfate.bot.opponent_model import OpponentModel
+    m = OpponentModel()
+    s = m.get(5)
+    s.hands_seen = 60; s.flop_seen_count = 40; s.vpip_count = 40; s.pfr_count = 6
+    s.call_count = 30; s.check_count = 20; s.bet_count = 5; s.raise_count = 5
+    s.showdown_count = 16; s.showdown_win_count = 8    # wtsd 0.40 (16/40): pool median, not extreme
+    s.fold_to_cbet_opps = 10; s.fold_to_cbet_count = 5  # folds 50% to flop bets
+    adj = m.exploit_adjustments(5)
+    assert adj['bluff_ag_scale'] > 0.12, adj

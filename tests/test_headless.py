@@ -192,6 +192,9 @@ class _RecordingBridge:
     def notify_inject_failed(self, type_name):
         pass
 
+    def bankroll_dashboard(self):
+        return {"frames_handled": len(self.handled)}
+
 
 def _login_result():
     return hl.LoginResult(uid=42, rdkey="rk", authorization="a", login_ip="9.9.9.9",
@@ -298,11 +301,223 @@ def test_slow_bridge_does_not_starve_heartbeat(monkeypatch):
         bridge.slow["pb.WinnerRSP"] = 0.6          # ~12 beats @ 0.05s, far over the 2-miss limit
         sess, ws = await _connect_with_fake(monkeypatch, bridge)
         try:
+            for _ in range(100):
+                if sess.bankroll_dashboard()["frames_handled"] == 1:
+                    break
+                await asyncio.sleep(0.01)
+            initial = sess.bankroll_dashboard()
+            assert initial["frames_handled"] == 1
             ws.push("pb.WinnerRSP", {"winner": [{"seatid": 1, "chips": "10"}]})
-            await asyncio.sleep(0.9)
+            await asyncio.sleep(0.1)
+            # Web reads the last complete snapshot while the handler is busy.
+            assert sess._bridge_lock.locked()
+            assert sess.bankroll_dashboard() == initial
+            await asyncio.sleep(0.8)
             assert sess.connected, "session wrongly closed while the bridge was busy"
             assert sess.stats.heartbeats_missed == 0
             assert any(t == "pb.WinnerRSP" for t, _ in bridge.handled)   # still processed, in the end
+            assert sess.bankroll_dashboard()["frames_handled"] == len(bridge.handled)
         finally:
             await sess.close()
     asyncio.run(run())
+
+
+async def _web_get_json(port, path="/api/status"):
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write(f"GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n".encode())
+        await writer.drain()
+        response = await asyncio.wait_for(reader.read(), timeout=2)
+        headers, body = response.split(b"\r\n\r\n", 1)
+        assert headers.startswith(b"HTTP/1.1 200")
+        return json.loads(body)
+    finally:
+        writer.close()
+        await writer.wait_closed()
+
+
+def test_headless_web_bankroll_tracks_wallet_hands_rebuy_and_leave(monkeypatch):
+    """Actual Web route + WSS decoder + bridge accounting, with no game/network IO."""
+    from unittest.mock import Mock
+
+    from pf_entertainment.live_table import LiveTableObserver, start_live_web
+    from pf_intercept.bot import BotBridge
+
+    bridge = BotBridge(max_auto_rebuy=5)
+    # Keep strategy/model work and player lookups out of this accounting test.
+    monkeypatch.setattr(bridge, "_ensure_api", lambda: bridge._api is not None)
+    monkeypatch.setattr(bridge, "_trigger_gamedata_fetch", lambda *_: None)
+    monkeypatch.setattr(bridge, "_runtime_calibration_should_pause_play", lambda: None)
+
+    async def run():
+        sess, ws = await _connect_with_fake(monkeypatch, bridge)
+        observer = LiveTableObserver(my_uid=42)
+        sess.on_frame = observer.observe
+        server = await start_live_web(observer, port=0, bankroll_source=sess.bankroll_dashboard)
+
+        async def dashboard(**expected):
+            async def wait_for_values():
+                while True:
+                    status = await _web_get_json(server.port)
+                    assert status["ok"]
+                    data = status["runtime"]["bot_dashboard"]
+                    if all(data[k] == v for k, v in expected.items()):
+                        return data
+                    await asyncio.sleep(0.01)
+            return await asyncio.wait_for(wait_for_values(), timeout=2)
+
+        def wallet(chips):
+            ws.push("pb.UserValueRSP", {"type": 10100001, "value": chips})
+
+        def deal(number, stack):
+            ws.push("pb.DealerInfoRSP", {
+                "dealer": 0, "small_blind": 0, "big_blind": 1,
+                "gameid": f"bankroll-{number}",
+                "start_info": [{"seatid": 0, "chips": stack}, {"seatid": 1, "chips": 200}],
+            })
+
+        def settle(profit):
+            ws.push("pb.WinnerRSP", {"profit": [{"uid": "42", "chips": profit}]})
+
+        try:
+            empty = await dashboard(wallet_chips=None, current_total_chips=None)
+            assert empty["max_auto_rebuy"] == 5
+            assert empty["samples"] == empty["hand_points"] == []
+            wallet(50_000)
+            await dashboard(base_total_chips=50_000, session_delta_chips=0)
+
+            ws.push("pb.SelfUserInfoRSP", {"brief": {"uid": "42"}})
+            ws.push("pb.EnterRoomRSP", {
+                "code": 0, "roomid": 777, "game_type": 10010101,
+                "room_info": {"bb": 2, "sb": 1, "lobby_coin": 10100001},
+                "table_status": {"seat": [{
+                    "seatid": 0, "player": {"uid": "42"},
+                    "hand_chips": 200, "begin_chips": 200,
+                }]},
+            }, room_id=777)
+            wallet(49_800)
+            # Buying in transfers funds; it must not appear as a profit or loss.
+            await dashboard(table_chips=200, wallet_chips=49_800, session_delta_chips=0)
+
+            bridge._api = Mock()
+            bridge._api.last_auto_collect_reasons.return_value = []
+            deal(1, 200)
+            settle(30)
+            won = await dashboard(table_chips=230, session_delta_chips=30)
+            assert won["session_delta_bb"] == 15
+            assert won["hand_points"][0]["hand_no"] == 1
+            assert won["hand_points"][0]["hand_delta_chips"] == 30
+            assert won["hand_points"][0]["total_chips"] == 50_030
+
+            # Returned snapshots cannot mutate the cached accounting history.
+            detached = sess.bankroll_dashboard()
+            detached["hand_points"][0]["delta_chips"] = -999
+            assert sess.bankroll_dashboard()["hand_points"][0]["delta_chips"] == 30
+
+            deal(2, 230)
+            settle(-230)
+            await dashboard(table_chips=0, session_delta_chips=-200)
+            ws.push("pb.NoticeRebyRSP", {"seatid": 0, "reby_left_time": 30})
+            await dashboard(pending_reason="auto_rebuy")
+            wallet(49_800)
+            await dashboard(auto_rebuy_count=1)
+            ws.push("pb.RebyBRC", {"seatid": 0, "chips": 200})
+            wallet(49_600)
+            await dashboard(table_chips=200, wallet_chips=49_600, session_delta_chips=-200)
+
+            deal(3, 200)
+            settle(10)
+            final = await dashboard(table_chips=210, session_delta_chips=-190)
+            assert [p["buyin_seq"] for p in final["hand_points"]] == [1, 1, 2]
+            assert [p["hand_delta_chips"] for p in final["hand_points"]] == [30, -230, 10]
+            assert final["profit_lock_count"] == final["room_escape_count"] == 0
+
+            ws.push("pb.LeaveRoomRSP", {"code": 0})
+            wallet(49_810)
+            left = await dashboard(table_chips=0, current_total_chips=49_810)
+            assert left["session_delta_chips"] == -190
+            assert left["base_total_chips"] == 50_000
+            assert len(left["hand_points"]) == 3
+            assert (await _web_get_json(server.port, "/api/live"))["available"] is True
+
+            # A new session never inherits this run's baseline/hand history.
+            fresh = hs.HeadlessSession(_login_result(), max_auto_rebuy=5)
+            assert fresh.bankroll_dashboard()["base_total_chips"] is None
+            assert fresh.bankroll_dashboard()["hand_points"] == []
+        finally:
+            server._server.close()
+            await server._server.wait_closed()
+            await sess.close()
+
+    asyncio.run(run())
+
+
+def test_bankroll_display_error_does_not_drop_bot_action(monkeypatch):
+    async def run():
+        bridge = _RecordingBridge()
+        sess, ws = await _connect_with_fake(monkeypatch, bridge)
+        previous = sess.bankroll_dashboard()
+
+        def broken_dashboard():
+            raise ValueError("display failure")
+
+        monkeypatch.setattr(bridge, "bankroll_dashboard", broken_dashboard)
+        bridge.injects["pb.ActionNotifyBRC"] = ("pb.ActionREQ", {"action_type": 3, "chips": 50}, 0.0)
+        try:
+            ws.push("pb.ActionNotifyBRC", {"seatid": 0, "call_need_chips": 50})
+            for _ in range(100):
+                if "pb.ActionREQ" in ws.sent_types():
+                    break
+                await asyncio.sleep(0.01)
+            assert "pb.ActionREQ" in ws.sent_types()
+            assert sess.bankroll_dashboard() == previous
+            assert sess.connected
+        finally:
+            await sess.close()
+
+    asyncio.run(run())
+
+
+def test_headless_cli_web_follows_current_session_on_server_fallback(monkeypatch):
+    from types import SimpleNamespace
+
+    from pf_entertainment import live_table
+    from pf_intercept.headless import __main__ as cli
+
+    result = _login_result()
+    result.servers.append(hl.ServerEntry("wss://10.0.0.2:9013", ""))
+    monkeypatch.setattr(cli, "_resume_result", lambda _: (result, 5, "1.7.0"))
+    captured = {}
+    attempts = []
+
+    async def keep_order(servers):
+        return servers
+
+    async def fake_web(observer, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(port=9022)
+
+    class FailedSession:
+        logged_in = False
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def bankroll_dashboard(self):
+            return {"session_id": id(self)}
+
+        async def connect(self, server_index):
+            attempts.append(self)
+            assert captured["bankroll_source"]() == {"session_id": id(self)}
+            raise OSError("test server unavailable")
+
+        async def close(self, reason):
+            pass
+
+    monkeypatch.setattr(cli, "_order_servers_by_latency", keep_order)
+    monkeypatch.setattr(cli, "HeadlessSession", FailedSession)
+    monkeypatch.setattr(live_table, "start_live_web", fake_web)
+    args = SimpleNamespace(no_notify=True, session_file="unused", profit_lock_bb=None,
+                           no_web=False, web_host="127.0.0.1", web_port=9022, max_auto_rebuy=5)
+    assert asyncio.run(cli._run(args)) == 2
+    assert len(attempts) == 2 and attempts[0] is not attempts[1]

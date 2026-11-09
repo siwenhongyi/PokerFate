@@ -4,6 +4,7 @@ import random as _rng
 
 import pytest
 from pokerfate.core.card import Card
+from pokerfate.core.config import RAKE_KEEP
 from pokerfate.core.game_state import GameState, Player, Street, Action, ActionType
 from pokerfate.bot.poker_bot import PokerBot
 from pokerfate.bot.opponent_model import OpponentModel
@@ -100,7 +101,8 @@ class TestBotDecisions:
         assert raw_call == pytest.approx(70.0)
         assert effective_call == pytest.approx(50.0)
         assert contestable_pot == pytest.approx(80.0)  # 30 old pot + matched 50
-        assert pot_odds == pytest.approx(50.0 / 130.0)
+        # Break-even equity is rake-adjusted: C / ((P + C) × keep).
+        assert pot_odds == pytest.approx(50.0 / 130.0 / RAKE_KEEP)
 
     def test_effective_call_context_caps_multiway_side_pot_excess(self):
         p0 = Player(0, 'Hero', 50.0, cards('Ac', 'Ad'))
@@ -121,7 +123,7 @@ class TestBotDecisions:
         assert raw_call == pytest.approx(70.0)
         assert effective_call == pytest.approx(50.0)
         assert contestable_pot == pytest.approx(130.0)  # 30 old pot + two matched 50s
-        assert pot_odds == pytest.approx(50.0 / 180.0)
+        assert pot_odds == pytest.approx(50.0 / 180.0 / RAKE_KEEP)
 
     def test_bot_folds_weak_hand_vs_large_bet(self):
         bot = PokerBot(equity_iterations=300)
@@ -309,7 +311,7 @@ class TestTinyBetValueRaise:
 
         assert ctx.to_call == pytest.approx(50.0)
         assert ctx.pot == pytest.approx(80.0)
-        assert ctx.pot_odds == pytest.approx(50.0 / 130.0)
+        assert ctx.pot_odds == pytest.approx(50.0 / 130.0 / RAKE_KEEP)
 
     def test_build_ctx_zero_stack_cannot_call(self):
         strat = PostflopStrategy()

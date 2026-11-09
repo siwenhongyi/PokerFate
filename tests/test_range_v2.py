@@ -1696,3 +1696,40 @@ class TestBucketPosteriorCalibration:
         before = tracker.get_distribution(1)
         tracker._apply_bucket_calibration(1, 'flop', board, 'action:fold_other')
         np.testing.assert_allclose(tracker.get_distribution(1), before)
+
+
+# ── Board-made hands are not the nuts ────────────────────────────────────────
+
+def _cards(*s):
+    from pokerfate.core.card import Card
+    return [Card.from_str(x) for x in s]
+
+
+def test_board_trips_with_kicker_is_not_nuts():
+    from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards
+    # Live hand 2026-11-07 #34: K♥T♦ on 6♦J♣6♣6♥ had 22% equity but was 'nuts'.
+    assert categorize_cards(_cards('Kh', 'Td'), _cards('6d', 'Jc', '6c', '6h')) == 'air'
+    assert categorize_cards(_cards('Kh', 'Td'), _cards('6d', 'Jc', '6c', '6h', 'Qh')) == 'air'
+    # Overcards to the board keep some showdown value.
+    assert categorize_cards(_cards('Ah', 'Kd'), _cards('6d', 'Jc', '6c', '6h')) == 'medium'
+    # A real set / trips with a hole card stay nuts.
+    assert categorize_cards(_cards('6s', '2d'), _cards('6d', 'Jc', '6c')) == 'nuts'
+    assert categorize_cards(_cards('Jh', 'Jd'), _cards('6d', 'Jc', '6c')) == 'nuts'
+
+
+def test_board_full_house_quads_straight_flush_not_nuts():
+    from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards
+    # Board full house: hero kickers only.
+    assert categorize_cards(_cards('Kh', 'Td'), _cards('6d', '6c', '6h', 'Jc', 'Js')) == 'air'
+    # Hero pair fills the house -> still nuts bucket.
+    assert categorize_cards(_cards('Jh', 'Jd'), _cards('6d', '6c', '6h', '2c', '3s')) == 'nuts'
+    # Board straight, hero plays the board -> medium (chop at best).
+    assert categorize_cards(_cards('Kh', '2d'), _cards('5d', '6c', '7h', '8c', '9s')) == 'medium'
+    # Hero makes a higher straight -> nuts.
+    assert categorize_cards(_cards('Th', '2d'), _cards('5d', '6c', '7h', '8c', '9s')) == 'nuts'
+    # Board flush: plays the board -> medium; improves without ace -> strong; with ace -> nuts.
+    assert categorize_cards(_cards('Kh', '2d'), _cards('3s', '6s', '7s', 'Ts', 'Js')) == 'medium'
+    assert categorize_cards(_cards('Qs', '2d'), _cards('3s', '6s', '7s', 'Ts', 'Js')) == 'strong'
+    assert categorize_cards(_cards('As', '2d'), _cards('3s', '6s', '7s', 'Ts', 'Js')) == 'nuts'
+    # Board quads: kicker only.
+    assert categorize_cards(_cards('Kh', '2d'), _cards('6d', '6c', '6h', '6s', 'Jc')) == 'air'

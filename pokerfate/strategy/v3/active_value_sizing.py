@@ -244,13 +244,20 @@ def _resistance_scale(ctx: DecisionCtx) -> float:
 
 
 def _size_decay(frac: float, sticky: float, pay_mass: float, resistance: float) -> float:
+    # Relative "gets paid" probability by bet size, anchored at 0.75 pot.
+    # Refit 2026-11 on 471 logged hero river value bets: villain continue
+    # rate was 0.61 for 0.4-0.7 pot, 0.54 for 0.7-1.1 pot and 0.43 above
+    # 1.1 pot (n=14), i.e. roughly 12% less continuation per +0.5 pot. The
+    # previous curve (0.66 at 1.0, 0.34 at 1.5) assumed ~2x that drop and
+    # systematically under-sized nut/strong value bets. The >1.5 pot points
+    # are extrapolated conservatively below the observed rate.
     points = (
         (0.75, 0.84),
-        (1.00, 0.66),
-        (1.25, 0.46),
-        (1.50, 0.34),
-        (1.75, 0.27),
-        (2.00, 0.22),
+        (1.00, 0.74),
+        (1.25, 0.63),
+        (1.50, 0.53),
+        (1.75, 0.46),
+        (2.00, 0.40),
     )
     base = points[-1][1]
     prev_f, prev_d = points[0]

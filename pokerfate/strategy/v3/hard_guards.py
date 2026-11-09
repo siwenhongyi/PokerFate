@@ -51,17 +51,15 @@ def reasons(ctx: DecisionCtx, cand: ActionCandidate) -> list[str]:
             out.append("river_large_bet_medium_wet")
         if ctx.hero_bucket in {"medium", "strong"} and ctx.street == "river" and ctx.villain_vs_hero_dist:
             rel_eq = float(ctx.villain_vs_hero_dist.get("win", 0.0) or 0.0) + 0.5 * float(ctx.villain_vs_hero_dist.get("tie", 0.0) or 0.0)
-            if ctx.pot_odds >= 0.35 and rel_eq < ctx.pot_odds + 0.08:
+            if ctx.raw_pot_odds >= 0.35 and rel_eq < ctx.pot_odds + 0.08:
                 out.append("fragile_rel_eq")
-        if ctx.hero_bucket in {"medium", "strong"} and ctx.villain_bucket_dist:
-            strong_mass = float(ctx.villain_bucket_dist.get("strong", 0.0) or 0.0) + float(ctx.villain_bucket_dist.get("nuts", 0.0) or 0.0)
-            stack_commit = ctx.to_call / max(ctx.stack or 1.0, 1.0)
-            if strong_mass >= 0.65 and (ctx.villain_stats.af < 1.0 or stack_commit >= 0.25):
-                out.append("passive_value_bet_dominates")
-            if ctx.hero_bucket == "medium" and ctx.pot_odds >= 0.22 and strong_mass >= 0.20 and ctx.villain_stats.af < 1.2:
-                clear_edge = max(float(ctx.equity_range or 0.0), float(ctx.equity_mc or 0.0) - 0.08) >= ctx.pot_odds + 0.08
-                if not (ctx.spr <= 1.0 and clear_edge):
-                    out.append("fold_dominant_call")
+        # The former "passive_value_bet_dominates" / "fold_dominant_call" rules
+        # (villain strong+nuts mass >= 0.20 with AF < 1.2 -> fold any medium
+        # hand priced above 22%) were removed on 2026-11-08: the pool's median
+        # AF is 0.73, so they fired on nearly every bluff-catch and would have
+        # folded calls the EV layer prices at +5 to +18bb (TT with 59% range
+        # equity at a 31% price). Range mass is already inside equity_range;
+        # pricing it twice is not a guard, it is a second, contradictory model.
     return out
 
 

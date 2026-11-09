@@ -20,6 +20,7 @@ import logging
 from typing import Dict, List, Optional
 
 from pokerfate.core.card import Card, Suit
+from pokerfate.core.game_state import ActionType
 from pokerfate.core.position import normalize_position
 from pokerfate.strategy import preflop as _pf
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
@@ -90,6 +91,106 @@ _TURN_BARREL_FREQ: Dict[str, float] = {
 }
 
 
+# Hero continue (call) frequency when facing a bet, by bucket. Used to filter
+# hero's reach range after a prior-street call; solver output replaces this
+# table whenever the previous decision came from the flop book / realtime CFR.
+_FACING_BET_CONTINUE_FREQ: Dict[str, float] = {
+    'nuts':      0.98,
+    'strong':    0.92,
+    'medium':    0.68,
+    'draw':      0.75,
+    'weak_draw': 0.40,
+    'air':       0.18,
+}
+
+
+def describe_preflop_line(
+    action_history,
+    hero_id: int,
+    position_of: Dict[int, str],
+) -> Dict[str, object]:
+    """Summarise hero's preflop line from the full-hand action history.
+
+    Returns ``{"hero_action": raise|call|check|none, "raises_before": n,
+    "raises_total": n, "opener_pos": pos|None, "limpers_before": n}`` where
+    ``raises_before`` counts raises that happened before hero's *last*
+    preflop action and ``opener_pos`` is the position of the first raiser
+    other than hero (the player hero defended against / 3-bet).
+    """
+    hero_action = 'none'
+    raises_before = 0
+    limpers_before = 0
+    raises_total = 0
+    opener_pos = None
+    seen_raise_ids: List[int] = []
+    for item in list(action_history or []):
+        if len(item) < 3 or str(item[2]).lower() != 'preflop':
+            continue
+        try:
+            pid = int(item[0])
+        except (TypeError, ValueError):
+            continue
+        action_type = getattr(item[1], 'action_type', None)
+        if pid == int(hero_id):
+            if action_type == ActionType.RAISE:
+                hero_action = 'raise'
+            elif action_type == ActionType.CALL:
+                hero_action = 'call'
+            elif action_type == ActionType.CHECK:
+                hero_action = 'check'
+            elif action_type == ActionType.FOLD:
+                hero_action = 'fold'
+            else:
+                continue
+            raises_before = raises_total
+            continue
+        if action_type == ActionType.RAISE:
+            raises_total += 1
+            seen_raise_ids.append(pid)
+            if opener_pos is None:
+                opener_pos = position_of.get(pid)
+        elif action_type == ActionType.CALL and raises_total == 0 and hero_action == 'none':
+            limpers_before += 1
+    return {
+        'hero_action': hero_action,
+        'raises_before': int(raises_before),
+        'raises_total': int(raises_total),
+        'opener_pos': opener_pos,
+        'limpers_before': int(limpers_before),
+    }
+
+
+def _range_for_line(position: str, line: Dict[str, object]) -> set:
+    """Category range implied by hero's actual preflop line."""
+    pos = normalize_position(position, default='MP', warn=False)
+    action = str(line.get('hero_action') or 'none')
+    raises_before = int(line.get('raises_before') or 0)
+    opener = normalize_position(str(line.get('opener_pos') or ''), default='CO', warn=False) if line.get('opener_pos') else None
+    if action == 'raise':
+        if raises_before == 0:
+            return _pf._POSITION_RANGES.get(pos, _pf._UTG_RANGE)
+        if raises_before == 1:
+            widen = opener in ('CO', 'BTN', 'SB')
+            return _pf._3BET_RANGE | (_pf._WIDE_OPEN_3BET_EXPAND if widen else set())
+        return _pf._4BET_RANGE
+    if action == 'call':
+        if raises_before == 0:
+            # limp / limp-behind / SB complete
+            return (
+                _pf._LIMP_BEHIND_SMALL_PAIRS | _pf._LIMP_BEHIND_SUITED_CONNECTORS
+                | _pf._LIMP_BEHIND_SUITED_ONE_GAPPERS | _pf._LIMP_BEHIND_WHEEL_AXS
+                | _pf._BB_VS_CO_DEFENSE
+            )
+        if raises_before == 1:
+            if pos == 'BB' and opener:
+                return _pf._BB_VS_OPEN_DEFENSE.get(opener, _pf._BB_VS_BTN_DEFENSE)
+            return _pf._PRICE_DEFEND_RANGE
+        return _pf._3BET_CALL_BY_POS.get(pos, _pf._3BET_CALL_DEFAULT) | _pf._3BET_VALUE
+    if action == 'check':
+        return None  # BB free check: every combo
+    return _pf._POSITION_RANGES.get(pos, _pf._UTG_RANGE)
+
+
 def _combos_for_category(cat: str) -> List[List[Card]]:
     """Enumerate all 2-card Card combos that belong to a canonical category
     like 'AA', 'AKs', 'AKo'."""
@@ -117,8 +218,36 @@ def _combos_for_category(cat: str) -> List[List[Card]]:
     return combos
 
 
-def _range_for(position: str, facing: str) -> set:
-    """Return hero's category-level range set for given (position, facing)."""
+_ALL_CATEGORIES = None
+
+
+def _all_categories() -> set:
+    global _ALL_CATEGORIES
+    if _ALL_CATEGORIES is None:
+        ranks = 'AKQJT98765432'
+        cats = set()
+        for i, r1 in enumerate(ranks):
+            for r2 in ranks[i:]:
+                if r1 == r2:
+                    cats.add(r1 + r2)
+                else:
+                    cats.add(r1 + r2 + 's')
+                    cats.add(r1 + r2 + 'o')
+        _ALL_CATEGORIES = cats
+    return _ALL_CATEGORIES
+
+
+def _range_for(position: str, facing: str, preflop_line: Optional[Dict[str, object]] = None) -> set:
+    """Return hero's category-level range set.
+
+    With ``preflop_line`` (from :func:`describe_preflop_line`) the range follows
+    hero's actual line: RFI / iso, 3-bet, 4-bet, BB defend vs the real opener,
+    flat vs open, call vs 3-bet, limp, or BB free check. Without it, fall back
+    to the legacy (position, facing) approximation.
+    """
+    if preflop_line:
+        rng = _range_for_line(position, preflop_line)
+        return _all_categories() if rng is None else rng
     pos = normalize_position(position, default='MP', warn=False)
     if facing in ('', 'none'):
         return _pf._POSITION_RANGES.get(pos, _pf._UTG_RANGE)
@@ -151,7 +280,10 @@ def _action_prob(
         return bet_p
     if action == 'check':
         return 1.0 - bet_p
-    # call / fold 不改变 hero 后续 range 存活概率（hero 若弃，就不在这节点）
+    if action == 'call':
+        # Facing a bet, weak parts of hero's range fold: a call narrows the
+        # range just like a bet does.
+        return _FACING_BET_CONTINUE_FREQ.get(bucket, 0.6)
     return 1.0
 
 
@@ -160,20 +292,34 @@ def _reach_prob(
     board: List[Card],
     my_prev_actions: Dict[str, str],
     is_pfr: bool,
+    street_filters: Optional[Dict[str, Dict[int, float]]] = None,
 ) -> float:
     """combo 在经历 my_prev_actions 后仍在 hero range 里的概率。
 
     按街链式乘积：P(reach) = Π P(action_on_street | bucket_at_that_street)。
     每个街的 bucket 按**当时能看到的 board 部分**重新分类（同一个 combo 在
     flop 可能是 medium，在 turn 改进后变 strong，两次用各自 bucket 算频率）。
+
+    ``street_filters[street]`` (combo index → P(action | combo)) comes from the
+    engine that actually made hero's decision on that street (flop book /
+    realtime CFR). When present it replaces the bucket table for that street,
+    so the solver's own continuation range carries forward.
     """
     if not my_prev_actions:
         return 1.0
 
     prob = 1.0
     had_flop_bet = False
+    filters = street_filters or {}
+    combo_idx = _combo_index(combo) if filters else -1
 
-    if 'flop' in my_prev_actions and len(board) >= 3:
+    for street in ('flop', 'turn'):
+        if street in filters and street in my_prev_actions:
+            prob *= float(filters[street].get(combo_idx, 0.0))
+            if my_prev_actions[street] in ('bet', 'raise'):
+                had_flop_bet = had_flop_bet or street == 'flop'
+
+    if 'flop' in my_prev_actions and 'flop' not in filters and len(board) >= 3:
         flop_board = board[:3]
         try:
             bucket = categorize_cards(list(combo), flop_board)
@@ -189,7 +335,7 @@ def _reach_prob(
         if action in ('bet', 'raise'):
             had_flop_bet = True
 
-    if 'turn' in my_prev_actions and len(board) >= 4:
+    if 'turn' in my_prev_actions and 'turn' not in filters and len(board) >= 4:
         turn_board = board[:4]
         try:
             bucket = categorize_cards(list(combo), turn_board)
@@ -220,6 +366,8 @@ def combo_weights(
     my_prev_actions: Optional[Dict[str, str]] = None,
     is_pfr: bool = False,
     force_include_cards: Optional[List[Card]] = None,
+    preflop_line: Optional[Dict[str, object]] = None,
+    street_filters: Optional[Dict[str, Dict[int, float]]] = None,
 ) -> List[float]:
     """Return 1326 combo weights for hero's public reach range.
 
@@ -232,7 +380,7 @@ def combo_weights(
     """
     del hero_known_cards
 
-    hero_range = _range_for(position, facing)
+    hero_range = _range_for(position, facing, preflop_line)
     board_blockers = set(board or [])
     weights = [0.0] * len(hcm.ALL_COMBOS)
     positive_weights: List[float] = []
@@ -241,7 +389,7 @@ def combo_weights(
         for combo in _combos_for_category(cat):
             if combo[0] in board_blockers or combo[1] in board_blockers:
                 continue
-            weight = _reach_prob(combo, board, my_prev_actions or {}, is_pfr)
+            weight = _reach_prob(combo, board, my_prev_actions or {}, is_pfr, street_filters)
             if weight <= 1e-9:
                 continue
             idx = _combo_index(combo)
@@ -269,6 +417,8 @@ def distribution(
     hero_known_cards: Optional[List[Card]] = None,
     my_prev_actions: Optional[Dict[str, str]] = None,
     is_pfr: bool = False,
+    preflop_line: Optional[Dict[str, object]] = None,
+    street_filters: Optional[Dict[str, Dict[int, float]]] = None,
 ) -> Dict[str, float]:
     """Return bucket → probability over hero's (action-filtered) range.
 
@@ -283,7 +433,7 @@ def distribution(
     street × action 的频率表对每个 combo 做贝叶斯加权，更贴近 solver 在当前
     节点的 subrange。
     """
-    hero_range = _range_for(position, facing)
+    hero_range = _range_for(position, facing, preflop_line)
 
     # Cards already on the table (including hero's known holding, if any).
     blocked: set = set()
@@ -308,7 +458,7 @@ def distribution(
                     [str(c) for c in board],
                 )
                 continue
-            weight = _reach_prob(combo, board, my_prev_actions or {}, is_pfr)
+            weight = _reach_prob(combo, board, my_prev_actions or {}, is_pfr, street_filters)
             if weight <= 1e-9:
                 continue
             totals[bucket] += weight

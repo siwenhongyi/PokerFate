@@ -60,6 +60,7 @@ from pokerfate.decision import (
     RealtimeCFROptions,
 )
 from pokerfate.decision.g5_model import G5ActionModel, stable_player_name
+from pokerfate.decision.g5_shadow import G5ShadowObserver
 from pokerfate.logger import PokerLogger
 from pokerfate.strategy.range_v2.action_model import ActionContext
 from pokerfate.strategy.range_v2.empirical_model import empirical_action_likelihood
@@ -258,6 +259,9 @@ class PokerFateAPI:
         g5_model_path: Optional[str] = _UNSET,
         realtime_cfr_timeout_sec: Optional[float] = None,
         realtime_cfr_solver_lib: Optional[str] = None,
+        cfr_flop_book_enabled: Optional[bool] = None,
+        g5_observer_enabled: Optional[bool] = None,
+        g5_shadow_server_actions: bool = False,
     ):
         """
         Parameters
@@ -280,6 +284,9 @@ class PokerFateAPI:
         verbose : bool
             If True, also print debug-level internal details to console.
             Key events (decisions, results) are always printed regardless.
+        cfr_flop_book_enabled : bool or None
+            Whether cfr uses the offline flop book. None reads
+            PF_CFR_FLOP_BOOK_ENABLED (default on); off uses local on the flop.
         """
         self.my_player_id = my_player_id
         self.big_blind = big_blind
@@ -322,9 +329,22 @@ class PokerFateAPI:
         self._flop_book_engine: Optional[FlopBookDecisionEngine] = None
         self._flop_book_enabled = False
         self._flop_book_error = ""
+        self._flop_book_requested = (
+            os.environ.get("PF_CFR_FLOP_BOOK_ENABLED", "1").strip().lower()
+            in {"1", "true", "yes", "on"}
+            if cfr_flop_book_enabled is None else bool(cfr_flop_book_enabled)
+        )
         self._realtime_cfr_engine: Optional[RealtimeCFRDecisionEngine] = None
         self._realtime_cfr_enabled = False
         self._realtime_cfr_error = ""
+        # Villain Range V2 posteriors snapshotted when each street is dealt.
+        # The solver gets the street-start range and re-derives this street's
+        # villain actions inside its own tree; feeding it the post-action
+        # posterior would count those actions twice.
+        self._street_start_ranges: dict[int, Any] = {}
+        # Hero continuation filters (combo idx -> P(action)) produced by the
+        # flop book / realtime CFR on earlier streets of this hand.
+        self._hero_reach_filters: dict[str, dict[int, float]] = {}
         self._realtime_cfr_timeout_sec = (
             float(realtime_cfr_timeout_sec)
             if realtime_cfr_timeout_sec is not None
@@ -345,6 +365,28 @@ class PokerFateAPI:
         self._g5_shadow_decisions = (
             (not _in_test) if g5_shadow_decisions is None else bool(g5_shadow_decisions)
         )
+        self._g5_observer_enabled = (
+            os.environ.get("PF_G5_SHADOW_ENABLED", "0" if _in_test else "1").strip().lower()
+            in {"1", "true", "yes", "on"}
+            if g5_observer_enabled is None else bool(g5_observer_enabled)
+        )
+        self._g5_shadow_server_actions = bool(g5_shadow_server_actions)
+        self._g5_observer = None
+        if self._g5_observer_enabled:
+            self._g5_observer = G5ShadowObserver(
+                G5EngineOptions(
+                    worker_cmd=str(g5_worker_cmd or "").strip() or self._default_g5_worker_cmd(),
+                    timeout_sec=float(g5_timeout_sec) if g5_timeout_sec is not None else 8.0,
+                    game_name="pokerfate_observer",
+                    recent_hands_count=self._g5_recent_hands_count,
+                    randomly_sample_actions=self._g5_randomly_sample_actions,
+                    preflop_charts_level=self._g5_preflop_charts_level,
+                    validate_replay_state=True,
+                    # Seeds are frozen on the main thread, never loaded by the worker.
+                    model_file=None,
+                ),
+                self._log.raw,
+            )
         self._configure_decision_engine(
             decision_engine=decision_engine,
             g5_worker_cmd=self._g5_worker_cmd,
@@ -354,6 +396,7 @@ class PokerFateAPI:
             g5_preflop_charts_level=self._g5_preflop_charts_level,
             g5_shadow_decisions=self._g5_shadow_decisions,
         )
+        self._log_session_config()
 
         # Auto-load opponent data (+ embedded showdown/learner data) from disk on startup
         if autosave_path:
@@ -480,6 +523,51 @@ class PokerFateAPI:
                 "vpip_seeded": changed,
             })
 
+    def _log_session_config(self) -> None:
+        """Record every strategy switch in force for this session.
+
+        The JSON log only carried the decision-engine mode, so a flag-alternated
+        live A/B (e.g. PF_V3_EV_VETO on in one session, off in the next) could
+        not be analysed afterwards. Resolved values are logged next to the raw
+        environment so defaults are visible too.
+        """
+        try:
+            from pokerfate.core import config as _cfg
+            from pokerfate.strategy import preflop as _pf
+            from pokerfate.strategy.v3 import engine as _eng
+            from pokerfate.strategy.v3 import purposes_active as _pa
+            resolved = {
+                "RAKE_RATE": float(getattr(_cfg, "RAKE_RATE", 0.0)),
+                "PF_V3_EV_VETO": bool(getattr(_eng, "_EV_VETO_ENABLED", True)),
+                "PF_V3_VOTE_LEVERAGE_DETERMINISTIC": bool(getattr(_eng, "_VOTE_LEVERAGE_DETERMINISTIC", True)),
+                "PREFLOP_STICKY_POOL_ADJUST": bool(getattr(_pf, "_PREFLOP_STICKY_POOL_ADJUST_DEFAULT", True)),
+                "PF_LIMP_BEHIND_ENABLED": bool(getattr(_pf, "_LIMP_BEHIND_ENABLED", True)),
+                "PF_PURE_BLUFF_ENABLED": bool(getattr(_pa, "_PURE_BLUFF_ENABLED", True)),
+                "PF_POSTFLOP_PROFIT_EXPAND_V1": bool(getattr(_pa, "_PROFIT_EXPAND_V1", False)),
+            }
+        except Exception as exc:  # pragma: no cover - diagnostics only
+            resolved = {"error": str(exc)}
+        resolved["DECISION_ENGINE"] = (
+            self._external_decision_engine_requested
+            if self._external_decision_engine_name != "local" else "local"
+        )
+        resolved["PF_CFR_FLOP_BOOK_ENABLED"] = self._flop_book_requested
+        resolved["PF_G5_SHADOW_ENABLED"] = self._g5_observer_enabled
+        resolved["G5_SHADOW_MODE"] = "real_history_v1"
+        resolved["G5_SHADOW_ACTIVE"] = (
+            self._g5_observer_enabled and self._external_decision_engine_name in {"local", "cfr"}
+        )
+        resolved["G5_SHADOW_ACTION_HISTORY"] = (
+            "server_confirmed" if self._g5_shadow_server_actions else "api_applied"
+        )
+        env = {
+            k: v for k, v in os.environ.items()
+            if k.startswith("PF_") or k in {
+                "DECISION_ENGINE", "PREFLOP_STICKY_POOL_ADJUST", "REALTIME_CFR_TIMEOUT_SEC",
+            }
+        }
+        self._log.raw({"event": "session_config", "env": env, "resolved": resolved})
+
     def _load_persisted_model(self, filepath: str) -> None:
         self._bot.opponent_model = self._bot.opponent_model.__class__.load(filepath)
         if self._bot.opponent_model._stats:
@@ -560,7 +648,7 @@ class PokerFateAPI:
         if engine_name in {"", "pokerfate"}:
             engine_name = "local"
         self._external_decision_engine_requested = engine_name or "local"
-        valid_engines = {"local", "g5", "g5_all", "realtime_cfr", "cfr"}
+        valid_engines = {"local", "g5", "g5_all", "cfr"}
         invalid_engine = engine_name not in valid_engines
         if invalid_engine:
             self._external_decision_engine_error = (
@@ -576,7 +664,7 @@ class PokerFateAPI:
         if engine_name == "local":
             return
 
-        if engine_name in {"realtime_cfr", "cfr"}:
+        if engine_name == "cfr":
             try:
                 realtime_engine = RealtimeCFRDecisionEngine(
                     RealtimeCFROptions(
@@ -586,7 +674,7 @@ class PokerFateAPI:
                 )
                 flop_book_engine = (
                     FlopBookDecisionEngine(FlopBookOptions())
-                    if engine_name == "cfr"
+                    if self._flop_book_requested
                     else None
                 )
             except Exception as exc:
@@ -606,14 +694,13 @@ class PokerFateAPI:
 
             self._realtime_cfr_engine = realtime_engine
             self._realtime_cfr_enabled = True
-            if engine_name == "cfr":
-                self._flop_book_engine = flop_book_engine
-                self._flop_book_enabled = True
+            self._flop_book_engine = flop_book_engine
+            self._flop_book_enabled = flop_book_engine is not None
             self._external_decision_engine_enabled = False
             self._external_decision_engine_active = False
             self._external_decision_engine_shadow = False
             self._external_decision_engine_mode = (
-                "flop_book_turn_river" if engine_name == "cfr" else "turn_river"
+                "flop_book_turn_river" if self._flop_book_enabled else "turn_river"
             )
             self._external_decision_engine_name = engine_name
             self._external_decision_engine_error = ""
@@ -624,7 +711,8 @@ class PokerFateAPI:
                 "requested_engine": str(requested_engine or ""),
                 "timeout_sec": self._realtime_cfr_timeout_sec,
                 "solver_lib": self._realtime_cfr_solver_lib,
-                "flop_book": bool(engine_name == "cfr"),
+                "flop_book": self._flop_book_enabled,
+                "flop_book_requested": self._flop_book_requested,
             })
             return
 
@@ -700,8 +788,8 @@ class PokerFateAPI:
         value = str(decision_engine or "local").strip().lower().replace("-", "_")
         if value in {"", "pokerfate"}:
             value = "local"
-        if value not in {"local", "g5", "g5_all", "realtime_cfr", "cfr"}:
-            raise ValueError("decision_engine must be local, g5, g5_all, realtime_cfr, or cfr")
+        if value not in {"local", "g5", "g5_all", "cfr"}:
+            raise ValueError("decision_engine must be local, g5, g5_all, or cfr")
 
         old = self._external_decision_engine
         if old is not None:
@@ -747,6 +835,7 @@ class PokerFateAPI:
             "requested_engine": value,
             "status": self.decision_engine_status(),
         })
+        self._log_session_config()
         return self.decision_engine_status()
 
     def decision_engine_status(self) -> dict[str, Any]:
@@ -767,6 +856,7 @@ class PokerFateAPI:
             "shadow": bool(self._external_decision_engine_shadow),
             "realtime_cfr": bool(self._realtime_cfr_enabled),
             "flop_book": bool(self._flop_book_enabled),
+            "flop_book_requested": self._flop_book_requested,
             "error": (
                 self._flop_book_error
                 if self._flop_book_enabled and self._flop_book_error
@@ -973,7 +1063,7 @@ class PokerFateAPI:
                     gs=gs,
                     hero_player_id=self.my_player_id,
                     street_start_pot=self._street_base_pot,
-                    range_provider=self._bot._range_tracker.get_distribution,
+                    range_provider=self._street_start_range,
                     hero_range_provider=lambda _player_id: self._realtime_cfr_hero_range_weights(
                         gs,
                         street,
@@ -984,6 +1074,13 @@ class PokerFateAPI:
                         gs,
                         street,
                         villain_id,
+                    ),
+                    decision_seed=self._next_decision_seed(
+                        street=street,
+                        pot=float(gs.pot or 0.0),
+                        current_bet=float(gs.current_bet or 0.0),
+                        to_call=float(gs.to_call(self._get_my_player()) or 0.0) if self._get_my_player() else 0.0,
+                        my_stack=float(self._get_my_player().stack or 0.0) if self._get_my_player() else 0.0,
                     ),
                 )
             )
@@ -1010,7 +1107,30 @@ class PokerFateAPI:
             })
             return None
         self._realtime_cfr_error = ""
+        reach = self._realtime_cfr_engine.last_hero_reach_update
+        if reach:
+            self._hero_reach_filters[str(street).lower()] = dict(reach)
         return action
+
+    def _snapshot_street_start_ranges(self) -> None:
+        """Freeze every opponent's Range V2 posterior at the start of a street."""
+        tracker = self._bot._range_tracker
+        snap: dict[int, Any] = {}
+        for p in self._players:
+            if p.player_id == self.my_player_id or p.is_folded:
+                continue
+            try:
+                snap[int(p.player_id)] = tracker.get_distribution(int(p.player_id))
+            except Exception:
+                continue
+        self._street_start_ranges = snap
+
+    def _street_start_range(self, player_id: int) -> Any:
+        """Villain range for the solver: street-start posterior when known."""
+        snap = self._street_start_ranges.get(int(player_id))
+        if snap is not None:
+            return snap
+        return self._bot._range_tracker.get_distribution(int(player_id))
 
     def _realtime_cfr_range_v2_prior(
         self,
@@ -1223,6 +1343,9 @@ class PokerFateAPI:
             })
             return None
         self._flop_book_error = ""
+        reach = self._flop_book_engine.last_hero_reach_update
+        if reach:
+            self._hero_reach_filters["flop"] = dict(reach)
         return action
 
     def _realtime_cfr_hero_range_weights(
@@ -1244,6 +1367,16 @@ class PokerFateAPI:
         hero_is_pfr = self._bot._my_street_actions.get("preflop") == "raise"
         position = gs.position_of(hero)
         facing = "bb_defend" if str(position).upper() == "BB" and not hero_is_pfr else "none"
+        preflop_line = hero_reach_range.describe_preflop_line(
+            gs.action_history,
+            self.my_player_id,
+            {int(p.player_id): str(gs.position_of(p) or "") for p in gs.players},
+        )
+        street_filters = {
+            prev_street: probs
+            for prev_street, probs in self._hero_reach_filters.items()
+            if _POSTFLOP_STREET_RANK.get(prev_street, 99) < current_rank and probs
+        }
         return hero_reach_range.combo_weights(
             position=position,
             facing=facing,
@@ -1251,6 +1384,8 @@ class PokerFateAPI:
             my_prev_actions=my_prev_actions,
             is_pfr=hero_is_pfr,
             force_include_cards=list(hero.hole_cards),
+            preflop_line=preflop_line,
+            street_filters=street_filters or None,
         )
 
     def _decide_with_external_engine(
@@ -2001,13 +2136,17 @@ class PokerFateAPI:
         self._external_decision_shadow_hero_folded = False
         self._external_decision_shadow_warning = ""
         self._flop_book_error = ""
+        self._street_start_ranges = {}
+        self._hero_reach_filters = {}
         if self._flop_book_engine is not None:
             self._flop_book_engine._last_result = {}
             self._flop_book_engine._last_error = ""
+            self._flop_book_engine.last_hero_reach_update = {}
         self._realtime_cfr_error = ""
         if self._realtime_cfr_engine is not None:
             self._realtime_cfr_engine._last_result = {}
             self._realtime_cfr_engine._last_error = ""
+            self._realtime_cfr_engine.last_hero_reach_update = {}
         if self._external_engine_ready() or self._realtime_cfr_enabled or self._flop_book_enabled:
             self._external_decision_engine_error = ""
         self._my_stack_start: float = 0.0  # set after resolving stacks below
@@ -2072,6 +2211,8 @@ class PokerFateAPI:
             players=self._players,
             dealer_pos=dealer_pos,
             player_positions=dict(self._hand_positions),
+            player_seats=dict(self._hand_seat_indices),
+            dealer_seat=self._dealer_seat_index,
         )
         for p in self._players:
             if not self._hand_positions.get(p.player_id):
@@ -2110,6 +2251,18 @@ class PokerFateAPI:
             player_positions=player_positions,
         )
         self._external_engine_start_hand()
+        if self._g5_observer is not None:
+            from pokerfate.decision.g5_model import table_type_for_player_count
+            table_type = table_type_for_player_count(6 if self._hand_seat_indices else len(self._players))
+            seeds = self._g5_action_model.seed_payload_for(
+                [stable_player_name(p.player_id) for p in self._players], table_type=table_type,
+            ) if self._g5_action_model is not None else []
+            self._g5_observer.start_hand(
+                players=self._players, dealer_id=self._dealer_id,
+                seat_indices=self._hand_seat_indices, dealer_seat_index=self._dealer_seat_index,
+                hand_number=self._hand_number, hero_player_id=self.my_player_id,
+                big_blind=self.big_blind, small_blind=self.small_blind, seed_payload=seeds,
+            )
 
         self._log.hand_start(
             hand_number=self._hand_number,
@@ -2139,12 +2292,15 @@ class PokerFateAPI:
         # Range V2: card removal for bot's hole cards
         self._bot.set_hole_cards(self._hole_cards)
         self._external_engine_deal_hole_cards()
+        if self._g5_observer is not None:
+            self._g5_observer.hole_cards(cards)
 
         self._log.hole_cards(cards)
 
     def restore_board(self, cards: List[str]) -> None:
         """重连时静默恢复公共牌，不触发日志/统计（仅还原 _board 状态）。"""
         self._board = [Card.from_str(c) for c in cards]
+        self.invalidate_g5_shadow("reconnected_without_full_history")
 
     def deal_board(self, cards: List[str], street: str, pot: Optional[float] = None) -> None:
         """Notify the bot of new community cards.
@@ -2168,6 +2324,7 @@ class PokerFateAPI:
 
         # Range V2: update board for observe_action
         self._bot.update_board(self._board)
+        self._snapshot_street_start_ranges()
 
         display_pot = pot if pot is not None else self._last_known_pot
         if pot is not None:
@@ -2175,6 +2332,8 @@ class PokerFateAPI:
         self._street_base_pot = display_pot
         self._street_base_street = street.lower()
         self._external_engine_deal_board([str(c) for c in new_cards], street)
+        if self._g5_observer is not None:
+            self._g5_observer.board(cards, street)
         self._log.board(street, cards, pot=display_pot)
         self._maybe_shadow_auto_decide_after_real_fold(street)
 
@@ -2206,6 +2365,11 @@ class PokerFateAPI:
         amount_added, total_bet_after = self._normalize_action_amounts(
             event, player, street_max_before,
         )
+        if not self._g5_shadow_server_actions:
+            self.record_g5_actual_action(
+                player_id=event.player_id, action=action_name, amount_added=amount_added,
+                total_bet_after=total_bet_after, street=street_key,
+            )
 
         # Compute spot types BEFORE appending current action to history
         is_3bet_spot = self._detect_3bet_spot(event)
@@ -2492,6 +2656,33 @@ class PokerFateAPI:
                 )
             )
             action = self._bot.decide(gs, self.my_player_id, is_bb_option=is_bb_option)
+        # All engines share the execution contract: raise-to totals, at least
+        # one BB unless the remaining stack only permits a smaller all-in.
+        # Normalize before logging, history, and stack accounting so they agree
+        # with the amount sent on the wire (not the server's silent correction).
+        if action.action_type == ActionType.RAISE:
+            requested_action = action
+            max_total = float(my_current_bet_this_street) + max(0.0, float(my_stack))
+            total_bet = min(max_total, max(float(self.big_blind), float(action.amount)))
+            if total_bet <= float(current_bet):
+                call_amount = min(
+                    max(0.0, float(current_bet) - float(my_current_bet_this_street)),
+                    max(0.0, float(my_stack)),
+                )
+                action = (
+                    Action(ActionType.CALL, call_amount)
+                    if call_amount > 0 else Action(ActionType.CHECK)
+                )
+            else:
+                action = Action(ActionType.RAISE, total_bet)
+            if action != requested_action:
+                self._log.raw({
+                    "event": "action_amount_normalized", "hand": self._hand_number,
+                    "street": street_key, "source": decision_source,
+                    "requested_action": str(requested_action.action_type),
+                    "requested_amount": requested_action.amount,
+                    "action": str(action.action_type), "amount": action.amount,
+                })
         elapsed_ms = (time.perf_counter() - t0) * 1000
         decision_timing: dict[str, Any] = {
             "decision_select_ms": round(float(elapsed_ms), 1),
@@ -2520,6 +2711,18 @@ class PokerFateAPI:
                 is_bb_option=is_bb_option,
             )
             decision_timing["local_shadow_ms"] = round((time.perf_counter() - shadow_t0) * 1000.0, 1)
+
+        observer_decision_id = None
+        if self._g5_observer is not None and self._external_decision_engine_name in {"local", "cfr"}:
+            try:
+                observer_decision_id = self._g5_observer.submit(
+                    gs, my_current_bet=my_current_bet_this_street,
+                    decision=decision, source=decision_source, local_shadow=local_shadow,
+                )
+            except Exception as exc:
+                self._log.raw({"event": "g5_shadow_decision", "mode": "real_history_v1",
+                               "hand": self._hand_number, "street": street_key,
+                               "status": "error", "reason": f"snapshot_failed: {exc}"})
 
         g5_result_for_range_compare = None
         if decision_source == "g5":
@@ -2605,6 +2808,11 @@ class PokerFateAPI:
                     street=street_key,
                     my_current_bet_this_street=my_current_bet_this_street,
                 )
+        if not self._g5_shadow_server_actions:
+            self.record_g5_actual_action(
+                player_id=self.my_player_id, action=decision.action, amount_added=amount_added,
+                total_bet_after=total_bet_after, street=street_key,
+            )
         decision_timing["apply_action_ms"] = round((time.perf_counter() - apply_action_t0) * 1000.0, 1)
 
         diagnostics_t0 = time.perf_counter()
@@ -2714,6 +2922,7 @@ class PokerFateAPI:
             gto_refs=log_gto_refs,
             elapsed_ms=elapsed_ms,
             timing=decision_timing,
+            decision_id=observer_decision_id,
             river_relative=(
                 self.last_decision_diagnostics()
                 .get("river_relative", {})
@@ -2735,6 +2944,19 @@ class PokerFateAPI:
             total_bet_after=total_bet_after,
         )
         return decision
+
+    def record_g5_actual_action(self, **payload) -> None:
+        """Append an executed action, including hero's server confirmation, to shadow only."""
+        if self._g5_observer is not None:
+            self._g5_observer.action(**payload)
+
+    def invalidate_g5_shadow(self, reason: str) -> None:
+        if self._g5_observer is not None:
+            self._g5_observer.invalidate(reason)
+
+    def close_g5_shadow(self) -> None:
+        if self._g5_observer is not None:
+            self._g5_observer.close()
 
     def _maybe_record_river_value_sizing_decision(
         self,
@@ -3675,14 +3897,22 @@ class PokerFateAPI:
         return any(pid == event.player_id for pid, _, _ in raises[:-1])
 
     def _detect_cbet_spot(self, event: ActionEvent) -> bool:
-        """True if villain is responding to a real continuation bet.
+        """True if this player is responding to the first bet of the flop.
 
-        Requires hero to be the previous street's last aggressor and the
-        current street's first and latest bettor. This prevents turn/river
-        actions from inheriting an unrelated old raise.
+        ``fold_to_cbet`` is consumed everywhere as "how often this player
+        folds to a flop bet" (exploit sticky/fold-lean scores, fold priors,
+        trap / stop-and-go / semi-bluff gates). It used to be recorded only
+        when hero was the preflop aggressor and the flop's sole bettor, which
+        left 64% of opponents with >=30 hands at zero opportunities and a
+        median of one (2026-11-08 snapshot) while the same players faced a
+        first flop bet eight times in the logs. Any first flop bet by another
+        player is now an opportunity; re-raises are excluded so the stat stays
+        a response to one bet.
         """
         street = event.street.lower()
-        if street == "preflop":
+        if street != "flop":
+            return False
+        if event.action.lower() not in ("fold", "call", "raise"):
             return False
         raises_this_street = [
             item for item in self._action_history
@@ -3690,20 +3920,9 @@ class PokerFateAPI:
             and item[2] == street
             and item[1].action_type == ActionType.RAISE
         ]
-        if not raises_this_street:
+        if len(raises_this_street) != 1:
             return False
-        if raises_this_street[0][0] != self.my_player_id:
-            return False
-        if raises_this_street[-1][0] != self.my_player_id:
-            return False
-        prev_street = {
-            "flop": "preflop",
-            "turn": "flop",
-            "river": "turn",
-        }.get(street)
-        if prev_street is None:
-            return False
-        return self._last_aggressor_on_street(prev_street) == self.my_player_id
+        return raises_this_street[0][0] != event.player_id
 
     def _detect_facing_bet_spot(self, event: ActionEvent) -> bool:
         """True if this action responds to an existing bet on this street."""
@@ -3782,6 +4001,8 @@ class PokerFateAPI:
             small_blind=self.small_blind,
             current_player_idx=my_idx,
             player_positions=dict(self._hand_positions),
+            player_seats=dict(self._hand_seat_indices),
+            dealer_seat=self._dealer_seat_index,
             action_history=list(self._action_history),
         )
         return gs
@@ -3902,4 +4123,6 @@ class PokerFateAPI:
             players=self._players,
             dealer_pos=dealer_pos,
             player_positions=dict(self._hand_positions),
+            player_seats=dict(self._hand_seat_indices),
+            dealer_seat=self._dealer_seat_index,
         ).is_ip(player)

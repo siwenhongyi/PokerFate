@@ -49,6 +49,48 @@ def categorize(combo_idx: int, board: List[Card]) -> str:
     return categorize_cards([c1, c2], board)
 
 
+def _board_made_bucket(hole, board, score, hand_rank, board_ranks_desc):
+    """Bucket for made hands that live entirely on the board, else ``None``.
+
+    The evaluator scores hole+board together, so on 6♦J♣6♣6♥ a K♥T♦ holding
+    is "three of a kind" and used to be bucketed NUTS although its equity was
+    22% (2% on the river): every opponent shares the board trips and any pair
+    beats the kicker. The same happened for board full houses / quads and for
+    5-card board straights and flushes, and because villain ranges are
+    bucketed with this function too, such boards turned *every* villain combo
+    into "nuts", zeroing hero's fold priors and inflating nut mass.
+    """
+    if hand_rank < HandRank.THREE_OF_A_KIND:
+        return None
+    hole_ranks = {c.rank for c in hole}
+
+    def kicker_bucket() -> str:
+        # Hero only brings kickers: overcards to the board keep showdown value.
+        return MEDIUM if all(c.rank > board_ranks_desc[0] for c in hole) else AIR
+
+    if hand_rank == HandRank.THREE_OF_A_KIND:
+        return None if score[1] in hole_ranks else kicker_bucket()
+    if hand_rank == HandRank.FOUR_OF_A_KIND:
+        return None if score[1] in hole_ranks else kicker_bucket()
+    if hand_rank == HandRank.FULL_HOUSE:
+        if score[1] in hole_ranks or score[2] in hole_ranks:
+            return None
+        return kicker_bucket()
+    if len(board) < 5:
+        return None
+    board_score = HandEvaluator.evaluate(list(board))
+    if HandRank(board_score[0]) < HandRank.STRAIGHT:
+        return None
+    if tuple(score) == tuple(board_score):
+        return MEDIUM  # hero plays the board: a chop unless someone improves
+    if hand_rank == HandRank.FLUSH and HandRank(board_score[0]) == HandRank.FLUSH:
+        suit = Counter(c.suit for c in board).most_common(1)[0][0]
+        if any(c.suit == suit and c.rank == 14 for c in hole):
+            return NUTS
+        return STRONG  # improves a board flush without the ace
+    return None
+
+
 def categorize_cards(hole: List[Card], board: List[Card]) -> str:
     """Categorize hole cards on the given board."""
     if not board or len(board) < 3:
@@ -59,6 +101,11 @@ def categorize_cards(hole: List[Card], board: List[Card]) -> str:
     hand_rank = HandRank(score[0])
     is_river = len(board) >= 5
     board_ranks = sorted([c.rank for c in board], reverse=True)
+
+    # --- Hands the board makes by itself ---
+    board_made = _board_made_bucket(hole, board, score, hand_rank, board_ranks)
+    if board_made is not None:
+        return board_made
 
     # --- Strong made hands ---
     if hand_rank >= HandRank.STRAIGHT:

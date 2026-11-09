@@ -562,7 +562,11 @@ def test_realtime_cfr_exploit_no_profile_and_no_line_does_not_mark_used():
     assert selection["exploit"]["used"] is False
 
 
-def test_realtime_cfr_defense_mdf_guard_keeps_close_call_available():
+def test_realtime_cfr_underbluff_profile_can_promote_close_call_without_mdf_guard():
+    """A strong 'villain rarely bets without it' read turns a marginal GTO
+    fold into a call through the response/EV path alone; there is no
+    per-combo MDF cap any more (MDF is a range property the solver already
+    satisfies)."""
     result = {
         "node": {
             "path": "r",
@@ -594,13 +598,98 @@ def test_realtime_cfr_defense_mdf_guard_keeps_close_call_available():
         adjustments={"river_bet_rare": True},
         max_confidence=0.45,
         enabled=True,
-        defense_fold_cap=0.35,
     )
 
-    assert selection["selected_label"] == "Call"
     assert selection["exploit"]["used"] is True
-    assert selection["exploit"]["safety"]["defense_mdf"]["applied"] is True
-    assert selection["exploit"]["final_strategy"]["Fold"] <= 0.35
+    assert "defense_mdf" not in selection["exploit"]["safety"]
+    # river_bet_rare lowers Call EV and raises Fold EV; Fold must stay selected.
+    assert selection["selected_label"] == "Fold"
+
+
+def test_realtime_cfr_gto_leash_excludes_far_below_actions():
+    """An action the solver rates far below its best cannot be promoted above
+    the solver's best action by exploit EV alone (capped under its final EV)."""
+    result = {
+        "node": {
+            "path": "r",
+            "player": 1,
+            "actions": ["Fold", "Call", "Raise(300)"],
+            "num_hands": 1,
+            "strategy": [1.0, 0.0, 0.0],
+            "evs": [0.0, -5.0, -40.0],
+        },
+        "nodes": [],
+        "oop_hands": ["QcQd"],
+        "ip_hands": ["AsAh"],
+    }
+    profile = PlayerProfile(name="foldy", hands_seen=300, af=0.6, wtsd=0.15, river_action_count=120,
+                            river_fold_rate=0.9)
+    selection = _select_exploit_action(
+        result,
+        hero_combo="AsAh",
+        hero_side="ip",
+        street="river",
+        gto_strategy={"Fold": 1.0, "Call": 0.0, "Raise(300)": 0.0},
+        profile=profile,
+        adjustments={"value_ag_scale": 0.3, "bluff_ag_scale": 0.2},
+        max_confidence=0.45,
+        enabled=True,
+        line_context={"current_pot_bb": 20.0},
+    )
+    assert selection["selected_label"] == "Fold"
+    leashed = {row["action"] for row in selection["exploit"]["safety"].get("gto_leash", [])}
+    assert "Raise(300)" in leashed
+    final = selection["exploit"]["final_action_evs_bb"]
+    assert final["Raise(300)"] < final["Fold"]
+
+
+def test_realtime_cfr_near_ev_actions_are_mixed_with_seed():
+    result = {
+        "node": {
+            "path": "r",
+            "player": 1,
+            "actions": ["Check", "Bet(100)"],
+            "num_hands": 1,
+            "strategy": [0.55, 0.45],
+            "evs": [100.0, 99.5],
+        },
+        "nodes": [],
+        "oop_hands": ["QcQd"],
+        "ip_hands": ["AsAh"],
+    }
+    picks = set()
+    for seed in range(1, 40):
+        selection = _select_exploit_action(
+            result,
+            hero_combo="AsAh",
+            hero_side="ip",
+            street="river",
+            gto_strategy={"Check": 0.55, "Bet(100)": 0.45},
+            profile=None,
+            adjustments={},
+            max_confidence=0.45,
+            enabled=True,
+            line_context={"current_pot_bb": 10.0},
+            decision_seed=seed,
+        )
+        picks.add(selection["selected_label"])
+    assert picks == {"Check", "Bet(100)"}
+    # Same seed → same pick (reproducible mixing).
+    a = _select_exploit_action(result, hero_combo="AsAh", hero_side="ip", street="river",
+                               gto_strategy={"Check": 0.55, "Bet(100)": 0.45}, profile=None,
+                               adjustments={}, max_confidence=0.45, enabled=True,
+                               line_context={"current_pot_bb": 10.0}, decision_seed=7)
+    b = _select_exploit_action(result, hero_combo="AsAh", hero_side="ip", street="river",
+                               gto_strategy={"Check": 0.55, "Bet(100)": 0.45}, profile=None,
+                               adjustments={}, max_confidence=0.45, enabled=True,
+                               line_context={"current_pot_bb": 10.0}, decision_seed=7)
+    assert a["selected_label"] == b["selected_label"]
+    # Without a seed the EV-best action is chosen deterministically.
+    c = _select_exploit_action(result, hero_combo="AsAh", hero_side="ip", street="river",
+                               gto_strategy={"Check": 0.55, "Bet(100)": 0.45}, profile=None,
+                               adjustments={}, max_confidence=0.45, enabled=True,
+                               line_context={"current_pot_bb": 10.0})
+    assert c["selected_label"] == "Check"
 
 
 def test_realtime_cfr_overvalue_profile_does_not_treat_underbluff_as_nuts():
@@ -891,7 +980,7 @@ def test_realtime_cfr_river_call_chain_keeps_value_big_bet():
             "actions": ["Check", "Bet(300)"],
             "num_hands": 1,
             "strategy": [0.40, 0.60],
-            "evs": [100.0, 170.0],
+            "evs": [100.0, 190.0],
         },
         "nodes": [
             {
@@ -900,7 +989,7 @@ def test_realtime_cfr_river_call_chain_keeps_value_big_bet():
                 "actions": ["Check", "Bet(300)"],
                 "num_hands": 1,
                 "strategy": [0.40, 0.60],
-                "evs": [100.0, 170.0],
+                "evs": [100.0, 190.0],
             },
             {
                 "path": "r:Bet(300)",
@@ -1103,7 +1192,7 @@ def test_realtime_cfr_raise_exposure_penalizes_bet_fold_trap():
             "actions": ["Check", "Bet(80)"],
             "num_hands": 1,
             "strategy": [0.05, 0.95],
-            "evs": [50.0, 70.0],
+            "evs": [50.0, 56.0],
         },
         "nodes": [
             {
@@ -1112,7 +1201,7 @@ def test_realtime_cfr_raise_exposure_penalizes_bet_fold_trap():
                 "actions": ["Check", "Bet(80)"],
                 "num_hands": 1,
                 "strategy": [0.05, 0.95],
-                "evs": [50.0, 70.0],
+                "evs": [50.0, 56.0],
             },
             {
                 "path": "r:Bet(80)",
@@ -1520,3 +1609,104 @@ def test_realtime_cfr_ignores_flop():
 
     assert action is None
     assert engine.last_result["reason"] == "street_not_supported"
+
+
+def test_hero_range_follows_actual_preflop_line():
+    from pokerfate.core.card import Card
+    from pokerfate.core.game_state import Action, ActionType
+
+    history = [
+        (1, Action(ActionType.RAISE, 25.0), "preflop"),   # BTN opens
+        (0, Action(ActionType.CALL, 0.0), "preflop"),     # hero BB calls
+    ]
+    line = hero_range.describe_preflop_line(history, 0, {1: "BTN", 0: "BB"})
+    assert line["hero_action"] == "call"
+    assert line["raises_before"] == 1
+    assert line["opener_pos"] == "BTN"
+    rng = hero_range._range_for("BB", "none", line)
+    assert "72o" not in rng and "T7o" in rng  # BB vs BTN defend, not an RFI range
+
+    history_3bet = [
+        (1, Action(ActionType.RAISE, 25.0), "preflop"),
+        (0, Action(ActionType.RAISE, 90.0), "preflop"),
+    ]
+    line_3bet = hero_range.describe_preflop_line(history_3bet, 0, {1: "CO", 0: "BTN"})
+    rng_3bet = hero_range._range_for("BTN", "none", line_3bet)
+    assert "AA" in rng_3bet and "A5s" in rng_3bet and "T7o" not in rng_3bet
+    # The hero combo is always force-included even if outside the heuristic range.
+    board = [Card.from_str(c) for c in ["Kh", "7d", "2c", "9s"]]
+    weights = hero_range.combo_weights(
+        "BTN", "none", board, preflop_line=line_3bet,
+        force_include_cards=[Card.from_str("7h"), Card.from_str("2h")],
+    )
+    assert sum(1 for w in weights if w > 0) > 50
+
+
+def test_hero_range_prior_street_call_narrows_range():
+    from pokerfate.core.card import Card
+
+    board = [Card.from_str(c) for c in ["Kh", "7d", "2c", "9s"]]
+    base = hero_range.distribution("BB", "bb_defend", board)
+    called = hero_range.distribution("BB", "bb_defend", board, my_prev_actions={"flop": "call"})
+    # Calling a flop bet should leave relatively less air in hero's range.
+    assert called["air"] < base["air"]
+
+
+def test_hero_range_uses_solver_street_filter_when_present():
+    from pokerfate.core.card import Card
+    from pokerfate.strategy.range_v2 import hand_combo_map as hcm
+
+    board = [Card.from_str(c) for c in ["Kh", "7d", "2c", "9s"]]
+    keep = hcm.COMBO_TO_IDX[tuple(sorted((hcm.card_to_int(Card.from_str("Ks")), hcm.card_to_int(Card.from_str("Qs")))))]
+    weights = hero_range.combo_weights(
+        "BTN", "none", board,
+        my_prev_actions={"flop": "bet"},
+        street_filters={"flop": {keep: 1.0}},
+        force_include_cards=[Card.from_str("Ks"), Card.from_str("Qs")],
+    )
+    assert weights[keep] == pytest.approx(1.0)
+    assert sum(1 for w in weights if w > 1e-9) == 1
+
+
+def test_response_evs_ignored_when_hero_combo_never_takes_action():
+    """Solver EVs at a child node are conditional on reach; with ~0 reach they
+    are garbage. Such actions must fall back to the bounded direct delta."""
+    from pokerfate.decision.realtime_cfr import _response_adjusted_ev_detail_from_result
+
+    result = {
+        "node": {
+            "path": "r:Check:Bet(120)",
+            "player": 0,
+            "actions": ["Fold", "Call", "Raise(264)"],
+            "num_hands": 1,
+            "strategy": [1.0, 0.0, 0.0],
+            "evs": [0.0, -3.4, -5.7],
+        },
+        "oop_hands": ["9s7s"],
+        "ip_hands": ["AcKc"],
+    }
+    child = {
+        "path": "r:Check:Bet(120):Raise(264)",
+        "player": 1,
+        "actions": ["Fold", "Call", "AllIn(420)"],
+        "num_hands": 1,
+        "strategy": [0.42, 0.11, 0.47],
+        "weights": [1.0],
+        "opponent_num_hands": 1,
+        "opponent_evs": [365.0, 4000.0, -264.0],  # 4000 = reach-normalised garbage
+    }
+    detail = _response_adjusted_ev_detail_from_result(
+        result, child, hero_combo="9s7s", hero_side="oop", profile=None, adjustments={},
+        street="turn", hero_action_label="Raise(264)", line_context={"current_pot_bb": 36.5},
+    )
+    assert detail is None
+
+    # With real reach and self-consistent EVs the detail is produced.
+    result["node"]["strategy"] = [0.5, 0.2, 0.3]
+    child["opponent_evs"] = [365.0, 10.0, -264.0]   # eq-weighted ≈ (365*.42+10*.11-264*.47)/10 = 3.0bb
+    result["node"]["evs"] = [0.0, -3.4, 30.4]
+    detail = _response_adjusted_ev_detail_from_result(
+        result, child, hero_combo="9s7s", hero_side="oop", profile=None, adjustments={},
+        street="turn", hero_action_label="Raise(264)", line_context={"current_pot_bb": 36.5},
+    )
+    assert detail is not None

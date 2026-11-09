@@ -89,7 +89,7 @@ def _story_score(ctx: DecisionCtx) -> float:
         score += 0.14
     if ctx.street == 'turn' and ctx.board_sig.high_card_rank >= 12:
         score += 0.10
-    if ctx.street == 'river' and ctx.my_prev_actions.get('turn') == 'bet':
+    if ctx.street == 'river' and ctx.my_prev_actions.get('turn') in ('bet', 'raise'):
         score += 0.08
     return _clamp(score)
 

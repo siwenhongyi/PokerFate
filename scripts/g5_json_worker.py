@@ -169,6 +169,15 @@ class G5Worker:
             raise ValueError(f"hero is not to act: expected {hero_index}, actual {actual}")
         amount_to_call = int(self.api.getAmountToCall(self.game_name))
         hero_money_in_pot = int(self.api.getStakesSize(self.game_name, hero_index))
+        if params.get("validate_replay_state"):
+            expected_call = max(0, int(params["current_bet"]) - int(params["my_current_bet_this_street"]))
+            expected_call = min(expected_call, int(params["hero_stack"]))
+            actual_pot = int(self.api.getPotSize(self.game_name))
+            if amount_to_call != expected_call or actual_pot != int(params["pot"]):
+                raise ValueError(
+                    f"replay state mismatch: call={amount_to_call}/{expected_call} "
+                    f"pot={actual_pot}/{params['pot']}"
+                )
         result = self.api.calculateHeroAction(self.game_name)
         return {
             "action": str(result.actionType),

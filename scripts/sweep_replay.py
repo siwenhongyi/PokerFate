@@ -4,7 +4,7 @@
 
 用法：
     .venv/bin/python -m scripts.sweep_replay \
-        --replay data/calibration_replays/replay_1_2log.jsonl \
+        --replay /tmp/replay.jsonl \
         --grid scripts/sweep_grids/p1_default.json \
         --max-hands 500 --seeds 1 --workers 1
 

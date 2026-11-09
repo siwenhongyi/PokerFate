@@ -186,6 +186,23 @@ class DecisionCtx:
 
     # === Derived convenience flags ===
     @property
+    def raw_pot_odds(self) -> float:
+        """Rake-free call price ``to_call / (pot + to_call)``.
+
+        ``pot_odds`` is the rake-adjusted break-even equity and is only for
+        ``equity >= pot_odds`` comparisons. Thresholds that describe how BIG
+        villain's bet is (tiny donk, small blocker bet, large bet, overbet
+        tiers) must use this geometric measure, otherwise the 9% rake shifts
+        every size boundary ~10% towards "larger" (a 0.60-pot bet would read
+        as a 0.75-pot bet).
+        """
+        to_call = max(0.0, float(self.to_call or 0.0))
+        pot = max(0.0, float(self.pot or 0.0))
+        if to_call <= 0.0 or pot + to_call <= 0.0:
+            return 0.0
+        return to_call / (pot + to_call)
+
+    @property
     def is_delayed_cbet(self) -> bool:
         """hero PFR, 上一街 check 过，当前街尚未面对下注。"""
         if self.facing_bet or not self.is_pfr:

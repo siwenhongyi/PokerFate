@@ -342,8 +342,11 @@ def test_fold_override_rescues_marginal_tracker_compressed_equity() -> None:
 
     out = V3Engine().decide(ctx)
 
-    assert out.action == 'call'
-    assert out.purpose == 'fold_override_call'
+    # 2026-11-08: call/fold flips are priced on the calibrated range equity
+    # (Brier 0.186 vs 0.251 for MC-vs-random on logged showdowns). 23% range
+    # equity against a 27.5% raked price is a fold; the old override called on
+    # the 53% MC figure.
+    assert out.action == 'fold'
 
 
 def test_fold_override_rescues_low_spr_commit_spot_when_cheap_edge_is_clear() -> None:
@@ -378,7 +381,7 @@ def test_fold_override_rescues_low_spr_commit_spot_when_cheap_edge_is_clear() ->
     out = V3Engine().decide(ctx)
 
     assert out.action == 'call'
-    assert out.purpose == 'fold_override_call'
+    assert out.purpose in ('fold_override_call', 'ev_promote_call')
     assert 'call' in out.reason
 
 
@@ -413,7 +416,7 @@ def test_fold_override_rescues_committed_low_spr_when_range_edge_is_clear() -> N
     out = V3Engine().decide(ctx)
 
     assert out.action == 'call'
-    assert out.purpose == 'fold_override_call'
+    assert out.purpose in ('fold_override_call', 'ev_promote_call')
     assert out.action == 'call'
     assert 'call' in out.reason
 
@@ -450,7 +453,7 @@ def test_fold_override_rescues_cheap_committed_low_spr_call() -> None:
     out = V3Engine().decide(ctx)
 
     assert out.action == 'call'
-    assert out.purpose == 'fold_override_call'
+    assert out.purpose in ('fold_override_call', 'ev_promote_call')
     assert 'call' in out.reason
 
 
@@ -487,7 +490,7 @@ def test_fold_override_rescues_cheap_low_spr_river_call_with_range_edge() -> Non
     out = V3Engine().decide(ctx)
 
     assert out.action == 'call'
-    assert out.purpose == 'fold_override_call'
+    assert out.purpose in ('fold_override_call', 'ev_promote_call')
     assert 'call' in out.reason
 
 

@@ -11,6 +11,7 @@ import os
 import random
 from typing import List, Optional, Set, Tuple
 from pokerfate.core.card import Card
+from pokerfate.core.config import required_equity
 from pokerfate.core.position import (
     normalize_position as _normalize_position,
 )
@@ -439,6 +440,46 @@ _ISO_EDGE_LIMP_DOWNGRADE = _LIMP_BEHIND_SMALL_PAIRS | _expand_range(
 _ISO_EDGE_FOLD_DOWNGRADE = _expand_range('KTo, QTo, QJo, JTo, K9s, Q9s, J9s, T8s')
 _ISO_EDGE_STICKY_DENSITY = 0.45
 
+# ── BB defence behind callers (2026-11-08, hypothesis C1) ────────────────────
+# Logs 2026-11-06/08 (1786 hands): 28 BB calls of an open with >=1 caller
+# already in lost 126bb (-4.5bb/hand vs -1bb for folding); the hands were
+# K3o/K4o/K7o/T6o/J8o/K8o/T4s-type, let in by the raw-equity price check
+# (K3o 4-way ~17% vs a 14% price). OOP multiway those hands realise far below
+# raw equity and the 9% rake taxes every small pot, so behind callers the BB
+# only defends hands with multiway playability and prices them at 70%
+# realisation. PF_BB_MULTIWAY_DEFENSE=0 restores the old behaviour for A/B.
+_BB_MULTIWAY_DEFENSE_ENABLED = os.environ.get('PF_BB_MULTIWAY_DEFENSE', '1') != '0'
+_BB_MULTIWAY_REALIZATION = 0.70
+_BB_MULTIWAY_DEFEND_RANGE = _expand_range(
+    '22+, A2s+, K8s+, Q9s+, J9s+, T8s, T9s, 98s, 97s, 87s, 86s, 76s, 75s, 65s, 64s, 54s, '
+    'AJo+, KQo'
+)
+
+# ── ISO layering in limped pots (2026-11-08, hypothesis C2) ──────────────────
+# 119 logged iso raises: only 17% took the pot down, 1-2 callers in 66% of
+# them at -2.9bb/hand. The pool (VPIP median 66%, AF 0.73) does not fold to
+# 4-5bb isos, so an iso is for value/initiative, not fold equity: value hands
+# size up, speculative hands overlimp, weak offsuit broadways fold. The
+# sticky-density signal that gates these downgrades used to come only from
+# postflop stats (8% of players qualified); PF_ISO_SPLIT also lets preflop
+# looseness (VPIP>=45%, AF<1.5) count. PF_ISO_SPLIT=0 restores the old rules.
+_ISO_SPLIT_ENABLED = os.environ.get('PF_ISO_SPLIT', '1') != '0'
+
+# ── Dampened 3-bet falls back to a priced call, not a fold (2026-11-08) ──────
+# Logs 2026-11-06/08: 30 chart-raise hands went through the exploit 3-bet
+# dampening (the pool does not fold to 3-bets, so bluff 3-bets lose
+# frequency); 27 of them were folded, among them AJo x4, KJs x2, 88 x2, 66,
+# ATo, KJo. The dampening is right, the exit is not: the removed 3-bet share
+# became a fold because this branch had no call. Hands the chart wanted to
+# 3-bet now fall back to a call when the price works, with the limpers still
+# to act counted into the expected pot (hand 53: KJs SB vs BTN 3bb iso with
+# two limpers behind -> pot 6.5bb became 13bb once both called).
+_3BET_DAMPEN_CALL_FALLBACK = os.environ.get('PF_3BET_DAMPEN_CALL_FALLBACK', '1') != '0'
+_LIMPER_CALL_VS_RAISE_RATE = 0.65   # logs: a 4-5bb iso took the pot down only 17% of the time
+_ISO_STICKY_BASE_BB = 5.0
+_ISO_SPLIT_LIMP_DOWNGRADE = _expand_range('A2s, A3s, A4s, A5s, 75s, 86s, 97s, T9s, K8s, Q8s, J8s')
+_ISO_SPLIT_FOLD_DOWNGRADE = _expand_range('A9o, A8o, K9o, Q9o, J9o')
+
 # Bluff 3bet frequency by villain (opener) position — applied to _3BET_BLUFF.
 # Tighter open (UTG) → fewer 3bet bluffs; wider open (SB/BTN) → more.
 _BLUFF_3BET_FREQ_BY_VS_POS = {
@@ -792,12 +833,13 @@ class PreflopStrategy:
             )
             if has_exploit_evidence:
                 adjusted, exploit_text = _adjust_raise_weight(1.0)
+                fallback = 'call_fallback' if _3BET_DAMPEN_CALL_FALLBACK else 'fold'
                 if adjusted < _BLUFF_3BET_MIN_EXEC_FREQ:
-                    return 'fold', (
-                        f"{source}:{chart_key} {cat} -> fold "
+                    return fallback, (
+                        f"{source}:{chart_key} {cat} -> {fallback} "
                         f"{exploit_text}"
                     )
-                selected = 'raise' if self._rng.random() < adjusted else 'fold'
+                selected = 'raise' if self._rng.random() < adjusted else fallback
                 return selected, (
                     f"{source}:{chart_key} {cat} -> {selected} "
                     f"{exploit_text}"
@@ -1071,10 +1113,19 @@ class PreflopStrategy:
         raw_call = max(0.0, float(to_call or open_raise or 0.0))
         call_amt = min(raw_call, stack)
         contestable_pot = max(0.0, float(pot or 0.0) - max(0.0, raw_call - call_amt))
-        pot_odds = call_amt / (contestable_pot + call_amt) if (contestable_pot + call_amt) > 0 else 1.0
+        pot_odds = required_equity(call_amt, contestable_pot) if (contestable_pot + call_amt) > 0 else 1.0
         stack_commit = call_amt / stack if stack > 0 else 1.0
         call_bb = call_amt / big_blind if big_blind > 0 else 99.0
         return call_amt, pot_odds, stack_commit, call_bb
+
+    @staticmethod
+    def _raw_call_price(stack: float, pot: float, to_call: float, open_raise: float) -> float:
+        """Rake-free ``call / (pot + call)``: bet-size measure for pressure tiers."""
+        raw_call = max(0.0, float(to_call or open_raise or 0.0))
+        call_amt = min(raw_call, stack)
+        contestable_pot = max(0.0, float(pot or 0.0) - max(0.0, raw_call - call_amt))
+        total = contestable_pot + call_amt
+        return call_amt / total if (call_amt > 0 and total > 0) else 0.0
 
     def _pressure_kind(
         self,
@@ -1084,18 +1135,22 @@ class PreflopStrategy:
         open_raise: float,
         big_blind: float,
     ) -> str:
-        call_amt, pot_odds, stack_commit, call_bb = self._pressure_inputs(
+        call_amt, _pot_odds, stack_commit, call_bb = self._pressure_inputs(
             stack, pot, to_call, open_raise, big_blind,
         )
         if call_amt <= 0:
             return 'none'
+        # Pressure tiers describe the SIZE of the raise hero faces, so they use
+        # the rake-free call price; the rake-adjusted pot_odds from
+        # _pressure_inputs is only for ``equity >= pot_odds`` price checks.
+        raw_price = self._raw_call_price(stack, pot, to_call, open_raise)
         if stack_commit >= _JAM_PRESSURE_MIN_STACK_COMMIT:
             return 'jam'
-        if call_bb <= _TINY_PRESSURE_MAX_CALL_BB or pot_odds <= _TINY_PRESSURE_MAX_POT_ODDS:
+        if call_bb <= _TINY_PRESSURE_MAX_CALL_BB or raw_price <= _TINY_PRESSURE_MAX_POT_ODDS:
             return 'tiny'
-        if pot_odds <= _CHEAP_PRESSURE_MAX_POT_ODDS and stack_commit <= _CHEAP_PRESSURE_MAX_STACK_COMMIT:
+        if raw_price <= _CHEAP_PRESSURE_MAX_POT_ODDS and stack_commit <= _CHEAP_PRESSURE_MAX_STACK_COMMIT:
             return 'cheap'
-        if pot_odds >= _HEAVY_PRESSURE_MIN_POT_ODDS or stack_commit >= _HEAVY_PRESSURE_MIN_STACK_COMMIT:
+        if raw_price >= _HEAVY_PRESSURE_MIN_POT_ODDS or stack_commit >= _HEAVY_PRESSURE_MIN_STACK_COMMIT:
             return 'heavy'
         return 'normal'
 
@@ -1109,12 +1164,25 @@ class PreflopStrategy:
         big_blind: float,
         equity: float,
         context: str,
+        callers_behind: int = 0,
+        position: str = '',
     ) -> bool:
         kind = self._pressure_kind(stack, pot, to_call, open_raise, big_blind)
         if kind not in {'tiny', 'cheap'}:
             return False
         if cat not in _PRICE_DEFEND_RANGE:
             return False
+        if (
+            _BB_MULTIWAY_DEFENSE_ENABLED
+            and callers_behind >= 1
+            and (_normalize_position(position) or position) == 'BB'
+        ):
+            if cat not in _BB_MULTIWAY_DEFEND_RANGE:
+                return False
+            if not (len(cat) == 2 and cat[0] == cat[1]):
+                # Pairs are priced on set-mining implied odds, not on realising
+                # raw equity OOP; only non-pair hands take the haircut.
+                equity = equity * _BB_MULTIWAY_REALIZATION
         call_amt, pot_odds, _, call_bb = self._pressure_inputs(
             stack, pot, to_call, open_raise, big_blind,
         )
@@ -1527,14 +1595,21 @@ class PreflopStrategy:
         if not (multi_limp or sticky):
             return False
 
-        if cat in _ISO_EDGE_LIMP_DOWNGRADE:
+        limp_set = _ISO_EDGE_LIMP_DOWNGRADE
+        fold_set = _ISO_EDGE_FOLD_DOWNGRADE
+        fold_trigger = multi_limp
+        if _ISO_SPLIT_ENABLED:
+            limp_set = limp_set | _ISO_SPLIT_LIMP_DOWNGRADE
+            fold_set = fold_set | _ISO_SPLIT_FOLD_DOWNGRADE
+            fold_trigger = multi_limp or sticky
+        if cat in limp_set:
             self.last_expand_reason = (
                 f"iso_downgrade:overlimp {chart_key} {cat} "
                 f"nlimp={num_limpers} sticky={sticky_density:.0%} stack={stack_bb:.0f}bb"
             )
             return True
 
-        if multi_limp and cat in _ISO_EDGE_FOLD_DOWNGRADE:
+        if fold_trigger and cat in fold_set:
             self.last_expand_reason = (
                 f"iso_downgrade:fold {chart_key} {cat} "
                 f"nlimp={num_limpers} sticky={sticky_density:.0%}"
@@ -1601,12 +1676,21 @@ class PreflopStrategy:
             )
             return True
 
-        strict_multiway = (
-            num_limpers >= 3
-            and sticky_density >= 0.45
-            and stack_bb >= 80.0
-            and call_bb <= 1.0
-        )
+        if _ISO_SPLIT_ENABLED:
+            # Overlimp speculative hands whenever the table is sticky or two
+            # limpers are already in (implied odds exist, fold equity does not).
+            strict_multiway = (
+                (num_limpers >= 2 or sticky_density >= _ISO_EDGE_STICKY_DENSITY)
+                and stack_bb >= 40.0
+                and call_bb <= 1.0
+            )
+        else:
+            strict_multiway = (
+                num_limpers >= 3
+                and sticky_density >= 0.45
+                and stack_bb >= 80.0
+                and call_bb <= 1.0
+            )
         if strict_multiway and cat in (_LIMP_BEHIND_SUITED_ONE_GAPPERS | _LIMP_BEHIND_WHEEL_AXS):
             kind = 'wheel_axs' if cat in _LIMP_BEHIND_WHEEL_AXS else 'suited_1gap'
             self.last_expand_reason = (
@@ -1641,10 +1725,13 @@ class PreflopStrategy:
         num_limpers: int,
         stack_bb: float = 100.0,
         sticky_pool_adjust: Optional[bool] = None,
+        sticky_density: float = 0.0,
     ) -> float:
         """Isolation raise size after limpers.
 
-        Sticky-pool adjustment: use 4bb plus 1bb per limper. When disabled,
+        Sticky-pool adjustment: use 4bb plus 1bb per limper (5bb base on a
+        sticky table under PF_ISO_SPLIT: the pool calls 4-5bb isos 83% of the
+        time, so the iso prices value, not fold equity). When disabled,
         restore the legacy normal-open-plus-limper-premium formula.
         """
         limpers = max(0, num_limpers)
@@ -1670,8 +1757,11 @@ class PreflopStrategy:
                 + limpers * _ISO_PER_LIMPER_BB
                 + oop_bonus
             )
+        base_bb = _ISO_BASE_BB
+        if _ISO_SPLIT_ENABLED and sticky_density >= _ISO_EDGE_STICKY_DENSITY:
+            base_bb = _ISO_STICKY_BASE_BB
         return big_blind * (
-            _ISO_BASE_BB
+            base_bb
             + limpers * _ISO_PER_LIMPER_BB
         )
 
@@ -1720,7 +1810,7 @@ class PreflopStrategy:
         self,
         hole_cards: List[Card],
         position: str,
-        facing_action: str,  # 'none', 'open', '3bet', '4bet'
+        facing_action: str,  # 'none', 'open', '3bet', '4bet', 'short_allin'
         open_raise: float,
         is_ip: bool,
         big_blind: float,
@@ -1745,9 +1835,20 @@ class PreflopStrategy:
         villain_fold_to_3bet: float = _POOL_FOLD_TO_3BET,
         villain_fold_to_3bet_opps: int = 0,
         sticky_pool_adjust: Optional[bool] = None,
+        current_bet: float = 0.0,
+        limpers_behind: int = 0,
     ) -> Tuple[str, float]:
-        """Return (action, amount). action in: fold, call, raise, check."""
+        """Return (action, amount); raises are street totals, calls increments.
+
+        ``stack`` is the remaining stack; ``current_bet`` is already invested.
+        """
         self.last_expand_reason = ''
+        max_raise_to = max(0.0, current_bet) + max(0.0, stack)
+        if facing_action == 'short_allin':
+            # Hero has already accepted the last full bet. Complete the
+            # additional short all-in without consulting a new raise chart.
+            self.last_expand_reason = 'short_allin:complete_call no_full_raise'
+            return ('call', min(to_call, stack)) if to_call > 0 else ('check', 0.0)
         cat = _hand_category(hole_cards)
         stack_bb = max(stack_bb, 1.0)
         sticky_adjust = self._sticky_pool_adjust_enabled(sticky_pool_adjust)
@@ -1796,7 +1897,7 @@ class PreflopStrategy:
                         stack_bb,
                         sticky_pool_adjust=sticky_adjust,
                     )
-                    return ('raise', min(size, stack))
+                    return ('raise', min(size, max_raise_to))
                 if chart_action == 'fold':
                     self.last_expand_reason = chart_reason
                     return _fold_fallback()
@@ -1810,7 +1911,7 @@ class PreflopStrategy:
                         stack_bb,
                         sticky_pool_adjust=sticky_adjust,
                     )
-                    return ('raise', min(size, stack))
+                    return ('raise', min(size, max_raise_to))
                 return _fold_fallback()
 
             if num_limpers > 0:
@@ -1828,7 +1929,18 @@ class PreflopStrategy:
                     num_limpers, stack_bb, sticky_density,
                     iso_available=iso_available,
                 ):
-                    return ('call', min(to_call if to_call > 0 else big_blind, stack))
+                    if to_call <= 0:
+                        # BB (or a forced post) behind limpers: the "limp" is a
+                        # free check. Recording it as a call put the hand on
+                        # the limp-behind line for the solver's hero range and
+                        # logged a call the server executed as a check (hands
+                        # 36/149/698, 2026-11-07).
+                        self.last_expand_reason = (
+                            f"{self.last_expand_reason} | free_check_option"
+                            if self.last_expand_reason else 'free_check_option'
+                        )
+                        return ('check', 0.0)
+                    return ('call', min(to_call, stack))
                 if iso_available:
                     size = self.iso_raise_size(
                         position,
@@ -1836,8 +1948,9 @@ class PreflopStrategy:
                         num_limpers,
                         stack_bb,
                         sticky_pool_adjust=sticky_adjust,
+                        sticky_density=sticky_density,
                     )
-                    return ('raise', min(size, stack))
+                    return ('raise', min(size, max_raise_to))
                 return _fold_fallback()
 
             # Normal positions: open or fold (range adjusted for player count)
@@ -1848,7 +1961,7 @@ class PreflopStrategy:
                     stack_bb,
                     sticky_pool_adjust=sticky_adjust,
                 )
-                return ('raise', min(size, stack))
+                return ('raise', min(size, max_raise_to))
             return _fold_fallback()
 
         elif facing_action == 'open':
@@ -1891,20 +2004,64 @@ class PreflopStrategy:
                     open_pos=villain_position,
                     three_bet_pos=position,
                 )
-                return ('raise', min(size, stack))
-            if chart_action == 'call':
+                return ('raise', min(size, max_raise_to))
+            bb_multiway = (
+                _BB_MULTIWAY_DEFENSE_ENABLED
+                and squeeze_callers >= 1
+                and hero_norm == 'BB'
+            )
+            if chart_action == 'call_fallback':
+                # Chart wanted a 3-bet; the exploit layer removed that share.
+                # Price the call on the pot the limpers still to act are likely
+                # to build, then apply the same gates as a chart call.
                 self.last_expand_reason = chart_reason
+                if bb_multiway and cat not in _BB_MULTIWAY_DEFEND_RANGE:
+                    self.last_expand_reason = f"{chart_reason} | bb_multiway_fold {cat}"
+                    return _fold_fallback()
+                # Same cheap-price gate the plain chart-fold branch applies, so
+                # a dampened 3-bet hand is never priced stricter than a chart fold.
                 if self._price_call_allowed(
                     cat, stack, pot, to_call, open_raise, big_blind, equity, 'open',
+                    callers_behind=squeeze_callers, position=position,
                 ):
                     return ('call', call_amt)
-                if call_amt > 0 and equity >= pot_odds + oop_penalty + depth_margin:
+                expected_extra = (
+                    max(0, int(limpers_behind)) * max(0.0, float(open_raise)) * _LIMPER_CALL_VS_RAISE_RATE
+                )
+                eff_price = required_equity(call_amt, max(0.0, float(pot)) + expected_extra)
+                realised = equity * (_BB_MULTIWAY_REALIZATION if (bb_multiway and not (len(cat) == 2 and cat[0] == cat[1])) else 1.0)
+                if call_amt > 0 and realised >= eff_price + oop_penalty + depth_margin:
+                    self.last_expand_reason = (
+                        f"{chart_reason} | dampen_call eq={realised:.0%} "
+                        f"price={eff_price:.0%} limpers_behind={int(limpers_behind)}"
+                    )
+                    return ('call', call_amt)
+                self.last_expand_reason = (
+                    f"{chart_reason} | dampen_fold eq={realised:.0%} price={eff_price:.0%}"
+                )
+                return _fold_fallback()
+            if chart_action == 'call':
+                self.last_expand_reason = chart_reason
+                if bb_multiway and cat not in _BB_MULTIWAY_DEFEND_RANGE:
+                    self.last_expand_reason = (
+                        f"{chart_reason} | bb_multiway_fold {cat} callers={squeeze_callers}"
+                    )
+                    return _fold_fallback()
+                if self._price_call_allowed(
+                    cat, stack, pot, to_call, open_raise, big_blind, equity, 'open',
+                    callers_behind=squeeze_callers, position=position,
+                ):
+                    return ('call', call_amt)
+                is_pair = len(cat) == 2 and cat[0] == cat[1]
+                realised = equity * (_BB_MULTIWAY_REALIZATION if (bb_multiway and not is_pair) else 1.0)
+                if call_amt > 0 and realised >= pot_odds + oop_penalty + depth_margin:
                     return ('call', call_amt)
                 return _fold_fallback()
             if chart_action == 'fold':
                 self.last_expand_reason = chart_reason
                 if self._price_call_allowed(
                     cat, stack, pot, to_call, open_raise, big_blind, equity, 'open',
+                    callers_behind=squeeze_callers, position=position,
                 ):
                     return ('call', call_amt)
                 return _fold_fallback()
@@ -1923,7 +2080,7 @@ class PreflopStrategy:
                         open_pos=villain_position,
                         three_bet_pos=position,
                     )
-                    return ('raise', min(size, stack))
+                    return ('raise', min(size, max_raise_to))
             if self.should_3bet(
                 hole_cards, position, villain_position,
                 squeeze_callers=squeeze_callers,
@@ -1948,7 +2105,7 @@ class PreflopStrategy:
                     open_pos=villain_position,
                     three_bet_pos=position,
                 )
-                return ('raise', min(size, stack))
+                return ('raise', min(size, max_raise_to))
             if squeeze_callers <= 0:
                 expand_action = self._greenline_vs_open_expand_action(
                     cat, position, villain_position, open_raise, big_blind,
@@ -1963,7 +2120,7 @@ class PreflopStrategy:
                         open_pos=villain_position,
                         three_bet_pos=position,
                     )
-                    return ('raise', min(size, stack))
+                    return ('raise', min(size, max_raise_to))
             # Pot-odds gate: if calling costs more equity than we have, fold.
             # Catches large/all-in raises where range heuristics should not override math.
             # OOP penalty: SB calling OOP requires extra equity vs IP callers
@@ -2016,9 +2173,9 @@ class PreflopStrategy:
                 )
                 if chart_action == 'allin':
                     _preserve_size_map_reason()
-                    return ('raise', stack)
+                    return ('raise', max_raise_to)
                 _preserve_size_map_reason()
-                return ('raise', min(four_bet, stack))
+                return ('raise', min(four_bet, max_raise_to))
 
             if chart_action == 'call':
                 self.last_expand_reason = (
@@ -2065,7 +2222,7 @@ class PreflopStrategy:
                     villain_3bet_pos=villain_position,
                 )
                 _preserve_size_map_reason()
-                return ('raise', min(four_bet, stack))
+                return ('raise', min(four_bet, max_raise_to))
 
             # Position-aware call range (hero's open position determines defend range).
             # Falls back to _3BET_CALL_DEFAULT when hero position unrecognized.
@@ -2084,7 +2241,7 @@ class PreflopStrategy:
                 cat, position, villain_position,
             )
             if chart_action == 'raise':
-                return ('raise', stack)
+                return ('raise', max_raise_to)
             if chart_action == 'call':
                 if not self._chart_call_pressure_allows(
                     cat,
@@ -2112,7 +2269,7 @@ class PreflopStrategy:
             ):
                 return ('call', min(to_call or open_raise, stack))
             if cat in _VS_4BET_FALLBACK_JAM:
-                return ('raise', stack)  # 5-bet shove
+                return ('raise', max_raise_to)  # 5-bet shove
             if cat in _VS_4BET_FALLBACK_CALL:
                 return ('call', min(to_call or open_raise, stack))
             return _fold_fallback()

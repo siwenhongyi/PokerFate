@@ -120,3 +120,49 @@ def test_cfr_flop_book_miss_falls_back_to_local(monkeypatch):
     assert decision.action == "check"
     assert api.last_decision_diagnostics()["decision_source"] == "pokerfate"
     assert api._flop_book_error == "requires_heads_up_active_players"
+
+
+def test_flop_book_lookup_is_usable_from_worker_threads():
+    """Decisions run on executor threads; the cached sqlite connection must
+    work from a thread other than the one that opened it."""
+    import threading
+
+    book = FlopBook()
+    errors: list[BaseException] = []
+    try:
+        book.lookup("BTNvBB_srp100", "4c4d3c", "As2s", [])
+
+        def worker() -> None:
+            try:
+                book.lookup("BTNvBB_srp100", "4c4d3c", "As2s", [("check", 0.0)])
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+    finally:
+        book.close()
+    assert errors == []
+
+
+def test_flop_book_range_action_probs_cover_hero_range():
+    from pokerfate.strategy.range_v2 import hand_combo_map as hcm
+
+    book = FlopBook()
+    try:
+        lookup = book.lookup("BTNvBB_srp100", "4c4d3c", "As2s", [])
+        probs = book.range_action_probs(lookup, "x")
+    finally:
+        book.close()
+    # Board cards are dead: no combo containing them may appear.
+    dead = {hcm.card_to_int(c) for c in map(__import__("pokerfate.core.card", fromlist=["Card"]).Card.from_str, ["4c", "4d", "3c"])}
+    assert probs
+    assert all(0.0 <= p <= 1.0 for p in probs.values())
+    for idx in probs:
+        c1, c2 = hcm.cards_of(idx)
+        assert hcm.card_to_int(c1) not in dead and hcm.card_to_int(c2) not in dead
+    # Hero's own combo probability matches the single-hand lookup.
+    from pokerfate.core.card import Card
+    idx = hcm.COMBO_TO_IDX[tuple(sorted((hcm.card_to_int(Card.from_str("As")), hcm.card_to_int(Card.from_str("2s")))))]
+    assert probs[idx] == pytest.approx(lookup["strategy"]["x"], abs=1e-6)

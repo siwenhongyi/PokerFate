@@ -1136,26 +1136,42 @@ class TestExternalDecisionEngine:
         assert status["engine"] == "g5"
         assert status["mode"] == "g5_all"
 
-    def test_realtime_cfr_decision_engine_status(self):
+    def test_cfr_without_flop_book_decision_engine_status(self, monkeypatch):
+        monkeypatch.setenv("PF_CFR_FLOP_BOOK_ENABLED", "0")
+
+        def unexpected_book(*args, **kwargs):
+            pytest.fail("disabled flop book must not be constructed")
+
+        monkeypatch.setattr("pokerfate.api.FlopBookDecisionEngine", unexpected_book)
         api = PokerFateAPI(
             my_player_id=0,
             big_blind=2.0,
             small_blind=1.0,
             autosave_path=None,
-            decision_engine="realtime-cfr",
+            decision_engine="cfr",
         )
 
         status = api.decision_engine_status()
 
-        assert status["requested"] == "realtime_cfr"
-        assert status["engine"] == "realtime_cfr"
+        assert status["requested"] == "cfr"
+        assert status["engine"] == "cfr"
         assert status["mode"] == "turn_river"
         assert status["enabled"] is True
         assert status["active"] is True
         assert status["shadow"] is False
         assert status["realtime_cfr"] is True
+        assert status["flop_book"] is False
+        assert status["flop_book_requested"] is False
 
-    def test_cfr_decision_engine_status(self):
+        # Changing the main engine must preserve the independent book switch.
+        api.set_decision_engine("local")
+        status = api.set_decision_engine("cfr")
+        assert status["mode"] == "turn_river"
+        assert status["realtime_cfr"] is True
+        assert status["flop_book"] is False
+
+    def test_cfr_decision_engine_status(self, monkeypatch):
+        monkeypatch.delenv("PF_CFR_FLOP_BOOK_ENABLED", raising=False)
         api = PokerFateAPI(
             my_player_id=0,
             big_blind=2.0,
@@ -1174,6 +1190,7 @@ class TestExternalDecisionEngine:
         assert status["shadow"] is False
         assert status["realtime_cfr"] is True
         assert status["flop_book"] is True
+        assert status["flop_book_requested"] is True
 
     def test_realtime_cfr_hero_range_provider_is_public_reach_range(self):
         from pokerfate.strategy.range_v2 import hand_combo_map as hcm
@@ -1188,7 +1205,8 @@ class TestExternalDecisionEngine:
             big_blind=2.0,
             small_blind=1.0,
             autosave_path=None,
-            decision_engine="realtime_cfr",
+            decision_engine="cfr",
+            cfr_flop_book_enabled=False,
         )
         start_hand(api)
         api.deal_hole_cards(["As", "Ah"])
@@ -1211,24 +1229,33 @@ class TestExternalDecisionEngine:
         assert weights[combo_index("AsKs")] > 0.0
         assert weights[combo_index("KhKd")] == 0.0
 
-    def test_invalid_decision_engine_is_pure_local(self):
+    @pytest.mark.parametrize("engine", ["unknown-engine", "realtime_cfr", "realtime-cfr"])
+    def test_invalid_decision_engine_is_pure_local(self, engine):
         api = PokerFateAPI(
             my_player_id=0,
             big_blind=2.0,
             small_blind=1.0,
             autosave_path=None,
-            decision_engine="unknown-engine",
+            decision_engine=engine,
         )
 
         status = api.decision_engine_status()
 
-        assert status["requested"] == "unknown_engine"
+        assert status["requested"] == engine.replace("-", "_")
         assert status["engine"] == "local"
         assert status["enabled"] is False
         assert status["active"] is False
         assert status["shadow"] is False
         assert status["realtime_cfr"] is False
         assert status["flop_book"] is False
+
+    @pytest.mark.parametrize("engine", ["realtime_cfr", "realtime-cfr"])
+    def test_removed_engine_cannot_be_selected_at_runtime(self, engine):
+        api = PokerFateAPI(decision_engine="cfr", cfr_flop_book_enabled=False)
+        before = api.decision_engine_status()
+        with pytest.raises(ValueError, match="must be local, g5, g5_all, or cfr"):
+            api.set_decision_engine(engine)
+        assert api.decision_engine_status() == before
 
     def test_external_engine_decision_is_used_and_recorded(self):
         api = make_api()
@@ -1579,7 +1606,8 @@ class TestExternalDecisionEngine:
             big_blind=2.0,
             small_blind=1.0,
             autosave_path=None,
-            decision_engine="realtime_cfr",
+            decision_engine="cfr",
+            cfr_flop_book_enabled=False,
         )
         api._realtime_cfr_error = "solver_worker_error"
         api._external_decision_engine_error = "solver_worker_error"
@@ -1660,3 +1688,48 @@ class TestExternalDecisionEngine:
 
         assert fake.finished[-1]["winner_payouts"] == {1: 57.0}
         assert "showdown_hands" not in fake.finished[-1]
+
+
+class TestFoldToCbetAnyFirstFlopBet:
+    """fold_to_cbet is 'fold to the first flop bet', whoever bets (2026-11-08)."""
+
+    def _api(self):
+        api = PokerFateAPI(my_player_id=0, big_blind=2.0, autosave_path=None)
+        api.new_hand(
+            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "A", 200.0), PlayerInfo(2, "B", 200.0)],
+            dealer_id=0,
+        )
+        api.deal_hole_cards(["Ac", "Kd"])
+        api.deal_board(["As", "7d", "2c"], street="flop")
+        return api
+
+    def test_response_to_another_villain_first_bet_counts(self):
+        api = self._api()
+        api.notify_action(ActionEvent(1, "raise", 5.0, "flop"))   # A bets first
+        before = api._bot.opponent_model.get(2).fold_to_cbet_opps
+        api.notify_action(ActionEvent(2, "fold", 0.0, "flop"))    # B folds to it
+        s = api._bot.opponent_model.get(2)
+        assert s.fold_to_cbet_opps == before + 1 and s.fold_to_cbet_count >= 1
+        # The bettor itself gets no opportunity.
+        assert api._bot.opponent_model.get(1).fold_to_cbet_opps == 0
+
+    def test_response_to_a_reraise_does_not_count(self):
+        api = self._api()
+        api.notify_action(ActionEvent(1, "raise", 5.0, "flop"))
+        api.notify_action(ActionEvent(2, "raise", 15.0, "flop"))  # re-raise
+        before = api._bot.opponent_model.get(1).fold_to_cbet_opps
+        api.notify_action(ActionEvent(1, "fold", 0.0, "flop"))
+        assert api._bot.opponent_model.get(1).fold_to_cbet_opps == before
+
+
+def test_session_config_event_is_logged(monkeypatch):
+    monkeypatch.setenv("PF_V3_EV_VETO", "1")
+    events = []
+    api = PokerFateAPI(my_player_id=0, big_blind=2.0, autosave_path=None)
+    # Re-emit through the public hook so the payload can be inspected.
+    monkeypatch.setattr(api._log, "raw", lambda ev: events.append(ev))
+    api._log_session_config()
+    assert events and events[-1]["event"] == "session_config"
+    assert events[-1]["env"].get("PF_V3_EV_VETO") == "1"
+    assert "PF_V3_EV_VETO" in events[-1]["resolved"]
+    assert "RAKE_RATE" in events[-1]["resolved"]

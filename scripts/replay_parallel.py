@@ -16,11 +16,11 @@
 
 用法：
     .venv/bin/python -m scripts.replay_parallel \
-        --replay data/calibration_replays/replay_2log.jsonl --max-hands 300
+        --replay /tmp/replay.jsonl --max-hands 300
 
     # 控制 shard 数
     .venv/bin/python -m scripts.replay_parallel \
-        --replay data/calibration_replays/replay_2log.jsonl \
+        --replay /tmp/replay.jsonl \
         --shards 8 --max-hands 300
 """
 from __future__ import annotations

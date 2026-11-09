@@ -156,9 +156,6 @@ async def _run(args: argparse.Namespace) -> int:
     if not args.no_web:
         from pf_entertainment.live_table import LiveTableObserver, start_live_web
         observer = LiveTableObserver(my_uid=result.uid)
-        web_server = await start_live_web(observer, host=args.web_host, port=args.web_port)
-        shown = args.web_host if args.web_host not in ("0.0.0.0", "") else "<本机IP>"
-        print(f"[headless] 实时对局 Web: http://{shown}:{web_server.port}（手机同 WiFi 用本机局域网 IP 访问）")
 
     # Frame hook: feed the live observer and notice LeaveRoomRSP for graceful exit.
     leave_done = asyncio.Event()
@@ -175,6 +172,15 @@ async def _run(args: argparse.Namespace) -> int:
 
     # Connect, trying each server in turn (the :443 entry is WAF-blocked).
     session = _mk_session()
+    if observer is not None:
+        web_server = await start_live_web(
+            observer, host=args.web_host, port=args.web_port,
+            # Resolve the current session on every read: server fallback below
+            # replaces it (and its bankroll baseline), so don't bind its method.
+            bankroll_source=lambda: session.bankroll_dashboard(),
+        )
+        shown = args.web_host if args.web_host not in ("0.0.0.0", "") else "<本机IP>"
+        print(f"[headless] 实时对局 Web: http://{shown}:{web_server.port}（手机同 WiFi 用本机局域网 IP 访问）")
     last_exc = None
     for idx in range(len(result.servers)):
         try:

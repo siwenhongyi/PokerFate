@@ -19,6 +19,7 @@ from typing import Any, Callable, Optional, Sequence
 import numpy as np
 
 from pokerfate.core.game_state import Action, ActionType, GameState, Player
+from pokerfate.strategy.range_v2 import hand_combo_map as hcm
 from pokerfate.decision.opponent_numeric_prior import (
     NumericOpponentPrior,
     build_numeric_prior,
@@ -109,7 +110,15 @@ class FlopBook:
             path = self.dir / f"{scenario_id}.db"
             if not path.is_file():
                 raise BookMiss(f"scenario_db_missing:{scenario_id}")
-            self._db[scenario_id] = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            # Decisions run on asyncio executor threads, so the cached
+            # connection is used from several threads. The book is a
+            # read-only file and each lookup is a single SELECT, so sharing
+            # one connection across threads is safe.
+            self._db[scenario_id] = sqlite3.connect(
+                f"file:{path}?mode=ro",
+                uri=True,
+                check_same_thread=False,
+            )
         return self._db[scenario_id]
 
     def _rows(self, board: str) -> dict[frozenset[int], int]:
@@ -224,7 +233,42 @@ class FlopBook:
             "flop_representative": representative,
             "exact": bool(exact),
             "scenario": scenario_id,
+            "_range": (matrix, rows, perm, canonical, representative, exact, list(node["actions"])),
         }
+
+    def range_action_probs(self, lookup: dict[str, Any], action: str) -> dict[str, float]:
+        """P(actor takes ``action`` | combo) for every live 1326 combo at the
+        looked-up node, keyed by ``hand_combo_map`` combo index.
+
+        Used to carry the book's own range filtering into later streets so the
+        turn/river solver sees the hero range the flop strategy actually left,
+        instead of a hand-written bucket frequency table.
+        """
+        payload = lookup.get("_range")
+        if not payload:
+            return {}
+        matrix, rows, perm, canonical, representative, exact, actions = payload
+        try:
+            col = actions.index(action)
+        except ValueError:
+            return {}
+        out: dict[int, float] = {}
+        for idx in range(len(hcm.ALL_COMBOS)):
+            c1, c2 = hcm.cards_of(idx)
+            hero = f"{c1}{c2}"
+            canon = self._map_hand_exact(hero, perm)
+            if exact:
+                row_idx = rows.get(frozenset((_card_idx(canon[0]), _card_idx(canon[1]))))
+            else:
+                row_idx = self._map_hand_cross(canon, canonical, representative, rows)
+            if row_idx is None:
+                continue
+            raw = matrix[row_idx]
+            total = float(raw.sum())
+            if total <= 0.0:
+                continue
+            out[idx] = float(raw[col]) / total
+        return out
 
     def _walk_path(
         self,
@@ -319,6 +363,10 @@ class FlopBookDecisionEngine:
         self.book = book or FlopBook(self.options.book_dir or DEFAULT_BOOK_DIR)
         self._last_result: dict[str, Any] = {}
         self._last_error = ""
+        # P(hero takes the selected action | combo) for all 1326 combos at the
+        # node of the last successful decision, keyed by combo index. Kept off
+        # ``last_result`` so diagnostics/logs do not carry 1326 floats.
+        self.last_hero_reach_update: dict[int, float] = {}
 
     @property
     def last_result(self) -> dict[str, Any]:
@@ -336,6 +384,7 @@ class FlopBookDecisionEngine:
         self._last_result = {}
         self._last_error = ""
 
+        self.last_hero_reach_update = {}
         prepared = self._prepare(ctx)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         if prepared is None:
@@ -370,6 +419,10 @@ class FlopBookDecisionEngine:
             return None
 
         selected_prob = float(selection.get("selected_prob", lookup["strategy"].get(selected_label, 0.0)))
+        try:
+            self.last_hero_reach_update = self.book.range_action_probs(lookup, selected_label)
+        except Exception:
+            self.last_hero_reach_update = {}
         self._last_result = {
             **meta,
             "status": "ok",

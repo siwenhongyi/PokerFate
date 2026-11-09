@@ -10,12 +10,14 @@ import numpy as np
 
 from pokerfate.bot.opponent_model import OpponentModel
 from pokerfate.core.card import Card
+from pokerfate.core.config import required_equity
 from pokerfate.core.equity import EquityCalculator
 from pokerfate.core.game_state import Action, ActionType, GameState, Player, Street
 from pokerfate.core.hand_evaluator import HandEvaluator, HandRank
 from pokerfate.core.position import normalize_position
 from pokerfate.data import format_action, lookup_gto
 from pokerfate.strategy.draw_utils import is_drawing_heavy
+from pokerfate.strategy import preflop as _pf_mod
 from pokerfate.strategy.gto import GTOMath
 from pokerfate.strategy.postflop import (
     BoardTexture,
@@ -233,6 +235,7 @@ class PokerBot:
             or (position == 'BB' and facing_action == 'none' and to_call == 0)
         )
         num_limpers = self._count_limpers(gs, player) if facing_action == 'none' else 0
+        limpers_behind = self._count_limpers_before_raise(gs, player) if facing_action == 'open' else 0
 
         stack_bb = stack / bb if bb > 0 else 100.0
         villain_pos = self._primary_raiser_position(gs, player) if facing_action in ('open', '3bet', '4bet') else ''
@@ -252,6 +255,7 @@ class PokerBot:
             is_ip=is_ip,
             big_blind=bb,
             stack=stack,
+            current_bet=player.current_bet,
             pot=pot,
             is_big_blind=free_check_option,
             num_limpers=num_limpers,
@@ -271,6 +275,7 @@ class PokerBot:
             villain_hands_seen=preflop_villain_stats.hands_seen if preflop_villain_stats else 0,
             villain_fold_to_3bet=preflop_villain_stats.fold_to_3bet if preflop_villain_stats else 0.55,
             villain_fold_to_3bet_opps=preflop_villain_stats.fold_to_3bet_opps if preflop_villain_stats else 0,
+            limpers_behind=limpers_behind,
         )
 
         self._last_reasoning = self._preflop_reasoning(
@@ -315,7 +320,9 @@ class PokerBot:
             'preflop_villain_fold_to_3bet_opps': preflop_villain_stats.fold_to_3bet_opps if preflop_villain_stats else 0,
             'preflop_expand_reason': preflop_expand_reason,
         }
-        return self._to_action(action_str, amount, raw_to_call, stack)
+        return self._to_action(
+            action_str, amount, raw_to_call, stack, current_bet=player.current_bet,
+        )
 
     def _classify_preflop_action(self, gs: GameState, player: Player):
         """Returns (facing_action_str, open_raise_amount).
@@ -325,6 +332,29 @@ class PokerBot:
         full raise are ignored for bet-level classification.
         """
         raises = self._effective_preflop_raises(gs)
+        # Once hero has accepted the last full bet, an insufficient all-in
+        # only creates a top-up. It is neither a new RFI nor a new bet level.
+        # An unanswered full opponent raise must still use its normal branch.
+        last_hero_idx = -1
+        short_after_hero = False
+        for idx, item in enumerate(gs.action_history):
+            if len(item) < 2:
+                continue
+            if len(item) >= 3 and str(item[2]).lower() != 'preflop':
+                continue
+            pid, act = item[:2]
+            if pid == player.player_id and act.action_type in (ActionType.CALL, ActionType.RAISE):
+                last_hero_idx = idx
+                short_after_hero = False
+            elif last_hero_idx >= 0 and act.action_type == ActionType.RAISE:
+                short_after_hero = short_after_hero or act.amount > player.current_bet
+        if (
+            last_hero_idx >= 0
+            and short_after_hero
+            and gs.to_call(player) > 0
+            and not any(idx > last_hero_idx for idx, _pid, _act in raises)
+        ):
+            return 'short_allin', gs.current_bet
         opp_raises = [(pid, act) for _idx, pid, act in raises if pid != player.player_id]
         if not opp_raises:
             return 'none', 0.0
@@ -347,6 +377,31 @@ class PokerBot:
             if act.action_type == ActionType.CALL and pid != player.player_id:
                 n += 1
         return n
+
+    def _count_limpers_before_raise(self, gs: GameState, player: Player) -> int:
+        """Opponents who limped before the first preflop raise and have not
+        yet acted on it: they will usually call it (pool rate ~65%) and grow
+        the pot hero is being asked to call into."""
+        limpers: set[int] = set()
+        raised = False
+        for item in gs.action_history:
+            if len(item) >= 3 and str(item[2]).lower() != 'preflop':
+                continue
+            pid, act = item[0], item[1]
+            if pid == player.player_id:
+                continue
+            if act.action_type == ActionType.RAISE:
+                if raised:
+                    continue
+                raised = True
+            elif act.action_type == ActionType.CALL:
+                if not raised:
+                    limpers.add(pid)
+                else:
+                    limpers.discard(pid)   # already acted on the raise
+            elif act.action_type == ActionType.FOLD:
+                limpers.discard(pid)
+        return len(limpers)
 
     def _count_callers_after_last_preflop_raise(self, gs: GameState, player: Player) -> int:
         """Count non-hero callers after the latest preflop raise."""
@@ -373,7 +428,19 @@ class PokerBot:
             return 0.0
         stats = [self.opponent_model.get(pid).to_villain_stats() for pid in opp_ids]
         _, _, _, _, n_sticky = aggregate_villain_stats(stats)
-        return max(0.0, min(1.0, n_sticky / max(1, len(stats))))
+        density = n_sticky / max(1, len(stats))
+        if getattr(_pf_mod, '_ISO_SPLIT_ENABLED', True):
+            # Postflop stickiness (value_lean >= 1.2) needs fold_to_cbet /
+            # river samples that only 8% of well-sampled opponents have, so
+            # this was 0 in 90% of preflop decisions at a 66%-VPIP table.
+            # Preflop looseness is the sticky evidence that is actually
+            # available: VPIP >= 45% with AF < 1.5 over >= 10 hands.
+            loose = sum(
+                1 for s in stats
+                if s.hands_seen >= 10 and s.vpip >= 0.45 and s.af < 1.5
+            )
+            density = max(density, loose / max(1, len(stats)))
+        return max(0.0, min(1.0, density))
 
     def _equity_ml_trigger(self, gs: GameState, player: Player,
                            target_opp_id: int, street: str) -> str:
@@ -741,7 +808,10 @@ class PokerBot:
             and facing_bet
             and is_drawing_heavy(player.hole_cards, board)
         )
-        facing_large_bet = facing_bet and to_call > 0 and pot_odds_pre >= 0.30 and spr < 5.0
+        # Size flag: rake-free call price (pot_odds_pre carries the rake and is
+        # only for equity comparisons).
+        raw_pot_odds_pre = to_call / (pot + to_call) if (facing_bet and to_call > 0 and pot + to_call > 0) else 0.0
+        facing_large_bet = facing_bet and to_call > 0 and raw_pot_odds_pre >= 0.30 and spr < 5.0
         exploit_tighten_call = bool(value_only and facing_large_bet)
 
         # ── P3: measured fold-to-cbet (more specific than generic fold_rate) ──
@@ -1051,6 +1121,9 @@ class PokerBot:
         # 加注金额不超过对手有效可投入的上限（超出无意义）。
         # 有效上限 = 对手剩余筹码 + 对手本街已投入（因为 amount 是 bot 的总额语义）。
         if action_str == 'raise' and amount > 0:
+            # The local postflop engine sizes additional chips against the
+            # remaining stack. Convert once to the public raise-to contract.
+            amount += player.current_bet
             acting_effective = [
                 p.stack + p.current_bet
                 for p in gs.active_players
@@ -1121,7 +1194,9 @@ class PokerBot:
             river_relative_assessment=river_relative_assessment,
             street_relative_assessment=street_relative_assessment,
         )
-        return self._to_action(action_str, amount, raw_to_call, stack)
+        return self._to_action(
+            action_str, amount, raw_to_call, stack, current_bet=player.current_bet,
+        )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1150,10 +1225,7 @@ class PokerBot:
                     float(opp.current_bet or 0.0) - hero_all_in_bet,
                 )
             contestable_pot = max(0.0, contestable_pot - uncallable)
-        pot_odds = (
-            effective_call / (contestable_pot + effective_call)
-            if effective_call > 0 and contestable_pot + effective_call > 0 else 0.0
-        )
+        pot_odds = required_equity(effective_call, contestable_pot)
         return raw_to_call, effective_call, contestable_pot, pot_odds
 
     @staticmethod
@@ -1452,7 +1524,10 @@ class PokerBot:
         cat = _hand_category(hole_cards)
         depth = GTOMath.stack_bb_category(stack_bb * big_blind, big_blind)
         eq = f"胜率{self._last_equity:.0%}"
-        facing_cn = {"none": "无开牌", "open": "面对开加", "3bet": "面对3bet", "4bet": "面对4bet"}
+        facing_cn = {
+            "none": "无开牌", "open": "面对开加", "3bet": "面对3bet", "4bet": "面对4bet",
+            "short_allin": "不足额全押补差（不升级下注级别）",
+        }
         facing = facing_cn.get(facing_action, facing_action)
         tag = "【GTOv2·翻前】"
         meta = f"深度{depth} {stack_bb:.0f}bb"
@@ -1516,7 +1591,7 @@ class PokerBot:
         # 展示的赔率 / 所需胜率要按 effective (能付金额) 算，否则会像 H40 那样
         # 显示 "底池赔率33%" 但实际 effective 赔率只有 5-10%。
         effective_call = min(to_call, stack) if (stack > 0 and to_call > 0) else to_call
-        pot_odds = effective_call / (pot + effective_call) if effective_call > 0 else 0.0
+        pot_odds = required_equity(effective_call, pot)
         spr_lbl = GTOMath.spr_category(spr)
         mw = f"{num_opp}人底池" if num_opp > 1 else "单挑"
 
@@ -2056,7 +2131,10 @@ class PokerBot:
 
         return max(-cap, min(cap, need_adj))
 
-    def _to_action(self, action_str: str, amount: float, to_call: float, stack: float) -> Action:
+    def _to_action(
+        self, action_str: str, amount: float, to_call: float, stack: float,
+        *, current_bet: float = 0.0,
+    ) -> Action:
         if action_str == 'fold':
             return Action(ActionType.FOLD)
         if action_str == 'check':
@@ -2065,10 +2143,12 @@ class PokerBot:
             call_amt = min(to_call, stack)
             return Action(ActionType.CALL, call_amt)
         if action_str == 'raise':
-            raise_amt = min(amount, stack)
-            if raise_amt <= to_call:
-                # Can't raise less than call; just call
-                return Action(ActionType.CALL, min(to_call, stack))
+            raise_amt = min(amount, current_bet + stack)
+            if raise_amt <= current_bet + to_call:
+                # Compare raise-to with call-to, not the additional call cost.
+                if to_call > 0:
+                    return Action(ActionType.CALL, min(to_call, stack))
+                return Action(ActionType.CHECK)
             return Action(ActionType.RAISE, raise_amt)
         return Action(ActionType.FOLD)
 

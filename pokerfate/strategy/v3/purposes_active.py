@@ -1073,7 +1073,18 @@ class RangeCbet(Purpose):
         # SPR 上限用软过渡 5.0 而非硬 4.0，避免单挑 PFR 在 SPR 4-5 的缝隙
         # 里 standard (SPR≥5) 和 multi_commit (SPR≤4) 都不触发。
         multi_eq_need = max(0.30, 0.45 - 0.05 * max(0, ctx.num_opponents - 2))
-        standard = (ctx.num_opponents <= 2 and ctx.spr >= 5.0)
+        # Air / weak-draw range bets need every opponent to fold. Measured on
+        # 2026-11-06/07 logs (first postflop bet, flop): one opponent facing
+        # folds 32% (n=53), each of two facing folds 48% (n=123), so both
+        # folding is ~23% while a 0.33-0.40 pot bet after 9% rake needs
+        # 27-31%. HU the bet is break-even; 2-way it is paid for by fold
+        # equity that is not there, so air only range-bets heads-up. Made
+        # hands keep the 2-way standard path (they sell value, not folds).
+        standard_air = ctx.hero_bucket in ('air', 'weak_draw')
+        standard = ctx.spr >= 5.0 and (
+            ctx.num_opponents <= 1
+            or (ctx.num_opponents == 2 and not standard_air)
+        )
         multi_commit = (
             ctx.num_opponents <= 4
             and ctx.spr <= 5.0
@@ -1912,7 +1923,10 @@ class DoubleBarrel(Purpose):
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
         if ctx.facing_bet or not ctx.is_pfr:
             return TriggerResult(False)
-        if ctx.my_prev_actions.get('flop') != 'bet':
+        # Hero's own bets are stored as 'raise' (Action.RAISE covers bets);
+        # comparing against 'bet' alone made this purpose unreachable (0 hits
+        # in 1786 replayed hands, 2026-11-08).
+        if ctx.my_prev_actions.get('flop') not in ('bet', 'raise'):
             return TriggerResult(False)
         if _fragile_underpair_after_resistance(ctx):
             return TriggerResult(False)
@@ -1936,6 +1950,10 @@ class DoubleBarrel(Purpose):
             and blf.strong_nuts <= 0.60
         )
         if ctx.hero_bucket in ('air', 'weak_draw', 'draw') and ctx.equity_range < need and not barrel_context_ok:
+            return TriggerResult(False)
+        # A value barrel needs the equity to back it: 'nuts'/'strong' buckets
+        # include board-made or dominated holdings whose range equity is low.
+        if ctx.hero_bucket in ('nuts', 'strong', 'medium') and ctx.equity_range < 0.45:
             return TriggerResult(False)
         # good barrel card = high (A/K/Q) turn or equity >= need
         if ctx.equity_range < need and ctx.board_sig.high_card_rank < 12 and not barrel_context_ok:
@@ -1963,13 +1981,16 @@ class TripleBarrel(Purpose):
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
         if ctx.facing_bet or not ctx.is_pfr:
             return TriggerResult(False)
-        if ctx.my_prev_actions.get('flop') != 'bet':
+        if ctx.my_prev_actions.get('flop') not in ('bet', 'raise'):
             return TriggerResult(False)
-        if ctx.my_prev_actions.get('turn') != 'bet':
+        if ctx.my_prev_actions.get('turn') not in ('bet', 'raise'):
             return TriggerResult(False)
         if _fragile_underpair_after_resistance(ctx):
             return TriggerResult(False)
         if ctx.hero_bucket not in ('nuts', 'strong', 'air'):
+            return TriggerResult(False)
+        if ctx.hero_bucket in ('nuts', 'strong') and ctx.equity_range < 0.50:
+            # Third barrel for value needs to be ahead of the calling range.
             return TriggerResult(False)
         blf = bluff_context.evaluate(ctx)
         if ctx.hero_bucket == 'air' and blf.blocker_score < 0.35:
@@ -2005,9 +2026,13 @@ class StopAndGo(Purpose):
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
         if ctx.facing_bet:
             return TriggerResult(False)
-        if ctx.my_prev_actions.get('flop') != 'bet':
+        if ctx.my_prev_actions.get('flop') not in ('bet', 'raise'):
             return TriggerResult(False)
         if ctx.my_prev_actions.get('turn') != 'check':
+            return TriggerResult(False)
+        # Stop-and-go is a bluff line; made hands with showdown value take the
+        # value purposes instead of betting pot with 26% equity (h241, 2026-11).
+        if ctx.hero_bucket not in ('air', 'weak_draw', 'draw') and ctx.equity_range >= 0.25:
             return TriggerResult(False)
         vs = ctx.villain_stats
         # stop-and-go EV 条件：对手会弃、但不过度弃（否则 flop-bet 就直接成功）、

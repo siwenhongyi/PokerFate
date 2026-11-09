@@ -15,7 +15,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from typing import Any
+from typing import Any, Callable
 
 # ── game wire decoding (mirrors pf_intercept.bot.bridge, kept dependency-light) ──
 
@@ -95,6 +95,9 @@ class LiveTableObserver:
         self._my_seat: int | None = None
         self._my_hole: list[str] = []
         self._action_seat: int | None = None
+        # Key by player identity so a replacement in the same seat cannot
+        # inherit the previous occupant's settlement baseline.
+        self._hand_start_stacks: dict[str, int] = {}
 
     def _reset_hand(self) -> None:
         self._board = []
@@ -102,6 +105,7 @@ class LiveTableObserver:
         self._street = "preflop"
         self._my_hole = []
         self._action_seat = None
+        self._hand_start_stacks.clear()
         for s in self._seats.values():
             s["bet"] = 0
             s["folded"] = False
@@ -141,6 +145,7 @@ class LiveTableObserver:
         self._bb = _chip(room_info.get("bb"), self._bb)
         self._seat_num = _chip(room_info.get("seat_num"), self._seat_num) or 6
         ts = msg.get("table_status") or {}
+        self._hand_start_stacks.clear()
         for entry in ts.get("seat") or []:
             if not isinstance(entry, dict):
                 continue
@@ -152,11 +157,13 @@ class LiveTableObserver:
                 s["uid"] = str(uid)
                 s["name"] = player.get("name") or s["name"] or f"玩家{seatid}"
                 s["empty"] = False
+                if "begin_chips" in entry:
+                    self._hand_start_stacks[str(uid)] = _chip(entry["begin_chips"])
                 if self.my_uid and str(uid) == self.my_uid:
                     self._my_seat = seatid
             else:
                 s["empty"] = not bool(entry.get("has_card"))
-            s["stack"] = _chip(entry.get("hand_chips"), s["stack"])
+            s["stack"] = _chip(entry.get("hand_chips"), 0)
             at = _chip(entry.get("last_action_type"), 0)
             s["folded"] = at in _FOLD_ACTIONS
             s["allin"] = bool(entry.get("is_allin"))
@@ -169,10 +176,10 @@ class LiveTableObserver:
             self._street = _STAGE_TO_STREET.get(stage, self._street)
         playing = msg.get("playing_status") or {}
         if "action_seatid" in playing:
-            self._action_seat = _chip(playing.get("action_seatid"), -1)
+            self._action_seat = _chip(playing.get("action_seatid"), 0)
 
     def _h_sit_down_rsp(self, msg: dict) -> None:
-        seatid = _chip(msg.get("seatid"), -1)
+        seatid = _chip(msg.get("seatid"), 0)
         if seatid < 0:
             return
         self._my_seat = seatid
@@ -184,7 +191,7 @@ class LiveTableObserver:
 
     def _h_sit_down_brc(self, msg: dict) -> None:
         status = msg.get("status") or {}
-        seatid = _chip(status.get("seatid"), -1)
+        seatid = _chip(status.get("seatid"), 0)
         if seatid < 0:
             return
         player = status.get("player") or {}
@@ -194,6 +201,16 @@ class LiveTableObserver:
             s["name"] = player.get("name") or s["name"] or f"玩家{seatid}"
         s["stack"] = _chip(status.get("hand_chips"), s["stack"])
         s["empty"] = False
+
+    def _h_other_leave(self, msg: dict) -> None:
+        # OtherLeaveRoomBRC identifies the departing player by uid only;
+        # unlike action broadcasts, it has no seatid field (not even seat 0).
+        uid = msg.get("uid")
+        if uid is None:
+            return
+        seatid = next((i for i, s in self._seats.items()
+                       if s["uid"] and s["uid"] == str(uid)), -1)
+        self._h_leave({"seatid": seatid})
 
     def _h_leave(self, msg: dict) -> None:
         seatid = _chip(msg.get("seatid"), -1)
@@ -205,8 +222,7 @@ class LiveTableObserver:
 
     def _h_hand_card(self, msg: dict) -> None:
         cards = [c for c in (_card_str(msg.get(k)) for k in ("card1", "card2", "card3", "card4")) if c]
-        seatid = msg.get("seatid")
-        seatid = _chip(seatid, self._my_seat if self._my_seat is not None else -1)
+        seatid = _chip(msg.get("seatid"), 0)
         if cards:
             self._my_hole = cards[:4]
             if seatid >= 0:
@@ -219,10 +235,13 @@ class LiveTableObserver:
         for entry in msg.get("start_info") or []:
             if not isinstance(entry, dict):
                 continue
-            seatid = _chip(entry.get("seatid"), -1)
+            seatid = _chip(entry.get("seatid"), 0)
             if seatid < 0:
                 continue
-            self._seat(seatid)["stack"] = _chip(entry.get("chips"), self._seat(seatid)["stack"])
+            s = self._seat(seatid)
+            s["stack"] = _chip(entry.get("chips"), 0)
+            if s["uid"]:
+                self._hand_start_stacks[s["uid"]] = s["stack"]
 
     def _h_round_start(self, msg: dict) -> None:
         stage = _chip(msg.get("stage"), 0)
@@ -239,14 +258,19 @@ class LiveTableObserver:
             s["bet"] = 0
 
     def _h_action(self, msg: dict) -> None:
-        seatid = _chip(msg.get("seatid"), self._action_seat if self._action_seat is not None else -1)
+        # Protobuf omits default-valued fields, so seat 0's broadcasts arrive
+        # with no ``seatid`` at all. Treating that as "unknown" froze the
+        # hero's stack at the buy-in on the web whenever hero sat in seat 0
+        # (2026-11-08). A missing seatid is seat 0.
+        seatid = _chip(msg.get("seatid"), 0)
         at = _chip(msg.get("action_type"), 0)
         chips = _chip(msg.get("chips"), 0)
         s = self._seat(seatid) if seatid >= 0 else None
         label = _ACTION_LABEL.get(at, "")
         if s is not None:
-            if "hand_chips" in msg:
-                s["stack"] = _chip(msg.get("hand_chips"), s["stack"])
+            # This field is the remaining stack, including zero when an
+            # all-in (or a call/blind exhausting the stack) omits the default.
+            s["stack"] = _chip(msg.get("hand_chips"), 0)
             if chips > 0:
                 s["bet"] += chips
             if at in _FOLD_ACTIONS:
@@ -262,19 +286,37 @@ class LiveTableObserver:
             self._feed.append(f"{who} {label}{amt}")
 
     def _h_action_notify(self, msg: dict) -> None:
-        self._action_seat = _chip(msg.get("seatid"), self._action_seat if self._action_seat is not None else -1)
+        self._action_seat = _chip(msg.get("seatid"), 0)
 
     def _h_round_over(self, msg: dict) -> None:
+        # Server totals account for uncalled bet returns and side pots.
+        # An empty notification without a pool is not a new total.
+        if "pool" in msg:
+            self._pot = sum(_chip(p) for p in msg.get("pool") or [])
         for s in self._seats.values():
             s["bet"] = 0
 
     def _h_winner(self, msg: dict) -> None:
+        # Net profit already includes refunds and rake. Adding gross winnings
+        # to the last action stack would miss refunds (or count money twice).
+        # Keep the baseline unchanged so repeated results are idempotent.
+        for p in msg.get("profit") or []:
+            if not isinstance(p, dict):
+                continue
+            uid = p.get("uid")
+            seatid = _chip(p.get("seatid"), 0)
+            if uid is not None:
+                seatid = next((i for i, s in self._seats.items()
+                               if s["uid"] == str(uid)), -1)
+            s = self._seats.get(seatid)
+            if s is not None and s["uid"] in self._hand_start_stacks:
+                s["stack"] = self._hand_start_stacks[s["uid"]] + _chip(p.get("chips"))
         winners = msg.get("winner") or []
         names = []
         for w in winners:
             if not isinstance(w, dict):
                 continue
-            seatid = _chip(w.get("seatid"), -1)
+            seatid = _chip(w.get("seatid"), 0)  # protobuf omits seat 0
             name = self._seats.get(seatid, {}).get("name") or (
                 "我" if seatid == self._my_seat else f"座位{seatid}")
             names.append(f"{name} 赢 {_chip(w.get('chips'),0)}")
@@ -332,16 +374,20 @@ class LiveTableObserver:
             }
 
 
-class _StubRuntime:
-    """Minimal runtime so EntertainmentWebServer can serve the live tab in
-    headless mode (other tabs degrade to empty — they need the proxy stack)."""
+class _HeadlessRuntime:
+    """Expose headless bankroll data to the existing Web dashboard."""
 
-    def __init__(self) -> None:
+    def __init__(self, bankroll_source: Callable[[], dict] | None = None) -> None:
         import logging
         self.log = logging.getLogger("pf_live_web")
+        self._bankroll_source = bankroll_source
 
     def status_data(self) -> dict:
-        return {"session_state": "headless", "mode": "headless"}
+        return {
+            "session_state": "headless",
+            "mode": "headless",
+            "bot_dashboard": self._bankroll_source() if self._bankroll_source else None,
+        }
 
     def bot_settings_data(self) -> dict:
         return {}
@@ -350,8 +396,11 @@ class _StubRuntime:
         return {}
 
 
-async def start_live_web(observer: "LiveTableObserver", *, host: str = "127.0.0.1", port: int = 9022):
-    """Start the entertainment web server bound to this observer's snapshot.
+async def start_live_web(
+    observer: "LiveTableObserver", *, host: str = "127.0.0.1", port: int = 9022,
+    bankroll_source: Callable[[], dict] | None = None,
+):
+    """Start the entertainment web server with live-table and bankroll snapshots.
 
     Returns the running EntertainmentWebServer (call ``await server.start()``
     is already done).  The live tab polls /api/live → observer.snapshot().
@@ -359,7 +408,8 @@ async def start_live_web(observer: "LiveTableObserver", *, host: str = "127.0.0.
     from pf_entertainment.web import EntertainmentWebServer
 
     server = EntertainmentWebServer(
-        runtime=_StubRuntime(), host=host, port=port, live_source=observer.snapshot
+        runtime=_HeadlessRuntime(bankroll_source), host=host, port=port,
+        live_source=observer.snapshot,
     )
     await server.start()
     return server
@@ -369,7 +419,7 @@ _HANDLERS = {
     "pb.EnterRoomRSP": LiveTableObserver._h_enter_room,
     "pb.SitDownRSP": LiveTableObserver._h_sit_down_rsp,
     "pb.SitDownBRC": LiveTableObserver._h_sit_down_brc,
-    "pb.OtherLeaveRoomBRC": LiveTableObserver._h_leave,
+    "pb.OtherLeaveRoomBRC": LiveTableObserver._h_other_leave,
     "pb.LeaveRoomBRC": LiveTableObserver._h_leave,
     "pb.HandCardRSP": LiveTableObserver._h_hand_card,
     "pb.DealerInfoRSP": LiveTableObserver._h_dealer_info,

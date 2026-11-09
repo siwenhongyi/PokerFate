@@ -26,7 +26,7 @@ from pokerfate.core.card import Card
 from pokerfate.core.hand_evaluator import HandEvaluator
 
 
-TS_RE = re.compile(r"^\[\d{2}:\d{2}:\d{2}\]\s*")
+TS_RE = re.compile(r"^\[(?:\d{4}-\d{2}-\d{2} )?\d{2}:\d{2}:\d{2}\]\s*")
 HAND_HEADER_RE = re.compile(r"第\s*(\d+)\s*手\s+(.*)$")
 PLAYER_RE = re.compile(r"(.+?)(?:\(([^)]+)\))?\s+(\d+(?:\.\d+)?)bb\s+\[([^\]]*)\]")
 STREET_RE = re.compile(r"──\s*(翻牌前|翻牌|转牌|河牌)\s*(.*?)\s*(?:底池\s+(\d+))?\s*─")

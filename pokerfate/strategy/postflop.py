@@ -23,6 +23,7 @@ from typing import Dict, List, Optional, Tuple
 _U_CAP = 0.20
 
 from pokerfate.core.card import Card
+from pokerfate.core.config import required_equity
 from pokerfate.strategy.v3 import (
     BlockerSet, DecisionCtx, DecisionOutput, DrawProfile, V3Engine, VillainStats,
 )
@@ -274,7 +275,7 @@ def _protection_raise_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
         and ctx.street in ('flop', 'turn')
         and ctx.hero_bucket in ('medium', 'strong')
         and ctx.to_call > 0
-        and (active or pressure >= 0.25 or ctx.pot_odds <= _v3_defensive._PR_MAX_POT_ODDS + 0.05)
+        and (active or pressure >= 0.25 or ctx.raw_pot_odds <= _v3_defensive._PR_MAX_POT_ODDS + 0.05)
     )
     if not active and not near:
         return None
@@ -288,7 +289,7 @@ def _protection_raise_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
         tag = f"opp>{3}"
     elif ctx.spr < _v3_defensive._PR_MIN_SPR or ctx.spr > _v3_defensive._PR_MAX_SPR:
         tag = 'spr'
-    elif ctx.pot_odds > _v3_defensive._PR_MAX_POT_ODDS:
+    elif ctx.raw_pot_odds > _v3_defensive._PR_MAX_POT_ODDS:
         tag = f"po>{_pct(_v3_defensive._PR_MAX_POT_ODDS)}"
     elif ctx.hero_bucket not in ('medium', 'strong'):
         tag = f"bucket={ctx.hero_bucket}"
@@ -765,7 +766,11 @@ class PostflopStrategy:
         raw_to_call = max(0.0, float(to_call or 0.0))
         effective_call = min(raw_to_call, stack) if raw_to_call > 0 else 0.0
         pot = max(0.0, float(pot or 0.0) - max(0.0, raw_to_call - effective_call))
-        pot_odds = (
+        # pot_odds is the rake-adjusted break-even equity for the call; every
+        # ``equity >= pot_odds`` comparison downstream inherits the rake.
+        pot_odds = required_equity(effective_call, pot)
+        # Rake-free call price: the bet-SIZE measure (see DecisionCtx.raw_pot_odds).
+        raw_pot_odds = (
             effective_call / (pot + effective_call)
             if effective_call > 0 and (pot + effective_call) > 0 else 0.0
         )
@@ -809,7 +814,7 @@ class PostflopStrategy:
             spr=spr,
             pot_odds=pot_odds,
             facing_bet=facing_bet,
-            facing_large_bet=(pot_odds >= 0.30 and spr < 5),
+            facing_large_bet=(raw_pot_odds >= 0.30 and spr < 5),
             hero_bucket=hero_bucket,
             hero_made_subtype=hmi.subtype,
             hero_hand_rank=hmi.hand_rank,

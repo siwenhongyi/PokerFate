@@ -11,6 +11,7 @@ import importlib.util
 import json
 import math
 import os
+import random
 import re
 import sys
 import time
@@ -21,6 +22,8 @@ from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
+from pokerfate.core.card import Card
+from pokerfate.core.config import RAKE_CAP_BB, RAKE_RATE
 from pokerfate.core.game_state import Action, ActionType, GameState, Player
 from pokerfate.core.hand_evaluator import HandEvaluator, HandRank
 from pokerfate.decision.opponent_numeric_prior import (
@@ -30,14 +33,18 @@ from pokerfate.decision.opponent_numeric_prior import (
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
 
 
+# postflop-solver charges ``min(rake_rate × pot, rake_cap)`` in chip units, so a
+# cap of 0 silently disables rake. The live game is uncapped (see
+# ``core.config``), which we express as a cap far above any reachable pot.
+_UNCAPPED_RAKE_CHIPS = 10 ** 9
 BASE_MENU = {
     "flop_bets": [33.0, 100.0],
     "turn_bets": [33.0, 75.0, 150.0],
     "river_bets": [33.0, 66.0, 100.0, 150.0],
     "future_river_bets": [66.0, 150.0],
     "raises": [2.2, 3.0],
-    "rake_rate": 0.09,
-    "rake_cap": 0.0,
+    "rake_rate": float(RAKE_RATE),
+    "rake_cap": float(_UNCAPPED_RAKE_CHIPS if RAKE_CAP_BB <= 0.0 else RAKE_CAP_BB * 10.0),
     "add_allin_threshold": 1.5,
     "force_allin_threshold": 0.15,
     "merging_threshold": 0.0,
@@ -45,6 +52,15 @@ BASE_MENU = {
 DEFAULT_ACCURACY = {"turn": 1.5, "river": 1.0}
 DEFAULT_TIMEOUT_SEC = 10.0
 DEFAULT_MAX_ITERATIONS = 1000
+MIN_SOLVER_STACK_BB = 0.1
+# Child-node response EVs are only trusted when hero's combo takes the action
+# at least this often in equilibrium (see _response_adjusted_ev_detail_from_result).
+MIN_RESPONSE_EV_REACH_PROB = 0.02
+# Actions whose final EV is within this margin of the best one are treated as
+# equivalent and sampled by GTO frequency; the margin is the larger of a fixed
+# bb amount and a pot fraction so it scales with the spot.
+MIXED_SAMPLE_EPS_BB = 0.15
+MIXED_SAMPLE_EPS_POT = 0.01
 _ACTION_RE = re.compile(r"^(Check|Call|Fold|Bet|Raise|AllIn)(?:\((\d+)\))?$")
 
 
@@ -81,6 +97,7 @@ class RealtimeCFRDecisionContext:
     villain_profile_provider: Optional[Callable[[int], Any]] = None
     exploit_adjustments_provider: Optional[Callable[[int], dict[str, Any]]] = None
     range_v2_prior_provider: Optional[Callable[[int], dict[str, Any]]] = None
+    decision_seed: Optional[int] = None
 
 
 class RealtimeCFRDecisionEngine:
@@ -90,6 +107,11 @@ class RealtimeCFRDecisionEngine:
         self.options = options or RealtimeCFROptions()
         self._last_result: dict[str, Any] = {}
         self._last_error = ""
+        # P(hero takes the selected action | combo) over the solver's hero
+        # range at the decided node, keyed by ``hand_combo_map`` combo index.
+        # Lets the next street's hero range be the solver's own continuation
+        # range. Kept off ``last_result`` to keep diagnostics small.
+        self.last_hero_reach_update: dict[int, float] = {}
 
     @property
     def last_result(self) -> dict[str, Any]:
@@ -103,6 +125,7 @@ class RealtimeCFRDecisionEngine:
         t0 = time.perf_counter()
         self._last_result = {}
         self._last_error = ""
+        self.last_hero_reach_update = {}
 
         prepared = self._prepare(ctx)
         prepare_ms = (time.perf_counter() - t0) * 1000.0
@@ -191,14 +214,6 @@ class RealtimeCFRDecisionEngine:
                 exploit_detail[f"range_v2_prior.{key}"] = value
         if range_v2_prior:
             line_context["range_v2"] = range_v2_prior
-        bb = max(float(ctx.gs.big_blind or 0.0), 1e-9)
-        hero_player = _player_by_id(ctx.gs.players, ctx.hero_player_id)
-        defense_fold_cap = None
-        if hero_player is not None:
-            defense_fold_cap = _defense_fold_cap(
-                pot_bb=float(ctx.gs.pot or 0.0) / bb,
-                to_call_bb=float(ctx.gs.to_call(hero_player) or 0.0) / bb,
-            )
         select_t0 = time.perf_counter()
         selection = _select_exploit_action(
             result,
@@ -210,10 +225,10 @@ class RealtimeCFRDecisionEngine:
             adjustments=exploit_adjustments,
             max_confidence=self.options.max_exploit_confidence,
             enabled=self.options.exploit_enabled,
-            defense_fold_cap=defense_fold_cap,
             big_blind=ctx.gs.big_blind,
             hero_made_rank=meta.get("hero_made_rank"),
             line_context=line_context,
+            decision_seed=ctx.decision_seed,
         )
         exploit_detail["select_action_ms"] = round((time.perf_counter() - select_t0) * 1000.0, 1)
         timing["exploit_select_ms"] = round((time.perf_counter() - exploit_t0) * 1000.0, 1)
@@ -241,6 +256,7 @@ class RealtimeCFRDecisionEngine:
             }
             return None
 
+        self.last_hero_reach_update = _hero_range_action_probs(result, meta["hero_side"], selected_label)
         self._last_result = {
             **meta,
             "status": "ok",
@@ -404,7 +420,10 @@ class RealtimeCFRDecisionEngine:
             float(ip.stack or 0.0) + float(ip.current_bet or 0.0),
         )
         effective_stack_bb = max(0.0, effective_stack / bb)
-        if pot_bb <= 0.0 or effective_stack_bb <= 0.0:
+        # Solver chips are bb×10 integers; anything under 0.1bb rounds to a
+        # zero stack and the tree build rejects it. Such spots are a forced
+        # check/call anyway, so let the local engine handle them.
+        if pot_bb <= 0.0 or effective_stack_bb < MIN_SOLVER_STACK_BB:
             self._fallback(
                 "invalid_pot_or_stack",
                 street=street,
@@ -852,10 +871,10 @@ def _select_exploit_action(
     adjustments: dict[str, Any],
     max_confidence: float,
     enabled: bool,
-    defense_fold_cap: Optional[float] = None,
     big_blind: Any = None,
     hero_made_rank: Any = None,
     line_context: Optional[dict[str, Any]] = None,
+    decision_seed: Optional[int] = None,
 ) -> dict[str, Any]:
     gto_label, gto_prob = _select_strategy_action(gto_strategy)
     out: dict[str, Any] = {
@@ -863,18 +882,23 @@ def _select_exploit_action(
         "selected_prob": gto_prob,
         "exploit": {"enabled": bool(enabled), "used": False},
     }
-    if not enabled:
-        return out
+    line_context = dict(line_context or {})
+    pot_bb = max(0.0, float(line_context.get("current_pot_bb") or 0.0))
+    rng = random.Random(int(decision_seed)) if decision_seed is not None else None
 
     node = result.get("node") or {}
     hero_idx = _hand_index(result, hero_side, hero_combo)
-    if hero_idx is None:
-        return out
-    gto_evs = _node_hand_values(node, "evs", hero_idx)
-    if not gto_evs:
+    gto_evs = _node_hand_values(node, "evs", hero_idx) if hero_idx is not None else {}
+    if gto_evs:
+        # Even without exploitation, pick by solver EV (not by raw frequency)
+        # and mix between near-equal actions at their equilibrium frequency.
+        label, prob, mixed = _sample_near_ev(gto_evs, gto_strategy, gto_evs, pot_bb=pot_bb, rng=rng)
+        out.update({"selected_label": label, "selected_prob": prob, "action_evs_bb": gto_evs})
+        if mixed:
+            out["exploit"]["mixed_sample"] = mixed
+    if not enabled or not gto_evs:
         return out
 
-    line_context = dict(line_context or {})
     numeric_prior = build_numeric_prior(profile, adjustments, street)
     confidence = _exploit_confidence(
         profile,
@@ -885,7 +909,6 @@ def _select_exploit_action(
         numeric_prior=numeric_prior,
     )
     if confidence <= 1e-6:
-        out["action_evs_bb"] = gto_evs
         return out
     signal = _exploit_signal_strength(
         profile,
@@ -895,7 +918,6 @@ def _select_exploit_action(
         numeric_prior=numeric_prior,
     )
     if signal <= 1e-9:
-        out["action_evs_bb"] = gto_evs
         out["exploit"].update({
             "confidence": round(confidence, 4),
             "numeric_prior": numeric_prior.diagnostics,
@@ -913,6 +935,8 @@ def _select_exploit_action(
     adjusted_evs: dict[str, float] = {}
     response_summaries: dict[str, Any] = {}
     safety: dict[str, Any] = {}
+    leashed: dict[str, float] = {}
+    blend_evs: dict[str, float] = {}
     best_gto_ev = max(gto_evs.values())
     passive_gto_evs = {
         label: value
@@ -950,6 +974,7 @@ def _select_exploit_action(
             adj_ev = float(response_detail["ev"])
         adjusted_evs[label] = adj_ev
         final_ev = (1.0 - confidence) * gto_ev + confidence * adj_ev
+        blend_evs[label] = final_ev
         risk = _river_aggression_risk_discount(
             label,
             street=street,
@@ -1053,14 +1078,9 @@ def _select_exploit_action(
                 final_ev -= discount
             safety.setdefault("sticky_aggression", []).append(sticky_aggression)
         gto_gap = max(0.0, best_gto_ev - gto_ev)
-        leash = 0.6 + 2.0 * confidence
-        if gto_gap > leash and final_ev > best_gto_ev:
-            final_ev = best_gto_ev - 1e-4
-            safety.setdefault("gto_leash", []).append({
-                "action": label,
-                "gto_gap_bb": round(gto_gap, 4),
-                "leash_bb": round(leash, 4),
-            })
+        leash = (0.6 + 2.0 * confidence) * max(1.0, pot_bb / 20.0)
+        if gto_gap > leash:
+            leashed[label] = gto_gap
         final[label] = final_ev
         if child is not None:
             summary = _response_summary(
@@ -1074,6 +1094,26 @@ def _select_exploit_action(
             )
             if summary is not None:
                 response_summaries[label] = summary
+
+    # GTO leash: an action the solver rates far below its best may never beat
+    # the solver's best action on exploit-adjusted EV alone. It stays in the
+    # set (so it remains the fallback when safety guards discount or block the
+    # best action) but is capped just under the best action's exploit-blended
+    # EV *before* guard discounts. The old cap against the best action's raw
+    # GTO EV let a leashed action win whenever the best action's own exploit
+    # adjustment was negative.
+    gto_best_label = max(gto_evs.items(), key=lambda item: (item[1], gto_strategy.get(item[0], 0.0)))[0]
+    for label, gap in leashed.items():
+        if label not in final or gto_best_label not in blend_evs:
+            continue
+        cap = blend_evs[gto_best_label] - 1e-4
+        if final[label] > cap:
+            final[label] = cap
+        safety.setdefault("gto_leash", []).append({
+            "action": label,
+            "gto_gap_bb": round(gap, 4),
+            "capped_to": gto_best_label,
+        })
 
     _apply_hard_action_blocks(final, safety)
     selected_label = max(final.items(), key=lambda item: (item[1], gto_strategy.get(item[0], 0.0)))[0]
@@ -1097,14 +1137,15 @@ def _select_exploit_action(
         safety=safety,
     )
     final_probs = _softmax_from_evs(final)
-    selected_label, final_probs = _apply_defense_mdf_guard(
-        selected_label,
-        final,
-        final_probs,
-        defense_fold_cap=defense_fold_cap,
-        confidence=confidence,
-        safety=safety,
-    )
+    blocked = _safety_discounted_actions(safety) | set(_safety_hard_blocked_actions(safety)) | set(leashed)
+    mixable = {k: v for k, v in final.items() if k not in blocked}
+    if selected_label in mixable:
+        mixed_label, _p, mixed = _sample_near_ev(
+            mixable, gto_strategy, gto_evs, pot_bb=pot_bb, rng=rng, anchor=selected_label,
+        )
+        if mixed:
+            selected_label = mixed_label
+            safety["mixed_sample"] = mixed
     if not safety:
         safety = {"applied": False}
     out.update({
@@ -1335,78 +1376,6 @@ def _apply_overvalue_cheap_call_guard(
         "final_tolerance_bb": round(max(0.12, final_tolerance), 4),
     }
     return "Call"
-
-
-def _apply_defense_mdf_guard(
-    selected_label: str,
-    final_evs: dict[str, float],
-    final_probs: dict[str, float],
-    *,
-    defense_fold_cap: Optional[float],
-    confidence: float,
-    safety: dict[str, Any],
-) -> tuple[str, dict[str, float]]:
-    if defense_fold_cap is None or "Fold" not in final_probs:
-        return selected_label, final_probs
-    cap = _clamp(float(defense_fold_cap), 0.0, 1.0)
-    fold_prob = max(0.0, float(final_probs.get("Fold", 0.0)))
-    if fold_prob <= cap + 1e-12:
-        return selected_label, final_probs
-
-    capped = dict(final_probs)
-    excess = fold_prob - cap
-    capped["Fold"] = cap
-    continuations = {
-        label: prob
-        for label, prob in final_probs.items()
-        if label != "Fold" and prob > 0.0
-    }
-    total_continue = sum(continuations.values())
-    if total_continue > 1e-12:
-        for label, prob in continuations.items():
-            capped[label] = capped.get(label, 0.0) + excess * prob / total_continue
-    norm = sum(max(0.0, v) for v in capped.values())
-    if norm > 1e-12:
-        capped = {label: max(0.0, value) / norm for label, value in capped.items()}
-
-    mdf_info: dict[str, Any] = {
-        "fold_prob_before": round(fold_prob, 6),
-        "fold_cap": round(cap, 6),
-        "fold_prob_after": round(capped.get("Fold", 0.0), 6),
-        "applied": False,
-    }
-    if selected_label == "Fold":
-        candidates = {
-            label: value
-            for label, value in final_evs.items()
-            if label != "Fold"
-            and label not in _safety_discounted_actions(safety)
-        }
-        if candidates:
-            replacement = max(
-                candidates.items(),
-                key=lambda item: (item[1], capped.get(item[0], 0.0)),
-            )[0]
-            ev_gap = final_evs.get("Fold", 0.0) - final_evs.get(replacement, -1e9)
-            tolerance = 0.25 + max(0.0, float(confidence or 0.0))
-            if ev_gap <= tolerance and capped.get(replacement, 0.0) >= capped.get("Fold", 0.0):
-                selected_label = replacement
-                mdf_info.update({
-                    "applied": True,
-                    "to": replacement,
-                    "ev_gap_bb": round(ev_gap, 4),
-                    "tolerance_bb": round(tolerance, 4),
-                })
-    safety["defense_mdf"] = mdf_info
-    return selected_label, capped
-
-
-def _defense_fold_cap(*, pot_bb: float, to_call_bb: float) -> Optional[float]:
-    if to_call_bb <= 1e-9:
-        return None
-    pot_before_call = max(float(pot_bb or 0.0) - float(to_call_bb or 0.0), 1e-9)
-    bet_ratio = float(to_call_bb) / pot_before_call
-    return min(1.0, 1.5 * bet_ratio / (1.0 + bet_ratio))
 
 
 def _call_price_features(line_context: dict[str, Any]) -> dict[str, float]:
@@ -1847,6 +1816,31 @@ def _response_adjusted_ev_detail_from_result(
     eq_probs = _node_weighted_strategy(child)
     if not eq_probs:
         return None
+    # The child-node EVs are conditional on hero's combo reaching that node.
+    # When the equilibrium (almost) never takes this action with this combo,
+    # the reach weight is ~0 and the solver's normalised EVs are numerically
+    # meaningless (replay showed +400bb "call" EVs in a 36bb pot). Require a
+    # minimum equilibrium frequency and check that the equilibrium-weighted
+    # response EV reproduces the action's own EV before trusting them.
+    hero_node = result.get("node") or {}
+    if hero_action_label is not None:
+        hero_strategy = _node_hand_values(hero_node, "strategy", hero_idx)
+        reach_prob = float(hero_strategy.get(hero_action_label, 0.0)) * 10.0
+        if reach_prob < MIN_RESPONSE_EV_REACH_PROB:
+            return None
+        gto_evs = _node_hand_values(hero_node, "evs", hero_idx)
+        gto_ev = gto_evs.get(hero_action_label)
+        if gto_ev is not None:
+            eq_total = sum(
+                max(0.0, float(eq_probs.get(label, 0.0))) * ev
+                for label, ev in response_evs.items()
+            )
+            eq_mass = sum(max(0.0, float(eq_probs.get(label, 0.0))) for label in response_evs)
+            if eq_mass > 1e-9:
+                pot_bb = max(0.0, float((line_context or {}).get("current_pot_bb") or 0.0))
+                tolerance = max(0.5, 0.05 * pot_bb)
+                if abs(eq_total / eq_mass - float(gto_ev)) > tolerance:
+                    return None
     adj_probs = _adjust_response_probs(
         eq_probs,
         profile,
@@ -1902,6 +1896,35 @@ def _response_adjusted_ev_from_result(
     if detail is None:
         return None
     return float(detail["ev"])
+
+
+def _hero_range_action_probs(result: dict[str, Any], hero_side: str, label: str) -> dict[int, float]:
+    """P(``label`` | combo) for every hero combo in the solver range at the
+    decided node, keyed by ``hand_combo_map`` combo index."""
+    node = result.get("node") or {}
+    hands = result.get("ip_hands") if hero_side == "ip" else result.get("oop_hands")
+    actions = [str(a) for a in list(node.get("actions") or [])]
+    strategy = list(node.get("strategy") or [])
+    if not isinstance(hands, list) or label not in actions or not strategy:
+        return {}
+    try:
+        num_hands = int(node.get("num_hands") or len(hands))
+    except (TypeError, ValueError):
+        num_hands = len(hands)
+    col = actions.index(label)
+    out: dict[int, float] = {}
+    for hand_idx, hand in enumerate(hands[:num_hands]):
+        pos = col * num_hands + hand_idx
+        if pos >= len(strategy):
+            break
+        try:
+            c1 = hcm.card_to_int(Card.from_str(str(hand)[:2]))
+            c2 = hcm.card_to_int(Card.from_str(str(hand)[2:4]))
+            idx = hcm.COMBO_TO_IDX[tuple(sorted((c1, c2)))]
+        except Exception:
+            continue
+        out[idx] = max(0.0, float(strategy[pos] or 0.0))
+    return out
 
 
 def _hand_index(result: dict[str, Any], side: str, combo: str) -> Optional[int]:
@@ -2068,9 +2091,13 @@ def _direct_exploit_delta(
         * max(0.0, prior.overvalue_score - 0.35 * prior.nut_heavy_score)
     )
     nut_weighted_underbluff = prior.underbluff_score * (0.20 + 0.80 * prior.nut_heavy_score)
+    # The constants below were tuned as bb amounts for ~10bb pots; scale them
+    # with the pot so a 60bb river pot does not get a 0.35bb nudge that is
+    # noise there, nor a 3bb pot a nudge that dominates its EVs.
+    pot_scale = _clamp(max(0.0, float(line_context.get("current_pot_bb") or 0.0)) / 10.0, 0.5, 4.0)
     kind = _action_kind(label)
     if kind in {"Bet", "Raise", "AllIn"}:
-        return (
+        return pot_scale * (
             0.45 * fold_bias
             - 0.25 * sticky_bias
             - 0.15 * max(0.0, raise_bias)
@@ -2085,7 +2112,7 @@ def _direct_exploit_delta(
     if kind == "Call":
         bluff_signal = 0.35 if adjustments.get("river_bluff_likely") else 0.0
         value_signal = 0.35 if adjustments.get("river_bet_rare") else 0.0
-        return (
+        return pot_scale * (
             bluff_signal
             + 0.20 * max(0.0, raise_bias)
             + 0.28 * prior.pressure_score
@@ -2102,7 +2129,7 @@ def _direct_exploit_delta(
     if kind == "Fold":
         bluff_signal = 0.35 if adjustments.get("river_bluff_likely") else 0.0
         value_signal = 0.20 if adjustments.get("river_bet_rare") else 0.0
-        return (
+        return pot_scale * (
             value_signal
             - bluff_signal
             + 0.25 * nut_weighted_underbluff
@@ -2163,6 +2190,57 @@ def _exploit_confidence(
             0.10 + 0.16 * range_v2_signal + 0.10 * features.get("spot_blend", 0.0),
         )
     return _clamp(conf, 0.0, max(0.0, float(max_confidence)))
+
+
+def _sample_near_ev(
+    evs: dict[str, float],
+    gto_strategy: dict[str, float],
+    gto_evs: dict[str, float],
+    *,
+    pot_bb: float,
+    rng: Optional[random.Random],
+    anchor: Optional[str] = None,
+) -> tuple[str, float, dict[str, Any]]:
+    """Pick among actions whose EV is within a small margin of the best.
+
+    Actions inside the margin are sampled at their equilibrium frequency
+    (floored so an EV-best action with ~0 frequency still has a chance),
+    which keeps the bot unpredictable at negligible EV cost. Without an rng
+    the best-EV action is returned deterministically. Returns
+    ``(label, gto_prob, diagnostics)``; diagnostics is empty when no mixing
+    happened.
+    """
+    if not evs:
+        return "", 0.0, {}
+    best_label = anchor if anchor in evs else max(
+        evs.items(), key=lambda item: (item[1], gto_strategy.get(item[0], 0.0))
+    )[0]
+    best_ev = evs[best_label]
+    eps = max(MIXED_SAMPLE_EPS_BB, MIXED_SAMPLE_EPS_POT * max(0.0, pot_bb))
+    near = {
+        label: value
+        for label, value in evs.items()
+        if value >= best_ev - eps and gto_evs.get(label, -1e9) >= max(gto_evs.values()) - eps
+    }
+    near.setdefault(best_label, best_ev)
+    if rng is None or len(near) <= 1:
+        return best_label, float(gto_strategy.get(best_label, 0.0)), {}
+    weights = {label: max(0.02, float(gto_strategy.get(label, 0.0))) for label in near}
+    total = sum(weights.values())
+    draw = rng.random() * total
+    acc = 0.0
+    chosen = best_label
+    for label, weight in weights.items():
+        acc += weight
+        if draw <= acc:
+            chosen = label
+            break
+    return chosen, float(gto_strategy.get(chosen, 0.0)), {
+        "eps_bb": round(eps, 4),
+        "candidates": {label: round(w / total, 4) for label, w in weights.items()},
+        "chosen": chosen,
+        "ev_best": best_label,
+    }
 
 
 def _softmax_from_evs(evs: dict[str, float]) -> dict[str, float]:

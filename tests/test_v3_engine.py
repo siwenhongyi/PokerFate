@@ -194,9 +194,11 @@ class TestCalibrator:
 
 class TestAlphaGate:
     def test_alpha_from_frac(self):
-        assert alpha_gate.alpha_from_frac(1.0) == pytest.approx(0.5)
-        assert alpha_gate.alpha_from_frac(0.5) == pytest.approx(1 / 3, abs=0.01)
+        assert alpha_gate.alpha_from_frac(1.0, rake_keep=1.0) == pytest.approx(0.5)
+        assert alpha_gate.alpha_from_frac(0.5, rake_keep=1.0) == pytest.approx(1 / 3, abs=0.01)
         assert alpha_gate.alpha_from_frac(0.0) == 0.0
+        # Rake makes a fold worth less, so a bluff needs more folds to break even.
+        assert alpha_gate.alpha_from_frac(1.0) > 0.5
         assert alpha_gate.balanced_bluff_share_from_frac(1.0) == pytest.approx(1 / 3)
         assert alpha_gate.balanced_bluff_share_from_frac(0.5) == pytest.approx(0.25)
 
@@ -2091,26 +2093,24 @@ class TestPurposeTriggers:
 
         assert p.trigger(ctx).hit
 
-    def test_fold_override_rejects_fragile_high_leverage_relative_loss(self):
+    def test_fragile_relative_loss_call_is_priced_by_ev(self):
+        """EV promotion replaced the legacy blended-equity override (2026-11-08).
+
+        80 to win 400 is a 20% price (22% after rake): a 45% exact relative
+        equity is a clear call even with a fragile made hand, while 15% is a
+        clear fold.
+        """
         engine = V3Engine()
-        ctx = self._base_ctx(
-            street='river',
-            facing_bet=True,
-            to_call=80.0,
-            stack=160.0,
-            pot=320.0,
-            pot_odds=0.40,
-            spr=0.5,
-            hero_bucket='medium',
-            hero_made_subtype='board_pair_pocket_underpair',
-            equity_range=0.50,
-            villain_vs_hero_dist={'win': 0.45, 'tie': 0.0, 'loss': 0.55},
+        base = dict(
+            street='river', facing_bet=True, to_call=80.0, stack=160.0, pot=320.0,
+            pot_odds=80.0 / 400.0 / 0.91, spr=0.5, hero_bucket='medium',
+            hero_made_subtype='board_pair_pocket_underpair', equity_range=0.50,
             villain_bucket_dist={'nuts': 0.10, 'strong': 0.20, 'medium': 0.50, 'air': 0.20},
         )
-
-        out = engine.decide(ctx)
+        out = engine.decide(self._base_ctx(villain_vs_hero_dist={'win': 0.45, 'tie': 0.0, 'loss': 0.55}, **base))
+        assert out.action == 'call'
+        out = engine.decide(self._base_ctx(villain_vs_hero_dist={'win': 0.15, 'tie': 0.0, 'loss': 0.85}, **base))
         assert out.action == 'fold'
-        assert out.purpose == 'fold'
 
     def test_fragile_high_leverage_call_rejects_passive_value_dominance(self):
         from pokerfate.strategy.v3.purposes_defensive import BluffCatchCall
@@ -3515,3 +3515,172 @@ class TestNonNutStackoffGuard:
         assert info.subtype == 'top_pair_weak_kicker'
         out = V3Engine().decide(ctx)
         assert out.action == 'fold'
+
+
+
+class TestRangeCbetMultiwayAir:
+    """Air range bets need every opponent to fold; the pool does not fold enough 2-way."""
+
+    def _ctx(self, n, bucket):
+        return DecisionCtx(street='flop', pot=100.0, stack=1000.0, big_blind=2.0, spr=10.0,
+                           num_opponents=n, hero_bucket=bucket, is_pfr=True, equity_range=0.30,
+                           equity_mc=0.35, board_sig=BoardSignals(wetness=0.2, high_card_rank=13, is_dry=True))
+
+    def test_air_range_bet_only_heads_up(self):
+        from pokerfate.strategy.v3.purposes_active import RangeCbet
+        p = RangeCbet()
+        assert p.trigger(self._ctx(1, 'air')).hit
+        assert not p.trigger(self._ctx(2, 'air')).hit
+        assert not p.trigger(self._ctx(2, 'weak_draw')).hit
+
+    def test_made_hands_keep_two_way_range_bet(self):
+        from pokerfate.strategy.v3.purposes_active import RangeCbet
+        p = RangeCbet()
+        assert p.trigger(self._ctx(2, 'medium')).hit
+        assert p.trigger(self._ctx(2, 'strong')).hit
+
+
+class TestEvVeto:
+    """The EV layer prices the vote's aggressive / calling choice."""
+
+    @staticmethod
+    def _cand(*a, **k):
+        from pokerfate.strategy.v3.candidates import ActionCandidate
+        return ActionCandidate(*a, **k)
+
+    def _ctx(self, **over):
+        defaults = dict(street='flop', pot=100.0, stack=1000.0, big_blind=2.0, spr=10.0,
+                        num_opponents=2, hero_bucket='air', is_pfr=True,
+                        equity_range=0.17, equity_mc=0.20,
+                        board_sig=BoardSignals(wetness=0.3, high_card_rank=11, is_dry=True),
+                        villain_bucket_dist={'nuts': 0.05, 'strong': 0.15, 'medium': 0.3,
+                                             'draw': 0.1, 'weak_draw': 0.2, 'air': 0.2})
+        defaults.update(over)
+        return DecisionCtx(**defaults)
+
+    def test_air_bet_into_two_opponents_is_vetoed_to_check(self):
+        eng = V3Engine()
+        bet = self._cand('range_cbet_40', 'bet', 40.0, 0.4, 'range_cbet', 'purpose')
+        veto = eng._ev_veto(self._ctx(), bet)
+        assert veto is not None
+        replacement, detail = veto
+        assert replacement.action == 'check'
+        assert detail['selected'] == 'check'
+
+    def test_multiway_fold_prob_compounds(self):
+        from pokerfate.strategy.v3 import counterfactual as cf
+        p1 = cf.reaction_estimate(self._ctx(num_opponents=1), 0.4, 'bet', 'range_cbet').p_fold
+        p2 = cf.reaction_estimate(self._ctx(num_opponents=2), 0.4, 'bet', 'range_cbet').p_fold
+        p3 = cf.reaction_estimate(self._ctx(num_opponents=3), 0.4, 'bet', 'range_cbet').p_fold
+        assert p1 ** 2 * 0.85 <= p2 <= p1 ** 2 * 1.05
+        assert p1 ** 3 * 0.80 <= p3 <= p1 ** 3 * 1.05
+
+    def test_value_and_above_share_equity_bets_are_exempt(self):
+        eng = V3Engine()
+        # A 35%-equity nut draw 5-way (share 20%) is value/protection, not a bluff.
+        draw = self._cand('semi_bluff_50', 'bet', 50.0, 0.5, 'semi_bluff', 'purpose')
+        assert eng._ev_veto(self._ctx(num_opponents=4, hero_bucket='draw', equity_range=0.35, equity_mc=0.35), draw) is None
+        bet = self._cand('thick_value_bet_60', 'bet', 60.0, 0.6, 'thick_value_bet', 'purpose')
+        assert eng._ev_veto(self._ctx(hero_bucket='strong', equity_range=0.75, equity_mc=0.8), bet) is None
+        assert eng._ev_veto(self._ctx(hero_bucket='nuts', equity_range=0.9, equity_mc=0.9), bet) is None
+
+    def test_call_below_raked_pot_odds_is_vetoed(self):
+        eng = V3Engine()
+        # Villain bets 60 into 100 → pot 160, to_call 60: raw price 27%, raked 30%.
+        ctx = self._ctx(street='river', facing_bet=True, pot=160.0, to_call=60.0, num_opponents=1,
+                        hero_bucket='medium', equity_range=0.22, equity_mc=0.24, spr=6.0,
+                        pot_odds=60.0 / 220.0 / 0.91, villain_vs_hero_dist={})
+        call = self._cand('bluff_catch_call', 'call', 60.0, 0.0, 'bluff_catch_call', 'purpose')
+        veto = eng._ev_veto(ctx, call)
+        assert veto is not None and veto[0].action == 'fold'
+        # With 45% equity the call clears the price comfortably and stands.
+        ctx2 = self._ctx(street='river', facing_bet=True, pot=160.0, to_call=60.0, num_opponents=1,
+                         hero_bucket='medium', equity_range=0.45, equity_mc=0.47, spr=6.0,
+                         pot_odds=60.0 / 220.0 / 0.91, villain_vs_hero_dist={})
+        assert eng._ev_veto(ctx2, call) is None
+
+    def test_env_switch_disables_veto(self, monkeypatch):
+        from pokerfate.strategy.v3 import engine as eng_mod
+        monkeypatch.setattr(eng_mod, '_EV_VETO_ENABLED', False)
+        eng = V3Engine()
+        out = eng.decide(self._ctx())
+        assert 'ev_veto' not in out.arbitration_mode
+
+
+class TestBarrelGatesAcceptRaiseLabel:
+    """Hero's own bets are stored as 'raise'; barrel purposes must accept it."""
+
+    def _ctx(self, street, prev):
+        return DecisionCtx(street=street, pot=100.0, stack=800.0, big_blind=2.0, spr=8.0,
+                           num_opponents=1, hero_bucket='strong', is_pfr=True, is_ip=True,
+                           equity_range=0.70, equity_mc=0.72, my_prev_actions=prev,
+                           board_sig=BoardSignals(wetness=0.2, high_card_rank=13, is_dry=True),
+                           villain_stats=VillainStats(hands_seen=30, river_fold_rate=0.5, river_action_count=10))
+
+    def test_double_barrel_fires_after_recorded_flop_raise(self):
+        from pokerfate.strategy.v3.purposes_active import DoubleBarrel
+        assert DoubleBarrel().trigger(self._ctx('turn', {'flop': 'raise'})).hit
+        assert not DoubleBarrel().trigger(self._ctx('turn', {'flop': 'check'})).hit
+
+    def test_triple_barrel_fires_after_two_recorded_raises(self):
+        from pokerfate.strategy.v3.purposes_active import TripleBarrel
+        assert TripleBarrel().trigger(self._ctx('river', {'flop': 'raise', 'turn': 'raise'})).hit
+        assert not TripleBarrel().trigger(self._ctx('river', {'flop': 'raise', 'turn': 'check'})).hit
+
+
+class TestEvPromote:
+    def _ctx(self, eq):
+        return DecisionCtx(street='river', facing_bet=True, pot=160.0, to_call=60.0, stack=800.0,
+                           big_blind=2.0, spr=5.0, num_opponents=1, hero_bucket='medium',
+                           equity_range=eq, equity_mc=eq + 0.02, pot_odds=60.0 / 220.0 / 0.91,
+                           villain_bucket_dist={'nuts': 0.05, 'strong': 0.15, 'medium': 0.3,
+                                                'draw': 0.1, 'weak_draw': 0.2, 'air': 0.2},
+                           villain_stats=VillainStats(hands_seen=30, af=1.5),
+                           board_sig=BoardSignals(wetness=0.2, is_dry=True))
+
+    def test_positive_ev_call_is_promoted(self):
+        from pokerfate.strategy.v3.candidates import ActionCandidate
+        eng = V3Engine()
+        fold = ActionCandidate('fold_purpose', 'fold', 0.0, 0.0, 'fold', 'purpose')
+        promoted = eng._ev_promote(self._ctx(0.50), fold)
+        assert promoted is not None and promoted[0].action == 'call'
+
+    def test_negative_ev_call_stays_fold(self):
+        from pokerfate.strategy.v3.candidates import ActionCandidate
+        eng = V3Engine()
+        fold = ActionCandidate('fold_purpose', 'fold', 0.0, 0.0, 'fold', 'purpose')
+        assert eng._ev_promote(self._ctx(0.20), fold) is None
+
+
+class TestEvPromoteNotBlockedByRangeMassRules:
+    def test_tt_with_59pct_equity_at_31pct_price_is_called(self):
+        """Hand 210 (2026-11-07): legacy override called, hard_guards would have folded."""
+        from pokerfate.strategy.v3.candidates import ActionCandidate
+        ctx = DecisionCtx(street='turn', facing_bet=True, pot=500.0, to_call=200.0, stack=2000.0,
+                          big_blind=10.0, spr=4.0, num_opponents=1, hero_bucket='medium',
+                          hero_made_subtype='pocket_pair', equity_range=0.59, equity_mc=0.76,
+                          pot_odds=200.0 / 700.0 / 0.91,
+                          villain_bucket_dist={'nuts': 0.08, 'strong': 0.22, 'medium': 0.35,
+                                               'draw': 0.1, 'weak_draw': 0.1, 'air': 0.15},
+                          villain_stats=VillainStats(hands_seen=40, af=0.7),
+                          board_sig=BoardSignals(wetness=0.3))
+        fold = ActionCandidate('fold_purpose', 'fold', 0.0, 0.0, 'fold', 'purpose')
+        promoted = V3Engine()._ev_promote(ctx, fold)
+        assert promoted is not None and promoted[0].action == 'call'
+
+
+class TestBarrelValueFloors:
+    def test_triple_barrel_needs_equity_even_with_nuts_bucket(self):
+        from pokerfate.strategy.v3.purposes_active import TripleBarrel
+        ctx = DecisionCtx(street='river', pot=100.0, stack=800.0, big_blind=2.0, spr=8.0, num_opponents=1,
+                          hero_bucket='nuts', is_pfr=True, is_ip=True, equity_range=0.34, equity_mc=0.9,
+                          my_prev_actions={'flop': 'raise', 'turn': 'raise'},
+                          board_sig=BoardSignals(wetness=0.3), villain_stats=VillainStats(hands_seen=30, river_fold_rate=0.5, river_action_count=10))
+        assert not TripleBarrel().trigger(ctx).hit
+
+    def test_stop_and_go_not_for_made_hands_with_showdown_value(self):
+        from pokerfate.strategy.v3.purposes_active import StopAndGo
+        ctx = DecisionCtx(street='river', pot=100.0, stack=800.0, big_blind=2.0, spr=8.0, num_opponents=1,
+                          hero_bucket='strong', equity_range=0.26, my_prev_actions={'flop': 'raise', 'turn': 'check'},
+                          villain_stats=VillainStats(hands_seen=30, fold_to_cbet=0.52, fold_to_cbet_opps=10, river_fold_rate=0.6, river_action_count=10))
+        assert not StopAndGo().trigger(ctx).hit

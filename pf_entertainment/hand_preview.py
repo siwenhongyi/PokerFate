@@ -10,7 +10,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 CONSOLE_LOG = ROOT / "pokerfate" / "logs" / "pokerfate_console.log"
 
-TS_RE = re.compile(r"^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)$")
+TS_RE = re.compile(r"^\[(?:\d{4}-\d{2}-\d{2} )?(\d{2}:\d{2}:\d{2})\]\s*(.*)$")
 HAND_HEADER_RE = re.compile(r"第\s*(\d+)\s*手\s*(.*)$")
 PLAYER_RE = re.compile(r"(?:^|\s{2,})(.+?)(?:\(([^)]*)\))?\s+(\d+)bb\s+\[([^\]]*)\]")
 CARD_RE = re.compile(r"([2-9TJQKA])([♠♥♦♣]️?|[cdhs])", re.IGNORECASE)

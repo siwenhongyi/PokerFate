@@ -252,7 +252,7 @@
       if (document.activeElement !== $("bot-decision-engine")) {
         const engineValue = String(settings.decision_engine || "local").replace(/-/g, "_");
         $("bot-decision-engine").value =
-          ["local", "g5", "g5_all", "realtime_cfr", "cfr"].includes(engineValue)
+          ["local", "g5", "g5_all", "cfr"].includes(engineValue)
             ? engineValue
             : "local";
       }

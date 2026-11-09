@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from pokerfate.core.config import RAKE_KEEP
 from pokerfate.strategy.v3.context import DecisionCtx
 from pokerfate.strategy.v3.exploit import no_fold_equity, sticky_passive
 
@@ -106,14 +107,23 @@ def assess(ctx: DecisionCtx, *, action: str, frac: float = 0.0, jammed: bool = F
         if ctx.board_sig.is_wet:
             premium += 0.025 * pot
             tags.append("wet_board")
-        if ctx.spr > 0 and ctx.spr <= 1.5:
+        # Low-SPR / stack-commit premiums model being raised or stacked off
+        # on later streets. A call that commits hero (>=35% of the stack, or
+        # SPR <= 1.5) has no such future: the money is in and the hand is
+        # realised at showdown, so the call's EV formula already carries the
+        # whole downside. Charging it here rejected calls with +22%-pot raw
+        # EV (QQ on A68 at SPR 0.4, 2026-11-08 audit).
+        committed_call = action == "call" and (commit >= 0.35 or (ctx.spr > 0 and ctx.spr <= 1.5))
+        if ctx.spr > 0 and ctx.spr <= 1.5 and not committed_call:
             premium += 0.04 * pot
             margin += 0.03 * pot
             tags.append("low_spr")
-        if commit >= 0.35:
+        if commit >= 0.35 and not committed_call:
             premium += 0.05 * pot
             margin += 0.03 * pot
             tags.append("stack_commit")
+        if committed_call:
+            tags.append("committed_call")
         if jammed:
             nut_draw = ctx.draw.flush_draw and ctx.blockers.nut_flush_blocker
             premium += (0.015 if nut_draw else 0.06) * pot
@@ -183,4 +193,4 @@ def check_value(ctx: DecisionCtx) -> float:
     realization = _value_opportunity_cap(ctx, realization)
     lo = 0.20 if ctx.hero_bucket in {"air", "weak", "weak_draw"} else 0.30
     realization = max(lo, min(1.0, realization))
-    return eq * pot * realization
+    return eq * pot * realization * RAKE_KEEP

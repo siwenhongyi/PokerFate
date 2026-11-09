@@ -4,6 +4,7 @@ import random
 
 import pytest
 from pokerfate.core.card import Card
+from pokerfate.core.config import RAKE_KEEP
 from pokerfate.strategy import preflop as preflop_module
 from pokerfate.strategy.preflop import (
     PreflopStrategy,
@@ -45,7 +46,7 @@ class TestOpenRange:
         )
 
         assert call_amt == pytest.approx(50.0)
-        assert pot_odds == pytest.approx(50.0 / 130.0)
+        assert pot_odds == pytest.approx(50.0 / 130.0 / RAKE_KEEP)
         assert stack_commit == pytest.approx(1.0)
         assert call_bb == pytest.approx(5.0)
 
@@ -1694,3 +1695,59 @@ class TestBBDefenseVsOpen:
             equity=0.25,
         )
         assert action == 'fold'
+
+
+def test_bb_multiway_defence_keeps_pairs_but_folds_rag_kings():
+    from pokerfate.strategy.preflop import PreflopStrategy
+    from pokerfate.core.card import Card
+    strat = PreflopStrategy()
+    # CO opens 3bb, one caller; BB faces 2bb more into 7.5bb (hero posted 1bb).
+    common = dict(position='BB', facing_action='open', villain_position='CO', open_raise=30000.0,
+                  is_ip=False, big_blind=10000.0, stack=1000000.0, pot=75000.0, to_call=20000.0,
+                  stack_bb=100.0, squeeze_callers=1, num_active_opponents=2)
+    action_k3, _ = strat.decide(hole_cards=[Card.from_str('Kh'), Card.from_str('3c')], equity=0.25, **common)
+    assert action_k3 == 'fold', strat.last_expand_reason
+    action_33, _ = strat.decide(hole_cards=[Card.from_str('3h'), Card.from_str('3c')], equity=0.26, **common)
+    assert action_33 in ('call', 'raise'), strat.last_expand_reason
+
+
+def test_dampened_3bet_falls_back_to_priced_call_not_fold(monkeypatch):
+    """Hand 53 (2026-11-08): KJs in the SB vs a BTN 3bb iso with two limpers behind.
+    The chart says 3-bet, the exploit layer removes most of that share; the
+    remainder must be a priced call, counting the limpers likely to call."""
+    from pokerfate.strategy import preflop as pf
+    from pokerfate.core.card import Card
+    strat = pf.PreflopStrategy()
+    strat._rng.random = lambda: 0.99          # force the "not raising" roll
+    common = dict(position='SB', facing_action='open', villain_position='BTN', open_raise=30000.0,
+                  is_ip=False, big_blind=10000.0, stack=956450.0, pot=65000.0, to_call=25000.0,
+                  stack_bb=95.6, num_active_opponents=3, villain_hands_seen=40,
+                  villain_vpip=0.55, villain_pfr=0.14, villain_fold_to_3bet=0.3, villain_fold_to_3bet_opps=6)
+    action, amount = strat.decide(hole_cards=[Card.from_str('Js'), Card.from_str('Ks')], equity=0.255,
+                                  limpers_behind=2, **common)
+    assert action == 'call', strat.last_expand_reason
+    assert amount == 25000.0
+    assert 'dampen_call' in strat.last_expand_reason
+    # Without the limpers the 25.5% equity does not cover the 30.5% raked price: fold.
+    action2, _ = strat.decide(hole_cards=[Card.from_str('Js'), Card.from_str('Ks')], equity=0.255,
+                              limpers_behind=0, **common)
+    assert action2 == 'fold', strat.last_expand_reason
+    # Switch off: old behaviour (fold) regardless of limpers.
+    monkeypatch.setattr(pf, '_3BET_DAMPEN_CALL_FALLBACK', False)
+    action3, _ = strat.decide(hole_cards=[Card.from_str('Js'), Card.from_str('Ks')], equity=0.255,
+                              limpers_behind=2, **common)
+    assert action3 == 'fold'
+
+
+def test_count_limpers_before_raise_excludes_those_who_acted():
+    from pokerfate.bot.poker_bot import PokerBot
+    from pokerfate.core.game_state import Action, ActionType, GameState, Player
+    bot = PokerBot(equity_iterations=10)
+    hero = Player(1, 'Hero', 100.0)
+    gs = GameState(players=[hero, Player(2, 'L1', 100.0), Player(3, 'L2', 100.0), Player(4, 'R', 100.0)],
+                   action_history=[(2, Action(ActionType.CALL, 1.0), 'preflop'), (3, Action(ActionType.CALL, 1.0), 'preflop'),
+                                   (4, Action(ActionType.RAISE, 3.0), 'preflop')])
+    assert bot._count_limpers_before_raise(gs, hero) == 2
+    gs.action_history.append((2, Action(ActionType.CALL, 3.0), 'preflop'))   # L1 already called the raise
+    assert bot._count_limpers_before_raise(gs, hero) == 1
+

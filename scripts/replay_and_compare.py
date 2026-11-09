@@ -15,11 +15,12 @@ Output:
  * --out (optional): NDJSON of per-decision comparisons
 
 Usage:
-    # Current session (small)
-    python -m scripts.replay_and_compare --replay /tmp/replay_current.jsonl
+    # 先由 JSON 决策日志生成 replay：
+    #   python -m scripts.json_log_to_replay --json-log pokerfate/logs/pokerfate.log --out /tmp/replay.jsonl
+    python -m scripts.replay_and_compare --replay /tmp/replay.jsonl
 
     # Everything
-    python -m scripts.replay_and_compare --replay /tmp/replay_bak.jsonl \\
+    python -m scripts.replay_and_compare --replay /tmp/replay.jsonl \\
         --out /tmp/replay_diff.jsonl --max-hands 200
 """
 from __future__ import annotations
@@ -34,6 +35,7 @@ from pathlib import Path
 from typing import Optional
 
 from pokerfate.api import ActionEvent, PlayerInfo, PokerFateAPI
+from pokerfate.core.config import RAKE_KEEP
 from pokerfate.core.game_state import Action, ActionType
 from scripts.hero_name import HeroNames, load_hero_names
 
@@ -94,10 +96,15 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
     # Track per-street state we need for request_action params
     current_street = "preflop"
     board_cards: list[str] = []
-    street_max_bet = 0.0
+    bb = float(hand.get("big_blind") or api.big_blind or 0.0)
+    # Preflop opens with the big blind already posted: the table's current
+    # bet is bb before anyone acts, so a first-to-act hero faces to_call=bb
+    # instead of a phantom free check.
+    street_max_bet = bb
     street_bets: dict[int, float] = {}
     my_current_bet_this_street = 0.0
     my_committed_total = 0.0   # sum of bot's call/raise amounts across streets
+    hero_acted_preflop = False
 
     # hero's running stack (we update from recorded my_delta at the end)
     hero_player = next((p for p in players if p["id"] == hero_id), None)
@@ -164,6 +171,21 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
             pot = float(ev.get("pot") or 0)
             to_call = float(ev.get("to_call") or 0)
             num_active_opp = len(active_opp_ids)
+            if ev.get("street", current_street) == "preflop" and not hero_acted_preflop:
+                # Hero's posted blind (BB / SB / out-of-position post). The
+                # log's to_call is authoritative and the table bet is
+                # street_max_bet, so posted = current_bet - to_call. hand_start
+                # stacks are pre-blind (hand_result: start - final == -my_delta
+                # in BB/SB hands), so the post also comes off the stack. The
+                # live bridge passes exactly this as my_current_bet_this_street;
+                # without it every BB spot saw to_call = bb and folded free
+                # checks / mispriced defends.
+                posted = max(0.0, max(street_max_bet, bb) - to_call)
+                if posted > 0.0:
+                    my_current_bet_this_street = posted
+                    street_bets[hero_id] = posted
+                    hero_stack = max(0.0, hero_stack - posted)
+                hero_acted_preflop = True
             try:
                 decision = api.request_action(
                     street=ev.get("street", current_street),
@@ -173,6 +195,10 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
                     my_stack=hero_stack,
                     num_active_opponents=max(1, num_active_opp),
                     my_current_bet_this_street=my_current_bet_this_street,
+                    # A preflop decision with nothing to call is the BB option
+                    # (the live bridge flags it the same way); without this the
+                    # bot treats a free check as facing a bet and "folds".
+                    is_bb_option=(ev.get("street", current_street) == "preflop" and to_call <= 0),
                 )
             except Exception as exc:
                 print(
@@ -187,7 +213,12 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
             hist_amount = float(ev.get("amount") or 0)
             new_action = decision.action
             new_amount = float(decision.amount or 0)
-            diag = getattr(api._bot, "last_decision_diagnostics", {}) or {}
+            # API-level diagnostics carry decision_source plus the flop_book /
+            # realtime_cfr blocks; the bot-level dict only covers local decisions.
+            try:
+                diag = dict(api.last_decision_diagnostics() or {})
+            except Exception:
+                diag = getattr(api._bot, "last_decision_diagnostics", {}) or {}
 
             comparisons.append({
                 "source_log": hand.get("source_log", ""),
@@ -208,6 +239,9 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
                 # or lose this hand? If hero lost, a new code fold is
                 # ~guaranteed to save chips; if hero won, fold would cost.)
                 "hist_hand_delta": (hand.get("result") or {}).get("my_delta", 0),
+                # Opponents still live when hero acted: the fold-equity model
+                # needs to know how many players a bet has to get through.
+                "n_opp": max(1, num_active_opp),
             })
 
             # IMPORTANT: always follow the historical action for downstream
@@ -215,13 +249,20 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
             # to what actually happened, so subsequent comparisons aren't
             # compounded by decision drift.
             if hist_action in ("call", "raise"):
-                cost = max(0.0, hist_amount - my_current_bet_this_street)
+                # Logged amounts: call = chips added this action (Action.amount
+                # for CALL is min(to_call, stack)); raise = total bet-to.
+                if hist_action == "call":
+                    cost = max(0.0, hist_amount)
+                    total_after = my_current_bet_this_street + cost
+                else:
+                    total_after = max(hist_amount, my_current_bet_this_street)
+                    cost = max(0.0, total_after - my_current_bet_this_street)
                 hero_stack = max(0.0, hero_stack - cost)
                 my_committed_total += cost
-                my_current_bet_this_street = hist_amount
+                my_current_bet_this_street = total_after
                 street_bets[hero_id] = my_current_bet_this_street
                 if hist_action == "raise":
-                    street_max_bet = max(street_max_bet, hist_amount)
+                    street_max_bet = max(street_max_bet, total_after)
             elif hist_action == "check":
                 street_bets[hero_id] = my_current_bet_this_street
             elif hist_action == "fold":
@@ -339,19 +380,104 @@ def classify_change(c: dict) -> str:
 
 _FOLD_RATE_PRIOR = 0.30
 
+# Measured pool reactions, filled by build_reaction_tables() from the replay
+# file itself: (street, size_bucket, players_facing) -> per-responder
+# fold / call / raise rates to the FIRST bet on a street. Keys fall back to
+# coarser ones (no size, then street only, then the prior) when a cell has
+# fewer than _REACTION_MIN_N observations.
+_REACTION: dict[tuple, dict[str, float]] = {}
+_REACTION_MIN_N = 25
+
+
+def _size_bucket(frac: float) -> str:
+    if frac <= 0.45:
+        return "small"
+    if frac <= 0.80:
+        return "mid"
+    return "large"
+
+
+def build_reaction_tables(hands: list[dict]) -> dict:
+    """Per-responder reaction rates to the first bet of each postflop street.
+
+    Every player (hero included) who faces the first bet on a street counts as
+    one observation; the bet's size bucket is bet / pot-before-bet and
+    ``facing`` is how many players were still live behind the bettor (capped
+    at 3). Returns summary counts for the report."""
+    counts: dict[tuple, Counter] = defaultdict(Counter)
+    for hand in hands:
+        players = {p["id"] for p in hand["players"]}
+        hero_id = next((p["id"] for p in hand["players"] if p.get("name") in {"Royal Police", "斯文红衣"}), None)
+        active = set(players)
+        street = "preflop"
+        bettor = None
+        key = None
+        for ev in hand.get("events", []):
+            if ev["type"] == "board":
+                street = ev["street"]
+                bettor = None
+                continue
+            pid = hero_id if ev["type"] == "decision" else ev.get("pid")
+            act = ev.get("action")
+            st = ev.get("street", street)
+            if st == "preflop":
+                if act == "fold":
+                    active.discard(pid)
+                continue
+            if bettor is None:
+                if act == "raise":
+                    pot = float(ev.get("pot") or 0.0)
+                    frac = (float(ev.get("amount") or 0.0) / pot) if pot > 0 else 0.5
+                    facing = min(3, max(1, len(active) - 1))
+                    key = (st, _size_bucket(frac), facing)
+                    bettor = pid
+            else:
+                if act in ("fold", "call", "raise") and key is not None:
+                    counts[key][act] += 1
+                    counts[(st, None, key[2])][act] += 1
+                    counts[(st, None, None)][act] += 1
+                if act == "raise":
+                    bettor = pid
+            if act == "fold":
+                active.discard(pid)
+    _REACTION.clear()
+    for k, c in counts.items():
+        n = sum(c.values())
+        if n <= 0:
+            continue
+        _REACTION[k] = {"fold": c["fold"] / n, "call": c["call"] / n, "raise": c["raise"] / n, "n": n}
+    return {str(k): v for k, v in _REACTION.items() if k[1] is None}
+
+
+def _reaction(street: str, frac: float, facing: int) -> dict[str, float]:
+    facing = min(3, max(1, int(facing or 1)))
+    for key in ((street, _size_bucket(frac), facing), (street, None, facing), (street, None, None)):
+        r = _REACTION.get(key)
+        if r and r["n"] >= _REACTION_MIN_N:
+            return r
+    return {"fold": _FOLD_RATE_PRIOR, "call": 1.0 - _FOLD_RATE_PRIOR, "raise": 0.0, "n": 0}
+
 
 def _ev_call(eq: float, pot: float, to_call: float) -> float:
-    """EV(call) relative to EV(fold) = 0."""
-    return eq * pot - (1.0 - eq) * to_call
+    """EV(call) relative to EV(fold) = 0, after rake on the won pot."""
+    return eq * (pot + to_call) * RAKE_KEEP - to_call
 
 
 def _ev_bet(eq: float, pot: float, amount: float,
-            fold_rate: float = _FOLD_RATE_PRIOR) -> float:
-    """EV(bet `amount` into `pot` with equity `eq`). amount = total new bet size."""
-    # If villain folds: we take the pot as-is.
-    # If villain calls: pot grows by `amount` on villain side; we win pot+amount or lose amount.
-    called_ev = eq * (pot + amount) - (1.0 - eq) * amount
-    return fold_rate * pot + (1.0 - fold_rate) * called_ev
+            fold_rate: float = _FOLD_RATE_PRIOR, *, street: str = "", n_opp: int = 1) -> float:
+    """EV(bet `amount` into `pot` with equity `eq`), raked.
+
+    The pot is won outright only when every live opponent folds: with the
+    measured per-responder fold rate f for this street/size/players-facing
+    cell that is f**n_opp. Otherwise one caller is assumed (raises count as
+    calls, conservative for value and optimistic for bluffs by the same
+    amount)."""
+    if street:
+        rx = _reaction(street, amount / max(pot, 1.0), n_opp)
+        fold_rate = rx["fold"]
+    p_all_fold = fold_rate ** max(1, int(n_opp or 1))
+    called_ev = eq * (pot + 2.0 * amount) * RAKE_KEEP - amount
+    return p_all_fold * pot * RAKE_KEEP + (1.0 - p_all_fold) * called_ev
 
 
 def estimate_ev_delta(c: dict) -> tuple[float | None, str]:
@@ -372,13 +498,19 @@ def estimate_ev_delta(c: dict) -> tuple[float | None, str]:
     if h == n and abs(ha - na) < max(ha * 0.01, 1.0):
         return 0.0, "unchanged"
 
+    street = str(c.get("street") or "")
+    n_opp = int(c.get("n_opp") or 1)
+
     def ev_of(action: str, amount: float) -> float:
         if action in ("fold", "check"):
             return 0.0
         if action == "call":
             return _ev_call(eq, pot, to_call)
         if action == "raise":
-            return _ev_bet(eq, pot, amount)
+            # `pot` already holds the bet hero faces; the raise's own cost is
+            # the raise-to amount minus what hero has in (approximated by
+            # to_call for the increment).
+            return _ev_bet(eq, max(pot - to_call, 1.0), max(amount - to_call, 1.0), street=street, n_opp=n_opp) - to_call * (1.0 - eq) if to_call > 0 else _ev_bet(eq, pot, amount, street=street, n_opp=n_opp)
         return 0.0
 
     delta = ev_of(n, na) - ev_of(h, ha)
@@ -548,6 +680,23 @@ def summarize(comparisons: list[dict]) -> dict:
             "lost_delta_sum": stats["lost_delta_sum"],
         }
 
+    # Decision-type EV ranking: for every changed decision, group by
+    # (street, logged action -> new action) and report mean delta with a
+    # normal-approximation 95% CI, so changes are judged in aggregate.
+    by_type: defaultdict[str, list[float]] = defaultdict(list)
+    for c in comparisons:
+        tag = classify_change(c)
+        if tag == "unchanged" or c.get("ev_delta") is None:
+            continue
+        by_type[f"{c.get('street') or '?'}|{tag}"].append(float(c["ev_delta"]))
+    ev_by_type = {}
+    for key, xs in sorted(by_type.items(), key=lambda kv: -abs(sum(kv[1]))):
+        n = len(xs)
+        mean = sum(xs) / n
+        sd = (sum((x - mean) ** 2 for x in xs) / (n - 1)) ** 0.5 if n > 1 else 0.0
+        ev_by_type[key] = {"n": n, "sum": round(sum(xs), 1), "mean": round(mean, 1),
+                           "ci95": round(1.96 * sd / n ** 0.5, 1) if n > 1 else None}
+
     worst_changes = []
     changed_rows = [c for c in comparisons if classify_change(c) != "unchanged"]
     changed_rows.sort(key=lambda c: float(c.get("ev_delta") or 0.0))
@@ -602,11 +751,14 @@ def summarize(comparisons: list[dict]) -> dict:
                                   key=lambda k: -abs(ev_sum_by_purpose[k]))
         },
         "changed_by_street_purpose": dict(changed_by_street_purpose.most_common()),
+        "ev_delta_by_decision_type": ev_by_type,
         "worst_changes": worst_changes,
         "ev_caveats": (
             "HIGH confidence: call↔fold changes, no fold-rate assumption. "
-            "MED/LOW confidence: bet-size or class changes use a 0.30 villain "
-            "fold-rate prior; the ABSOLUTE values are rough, but NET SIGN is "
+            "MED/LOW confidence: bet-size or class changes use the pool's measured "
+            "per-responder fold rate for the street/size/players-facing cell "
+            "(see reaction_tables; 0.30 prior only when a cell has <25 observations), "
+            "compounded over live opponents; the ABSOLUTE values are rough, but NET SIGN is "
             "meaningful. Opponent responses to changed bet sizes are assumed "
             "sticky (villain does what they did historically), which is the "
             "standard counterfactual simplification in poker EV analysis."
@@ -626,6 +778,10 @@ def main() -> None:
                     help="Skip the first N hands (0 = no skip; for parallel sharding)")
     ap.add_argument("--end-hand", type=int, default=-1,
                     help="Stop at hand index (exclusive); -1 = no limit")
+    ap.add_argument("--opponents-model", type=Path, default=None,
+                    help="load this persisted opponent model read-only before "
+                         "replaying (the live bot loads pokerfate/data/local_models/"
+                         "opponents.json; replay never writes it back)")
     ap.add_argument("--seed", type=int, default=42,
                     help="Seed used to pin RNG behavior for reproducibility")
     ap.add_argument("--progress", action="store_true",
@@ -644,6 +800,7 @@ def main() -> None:
         ap.error(str(exc))
 
     hands = load_replay(args.replay)
+    reaction_summary = build_reaction_tables(hands)
     # Sharding：start_hand / end_hand 切片，max_hands 仍兼容（在切片内再 cap）。
     start = max(0, args.start_hand)
     end = args.end_hand if args.end_hand > 0 else len(hands)
@@ -689,6 +846,10 @@ def main() -> None:
             )
             # Silence per-hand pretty-print so summary 不被淹没。
             api._log._console = False
+            if args.opponents_model is not None:
+                # Read-only: autosave_path stays None so hand_over never
+                # writes the model back.
+                api._load_persisted_model(str(args.opponents_model))
             last_session = session
             last_big_blind = table_bb
 
@@ -697,6 +858,7 @@ def main() -> None:
             print(f"__PF_PROGRESS__ {idx} {total_hands}", file=sys.stderr, flush=True)
 
     summary = summarize(comparisons)
+    summary["reaction_tables"] = reaction_summary
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
     if args.out:

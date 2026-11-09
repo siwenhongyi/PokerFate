@@ -72,6 +72,11 @@ class GameState:
     # Uniform shape: (player_id, Action, street) with street in {"preflop","flop","turn","river"}.
     action_history: list = field(default_factory=list)
     street_action_count: int = 0  # actions taken this street
+    # Physical seats disambiguate postflop order when new players post blinds
+    # out of turn or the button is on an empty seat. Blind labels still drive
+    # preflop ranges; they need not describe the clockwise action order.
+    player_seats: Dict[int, int] = field(default_factory=dict)
+    dealer_seat: Optional[int] = None
 
     def last_aggressor_id(self, my_player_id: int, street: Optional[str] = None) -> Optional[int]:
         """Last opponent to bet or raise (RAISE includes first bet), optionally on one street."""
@@ -191,6 +196,16 @@ class GameState:
         active = [p for p in self.players if not p.is_folded]
         if len(active) < 2:
             return False
+
+        if self.dealer_seat is not None and all(
+            p.player_id in self.player_seats for p in active
+        ):
+            # Seats after the button act first, wrapping around to the button.
+            last = max(active, key=lambda p: (
+                self.player_seats[p.player_id] <= self.dealer_seat,
+                self.player_seats[p.player_id],
+            ))
+            return last.player_id == player.player_id
 
         explicit_ranks = []
         for p in active:

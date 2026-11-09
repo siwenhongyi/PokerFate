@@ -551,7 +551,19 @@ class OpponentModel:
         # 替代原 ptype=='whale/fish/station' → bluff_freq='none' 的语义。
         base_bluff = max(0.08, base_bluff - sticky_score * 0.40)
         # wtsd 极端高（>0.38）额外压制，等价原"禁止诈唬"
-        if (s.flop_seen_count >= 15 or s.server_wtsd_prior > 0) and s.wtsd > 0.38:
+        # 2026-11-08 audit: the fixed 0.38 cap carries real signal (players
+        # above it fold less to bets; bluff_ag vs measured fold rate r=0.42,
+        # and lifting the cap to a pool-relative 0.47 dropped r to 0.29), so
+        # it stays. What does override it is direct fold evidence: a player
+        # who has folded >=40% to flop bets over >=5 samples is bluffable
+        # whatever their showdown rate says.
+        wtsd_cap = 0.38
+        folds_enough = s.fold_to_cbet_opps >= 5 and s.fold_to_cbet >= 0.40
+        if (
+            (s.flop_seen_count >= 15 or s.server_wtsd_prior > 0)
+            and s.wtsd > wtsd_cap
+            and not folds_enough
+        ):
             base_bluff = min(base_bluff, 0.12)
         if s.showdown_count >= 8 and s.wmsd < 0.45 and s.wtsd > 0.35:
             # 频繁摊牌但常输 → 只用强手摊 → 对他诈唬无意义
@@ -660,8 +672,24 @@ class OpponentModel:
         parent = os.path.dirname(filepath)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        # Atomic replace. The live bot rewrites this ~60MB file after every
+        # hand; a direct ``open(filepath, "w")`` leaves a truncated file for
+        # the whole dump (observed: concurrent readers got "invalid JSON" at
+        # random offsets), and a crash mid-write makes ``load`` fall back to an
+        # empty model whose next save would wipe every opponent's history.
+        tmp_path = f"{filepath}.{os.getpid()}.tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, filepath)
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
 
     @classmethod
     def load(cls, filepath: str) -> "OpponentModel":

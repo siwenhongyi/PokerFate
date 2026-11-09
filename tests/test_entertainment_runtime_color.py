@@ -286,3 +286,21 @@ def test_web_range_compare_api_runs_analysis(monkeypatch) -> None:
         "summary": {"count": 1},
         "conclusion": ["ok"],
     }
+
+
+def test_live_table_treats_missing_seatid_as_seat_zero():
+    """Protobuf omits seatid=0; the hero in seat 0 must still get stack/action updates."""
+    from pf_entertainment.live_table import LiveTableObserver
+    obs = LiveTableObserver(my_uid=10262053)
+    obs.observe("pb.EnterRoomRSP", {"roomid": 1, "room_info": {"sb": 5000, "bb": 10000, "seat_num": 6},
+                                    "table_status": {"seat": [{"player": {"uid": 10262053, "name": "Hero"}, "hand_chips": "1000000"},
+                                                              {"seatid": 1, "player": {"uid": 2, "name": "V"}, "hand_chips": "2000000"}]}})
+    obs.observe("pb.DealerInfoRSP", {"dealer": 1, "start_info": [{"chips": "951450"}, {"seatid": 1, "chips": "1969667"}]})
+    snap = obs.snapshot()
+    assert snap["my_seat"] == 0
+    assert snap["seats"][0]["stack"] == 951450
+    obs.observe("pb.ActionNotifyBRC", {"call_need_chips": "40000"})
+    assert obs.snapshot()["action_seat"] == 0
+    obs.observe("pb.ActionBRC", {"action_type": 3, "chips": "40000", "hand_chips": "911450"})
+    s0 = obs.snapshot()["seats"][0]
+    assert s0["stack"] == 911450 and s0["bet"] == 40000

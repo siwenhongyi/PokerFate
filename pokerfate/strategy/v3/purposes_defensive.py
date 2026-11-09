@@ -220,7 +220,7 @@ def _danger_non_nut_call_block(ctx: DecisionCtx) -> bool:
     if not _dangerous_made_board(ctx):
         return False
     if (
-        ctx.pot_odds < _DANGER_NON_NUT_CALL_MIN_POT_ODDS
+        ctx.raw_pot_odds < _DANGER_NON_NUT_CALL_MIN_POT_ODDS
         and _stack_commit(ctx) < _DANGER_NON_NUT_CALL_MIN_COMMIT
         and ctx.spr > _BLUFF_CATCH_HIGH_LEVERAGE_SPR_MAX
     ):
@@ -294,7 +294,7 @@ def passive_value_bet_dominates(ctx: DecisionCtx) -> bool:
     ):
         return False
     if (
-        ctx.pot_odds < _PASSIVE_VALUE_BET_MIN_POT_ODDS
+        ctx.raw_pot_odds < _PASSIVE_VALUE_BET_MIN_POT_ODDS
         and _stack_commit(ctx) < _PASSIVE_VALUE_BET_MIN_COMMIT
         and ctx.spr > _BLUFF_CATCH_HIGH_LEVERAGE_SPR_MAX
     ):
@@ -325,8 +325,10 @@ def _effective_air_pressure(ctx: DecisionCtx) -> float:
         float(dist.get('air', 0.0) or 0.0)
         + 0.5 * float(dist.get('weak_draw', 0.0) or 0.0)
     )
-    denom = max(1e-9, 1.0 - float(ctx.pot_odds or 0.0))
-    bet_ratio = float(ctx.pot_odds or 0.0) / denom
+    # Bet-to-pot ratio from table geometry (pot_odds is rake-adjusted and is
+    # not a size measure).
+    to_call = max(0.0, float(ctx.to_call or 0.0))
+    bet_ratio = to_call / max(1e-9, float(ctx.pot or 0.0) - to_call)
     floor = 0.0
     if ctx.street == 'river' and bet_ratio >= 0.75:
         floor = 0.10
@@ -345,7 +347,7 @@ def _bluff_catch_reopen_weight(ctx: DecisionCtx, need: float | None = None) -> f
         return 0.0
     if ctx.hero_bucket not in ('medium', 'strong'):
         return 0.0
-    if ctx.pot_odds > _BLUFF_CATCH_REOPEN_MAX_POT_ODDS:
+    if ctx.raw_pot_odds > _BLUFF_CATCH_REOPEN_MAX_POT_ODDS:
         return 0.0
     if _danger_non_nut_call_block(ctx):
         return 0.0
@@ -407,7 +409,7 @@ def _overbet_raise_jam_needed(ctx: DecisionCtx) -> bool:
     return (
         (0 < ctx.spr <= _ORJ_COMMIT_SPR)
         or _stack_commit(ctx) >= _ORJ_MIN_STACK_COMMIT
-        or ctx.pot_odds >= _ORJ_MIN_POT_ODDS
+        or ctx.raw_pot_odds >= _ORJ_MIN_POT_ODDS
         or (pressure >= _ORJ_PRESSURE_MIN and continue_mass >= _ORJ_PRESSURE_CONTINUE_MIN)
         or continue_mass >= _ORJ_PURE_CONTINUE_MIN
     )
@@ -420,7 +422,7 @@ def _tiny_donk_overpair_protection(ctx: DecisionCtx, pressure: float, nuts: floa
         and ctx.hero_bucket == 'strong'
         and ctx.hero_made_subtype == 'clean_overpair'
         and ctx.spr <= _PR_TINY_DONK_OVERPAIR_MAX_SPR
-        and ctx.pot_odds <= _PR_TINY_DONK_OVERPAIR_MAX_POT_ODDS
+        and ctx.raw_pot_odds <= _PR_TINY_DONK_OVERPAIR_MAX_POT_ODDS
         and pressure >= _PR_TINY_DONK_OVERPAIR_MIN_PRESSURE
         and nuts <= _PR_TINY_DONK_OVERPAIR_MAX_NUTS
     )
@@ -463,13 +465,13 @@ def _opp_raise_premium(ctx: DecisionCtx) -> float:
     """
     vs = ctx.villain_stats
     premium = max(-0.10, min(0.15, (AF_PASSIVE_BASELINE - vs.af) * 0.06))
-    scale = min(1.0, ctx.pot_odds / 0.25) if ctx.pot_odds > 0 else 0.0
+    scale = min(1.0, ctx.raw_pot_odds / 0.25) if ctx.raw_pot_odds > 0 else 0.0
     return premium * scale
 
 
 def _small_bet_value_raise_spot(ctx: DecisionCtx) -> bool:
     """Whether a tiny blocker/donk bet should be raised for value."""
-    if ctx.pot_odds > _VALUE_RAISE_SMALL_BET_MAX_POT_ODDS:
+    if ctx.raw_pot_odds > _VALUE_RAISE_SMALL_BET_MAX_POT_ODDS:
         return False
     if ctx.hero_bucket not in ('strong', 'nuts'):
         return False
@@ -491,7 +493,7 @@ def _small_bet_medium_value_raise_spot(ctx: DecisionCtx) -> bool:
     """Top-pair/overpair class hands may punish blocker bets before river."""
     if ctx.street not in ('flop', 'turn'):
         return False
-    if ctx.pot_odds > _VALUE_RAISE_SMALL_MEDIUM_MAX_POT_ODDS:
+    if ctx.raw_pot_odds > _VALUE_RAISE_SMALL_MEDIUM_MAX_POT_ODDS:
         return False
     if ctx.hero_bucket != 'medium':
         return False
@@ -530,7 +532,7 @@ def _low_spr_nuts_value_raise_spot(ctx: DecisionCtx) -> bool:
         ctx.hero_bucket == 'nuts'
         and ctx.spr > 0
         and ctx.spr <= _VALUE_RAISE_LOW_SPR_NUTS_MAX_SPR
-        and ctx.pot_odds <= 0.35
+        and ctx.raw_pot_odds <= 0.35
         and (ctx.villain_bucket_dist or {}).get('nuts', 0.0) <= _VALUE_RAISE_LOW_SPR_NUTS_MAX_NUTS
         and (
             ctx.equity_range >= _VALUE_RAISE_LOW_SPR_NUTS_MIN_EQ
@@ -571,7 +573,7 @@ class BluffCatchCall(Purpose):
                 adj += 0.04
             elif ctx.villain_stats.bluff_win_rate > 0.30:
                 adj -= 0.04
-        if ctx.board_sig.paired and not ctx.is_ip and ctx.pot_odds >= 0.30:
+        if ctx.board_sig.paired and not ctx.is_ip and ctx.raw_pot_odds >= 0.30:
             adj += 0.06
         if ctx.villain_bucket_dist.get('nuts', 0.0) > 0.08:
             adj += 0.03
@@ -590,7 +592,7 @@ class BluffCatchCall(Purpose):
                 loss_dominant_passive_raise = (
                     ctx.street == 'river'
                     and ctx.board_sig.paired
-                    and ctx.pot_odds >= _BLUFF_CATCH_REL_LOSS_DOMINANT_MIN_POT_ODDS
+                    and ctx.raw_pot_odds >= _BLUFF_CATCH_REL_LOSS_DOMINANT_MIN_POT_ODDS
                     and villain_wins >= hero_wins
                     and (sticky_passive(ctx) or ctx.villain_stats.af < AF_PASSIVE_BASELINE)
                 )
@@ -835,7 +837,7 @@ class SemiBluffRaise(Purpose):
             and (
                 ctx.villain_stats.fold_to_cbet >= _SEMI_BLUFF_RAISE_PREMIUM_MIN_FOLD
                 or ctx.is_ip
-                or ctx.pot_odds <= 0.20
+                or ctx.raw_pot_odds <= 0.20
             )
         )
         if not has_primary_blocker and not premium_aggressive:
@@ -906,7 +908,7 @@ class ProtectionRaise(Purpose):
             return TriggerResult(False)
         if ctx.to_call <= 0:
             return TriggerResult(False)
-        if ctx.pot_odds > _PR_MAX_POT_ODDS:
+        if ctx.raw_pot_odds > _PR_MAX_POT_ODDS:
             return TriggerResult(False)
 
         # Protection raise 的语义不是“近坚果价值加注”，而是“脆弱领先牌
@@ -1060,11 +1062,11 @@ class FoldPurpose(Purpose):
         # 超额 pot bet 在 range 层强烈表达 polarization（nuts 或纯 bluff），
         # whale 桌上 "纯 bluff" 极少 → fold 加权 +EV。
         if not hero_is_top_tier:
-            if ctx.pot_odds >= _BR_T1:
+            if ctx.raw_pot_odds >= _BR_T1:
                 w += 0.8
-            if ctx.pot_odds >= _BR_T2:
+            if ctx.raw_pot_odds >= _BR_T2:
                 w += 0.6    # 累加
-            if ctx.pot_odds >= _BR_T3:
+            if ctx.raw_pot_odds >= _BR_T3:
                 w += 0.4    # 再累加
 
         # Hero 自己是 air / weak → fold 至少保持 0.8 地板

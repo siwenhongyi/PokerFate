@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
 from scripts.hero_name import load_hero_names
 
 
-TS_RE = re.compile(r"^\[\d{2}:\d{2}:\d{2}\]\s*")
+TS_RE = re.compile(r"^\[(?:\d{4}-\d{2}-\d{2} )?\d{2}:\d{2}:\d{2}\]\s*")
 HAND_RE = re.compile(r"第\s*(\d+)\s*手\s+(.*)$")
 STREET_RE = re.compile(r"──\s*(翻牌前|翻牌|转牌|河牌)")
 HERO_ACTION_RE = re.compile(r"►\s*(?P<name>.+?)\s+(?P<action>弃牌|过牌|跟注|加注|下注|全下)(?P<rest>.*)$")
@@ -77,7 +77,7 @@ def load_hero_aliases(hero: str | None) -> tuple[str, ...]:
 
 def parse_stack_bb(header_tail: str, hero_aliases: Iterable[str]) -> float | None:
     for hero in sorted((h for h in hero_aliases if h), key=len, reverse=True):
-        m = re.search(rf"(?:^|\s){re.escape(hero)}(?:\([^)]*\))?\s+(\d+(?:\.\d+)?)bb\s+\[\]", header_tail)
+        m = re.search(rf"(?:^|\s){re.escape(hero)}(?:\([^)]*\))?\s+(\d+(?:\.\d+)?)bb\s+\[[^\]]*\]", header_tail)
         if m:
             return float(m.group(1))
     return None

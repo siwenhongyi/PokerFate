@@ -37,6 +37,7 @@ class G5EngineOptions:
     log_file: Optional[str] = None
     model_file: Optional[str] = None
     max_worker_exits: int = 1
+    validate_replay_state: bool = False
 
 
 class G5JsonDecisionEngine:
@@ -56,6 +57,7 @@ class G5JsonDecisionEngine:
             raise DecisionEngineError("g5 worker command is empty")
         self.options = options
         self._proc: Optional[subprocess.Popen[str]] = None
+        self._process_lock = threading.RLock()
         self._stdout_queue: "queue.Queue[dict[str, Any]]" = queue.Queue()
         self._stderr_queue: "queue.Queue[str]" = queue.Queue()
         self._next_id = 0
@@ -92,6 +94,16 @@ class G5JsonDecisionEngine:
         self._fail_hand(reason)
 
     def close(self) -> None:
+        with self._process_lock:
+            self._close_process()
+
+    def shutdown(self) -> None:
+        """Cancel an observer permanently, including a concurrent lazy spawn."""
+        with self._process_lock:
+            self._worker_disabled_reason = "g5 observer closed"
+            self._close_process()
+
+    def _close_process(self) -> None:
         proc = self._proc
         self._proc = None
         self._created_signature = None
@@ -133,6 +145,8 @@ class G5JsonDecisionEngine:
         hero_player_id: int,
         big_blind: float,
         small_blind: float,
+        fresh_game: bool = False,
+        seed_payload: Optional[list[dict[str, Any]]] = None,
     ) -> None:
         self._hand_failed = False
         if len(players) < 2:
@@ -170,7 +184,7 @@ class G5JsonDecisionEngine:
             self._int_chips(big_blind),
             self._int_chips(small_blind),
         )
-        if signature != self._created_signature:
+        if fresh_game or signature != self._created_signature:
             self._rpc(
                 "create_game",
                 {
@@ -187,7 +201,12 @@ class G5JsonDecisionEngine:
             )
             self._created_signature = signature
 
-        self._seed_current_players()
+        if seed_payload is None:
+            self._seed_current_players()
+        elif seed_payload:
+            self._rpc("seed_player_stats", {
+                "game_name": self.options.game_name, "players": seed_payload,
+            })
 
         result = self._rpc(
             "start_hand",
@@ -356,6 +375,8 @@ class G5JsonDecisionEngine:
                 "pot": self._int_chips(gs.pot),
                 "current_bet": self._int_chips(gs.current_bet),
                 "my_current_bet_this_street": self._int_chips(my_current_bet_this_street),
+                "validate_replay_state": self.options.validate_replay_state,
+                "hero_stack": self._int_chips(next(p.stack for p in gs.players if p.player_id == hero_player_id)),
             },
         )
         if not isinstance(result, dict):
@@ -572,6 +593,10 @@ class G5JsonDecisionEngine:
             return response.get("result")
 
     def _ensure_process(self) -> subprocess.Popen[str]:
+        with self._process_lock:
+            return self._ensure_process_locked()
+
+    def _ensure_process_locked(self) -> subprocess.Popen[str]:
         if self._worker_disabled_reason:
             raise DecisionEngineError(self._worker_disabled_reason)
         if self._proc is not None and self._proc.poll() is None:

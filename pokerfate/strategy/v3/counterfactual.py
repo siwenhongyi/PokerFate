@@ -227,7 +227,14 @@ def _stat_fold_prior(ctx: DecisionCtx, action_kind: str, frac: float, purpose: s
         base *= 0.55
         source += "+raise"
     if ctx.num_opponents > 1:
-        base *= max(0.55, 1.0 - 0.15 * (ctx.num_opponents - 1))
+        # A bet only wins the pot when EVERY live opponent folds. Treating them
+        # as roughly independent that is base**n, not a 15%-per-opponent
+        # discount: with the 0.42 population prior the old rule gave 0.36 for
+        # two and 0.29 for three opponents where the product is 0.18 and 0.07.
+        # Logs 2026-11-06/07: each of two opponents facing a flop bet folds
+        # 48% (n=123), so both folding is ~23%. n is capped at 4 so 5-6 way
+        # pots do not sit on the clamp floor from noise alone.
+        base = base ** min(int(ctx.num_opponents), 4)
     if ctx.prev_bet_called_count:
         base *= max(0.45, 1.0 - 0.18 * ctx.prev_bet_called_count)
     if ctx.prev_bet_raised:
@@ -302,7 +309,12 @@ def equity_vs_raising_range(ctx: DecisionCtx, frac: float) -> float:
     return clamp(float(ctx.equity_range or 0.0) + (prior_filtered - prior_full) + blocker_lift, 0.02, 0.98)
 
 
-def effective_equity(ctx: DecisionCtx, *, conservative: bool = False) -> tuple[float, str, float]:
+def effective_equity(
+    ctx: DecisionCtx,
+    *,
+    conservative: bool = False,
+    range_only: bool = False,
+) -> tuple[float, str, float]:
     rel = ctx.villain_vs_hero_dist or {}
     if ctx.street == "river" and rel:
         eq = float(rel.get("win", 0.0) or 0.0) + 0.5 * float(rel.get("tie", 0.0) or 0.0)
@@ -311,6 +323,13 @@ def effective_equity(ctx: DecisionCtx, *, conservative: bool = False) -> tuple[f
     mc_eq = float(ctx.equity_mc or range_eq)
     uncertainty = float(ctx.equity_uncertainty or 0.0)
     div = abs(mc_eq - range_eq)
+    if range_only:
+        # The calibrated range equity is the best showdown predictor we have
+        # (Brier 0.186 vs 0.251 for MC-vs-random on logged river showdowns);
+        # the MC blend below rewards exactly the hands whose range equity
+        # collapsed (air facing a bet). Price decisions on range equity with
+        # half the tracker uncertainty as a haircut.
+        return clamp(range_eq - 0.5 * uncertainty), "range_only", max(0.2, 1.0 - div)
     if conservative:
         return clamp(min(range_eq, mc_eq) - uncertainty), "conservative", max(0.2, 1.0 - div)
     if div <= 0.08:

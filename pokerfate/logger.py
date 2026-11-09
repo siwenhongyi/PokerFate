@@ -17,6 +17,7 @@ import os
 import pathlib
 import re
 import sys
+import threading
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -209,13 +210,17 @@ class _JsonlWriter:
         os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
         _archive_runtime_log(filepath)
         self._f = open(filepath, "w", encoding="utf-8", buffering=1)
+        self._lock = threading.Lock()
 
     def write(self, event: dict):
         event.setdefault("ts", datetime.now(timezone.utc).isoformat())
-        self._f.write(json.dumps(event, ensure_ascii=False) + "\n")
+        with self._lock:
+            if not self._f.closed:
+                self._f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
     def close(self):
-        self._f.close()
+        with self._lock:
+            self._f.close()
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +426,7 @@ class PokerLogger:
         timing: Optional[Dict] = None,
         river_relative: Optional[Dict] = None,
         street_relative: Optional[Dict] = None,
+        decision_id: Optional[str] = None,
     ):
         """Log the bot's own decision."""
         rec: Dict = {
@@ -433,6 +439,8 @@ class PokerLogger:
             "pot": pot,
             "to_call": to_call,
         }
+        if decision_id is not None:
+            rec["decision_id"] = decision_id
         if equity_random is not None:
             rec["equity_random"] = round(equity_random, 3)
         if spr is not None:

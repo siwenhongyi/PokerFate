@@ -21,6 +21,7 @@ import asyncio
 import logging
 import ssl
 import time
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
@@ -110,6 +111,23 @@ class HeadlessSession:
         self._bridge_queue: asyncio.Queue = asyncio.Queue()
         self._pending_hb = 0
         self._tasks: list[asyncio.Task] = []
+        self._bankroll_snapshot: dict = {}
+        self._refresh_bankroll_snapshot()
+
+    def bankroll_dashboard(self) -> dict:
+        """Read the last completed bridge snapshot without waiting for the bot.
+
+        Web polling must neither read halfway through a handler nor wait for
+        CFR/learning to release the bridge lock. Snapshots belong to this session.
+        """
+        return deepcopy(self._bankroll_snapshot)
+
+    def _refresh_bankroll_snapshot(self) -> None:
+        try:
+            self._bankroll_snapshot = self.bridge.bankroll_dashboard()
+        except Exception:
+            # A display failure must not discard an action returned by handle().
+            log.exception("[BOT] bankroll snapshot failed")
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
@@ -187,6 +205,9 @@ class HeadlessSession:
         for t in self._tasks:
             t.cancel()
         self._tasks = []
+        close_bridge = getattr(self.bridge, "close", None)
+        if callable(close_bridge):
+            await asyncio.to_thread(close_bridge)
         if self._ws is not None:
             try:
                 await self._ws.close(code=1000, reason=reason[:100])
@@ -297,6 +318,7 @@ class HeadlessSession:
                 try:
                     async with self._bridge_lock:
                         result = await asyncio.to_thread(self.bridge.handle, type_name, msg)
+                        self._refresh_bankroll_snapshot()
                     for inject in _iter_injects(result):
                         asyncio.create_task(self._inject(inject, room_id), name="headless-inject")
                 except asyncio.CancelledError:

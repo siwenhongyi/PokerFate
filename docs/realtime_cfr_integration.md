@@ -5,8 +5,19 @@
 - `local` 或非法值：PokerFate 纯本地决策。
 - `g5_all`：翻前、翻后都由 g5 接管，PokerFate 只做旁路对照。
 - `g5`：翻前 PokerFate 查表/本地，翻后 g5 接管；翻前仍同步 g5 shadow，保证翻后状态连续。
-- `realtime_cfr`：翻前、翻牌 PokerFate 本地；转牌、河牌走 realtime CFR 局部实时搜索，10 秒超时或准备失败时回退 PokerFate 本地。
-- `cfr`：翻前 PokerFate 本地；翻牌查离线 CFR 书；转牌、河牌走 realtime CFR；任意 miss/异常/超时都回退 PokerFate 本地。
+- `cfr`：翻前 PokerFate 本地；翻牌由独立开关决定是否查离线 CFR 书；转牌、河牌实时求解；任意 miss/异常/超时都回退 PokerFate 本地。
+
+`PF_CFR_FLOP_BOOK_ENABLED` 是启动时读取的独立开关，默认 `1`：
+
+- `DECISION_ENGINE=cfr PF_CFR_FLOP_BOOK_ENABLED=1`：翻牌优先查书。
+- `DECISION_ENGINE=cfr PF_CFR_FLOP_BOOK_ENABLED=0`：翻牌走本地，不加载翻牌书；转牌、河牌照常实时求解。
+
+关闭值可用 `0/false/no/off`，开启值可用 `1/true/yes/on`。API 调用方可通过
+`cfr_flop_book_enabled` 显式覆盖环境变量。启动日志 `session_config.env` 保留环境原值，
+`session_config.resolved.PF_CFR_FLOP_BOOK_ENABLED` 记录实际解析后的布尔值（未设环境变量时也记录）。
+`decision_engine_enabled.flop_book` 和状态接口的 `flop_book` 表示是否实际启用了书；
+`flop_book_requested` 表示开关值。运行时切换决策引擎会再次记录 `session_config`。
+顶层模式只支持 `local/g5/g5_all/cfr`，不提供旧模式的兼容别名。
 
 ## 本次复制进项目的 solver
 
@@ -34,6 +45,8 @@ cargo build --release
 
 ## 离线翻牌书
 
+注意：v2 书是按 97bb、无抽水（meta `rake.cap=0`）、2.5/3bb 开池解的；现场是 9% 不封顶抽水、hero 多为 40–60bb、开池 3.5/4bb。书未重算，命中窗口（`FlopBookOptions`）保持原样，底池偏离 >35% 或后手不在 40–170bb 时回退本地。sqlite 连接以 `check_same_thread=False` 打开，因为决策跑在 asyncio 线程池里，否则第二个线程查书会直接报错回退。
+
 `pf_offline_book` 的 v2 离线翻牌书已复制进本项目：
 
 ```text
@@ -58,11 +71,11 @@ pokerfate/data/flop_book/v2/
 
 `PokerFateAPI.request_action()` 的顺序：
 
-1. `DECISION_ENGINE=cfr` 且当前是 flop 时，先调用 `FlopBookDecisionEngine`。
-2. `DECISION_ENGINE=realtime_cfr/cfr` 且当前是 turn/river 时，调用 `RealtimeCFRDecisionEngine`。
+1. `DECISION_ENGINE=cfr`、翻牌书开关开启且当前是 flop 时，先调用 `FlopBookDecisionEngine`；开关关闭则翻牌走本地。
+2. `DECISION_ENGINE=cfr` 且当前是 turn/river 时，调用 `RealtimeCFRDecisionEngine`。
 3. CFR 成功返回 `Action` 时，直接接入主决策结果，并把本地 bot 的已采纳动作记忆同步上。
 4. CFR 失败、超时、solver 缺失、非 heads-up、range 不可用、节点无法定位、翻牌书 miss 时，记录 fallback 原因并继续走 PokerFate 本地。
-5. g5 模式仍走原来的 g5 active/shadow 路径；`realtime_cfr/cfr` 不触发 g5 shadow。
+5. g5 模式仍走原来的 g5 active/shadow 路径；`cfr` 不触发 g5 shadow。
 
 ## realtime CFR 输入
 
@@ -73,8 +86,9 @@ pokerfate/data/flop_book/v2/
 - 底池：使用当前街开始底池 `street_start_pot`，避免把本街下注重复计入 solver 起点。
 - 有效后手：按 OOP/IP 当前剩余栈加本街已投入计算。
 - 当前街真实动作前缀：从 `GameState.action_history` 提取 check/call/bet/raise，并把真实下注尺寸注入 solver menu。
-- 对手范围：使用 Range V2 的 1326 combo 权重，去除 hero 手牌和公共牌 blockers 后转成 `postflop-solver` range 字符串。
-- Hero 范围：使用 v3 hero reach range，按翻前位置/防守场景 + hero 前街动作过滤生成 1326 combo 权重。hero 侧只用公共牌做 blocker，不用真实底牌删掉其它 hero combos；真实底牌只用于从 solver 输出策略表里取当前 combo 的行动。range 生成失败时才 fallback 到当前真实手牌精确 combo。
+- 对手范围：使用 Range V2 的 1326 combo 权重，但取的是**本街发牌时的快照**（`api.deal_board` 后保存），不是对手本街行动之后的后验。对手本街的 bet/raise/call 已经在 solver 树的动作前缀里，再喂后验等于把同一个动作算两遍（回放实测会把对手范围压得过紧、hero 多弃牌）。去除 hero 手牌和公共牌 blockers 后转成 `postflop-solver` range 字符串。
+- Hero 范围：`v3/hero_range.combo_weights`。翻前基础范围按 hero 实际走过的线取（`describe_preflop_line`）：RFI/iso → 位置 RFI 表；3bet → 3bet 价值+诈唬池；4bet → 4bet 池；BB 跟开池 → 对应开池位置的 BB 防守表；非 BB 平跟 → 平跟防守表；跟 3bet → 位置 3bet-call 表；limp → limp-behind 池；BB 免费看牌 → 全范围。前街过滤优先用当时做决策的引擎输出：翻牌书 / realtime CFR 都会导出“当前节点所有 hero combo 选中所选动作的概率”（`last_hero_reach_update`），下一街直接乘上去；只有本地引擎做的决策才退回 bucket 频率表（含 call 的续牌频率）。hero 侧只用公共牌做 blocker，真实底牌只用于取当前 combo 的行动。
+- 抽水：`core.config.RAKE_RATE=0.09`、不封顶，以 `rake_cap=10^9` 筹码传给 solver（postflop-solver 按 `min(rate×pot, cap)` 计费，cap=0 等于不抽水）。
 - 默认菜单：flop `33/100`；turn `33/75/150`；river `33/66/100/150`；转牌求解树内未来 river 粗化为 `66/150`；raise `2.2x/3.0x`。真实已发生尺寸会额外注入，保证能定位到当前节点。
 
 ## solver 输出扩展
@@ -90,7 +104,7 @@ Rust 绑定现在支持 `include_evs=true`，默认开启。除当前节点策�
 
 ## 剥削层
 
-当前 CFR 接入不随机抽样混合策略。没有 EV 的翻牌书先取当前 combo 策略概率最高的动作；有 EV 的 turn/river 先取当前 combo 的 action EV，再经剥削层重算/约束后选最终 EV 最高的动作。`selected_prob` 只用于诊断“这个动作在基线/最终策略里有多高频”，不是随机采样结果。
+动作选择：没有 EV 的翻牌书取当前 combo 策略概率最高的动作；有 EV 的 turn/river 先取当前 combo 的 action EV，经剥削层重算/约束后，在“最终 EV 与最优差距 ≤ max(0.15bb, 1% 底池)”的动作集合里按均衡频率抽样（`_sample_near_ev`，随机数来自 `api._next_decision_seed` 的可复现种子；无种子时取 EV 最高）。这样 EV 几乎相等的动作不会永远只出一个，诊断里的 `mixed_sample` 记录候选与概率。`selected_prob` 仍是该动作在基线策略里的频率。
 
 realtime CFR 仍以均衡策略为锚点，不直接用画像替代 solver：
 
@@ -98,8 +112,9 @@ realtime CFR 仍以均衡策略为锚点，不直接用画像替代 solver：
 2. 对 hero 每个 action，找到下一层 villain 节点，读取 villain `Fold/Call/Raise/...` 每个 response 后 hero combo 的 EV。
 3. 用 villain 节点的 `weights + strategy` 聚合出均衡 response 频率。
 4. 用项目内画像和当前手线路证据修正 response 频率，再重算该 hero action 的 exploit EV。
-5. 最终 action EV = `(1 - confidence) * GTO_EV + confidence * exploit_EV`，并用 GTO leash 限制大幅偏离。
-6. 安全阀：没有真实偏置信号时不启用剥削；候选动作的 GTO EV 低于最优 GTO EV 太多时触发 `gto_ev_floor`；防守端 fold 概率过高且非 fold EV 接近时触发 `defense_mdf` 软阀；river 大注/all-in 会额外检查 adjusted fold equity 和 risk margin。
+5. 最终 action EV = `(1 - confidence) * GTO_EV + confidence * exploit_EV`。GTO leash：GTO EV 低于最优超过 `(0.6 + 2×confidence) × max(1, pot/20)` bb 的动作直接从候选集中剔除（旧版只是把它夹到“略低于最优”，后续 tie-break 仍可能选中它，回放里出现过 solver 100% 弃牌却选了 raise 的案例）。
+6. 安全阀：没有真实偏置信号时不启用剥削；候选动作的 GTO EV 低于最优 GTO EV 太多时触发 `gto_ev_floor`；river 大注/all-in 会额外检查 adjusted fold equity 和 risk margin。旧的逐 combo `defense_mdf` 阀已删除：MDF 是范围层面的性质，solver 均衡本身已满足，按单个 combo 再套 MDF 概念上不成立。
+7. 没有 response EV 的动作走 `_direct_exploit_delta`，其常数按 `pot/10`（限 0.5–4）缩放，保证 3bb 和 60bb 底池里的修正量级都合理。
 
 画像来源是 `PokerBot._build_player_profile()`，也就是既有的 OpponentModel + Range V2 统计：VPIP/PFR/AF、fold to cbet、WTSD、street AFq、river fold/bet 等。连续剥削信号来自 `OpponentModel.exploit_adjustments()`：`value_ag_scale`、`bluff_ag_scale`、`river_bluff_likely`、`river_bet_rare` 等。
 
@@ -127,6 +142,7 @@ realtime CFR 仍以均衡策略为锚点，不直接用画像替代 solver：
 - hero 手牌或公共牌不完整。
 - Range V2 未启用或范围为空。
 - 当前街动作历史无法按 OOP/IP 顺序还原。
+- 有效后手不足 0.1bb（solver 筹码取整后为 0，本就只能 check/call）。
 - solver 动态库不存在、加载失败、求解异常或 10 秒超时。
 - solver 返回结果里找不到当前节点或 hero combo 策略。
 
@@ -174,3 +190,31 @@ realtime_cfr decision | Raise(90)@80% | expl=0.42% | t=1.8s | path=r:Bet(60)
 ```text
 flop_book decision | BTNvBB_srp100 | x@100% | path=r | t=1ms
 ```
+
+## G5 真实历史旁路
+
+`PF_G5_SHADOW_ENABLED=1` 默认开启，在 `DECISION_ENGINE=cfr` / `local` 下独立评估。
+设为 `0` 可关闭；更改后下次启动生效。它不改变主决策路由。
+
+每个真实决策点冻结手牌、牌面、此前的动作和本手开始时的 G5 对手模型，
+后台 worker 在新建的游戏状态中重放到该节点。实战历史来自服务器 ActionBRC，
+包括自己最终执行的动作；G5 建议不会被执行或写入下一节点的历史，建议弃牌后
+仍继续评估后续真实节点。直接调用 PokerFateAPI 时默认使用 API 已应用的动作；
+外部接入可设置 `g5_shadow_server_actions=True` 并调用 `record_g5_actual_action`。
+
+`session_config.resolved` 记录开关、`G5_SHADOW_ACTIVE`、`G5_SHADOW_MODE=real_history_v1`
+和历史来源。JSONL 日志中：
+
+- `decision.decision_id`：主决策对应的唯一节点 ID。
+- `g5_shadow_decision`：相同 ID 的主建议、local 对照（如果有）、G5 建议/EV、
+  原始手号、牌面/筹码、历史长度/哈希、耗时和成功/失败/跳过状态。
+- `g5_shadow_execution`：相同 ID 的服务器最终执行动作和实际金额。
+
+旁路异步完成，按 `decision_id` 关联，不能按日志相邻位置关联。
+队列满、缺少自己动作确认、重连丢失历史、非标准盲位/补盲或状态校验失败均显式记录；
+这些节点不能算作有效建议样本。G5 RPC 超时/退出后会停止启动新的 worker，
+后续节点保留错误记录，重启进程后恢复。旁路不接收本手最终输赢或未来牌面。
+
+这能支持同点建议、覆盖率和故障率对照；没有执行过的 G5 建议仍没有真实收益，
+不能把主引擎的实际输赢直接算作 G5 的反事实盈亏。原有 `g5` 主引擎模式的旧
+`G5_SHADOW_DECISIONS` 属于另一条历史逻辑，评估时只取 `real_history_v1`。

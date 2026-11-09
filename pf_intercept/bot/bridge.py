@@ -521,8 +521,8 @@ class BotBridge:
             value = str(decision_engine or "local").strip().lower().replace("-", "_")
             if value in {"", "pokerfate"}:
                 value = "local"
-            if value not in {"local", "g5", "g5_all", "realtime_cfr", "cfr"}:
-                raise ValueError("decision_engine must be local, g5, g5_all, realtime_cfr, or cfr")
+            if value not in {"local", "g5", "g5_all", "cfr"}:
+                raise ValueError("decision_engine must be local, g5, g5_all, or cfr")
             old = (
                 str(getattr(config, "DECISION_ENGINE", "local") or "local")
                 .strip()
@@ -1021,6 +1021,12 @@ class BotBridge:
 
     # ── Session setup ─────────────────────────────────────────────────────────
 
+    def close(self) -> None:
+        if self._api is not None:
+            close = getattr(self._api, "close_g5_shadow", None)
+            if callable(close):
+                close()
+
     def _set_my_seat(self, seat: int, reason: str) -> None:
         if seat < 0:
             return
@@ -1030,6 +1036,7 @@ class BotBridge:
         self._my_seat = seat
         log.info("[BOT] My seat detected: %s -> %d (%s)", old, seat, reason)
         # Recreate API when seat changes (reconnect / table rejoin).
+        self.close()
         self._api = None
 
     def _on_user_login_rsp(self, msg: dict) -> WireInject | None:
@@ -1376,6 +1383,22 @@ class BotBridge:
             return int(uid)
         return -(int(seat) + 1)
 
+    def _dealer_player_id(self, dealer_seat: int) -> int:
+        """Player id the API uses to locate the button.
+
+        When the button sits on a seat that is not in this hand (a player who
+        left or sits out keeps a stale uid in ``_seat_uids``), passing that uid
+        makes ``PokerFateAPI`` lose the physical button seat and fall back to
+        blind labels for postflop order; heads-up with a dead button that
+        labels the first-to-act player "BTN" and the realtime CFR rejects the
+        action prefix. Encode an unseated button as ``-(seat + 1)``, which
+        ``new_hand`` decodes back to the seat index. 130 of 1798 logged hands
+        (2026-11-07) had an unseated button.
+        """
+        if int(dealer_seat) not in self._all_seats:
+            return -(int(dealer_seat) + 1)
+        return self._seat_to_player_id(dealer_seat)
+
     def _seat_player_name(self, seat: int) -> str:
         return self._seat_names.get(seat) or f"Player_{seat}"
 
@@ -1633,7 +1656,7 @@ class BotBridge:
         self._apply_pending_seeds_for_players(players)
         self._api.new_hand(
             players=players,
-            dealer_id=self._seat_to_player_id(dealer_seat),
+            dealer_id=self._dealer_player_id(dealer_seat),
             hand_number=self._hand_seq,
         )
         if previous_gameid:
@@ -1697,6 +1720,11 @@ class BotBridge:
         """Best-effort restore of per-hand bridge state from EnterRoomRSP after reconnect."""
         if not table_status:
             return
+        if table_status.get("is_playing") is True:
+            invalidate = getattr(self._api, "invalidate_g5_shadow", None)
+            if callable(invalidate):
+                # This also covers preflop reconnects, where there is no board.
+                invalidate("reconnected_without_full_history")
         stage = _chip_int(table_status.get("stage", self._stage or 1), self._stage or 1)
         if stage > 0:
             self._stage = stage
@@ -1872,11 +1900,14 @@ class BotBridge:
             equity_iterations=3000,
             verbose=True,
             decision_engine=getattr(config, "DECISION_ENGINE", "local"),
+            cfr_flop_book_enabled=getattr(config, "PF_CFR_FLOP_BOOK_ENABLED", True),
             g5_timeout_sec=getattr(config, "G5_TIMEOUT_SEC", 1.5),
             g5_recent_hands_count=getattr(config, "G5_RECENT_HANDS", 100),
             g5_randomly_sample_actions=getattr(config, "G5_RANDOMLY_SAMPLE_ACTIONS", False),
             g5_preflop_charts_level=getattr(config, "G5_PREFLOP_CHARTS_LEVEL", 4),
             g5_shadow_decisions=getattr(config, "G5_SHADOW_DECISIONS", True),
+            g5_observer_enabled=getattr(config, "PF_G5_SHADOW_ENABLED", True),
+            g5_shadow_server_actions=True,
         )
         self._apply_preflop_sticky_pool_adjust(
             bool(getattr(config, "PREFLOP_STICKY_POOL_ADJUST", True))
@@ -1979,10 +2010,13 @@ class BotBridge:
 
         self._api.new_hand(
             players=players,
-            dealer_id=self._seat_to_player_id(dealer_seat),
+            dealer_id=self._dealer_player_id(dealer_seat),
             hand_number=self._hand_seq,
         )
         if not blind_layout_is_standard:
+            invalidate = getattr(self._api, "invalidate_g5_shadow", None)
+            if callable(invalidate):
+                invalidate("nonstandard_blind_layout")
             log.info(
                 "[BOT] G5 非标准盲位布局，保留外部决策；由物理座位+sitting_out 建模兜底: "
                 "dealer=%s sb=%s bb=%s expected_sb=%s expected_bb=%s",
@@ -2087,6 +2121,23 @@ class BotBridge:
             )
 
         action_str = ACTION_TYPE_TO_EVENT_ACTION.get(action_type)
+
+        if callable(getattr(self._api, "record_g5_actual_action", None)):
+            if action_type in (10, 11, 14) and chips > 0:
+                self._api.invalidate_g5_shadow("unsupported_forced_post")
+            elif action_str is not None:
+                # An all-in at/below the previous maximum is a call in G5.
+                observed_action = action_str
+                other_max = max((v for s, v in self._street_bets.items() if s != seat), default=0)
+                if observed_action == "raise" and total_street_bet <= other_max:
+                    observed_action = "call"
+                self._api.record_g5_actual_action(
+                    player_id=self._seat_to_player_id(seat), action=observed_action,
+                    amount_added=chips, total_bet_after=total_street_bet,
+                    street=_STAGE_TO_STREET.get(self._stage, "preflop"),
+                )
+            elif action_type not in ACTION_TYPE_TO_EVENT_ACTION:
+                self._api.invalidate_g5_shadow(f"unknown_action_type:{action_type}")
 
         if seat == self._my_seat:
             self._my_bet = total_street_bet
@@ -2223,7 +2274,7 @@ class BotBridge:
         log.info("[BOT] Decision: %s  (street=%s pot=%.0f to_call=%.0f stack=%.0f)",
                  decision, street, self._pot, call_need, self._my_chips)
 
-        action_type, chips = _decision_to_wire(decision)
+        action_type, chips = _decision_to_wire(decision, current_bet=self._my_bet)
         self._remember_hero_wire_action(decision, notify_sig=notify_sig)
         self._maybe_show_pure_bluff_before_action(decision)
         delay_sec = _inject_delay_before_action(
@@ -2720,10 +2771,11 @@ class BotBridge:
 
 # ── Wire action conversion ─────────────────────────────────────────────────────
 
-def _decision_to_wire(decision: BotDecision) -> tuple[int, int]:
+def _decision_to_wire(decision: BotDecision, *, current_bet: float = 0.0) -> tuple[int, int]:
+    """Convert API raise-to amounts to the protocol's additional chips."""
     action = decision.action.lower()
     if action == "fold":  return 1, 0
     if action == "check": return 2, 0
     if action == "call":  return 3, 0
-    if action == "raise": return 4, int(decision.amount)
+    if action == "raise": return 4, max(0, int(decision.amount) - int(current_bet))
     return 2, 0   # safe default

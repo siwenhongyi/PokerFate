@@ -146,6 +146,7 @@ def _bot_worker_main(to_worker, from_worker, options: dict[str, Any]) -> None:
     _configure_worker_logging(_LOGS_DIR)
     log = logging.getLogger("pf_bot_worker")
     _load_bark_key_for_worker(log)
+    bridge = None
     try:
         from pf_intercept.bot import BotBridge
 
@@ -276,6 +277,8 @@ def _bot_worker_main(to_worker, from_worker, options: dict[str, Any]) -> None:
             pass
         raise
     finally:
+        if bridge is not None:
+            bridge.close()
         logging.getLogger("pf_bot_worker").info("[BOT_WORKER] exited")
 
 

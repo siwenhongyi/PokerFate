@@ -66,14 +66,19 @@ ACTION_INJECT_DELAY_MAX_SEC = 3.0
 #   未设置/非法/local = PokerFate 纯本地
 #   g5_all          = 翻前/翻后都由 g5 接管，PokerFate 旁路对照
 #   g5              = 翻前 PokerFate；翻后 g5 接管
-#   realtime_cfr    = 翻前/翻牌 PokerFate；转牌/河牌实时 CFR，超时回退 PokerFate
-#   cfr             = 翻前 PokerFate；翻牌离线 CFR 书；转/河实时 CFR，miss/超时回退 PokerFate
-# 可用环境变量覆盖：DECISION_ENGINE=g5_all / g5 / realtime_cfr / cfr
+#   cfr             = 翻前 PokerFate；翻牌可选离线 CFR 书；转/河实时 CFR，miss/超时回退 PokerFate
+# 可用环境变量覆盖：DECISION_ENGINE=g5_all / g5 / cfr / local
 _DEFAULT_DECISION_ENGINE = "local"
 DECISION_ENGINE = os.environ.get(
     "DECISION_ENGINE",
     _DEFAULT_DECISION_ENGINE,
 ).strip().lower().replace("-", "_")
+
+# CFR 翻牌书独立开关（会写入 session_config 的 A/B 配置快照）。
+# 关闭时翻牌走本地，转牌/河牌仍实时求解；仅在 cfr 模式下使用。
+PF_CFR_FLOP_BOOK_ENABLED = _env_bool("PF_CFR_FLOP_BOOK_ENABLED", True)
+# CFR/local 同点对照：异步重放真实行动，不参与实战决策。
+PF_G5_SHADOW_ENABLED = _env_bool("PF_G5_SHADOW_ENABLED", True)
 
 # 粘池翻前调整：默认开启。
 # 开启时 RFI +1bb，ISO 使用 4bb + 1bb/limper，并把边缘 ISO 在粘/多 limper
