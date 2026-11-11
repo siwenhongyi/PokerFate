@@ -8,6 +8,7 @@ fed back to g5 as ``ActionStats[]`` for hot-starting its Bayesian model.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -132,9 +133,17 @@ class G5ActionModel:
         self.table_type = table_type if table_type in {TABLE_SIX_MAX, TABLE_HEADS_UP} else TABLE_SIX_MAX
         self.players: dict[str, G5PlayerStats] = players or {}
         self.updated_at = 0.0
+        # Immutable per-player JSON lets live saves copy only this hand's
+        # changed players. Never serialize all historical players on a turn.
+        self._save_cache: dict[str, str] = {}
+        self._save_condition = threading.Condition()
+        self._save_pending = None
+        self._save_thread = None
+        self._save_closing = False
 
     @classmethod
-    def load(cls, path: str | Path | None, *, table_type: str = TABLE_SIX_MAX) -> "G5ActionModel":
+    def load(cls, path: str | Path | None, *, table_type: str = TABLE_SIX_MAX,
+             prepare_save_cache: bool = False) -> "G5ActionModel":
         if not path:
             return cls(table_type=table_type)
         file_path = Path(path)
@@ -150,8 +159,90 @@ class G5ActionModel:
                 model.players[str(name)] = G5PlayerStats.from_raw(
                     str(name), item, table_type=model.table_type,
                 )
+                if prepare_save_cache:
+                    model._cache_player(str(name))
         model.updated_at = float(raw.get("updated_at", 0.0) or 0.0)
         return model
+
+    def _cache_player(self, name: str) -> None:
+        self._save_cache[name] = (
+            json.dumps(name, ensure_ascii=False) + ":"
+            + json.dumps(self.players[name].to_json(), ensure_ascii=False, separators=(",", ":"))
+        )
+
+    def save_async(self, path, *, player_names=None, on_saved=None) -> None:
+        """Queue a complete immutable checkpoint; coalesce pending writes.
+
+        Callers supply every changed player (or None for a full refresh).
+        The worker never reads live PlayerStats, so later learning cannot race
+        serialization. The format remains version 1, including zero counters.
+        """
+        if not path:
+            return
+        if self._save_closing:
+            raise RuntimeError("G5 model writer is closed")
+        if player_names is None:
+            self._save_cache.clear()
+        changed = set(self.players) if player_names is None else set(player_names)
+        changed.update(self.players.keys() - self._save_cache.keys())
+        for name in changed:
+            if name in self.players:
+                self._cache_player(name)
+        self.updated_at = time.time()
+        header = json.dumps({"version": 1, "table_type": self.table_type,
+                             "updated_at": self.updated_at}, separators=(",", ":"))
+        snapshot = (Path(path), header, tuple(self._save_cache.values()), on_saved)
+        with self._save_condition:
+            self._save_pending = snapshot
+            if self._save_thread is None:
+                self._save_thread = threading.Thread(target=self._write_pending,
+                                                     name="g5-model-save", daemon=True)
+                self._save_thread.start()
+            self._save_condition.notify()
+
+    @staticmethod
+    def _write_checkpoint(path, header, players) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        with tmp.open("w", encoding="utf-8") as f:
+            f.write(header[:-1] + ',"players":{')
+            for i, player in enumerate(players):
+                if i:
+                    f.write(",")
+                f.write(player)
+            f.write("}}\n")
+        tmp.replace(path)
+
+    def _write_pending(self) -> None:
+        import logging
+        log = logging.getLogger(__name__)
+        while True:
+            with self._save_condition:
+                self._save_condition.wait_for(lambda: self._save_pending is not None or self._save_closing)
+                if self._save_pending is None:
+                    return
+                path, header, players, callback = self._save_pending
+                self._save_pending = None
+            started = time.perf_counter()
+            error = None
+            try:
+                self._write_checkpoint(path, header, players)
+            except Exception as exc:
+                error = str(exc)
+                log.exception("G5 model checkpoint failed: %s", path)
+            if callback is not None:
+                try:
+                    callback(error, (time.perf_counter() - started) * 1000)
+                except Exception:
+                    log.exception("G5 checkpoint log failed")
+
+    def close_writer(self) -> None:
+        """Flush the latest accepted checkpoint before graceful shutdown."""
+        with self._save_condition:
+            self._save_closing = True
+            self._save_condition.notify_all()
+        if self._save_thread is not None:
+            self._save_thread.join()
 
     def save(self, path: str | Path | None) -> None:
         if not path:

@@ -30,6 +30,9 @@ from pokerfate.strategy.range_v2.empirical_model import (
 )
 
 ACTION_LABELS = ("call", "check", "bet", "raise_over", "fold")
+# A bucket needs this many showdown rows on a street before its action rate
+# replaces the GTO row (per-bucket noise guard; 2026-11-09).
+MIN_CAT_DENOM = 30
 BUCKET_TRANSLATE = {
     "坚果": "nuts",
     "强": "strong",
@@ -58,11 +61,30 @@ def _iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
                 yield row
 
 
-def _load_rows(paths: Iterable[Path]) -> list[dict[str, Any]]:
+def _load_rows(
+    paths: Iterable[Path],
+    *,
+    since_ts: float = 0.0,
+    until_ts: float = 0.0,
+) -> list[dict[str, Any]]:
+    """Load calibration rows, optionally restricted by ``recorded_at`` (epoch
+    seconds). The bounds make temporal hold-out builds possible: fit on rows
+    before a cut, score on hands after it."""
     rows: list[dict[str, Any]] = []
     for path in paths:
-        if path.exists():
-            rows.extend(_iter_jsonl(path))
+        if not path.exists():
+            continue
+        for row in _iter_jsonl(path):
+            if since_ts or until_ts:
+                try:
+                    at = float(row.get("recorded_at") or 0.0)
+                except (TypeError, ValueError):
+                    at = 0.0
+                if since_ts and at < since_ts:
+                    continue
+                if until_ts and at >= until_ts:
+                    continue
+            rows.append(row)
     return rows
 
 
@@ -187,6 +209,7 @@ def _build_action_likelihoods(
     *,
     min_action_n: int,
     prior_weight: float,
+    max_blend: float = 0.055,
 ) -> dict[str, dict[str, Any]]:
     counts: dict[str, dict[str, Counter[str]]] = defaultdict(lambda: defaultdict(Counter))
     for row in rows:
@@ -205,20 +228,41 @@ def _build_action_likelihoods(
         if total_ctx < min_action_n:
             continue
         street, size, rr = ctx_key.split("|")
-        specificity = sum(1 for part in (size, rr) if part != "*")
-        cap = min(0.055, 0.025 + specificity * 0.015)
+        # P(action | cat) needs "all actions this bucket took on this street"
+        # as the denominator. Bet size and raise-over are attributes of the
+        # action itself, so a size- or rr-specific context only contains rows
+        # of that action and the old per-context denominator gave
+        # P(action | cat) ≈ 1 for every bucket (July model: river|bet|pot →
+        # 0.98–1.0 for all cats). Always divide by the street-wide totals.
+        # Size keys are then rescaled by N(action)/N(action, size) so they
+        # keep the scale of P(action | cat) while carrying the size-specific
+        # bucket composition — the tracker mixes them with the GTO row, which
+        # is on the P(action | cat) scale.
+        denom_actions = counts.get(f"{street}|*|*", cat_actions)
+        base_actions = counts.get(f"{street}|*|{rr}", cat_actions) if size != "*" else cat_actions
         for action in ACTION_LABELS:
             n_action = sum(c.get(action, 0) for c in cat_actions.values())
             if n_action < min_action_n:
                 continue
+            scale = 1.0
+            if size != "*":
+                n_base = sum(c.get(action, 0) for c in base_actions.values())
+                scale = (n_base / n_action) if n_action > 0 else 1.0
             cat_probs: dict[str, float] = {}
             for cat in CAT_ORDER:
-                denom = sum(cat_actions.get(cat, {}).values())
-                if denom <= 0:
-                    continue
-                cat_probs[cat] = round(cat_actions[cat].get(action, 0) / denom, 6)
+                denom = sum(denom_actions.get(cat, {}).values())
+                if denom < MIN_CAT_DENOM:
+                    continue  # too few showdowns of this bucket: leave the GTO row in place
+                cat_probs[cat] = round(min(0.99, cat_actions[cat].get(action, 0) / denom * scale), 6)
             if not cat_probs:
                 continue
+            # Shrinkage toward the GTO table: blend = min(cap, n / (n + prior_weight)).
+            # Default cap keeps the historical 2.5–5.5% weight (the 2026-11-09
+            # hold-out showed that lifting it to ~0.9 on top of the tracker
+            # fixes over-corrects: river strength bias +0.016, Brier 0.1321 vs
+            # 0.1304). --max-blend raises it for experiments.
+            specificity = sum(1 for part in (size, rr) if part != "*")
+            cap = min(max_blend, max_blend - 0.03 + specificity * 0.015) if max_blend <= 0.1 else max_blend
             blend = min(cap, n_action / (n_action + prior_weight))
             table[f"{street}|{action}|{size}|{rr}|*"] = {
                 "cat_probs": cat_probs,
@@ -320,8 +364,11 @@ def _build_model(
     min_action_n: int,
     min_prior_n: int,
     action_prior_weight: float,
+    since_ts: float = 0.0,
+    until_ts: float = 0.0,
+    max_blend: float = 0.055,
 ) -> dict[str, Any]:
-    rows = _load_rows(row_paths)
+    rows = _load_rows(row_paths, since_ts=since_ts, until_ts=until_ts)
     console_rows = []
     for path in console_logs:
         console_rows.extend(_rows_from_console(path))
@@ -341,6 +388,8 @@ def _build_model(
         "generated_at": int(time.time()),
         "sources": {
             "rows": [str(p) for p in row_paths],
+            "since_ts": since_ts or None,
+            "until_ts": until_ts or None,
             "console_logs": [str(p) for p in console_logs],
             "opponents": str(opponents_path),
             "structured_rows": len(rows),
@@ -354,7 +403,7 @@ def _build_model(
         "preflop_bucket_priors": _build_preflop_priors(all_rows, min_n=min_prior_n),
         "action_likelihoods": _build_action_likelihoods(
             all_rows, min_action_n=min_action_n,
-            prior_weight=action_prior_weight,
+            prior_weight=action_prior_weight, max_blend=max_blend,
         ),
     }
 
@@ -377,6 +426,22 @@ def _build_model(
     }
 
 
+def _parse_ts(text: str) -> float:
+    """ISO 8601 (assumed UTC when naive) or epoch seconds → epoch seconds; '' → 0."""
+    raw = str(text or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        return float(raw)
+    except ValueError:
+        pass
+    from datetime import datetime, timezone
+    dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--row", type=Path, action="append", default=[],
@@ -389,7 +454,19 @@ def main() -> None:
                     help=f"output path; default {empirical_model_path()}")
     ap.add_argument("--min-action-n", type=int, default=12)
     ap.add_argument("--min-prior-n", type=int, default=20)
-    ap.add_argument("--action-prior-weight", type=float, default=3000.0)
+    ap.add_argument("--action-prior-weight", type=float, default=3000.0,
+                    help="GTO-prior pseudo-count behind the pool action table: "
+                         "blend = min(max_blend, n / (n + weight))")
+    ap.add_argument("--max-blend", type=float, default=0.055,
+                    help="cap on the pool table's blend weight (default keeps the "
+                         "historical 2.5–5.5%%; 0.9 was tested 2026-11-09 and "
+                         "over-corrected once the tracker's board floor and static "
+                         "bucket calibration were removed)")
+    ap.add_argument("--since", default="",
+                    help="only rows recorded at/after this UTC time (ISO 8601 or epoch)")
+    ap.add_argument("--until", default="",
+                    help="only rows recorded before this UTC time (ISO 8601 or epoch); "
+                         "use for temporal hold-out builds")
     args = ap.parse_args()
 
     summary = _build_model(
@@ -400,6 +477,9 @@ def main() -> None:
         min_action_n=args.min_action_n,
         min_prior_n=args.min_prior_n,
         action_prior_weight=args.action_prior_weight,
+        since_ts=_parse_ts(args.since),
+        until_ts=_parse_ts(args.until),
+        max_blend=args.max_blend,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
 

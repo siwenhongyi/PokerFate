@@ -13,12 +13,8 @@ from typing import Any, Iterable
 LEGACY_VERSION = "legacy"
 _PROFILE_DEFAULTS = {
     "PF_TURN_FLOP_RELATIVE_GUARD": "1",
-    "PF_RUNTIME_RANGE_CALIBRATION": "1",
-    "PF_BUCKET_CALIBRATION": "1",
-    "PF_BUCKET_ML": "off",
-    "PF_EQUITY_ML": "lgbm",
-    "PF_RIVER_RELATIVE_ML": "off",
-    "PF_POSTFLOP_PROFIT_EXPAND_V1": "0",
+    "PF_BUCKET_ML": "lgbm",
+    "PF_POSTFLOP_PROFIT_EXPAND_V1": "1",
 }
 
 

@@ -13,7 +13,9 @@ import math
 import os
 import random
 import re
+import atexit
 import sys
+import threading
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -687,67 +689,52 @@ def solve_realtime_cfr(
         return None
     timing["build_args_ms"] = round((time.perf_counter() - args_t0) * 1000.0, 1)
 
-    ctx = get_context("spawn")
-    q = ctx.Queue()
-    proc = ctx.Process(
-        target=_solver_worker,
-        args=(json.dumps(args), int(threads or 0), solver_path, q),
-        daemon=True,
-    )
     start_t0 = time.perf_counter()
-    try:
-        proc.start()
-    except Exception as exc:
+    status, msg, worker_meta = _SOLVER_CLIENT.solve(
+        json.dumps(args), int(threads or 0), solver_path, max(0.05, float(timeout_sec)),
+    )
+    timing["worker_start_ms"] = round(float(worker_meta.get("start_ms", 0.0)), 1)
+    timing["worker_wait_ms"] = round(float(worker_meta.get("wait_ms", 0.0)), 1)
+    timing["worker_reused"] = bool(worker_meta.get("reused"))
+    if status == "start_failed":
         _set_realtime_solver_error(
             "solver_worker_start_failed",
-            {"error": str(exc), "solver_lib": str(solver_path), "timing": dict(timing)},
+            {"error": str(msg), "solver_lib": str(solver_path), "timing": dict(timing)},
         )
         return None
-    timing["worker_start_ms"] = round((time.perf_counter() - start_t0) * 1000.0, 1)
-
-    wait_t0 = time.perf_counter()
-    try:
-        msg = q.get(timeout=max(0.05, float(timeout_sec)))
-    except Exception:
-        timing["worker_wait_ms"] = round((time.perf_counter() - wait_t0) * 1000.0, 1)
-        alive = proc.is_alive()
-        if alive:
-            proc.terminate()
-        proc.join(1.0)
+    if status == "timeout":
         _set_realtime_solver_error(
-            "solver_timeout" if alive else "solver_worker_exited_no_message",
+            "solver_timeout",
             {
                 "timeout_sec": float(timeout_sec),
-                "exitcode": proc.exitcode,
+                "exitcode": worker_meta.get("exitcode"),
                 "timing": dict(timing),
             },
         )
         return None
-    finally:
-        if proc.is_alive():
-            proc.join(0.25)
-    timing["worker_wait_ms"] = round((time.perf_counter() - wait_t0) * 1000.0, 1)
-
-    if not isinstance(msg, dict):
-        if proc.is_alive():
-            proc.terminate()
-            proc.join(1.0)
+    if status == "exited":
         _set_realtime_solver_error(
-            "solver_worker_bad_message",
-            {"message_type": type(msg).__name__, "exitcode": proc.exitcode, "timing": dict(timing)},
+            "solver_worker_exited_no_message",
+            {
+                "timeout_sec": float(timeout_sec),
+                "exitcode": worker_meta.get("exitcode"),
+                "timing": dict(timing),
+            },
         )
         return None
-
+    if not isinstance(msg, dict):
+        _set_realtime_solver_error(
+            "solver_worker_bad_message",
+            {"message_type": type(msg).__name__, "exitcode": worker_meta.get("exitcode"), "timing": dict(timing)},
+        )
+        return None
     if not msg.get("ok"):
-        if proc.is_alive():
-            proc.terminate()
-            proc.join(1.0)
         _set_realtime_solver_error(
             "solver_worker_error",
             {
                 "error": _short_text(msg.get("error")),
                 "traceback": _short_text(msg.get("traceback")),
-                "exitcode": proc.exitcode,
+                "exitcode": worker_meta.get("exitcode"),
                 "timing": dict(timing),
             },
         )
@@ -762,7 +749,7 @@ def solve_realtime_cfr(
             {
                 "error": str(exc),
                 "result_prefix": _short_text(msg.get("result"), 800),
-                "exitcode": proc.exitcode,
+                "exitcode": worker_meta.get("exitcode"),
                 "timing": dict(timing),
             },
         )
@@ -1551,38 +1538,6 @@ def _public_range_v2_prior(raw: Any) -> dict[str, Any]:
     raw_vs_hero = _float_map(prior.get("raw_vs_hero"), keys=("win", "tie", "loss"))
     if raw_vs_hero:
         out["raw_vs_hero"] = {k: round(v, 4) for k, v in raw_vs_hero.items()}
-    cec = prior.get("cec_calibration")
-    if isinstance(cec, dict):
-        out["cec_calibration"] = {
-            key: (
-                round(float(value), 4)
-                if isinstance(value, (int, float)) and not isinstance(value, bool)
-                else value
-            )
-            for key, value in cec.items()
-            if key in {
-                "used",
-                "source",
-                "level",
-                "key",
-                "rows",
-                "points",
-                "ece",
-                "raw_reliability",
-                "sample_confidence",
-                "bias_strength",
-                "prior_strength",
-                "runtime_rows",
-                "files",
-            }
-        }
-        shift = cec.get("shift")
-        if isinstance(shift, dict):
-            out["cec_calibration"]["shift"] = {
-                str(k): round(_as_float(v, 0.0), 4)
-                for k, v in shift.items()
-                if abs(_as_float(v, 0.0)) > 1e-4
-            }
     action_ctx = prior.get("action_context")
     if isinstance(action_ctx, dict):
         out["action_context"] = {
@@ -3623,14 +3578,140 @@ def _build_solver_args(
     return args, expect
 
 
-def _solver_worker(args_json: str, threads: int, solver_lib_path: Optional[str], q: Any) -> None:
+def _solver_loop(threads: int, solver_lib_path: Optional[str], requests: Any, results: Any) -> None:
+    """Body of the long-lived solver worker process.
+
+    Loads the Rust extension once, then answers one ``solve_flop_json``
+    request at a time until it receives ``None``. Runs under the ``spawn``
+    start method, so the (roughly 1 s) interpreter + import cost is paid once
+    per worker instead of once per decision, which is what made every CFR
+    decision in replay cost a second and every live river solve ~150 ms of
+    pure process start-up.
+    """
     try:
         if threads > 0:
             os.environ["RAYON_NUM_THREADS"] = str(int(threads))
         pf_solver = _load_pf_solver(solver_lib_path)
-        q.put({"ok": True, "result": pf_solver.solve_flop_json(args_json)})
     except Exception as exc:
-        q.put({"ok": False, "error": str(exc), "traceback": traceback.format_exc()})
+        results.put({"ok": False, "error": f"load_failed: {exc}", "traceback": traceback.format_exc()})
+        return
+    results.put({"ok": True, "ready": True})
+    while True:
+        try:
+            args_json = requests.get()
+        except (EOFError, OSError):
+            return
+        if args_json is None:
+            return
+        try:
+            results.put({"ok": True, "result": pf_solver.solve_flop_json(args_json)})
+        except Exception as exc:
+            results.put({"ok": False, "error": str(exc), "traceback": traceback.format_exc()})
+
+
+class _SolverClient:
+    """Owns one persistent solver worker and serialises requests to it.
+
+    A solve that exceeds its timeout cannot be interrupted inside the Rust
+    call, so the worker is terminated and the next request starts a fresh one
+    (paying the cold-start cost again). A worker started with different
+    ``threads`` / library settings is likewise replaced.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._proc: Any = None
+        self._requests: Any = None
+        self._results: Any = None
+        self._threads: Optional[int] = None
+        self._lib_path: Optional[str] = None
+
+    def _stop(self, grace: float = 0.5) -> Optional[int]:
+        proc = self._proc
+        exitcode: Optional[int] = None
+        if proc is not None:
+            try:
+                if proc.is_alive():
+                    try:
+                        self._requests.put_nowait(None)
+                    except Exception:
+                        pass
+                    proc.join(grace)
+                    if proc.is_alive():
+                        proc.terminate()
+                        proc.join(1.0)
+                exitcode = proc.exitcode
+            except Exception:
+                pass
+        for q in (self._requests, self._results):
+            try:
+                q.close()
+            except Exception:
+                pass
+        self._proc = self._requests = self._results = None
+        return exitcode
+
+    def _start(self, threads: int, lib_path: str, timeout: float) -> None:
+        ctx = get_context("spawn")
+        self._requests = ctx.Queue()
+        self._results = ctx.Queue()
+        self._proc = ctx.Process(
+            target=_solver_loop,
+            args=(int(threads or 0), lib_path, self._requests, self._results),
+            daemon=True,
+        )
+        self._proc.start()
+        self._threads = int(threads or 0)
+        self._lib_path = lib_path
+        ready = self._results.get(timeout=max(5.0, timeout))
+        if not (isinstance(ready, dict) and ready.get("ok") and ready.get("ready")):
+            raise RuntimeError(f"solver worker failed to initialise: {ready!r}")
+
+    def solve(
+        self,
+        args_json: str,
+        threads: int,
+        lib_path: str,
+        timeout: float,
+    ) -> tuple[str, Any, dict[str, Any]]:
+        """Return ``(status, message, meta)``; status is one of
+        ``ok`` / ``timeout`` / ``exited`` / ``start_failed``."""
+        meta: dict[str, Any] = {"reused": False, "start_ms": 0.0, "wait_ms": 0.0, "exitcode": None}
+        with self._lock:
+            start_t0 = time.perf_counter()
+            alive = self._proc is not None and self._proc.is_alive()
+            same = alive and self._threads == int(threads or 0) and self._lib_path == lib_path
+            if not same:
+                self._stop()
+                try:
+                    self._start(int(threads or 0), lib_path, timeout)
+                except Exception as exc:
+                    self._stop()
+                    meta["start_ms"] = (time.perf_counter() - start_t0) * 1000.0
+                    return "start_failed", str(exc), meta
+            else:
+                meta["reused"] = True
+            meta["start_ms"] = (time.perf_counter() - start_t0) * 1000.0
+
+            wait_t0 = time.perf_counter()
+            try:
+                self._requests.put(args_json)
+                msg = self._results.get(timeout=timeout)
+            except Exception:
+                meta["wait_ms"] = (time.perf_counter() - wait_t0) * 1000.0
+                alive = self._proc is not None and self._proc.is_alive()
+                meta["exitcode"] = self._stop(grace=0.0)
+                return ("timeout" if alive else "exited"), None, meta
+            meta["wait_ms"] = (time.perf_counter() - wait_t0) * 1000.0
+            return "ok", msg, meta
+
+    def shutdown(self) -> None:
+        with self._lock:
+            self._stop()
+
+
+_SOLVER_CLIENT = _SolverClient()
+atexit.register(_SOLVER_CLIENT.shutdown)
 
 
 def _load_pf_solver(solver_lib_path: Optional[str]):

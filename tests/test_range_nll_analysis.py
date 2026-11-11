@@ -76,13 +76,6 @@ def test_range_nll_payload_analyzes_runtime_rows(tmp_path):
     assert {row["key"] for row in calibration["by_action"]} >= {"call", "raise"}
     assert {row["key"] for row in calibration["by_size"]} >= {"half", "pot"}
     assert calibration["hotspots"]
-    cec = payload["cec_integration"]
-    assert cec["overall"]["count"] == 2
-    assert cec["overall"]["raw_nll"] is not None
-    assert cec["overall"]["cec_nll"] is not None
-    assert cec["overall"]["raw_ece"] is not None
-    assert cec["overall"]["cec_ece"] is not None
-    assert cec["hotspots"]
     assert payload["by_street"][0]["key"] in {"flop", "turn"}
     assert payload["examples"]["improved"][0]["actual_combo"] == "AcKd"
     assert payload["examples"]["worse"][0]["actual_combo"] == "QhQs"

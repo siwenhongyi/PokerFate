@@ -46,6 +46,7 @@ from pokerfate.calibration import (
 )
 from pokerfate.core.card import Card
 from pokerfate.core.config import MIN_HANDS_FOR_CLASSIFICATION
+from pokerfate.core.position import relabel_positions_by_button
 from pokerfate.core.game_state import Action, ActionType, GameState, Player, Street
 from pokerfate.core.hand_evaluator import HandEvaluator, HandRank
 from pokerfate.data import init as _init_data
@@ -65,14 +66,11 @@ from pokerfate.logger import PokerLogger
 from pokerfate.strategy.range_v2.action_model import ActionContext
 from pokerfate.strategy.range_v2.empirical_model import empirical_action_likelihood
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
-from pokerfate.strategy.range_v2.cec_calibration import calibrate_range_v2_prior
 from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards
 from pokerfate.strategy.range_v2.hero_eq_calibrator import (
     HeroEquityCalibrator,
     classify_action_ctx_from_trigger,
 )
-from pokerfate.strategy.range_v2.river_relative_calibrator import RiverRelativeCalibrator
-from pokerfate.strategy.range_v2.showdown_learner import ShowdownLearner, _board_at_street
 from pokerfate.strategy.v3 import hero_range as hero_reach_range
 
 _UNSET = object()  # sentinel for log_file default
@@ -305,7 +303,7 @@ class PokerFateAPI:
             None if _in_test else str(_DEFAULT_G5_MODEL_PATH)
         ) if g5_model_path is _UNSET else g5_model_path
         self._g5_action_model = (
-            G5ActionModel.load(self._g5_model_path)
+            G5ActionModel.load(self._g5_model_path, prepare_save_cache=True)
             if self._g5_model_path else None
         )
         self._log = PokerLogger(
@@ -352,7 +350,7 @@ class PokerFateAPI:
         )
         self._realtime_cfr_solver_lib = realtime_cfr_solver_lib
         self._external_decision_engine_requested = str(
-            decision_engine if decision_engine is not None else os.environ.get("DECISION_ENGINE", "local")
+            decision_engine if decision_engine is not None else os.environ.get("DECISION_ENGINE", "cfr")
         ).strip().lower()
         self._external_decision_hand_disabled_reason = ""
         self._external_decision_shadow_hero_folded = False
@@ -477,10 +475,7 @@ class PokerFateAPI:
         if not callable(apply_updates):
             return
         try:
-            count = apply_updates(
-                self._bot._hero_eq_calibrator,
-                self._bot._river_relative_calibrator,
-            )
+            count = apply_updates(self._bot._hero_eq_calibrator)
             if count:
                 self._log.raw({
                     "event": "showdown_calibration_spool_updates_applied",
@@ -491,11 +486,7 @@ class PokerFateAPI:
 
     def _showdown_persistence_data(self) -> dict:
         return {
-            'range_v2_learner': self._bot._showdown_learner.to_dict(),
             'hero_eq_calibrator': self._bot._hero_eq_calibrator.to_dict(),
-            'river_relative_calibrator': (
-                self._bot._river_relative_calibrator.to_dict()
-            ),
         }
 
     def _save_persisted_model(self) -> None:
@@ -506,10 +497,18 @@ class PokerFateAPI:
             showdown_data=self._showdown_persistence_data(),
         )
 
-    def _save_g5_action_model(self) -> None:
+    def _save_g5_action_model(self, player_names=None) -> None:
         if self._g5_action_model is None or not self._g5_model_path:
             return
-        self._g5_action_model.save(self._g5_model_path)
+        hand = self._hand_number if hasattr(self, "_hand_number") else 0
+        def saved(error, elapsed_ms):
+            self._log.raw({
+                "event": "g5_model_save_failed" if error else "g5_model_saved",
+                "path": self._g5_model_path, "hand": hand,
+                "mode": "background_checkpoint", "elapsed_ms": round(elapsed_ms, 1),
+                **({"reason": error} if error else {}),
+            })
+        self._g5_action_model.save_async(self._g5_model_path, player_names=player_names, on_saved=saved)
 
     def _bootstrap_g5_action_model_from_opponents(self) -> None:
         if self._g5_action_model is None:
@@ -536,14 +535,18 @@ class PokerFateAPI:
             from pokerfate.strategy import preflop as _pf
             from pokerfate.strategy.v3 import engine as _eng
             from pokerfate.strategy.v3 import purposes_active as _pa
+            from pokerfate.strategy.range_v2 import bucket_ml_calibration as _bml
             resolved = {
+                # 2026-11-11 起这些开关的代码默认值就是实战值；env 为空时仍能从这里看到实际生效的配置。
+                "PF_BUCKET_ML": _bml.ml_mode(),
+                "REALTIME_CFR_TIMEOUT_SEC": float(self._realtime_cfr_timeout_sec),
                 "RAKE_RATE": float(getattr(_cfg, "RAKE_RATE", 0.0)),
                 "PF_V3_EV_VETO": bool(getattr(_eng, "_EV_VETO_ENABLED", True)),
                 "PF_V3_VOTE_LEVERAGE_DETERMINISTIC": bool(getattr(_eng, "_VOTE_LEVERAGE_DETERMINISTIC", True)),
                 "PREFLOP_STICKY_POOL_ADJUST": bool(getattr(_pf, "_PREFLOP_STICKY_POOL_ADJUST_DEFAULT", True)),
                 "PF_LIMP_BEHIND_ENABLED": bool(getattr(_pf, "_LIMP_BEHIND_ENABLED", True)),
                 "PF_PURE_BLUFF_ENABLED": bool(getattr(_pa, "_PURE_BLUFF_ENABLED", True)),
-                "PF_POSTFLOP_PROFIT_EXPAND_V1": bool(getattr(_pa, "_PROFIT_EXPAND_V1", False)),
+                "PF_POSTFLOP_PROFIT_EXPAND_V1": bool(getattr(_pa, "_PROFIT_EXPAND_V1", True)),
             }
         except Exception as exc:  # pragma: no cover - diagnostics only
             resolved = {"error": str(exc)}
@@ -576,18 +579,9 @@ class PokerFateAPI:
         showdown_raw = self._bot.opponent_model._showdown_data
         if not showdown_raw:
             return
-        v2_data = showdown_raw.get('range_v2_learner')
-        if v2_data:
-            self._bot._showdown_learner = ShowdownLearner.from_dict(v2_data)
-            self._bot._action_model.showdown_learner = self._bot._showdown_learner
         heq_data = showdown_raw.get('hero_eq_calibrator')
         if heq_data:
             self._bot._hero_eq_calibrator = HeroEquityCalibrator.from_dict(heq_data)
-        river_rel_data = showdown_raw.get('river_relative_calibrator')
-        if river_rel_data:
-            self._bot._river_relative_calibrator = (
-                RiverRelativeCalibrator.from_dict(river_rel_data)
-            )
 
     def set_table_blinds(self, big_blind: float, small_blind: float) -> None:
         """Update blinds after EnterRoomRSP (new table); refreshes unknown-stack fallback."""
@@ -640,7 +634,7 @@ class PokerFateAPI:
         requested_engine = (
             decision_engine
             if decision_engine is not None
-            else os.environ.get("DECISION_ENGINE", "local")
+            else os.environ.get("DECISION_ENGINE", "cfr")
         )
         engine_name = str(requested_engine or "local").strip().lower().replace("-", "_")
         self._flop_book_error = ""
@@ -1032,12 +1026,9 @@ class PokerFateAPI:
                 small_blind=self.small_blind,
             )
             if changed:
-                self._save_g5_action_model()
-                self._log.raw({
-                    "event": "g5_model_saved",
-                    "path": self._g5_model_path,
-                    "players": len(self._g5_hand_start_players),
-                })
+                self._save_g5_action_model([
+                    stable_player_name(p["player_id"]) for p in self._g5_hand_start_players
+                ])
         except Exception as exc:
             self._log.raw({
                 "event": "g5_model_save_failed",
@@ -1199,13 +1190,6 @@ class PokerFateAPI:
                         "n": int(n),
                     }
                 timing["action_likelihood_ms"] = (time.perf_counter() - likelihood_t0) * 1000.0
-            except Exception:
-                pass
-        if out:
-            try:
-                cec_t0 = time.perf_counter()
-                out = calibrate_range_v2_prior(out)
-                timing["cec_calibration_ms"] = (time.perf_counter() - cec_t0) * 1000.0
             except Exception:
                 pass
         if out:
@@ -1922,66 +1906,10 @@ class PokerFateAPI:
         node_path = str(result.get("node_path") or "").strip()
         if node_path:
             parts.append(f"path={node_path}")
-        cec_summary = PokerFateAPI._realtime_cfr_cec_summary(result)
-        if cec_summary:
-            parts.append(cec_summary)
         safety_summary = PokerFateAPI._realtime_cfr_safety_summary(result)
         if safety_summary:
             parts.append(safety_summary)
         return " | ".join(parts)
-
-    @staticmethod
-    def _realtime_cfr_cec_summary(result: dict[str, Any]) -> str:
-        exploit = result.get("exploit")
-        if not isinstance(exploit, dict):
-            return ""
-        line_context = exploit.get("line_context")
-        if not isinstance(line_context, dict):
-            return ""
-        range_v2 = line_context.get("range_v2")
-        if not isinstance(range_v2, dict):
-            return ""
-        cec = range_v2.get("cec_calibration")
-        if not isinstance(cec, dict) or not cec.get("used"):
-            return ""
-        raw_bucket = range_v2.get("raw_bucket_dist")
-        bucket = range_v2.get("bucket_dist")
-        if not isinstance(raw_bucket, dict) or not isinstance(bucket, dict):
-            return ""
-
-        order = ("nuts", "strong", "medium", "draw", "weak_draw", "air")
-        labels = {
-            "nuts": "N",
-            "strong": "S",
-            "medium": "M",
-            "draw": "D",
-            "weak_draw": "W",
-            "air": "A",
-        }
-
-        def pct(dist: dict[str, Any], key: str) -> int:
-            try:
-                return int(round(float(dist.get(key, 0.0) or 0.0) * 100.0))
-            except Exception:
-                return 0
-
-        raw_text = "/".join(f"{labels[k]}{pct(raw_bucket, k)}" for k in order)
-        cal_text = "/".join(f"{labels[k]}{pct(bucket, k)}" for k in order)
-        level = str(cec.get("level") or cec.get("source") or "cec").strip() or "cec"
-        rows = cec.get("rows")
-        rel = cec.get("raw_reliability")
-        meta = [f"cec={level}"]
-        if rows is not None:
-            try:
-                meta.append(f"n={int(float(rows))}")
-            except Exception:
-                pass
-        if rel is not None:
-            try:
-                meta.append(f"rel={float(rel):.0%}")
-            except Exception:
-                pass
-        return f"{' '.join(meta)} {raw_text}→{cal_text}"
 
     @staticmethod
     def _realtime_cfr_safety_summary(result: dict[str, Any]) -> str:
@@ -2217,6 +2145,13 @@ class PokerFateAPI:
         for p in self._players:
             if not self._hand_positions.get(p.player_id):
                 self._hand_positions[p.player_id] = position_state.position_of(p)
+        # Upstream counts seats forwards from the BB ('UTG', 'UTG+1', ...);
+        # charts, range tables, tracker priors and the flop book are keyed on
+        # button-relative 6-max positions. Relabel once here so every
+        # consumer (preflop charts, villain opener position, Range V2 priors,
+        # flop-book scenario, CFR hero range) sees the same seat.
+        self._hand_positions_raw: Dict[int, str] = dict(self._hand_positions)
+        self._hand_positions = relabel_positions_by_button(self._hand_positions)
         self._g5_hand_start_players = [
             {
                 "player_id": p.player_id,
@@ -2267,8 +2202,16 @@ class PokerFateAPI:
         self._log.hand_start(
             hand_number=self._hand_number,
             players=[
-                {"id": p.player_id, "name": p.name,
-                 "stack": p.stack, "pos": self._hand_positions.get(p.player_id, '')}
+                {
+                    "id": p.player_id, "name": p.name, "stack": p.stack,
+                    "pos": self._hand_positions.get(p.player_id, ''),
+                    **(
+                        {"pos_raw": self._hand_positions_raw.get(p.player_id, '')}
+                        if self._hand_positions_raw.get(p.player_id, '')
+                        != self._hand_positions.get(p.player_id, '')
+                        else {}
+                    ),
+                }
                 for p in self._players
             ],
             dealer_id=dealer_id,
@@ -2481,6 +2424,7 @@ class PokerFateAPI:
                 my_current_bet = my_player.current_bet or 0.0
                 to_call = max(0.0, total_bet_after - my_current_bet)
 
+        layer_trace = dict(getattr(self._bot._range_tracker, 'last_update_trace', {}) or {})
         self._log.opponent_action(
             name, event.action, normalized_action_amount, event.street,
             big_blind=self.big_blind,
@@ -2490,6 +2434,7 @@ class PokerFateAPI:
             vs_hero=vs_hero,
             to_call=to_call,
             pot_before_action=pot_at_action,
+            layer_trace=layer_trace or None,
         )
 
         # Check for newly significant opponent patterns and surface them
@@ -2927,6 +2872,7 @@ class PokerFateAPI:
                 self.last_decision_diagnostics()
                 .get("river_relative", {})
             ),
+            extra=self._decision_log_extra(decision_source, local_shadow),
         )
         if g5_shadow is not None:
             self._log_g5_shadow_decision(g5_shadow, street=street_key)
@@ -2945,6 +2891,124 @@ class PokerFateAPI:
         )
         return decision
 
+    def _decision_log_extra(
+        self,
+        decision_source: str,
+        local_shadow: Optional[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Engine diagnostics for the structured ``decision`` log record.
+
+        2026-11-09: the JSON log only had action/amount/equity, so attributing
+        an executed decision to its engine, purpose or calibration layer meant
+        parsing console text (whose format has already broken parsers once)
+        or re-running the solver in a replay. Everything below is already
+        computed in ``_last_decision_diagnostics``; this just projects a
+        bounded subset into the log.
+        """
+        diag = self._last_decision_diagnostics or {}
+        extra: dict[str, Any] = {"decision_source": decision_source}
+
+        def _round_map(raw: Any, nd: int = 4) -> Optional[dict[str, float]]:
+            if not isinstance(raw, dict):
+                return None
+            out: dict[str, float] = {}
+            for k, v in raw.items():
+                try:
+                    out[str(k)] = round(float(v), nd)
+                except (TypeError, ValueError):
+                    continue
+            return out or None
+
+        try:
+            if decision_source == "pokerfate":
+                for key in (
+                    "final_purpose", "decision_reason", "arbitration_mode",
+                    "hero_bucket", "hero_made_subtype", "facing_action",
+                    "preflop_expand_reason", "position",
+                ):
+                    if diag.get(key) not in (None, ""):
+                        extra[key] = diag[key]
+                gates = diag.get("strategy_gates")
+                if isinstance(gates, list) and gates:
+                    extra["strategy_gates"] = [str(g)[:160] for g in gates[:6]]
+                cands = diag.get("purpose_candidates")
+                if isinstance(cands, list) and cands:
+                    extra["purpose_candidates"] = [
+                        {"purpose": str(c.get("purpose")), "prob": round(float(c.get("prob", 0.0)), 4)}
+                        for c in cands[:8] if isinstance(c, dict)
+                    ]
+                ec = diag.get("equity_calibration")
+                if isinstance(ec, dict) and ec:
+                    extra["equity_calibration"] = {
+                        "raw": round(float(ec.get("raw", 0.0) or 0.0), 4),
+                                "online_bias": round(float(ec.get("online_bias", 0.0) or 0.0), 4),
+                        "final": round(float(ec.get("final", 0.0) or 0.0), 4),
+                    }
+                if diag.get("pot_odds") is not None:
+                    extra["pot_odds"] = round(float(diag["pot_odds"]), 4)
+            elif decision_source == "realtime_cfr":
+                cfr = diag.get("realtime_cfr") or {}
+                exploit = cfr.get("exploit") or {}
+                safety = exploit.get("safety") or {}
+                safety_summary: dict[str, Any] = {}
+                if isinstance(safety, dict):
+                    for guard, items in safety.items():
+                        if isinstance(items, list):
+                            compact = []
+                            for item in items[:6]:
+                                if not isinstance(item, dict):
+                                    continue
+                                entry = {"action": str(item.get("action") or "")}
+                                if item.get("discount_bb") is not None:
+                                    entry["discount_bb"] = round(float(item["discount_bb"]), 4)
+                                for k in ("gto_gap_bb", "capped_to", "reason", "blocked"):
+                                    if item.get(k) is not None:
+                                        entry[k] = item[k]
+                                compact.append(entry)
+                            safety_summary[str(guard)] = compact
+                        elif isinstance(items, dict):
+                            safety_summary[str(guard)] = {
+                                str(k): (round(float(v), 4) if isinstance(v, (int, float)) else v)
+                                for k, v in list(items.items())[:8]
+                            }
+                        else:
+                            safety_summary[str(guard)] = items
+                extra["realtime_cfr"] = {
+                    "status": cfr.get("status"),
+                    "hero_side": cfr.get("hero_side"),
+                    "pot_bb": cfr.get("pot_bb"),
+                    "effective_stack_bb": cfr.get("effective_stack_bb"),
+                    "node_path": cfr.get("node_path"),
+                    "exploitability_pct": cfr.get("exploitability_pct"),
+                    "range_counts": cfr.get("range_counts"),
+                    "selected_label": cfr.get("selected_label"),
+                    "selected_prob": cfr.get("selected_prob"),
+                    "strategy": _round_map(cfr.get("strategy")),
+                    "action_evs_bb": _round_map(cfr.get("action_evs_bb")),
+                    "exploit_used": bool(exploit.get("used")),
+                    "exploit_confidence": exploit.get("confidence"),
+                    "final_action_evs_bb": _round_map(exploit.get("final_action_evs_bb")),
+                    "safety": safety_summary or None,
+                }
+            elif decision_source == "flop_book":
+                fb = diag.get("flop_book") or {}
+                extra["flop_book"] = {
+                    "scenario": fb.get("scenario"),
+                    "node_path": fb.get("node_path"),
+                    "selected_label": fb.get("selected_label"),
+                    "selected_prob": fb.get("selected_prob"),
+                    "strategy": _round_map(fb.get("strategy")),
+                    "exploit_mode": (fb.get("exploit") or {}).get("mode") if isinstance(fb.get("exploit"), dict) else None,
+                }
+            if isinstance(local_shadow, dict) and local_shadow.get("status") == "ok":
+                shadow_decision = local_shadow.get("decision")
+                if shadow_decision is not None:
+                    extra["local_shadow_action"] = getattr(shadow_decision, "action", None)
+                    extra["local_shadow_amount"] = getattr(shadow_decision, "amount", None)
+        except Exception as exc:  # diagnostics must never break a decision
+            extra["extra_error"] = f"{type(exc).__name__}: {exc}"
+        return extra
+
     def record_g5_actual_action(self, **payload) -> None:
         """Append an executed action, including hero's server confirmation, to shadow only."""
         if self._g5_observer is not None:
@@ -2957,6 +3021,8 @@ class PokerFateAPI:
     def close_g5_shadow(self) -> None:
         if self._g5_observer is not None:
             self._g5_observer.close()
+        if self._g5_action_model is not None:
+            self._g5_action_model.close_writer()
 
     def _maybe_record_river_value_sizing_decision(
         self,
@@ -3019,7 +3085,6 @@ class PokerFateAPI:
             "villain_bucket_dist": dict(diag.get("villain_bucket_dist") or {}),
             "villain_vs_hero_dist": dict(diag.get("villain_vs_hero_dist") or {}),
             "river_relative": dict(diag.get("river_relative") or {}),
-            "river_relative_calibration": dict(diag.get("river_relative_calibration") or {}),
             "primary_opp_id": primary_opp_id,
             "primary_opp_name": self._session_names.get(primary_opp_id, str(primary_opp_id))
                                 if primary_opp_id >= 0 else "",
@@ -3522,35 +3587,6 @@ class PokerFateAPI:
                     continue
                 name = self._session_names.get(pid, str(pid))
                 hole = [Card.from_str(str(c)) if isinstance(c, str) else c for c in cards[:2]]
-                self._bot.observe_showdown(pid, cards, name=name, board=self._board)
-                # Log with Range V2 format
-                learner = self._bot._showdown_learner
-                card_strs = [str(c) for c in cards]
-                action_seq = self._bot._v2_action_history.get(pid, [])
-                street_entries = []
-                for street_key in ('preflop', 'flop', 'turn', 'river'):
-                    n = learner.sample_count(name, street_key, 'raise')
-                    if n == 0:
-                        continue
-                    learned = learner.get_learned_freq(name, street_key, 'raise')
-                    # 本次摊牌在该街道的 category
-                    street_board = _board_at_street(self._board, street_key)
-                    cat = categorize_cards(hole, street_board) if street_board or street_key == 'preflop' else None
-                    # 只有本手在该街道有 raise 行动才显示 category
-                    had_action = any(s == street_key and a == 'raise' for s, a in action_seq)
-                    street_entries.append({
-                        "street": street_key,
-                        "action": "raise",
-                        "sample_count": n,
-                        "category": cat if had_action else None,
-                        "learned_freq": learned,
-                    })
-                if street_entries:
-                    self._log.showdown_learner(
-                        player_name=name,
-                        cards=card_strs,
-                        streets=street_entries,
-                    )
                 # 紧跟 ◈ 学习 之后输出该 villain 的所有 ⚖ 校准记录
                 if self._calibrator is not None:
                     results = self._calibrator.emit_records_for(
@@ -3578,20 +3614,6 @@ class PokerFateAPI:
                                 predicted=rec.predicted_hero_eq_multi,
                                 actual=r.actual_hero_eq_street_multi,
                                 action_ctx=action_ctx,
-                            )
-                        if (
-                            rec.street == 'river'
-                            and rec.villain_vs_hero_dist
-                            and r.actual_relation
-                            and rec.hero_bucket
-                        ):
-                            self._bot._river_relative_calibrator.record(
-                                hero_bucket=rec.hero_bucket,
-                                hero_made_subtype=rec.hero_made_subtype,
-                                board_texture=rec.board_texture,
-                                action_ctx=action_ctx,
-                                predicted_dist=rec.villain_vs_hero_dist,
-                                actual_relation=r.actual_relation,
                             )
                     if (
                         self._runtime_calibration_recorder is not None

@@ -42,6 +42,7 @@ BARK_EVENT_ICONS: dict[str, str] = {
     "hand_swing_up": f"{_FE}/Chart%20Increasing/3D/chart_increasing_3d.png",
     "hand_swing_down": f"{_FE}/Chart%20Decreasing/3D/chart_decreasing_3d.png",
     "gamedata_no_history": f"{_FE}/Ghost/3D/ghost_3d.png",
+    "gamedata_auth_failed": f"{_FE}/Key/3D/key_3d.png",
     "token_captured": f"{_FE}/Key/3D/key_3d.png",
 }
 
@@ -166,8 +167,14 @@ def format_bark_message(event: str, fields: dict[str, Any]) -> tuple[str, str, s
         return title, _append_hand_detail(body, fields), icon
 
     if event == "gamedata_no_history":
-        title = "新玩家 · 无历史数据"
-        body = f"本局首次出现无历史数据玩家（code=-2）\n可能是新号/小号，留意激进下注"
+        title = "玩家 · 暂无历史统计"
+        body = (f"玩家：{fields.get('name') or fields.get('uid') or '未知'}\n"
+                "查询成功，近30天有效对局数为0。\n本次运行仅提醒一次。")
+        return title, body, icon
+
+    if event == "gamedata_auth_failed":
+        title = "对手历史查询 · 登录态失效"
+        body = "HTTP 鉴权失败（code=-2），暂停查询对手历史统计。\n更新有效凭证后重试；游戏对局继续。"
         return title, body, icon
 
     if event == "token_captured":

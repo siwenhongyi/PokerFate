@@ -128,6 +128,8 @@ class PredictionRecord:
     # 手牌结束后用所有亮牌的 villain 真手牌复算"实际多人胜率"。
     predicted_hero_eq_multi: Optional[float] = None
     active_player_ids: List[int] = field(default_factory=list)
+    # Opponent profile features at prediction time (bucket-ML training input).
+    player_profile: Dict[str, float] = field(default_factory=dict)
     # Hero 在预测时板面上的桶（air/weak_draw/draw/medium/strong/nuts）。
     # 缺陷 C meta-calibration：按 (hero_bucket, street, n_opp) 累积 (pred,
     # actual) 对，用历史 bias 校正 raw equity。preflop 时为 hero preflop 桶。
@@ -244,6 +246,7 @@ class ShowdownCalibrator:
         bet_size_bucket: str = '',
         is_raise_over: bool = False,
         action_sequence: str = '',
+        player_profile: Optional[Dict[str, float]] = None,
     ) -> None:
         """每次 tracker 的 _weights[player_id] 更新后调用。
 
@@ -338,6 +341,7 @@ class ShowdownCalibrator:
             board_features=_board_features(board),
             hero_draw=_hero_draw_features(list(hero_cards or []), list(board)),
             hero_blockers=_hero_blocker_features(list(hero_cards or []), list(board)),
+            player_profile=dict(player_profile or {}),
             posterior_weights=posterior_weights,
             static_weights=static_weights,
         )

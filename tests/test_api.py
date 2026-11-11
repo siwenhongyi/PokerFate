@@ -69,6 +69,7 @@ class TestAPILifecycle:
             small_blind=5,
             equity_iterations=50,
             g5_model_path=str(g5_path),
+            enable_showdown_calibration=False,
         )
         api.new_hand(
             players=[
@@ -88,6 +89,8 @@ class TestAPILifecycle:
             my_profit_delta=20,
         )
 
+        # Live saves are asynchronous; graceful close flushes the checkpoint.
+        api.close_g5_shadow()
         model = G5ActionModel.load(g5_path)
         villain = model.players["uid:1"]
         other = model.players["uid:2"]

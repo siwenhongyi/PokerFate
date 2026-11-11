@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import threading
 import time
+import copy
+import uuid
 from collections import deque
 from typing import Any, Callable
 
@@ -68,8 +70,12 @@ class LiveTableObserver:
         self._lock = threading.Lock()
         self._feed: deque[str] = deque(maxlen=log_size)
         self._seats: dict[int, dict] = {}
+        # The last result is independent of the live table. A profit-lock
+        # leave/re-entry must not erase it before the viewer can read it.
+        self._settlement: dict | None = None
         self._reset_table()
         self._connected = False
+        self._connection_status = "disconnected"
         self._room_id = 0
         self._sb = 0
         self._bb = 0
@@ -82,6 +88,15 @@ class LiveTableObserver:
     def set_connected(self, flag: bool) -> None:
         with self._lock:
             self._connected = bool(flag)
+            self._connection_status = "connected" if flag else "disconnected"
+            self._updated = time.time()
+
+    def set_connection_status(self, status: str) -> None:
+        with self._lock:
+            self._connection_status = status
+            self._connected = status == "connected"
+            if not self._connected:
+                self._action_seat = None
             self._updated = time.time()
 
     def set_my_uid(self, uid: int | str | None) -> None:
@@ -89,6 +104,9 @@ class LiveTableObserver:
             self.my_uid = str(uid) if uid is not None else None
 
     def _reset_table(self) -> None:
+        self._game_id = ""
+        self._hand_token = uuid.uuid4().hex
+        self._public_holes: dict[int, list] = {}
         self._board: list[str] = []
         self._pot = 0
         self._street = ""
@@ -100,6 +118,8 @@ class LiveTableObserver:
         self._hand_start_stacks: dict[str, int] = {}
 
     def _reset_hand(self) -> None:
+        self._public_holes.clear()
+        self._hand_token = uuid.uuid4().hex
         self._board = []
         self._pot = 0
         self._street = "preflop"
@@ -112,6 +132,7 @@ class LiveTableObserver:
             s["allin"] = False
             s["last"] = ""
             s["cards"] = []
+            s["revealed"] = False
 
     def _seat(self, seatid: int) -> dict:
         s = self._seats.get(seatid)
@@ -139,12 +160,18 @@ class LiveTableObserver:
 
     # individual handlers (called under lock) ---------------------------------
     def _h_enter_room(self, msg: dict) -> None:
+        if _chip(msg.get("code"), 0) != 0:
+            return
+        self._reset_table()
+        self._seats.clear()
+        self._result = ""
         self._room_id = _chip(msg.get("roomid"), self._room_id)
         room_info = msg.get("room_info") or {}
         self._sb = _chip(room_info.get("sb"), self._sb)
         self._bb = _chip(room_info.get("bb"), self._bb)
         self._seat_num = _chip(room_info.get("seat_num"), self._seat_num) or 6
         ts = msg.get("table_status") or {}
+        self._game_id = str(ts.get("gameid") or "")
         self._hand_start_stacks.clear()
         for entry in ts.get("seat") or []:
             if not isinstance(entry, dict):
@@ -167,6 +194,11 @@ class LiveTableObserver:
             at = _chip(entry.get("last_action_type"), 0)
             s["folded"] = at in _FOLD_ACTIONS
             s["allin"] = bool(entry.get("is_allin"))
+            cards = [_card_str(entry.get(k)) for k in ("card1", "card2")]
+            if any(cards):
+                s["cards"] = cards
+                s["revealed"] = True
+                self._public_holes[seatid] = cards
         board = [c for c in (_card_str(x) for x in ts.get("board") or []) if c]
         if board:
             self._board = board
@@ -175,8 +207,30 @@ class LiveTableObserver:
         if stage:
             self._street = _STAGE_TO_STREET.get(stage, self._street)
         playing = msg.get("playing_status") or {}
+        hole = [_card_str(playing.get(k)) for k in ("card1", "card2")]
+        if any(hole):
+            self._my_hole = hole
+            if self._my_seat is not None:
+                self._seat(self._my_seat)["cards"] = list(hole)
         if "action_seatid" in playing:
             self._action_seat = _chip(playing.get("action_seatid"), 0)
+
+    def _h_leave_room_rsp(self, msg: dict) -> None:
+        if _chip(msg.get("code"), 0) not in (0, 2, 3):
+            return
+        rid = _chip(msg.get("roomid"), 0)
+        if rid and self._room_id and rid != self._room_id:
+            return
+        self._reset_table()
+        self._seats.clear()
+        self._room_id = 0
+        self._sb = self._bb = 0
+        self._result = "已离桌，当前在大厅"
+        self._feed.append("已离桌，当前在大厅")
+
+    def _h_location(self, msg: dict) -> None:
+        if _chip(msg.get("roomid"), 0) == 0:
+            self._h_leave_room_rsp({})
 
     def _h_sit_down_rsp(self, msg: dict) -> None:
         seatid = _chip(msg.get("seatid"), 0)
@@ -225,11 +279,13 @@ class LiveTableObserver:
         seatid = _chip(msg.get("seatid"), 0)
         if cards:
             self._my_hole = cards[:4]
+            self._my_seat = seatid
             if seatid >= 0:
                 self._seat(seatid)["cards"] = cards[:4]
 
     def _h_dealer_info(self, msg: dict) -> None:
         self._reset_hand()
+        self._game_id = str(msg.get("gameid") or "")
         self._hand_no += 1
         self._result = ""
         for entry in msg.get("start_info") or []:
@@ -296,6 +352,97 @@ class LiveTableObserver:
         for s in self._seats.values():
             s["bet"] = 0
 
+    def _h_show_hand(self, msg: dict) -> None:
+        for entry in msg.get("info") or []:
+            if isinstance(entry, dict):
+                self._reveal(_chip(entry.get("seatid"), 0),
+                             [_card_str(entry.get(k)) for k in ("card1", "card2")])
+
+    def _h_show_my_card(self, msg: dict) -> None:
+        game_id = str(msg.get("gameid") or "")
+        old = bool(game_id and game_id != self._game_id)
+        if old and (not self._settlement or game_id != self._settlement["game_id"]):
+            return
+        for entry in msg.get("info") or []:
+            if not isinstance(entry, dict):
+                continue
+            cards = [_card_str(card) for card in (entry.get("hand_cards") or [])[:2]]
+            cards += [None] * (2 - len(cards))
+            self._reveal(_chip(entry.get("seatid"), 0), cards, old_hand=old)
+
+    def _reveal(self, seatid: int, cards: list, *, old_hand: bool = False) -> None:
+        if seatid < 0 or seatid >= 12 or not any(cards):
+            return
+        if not old_hand:
+            previous = self._public_holes.get(seatid, [None, None])
+            cards = [card or previous[i] for i, card in enumerate(cards)]
+            self._public_holes[seatid] = list(cards)
+            seat = self._seat(seatid)
+            seat["cards"] = list(self._my_hole) if seatid == self._my_seat and self._my_hole else list(cards)
+            seat["revealed"] = True
+        settlement = self._settlement
+        if not settlement or (not old_hand and settlement["id"] != self._hand_token):
+            return
+        # Some voluntary reveals arrive after WinnerRSP, even after the next
+        # DealerInfoRSP. Update the saved result, never the new hand's seats.
+        shown = next((p for p in settlement["revealed"] if p["seatid"] == seatid), None)
+        if shown is None:
+            player = next((p for p in settlement["players"] if p["seatid"] == seatid), None)
+            if player is None:
+                return
+            shown = {"seatid": seatid, "name": player["name"], "hole": [None, None]}
+            settlement["revealed"].append(shown)
+        shown["hole"] = [card or shown["hole"][i] for i, card in enumerate(cards)]
+        from pf_entertainment.showdown import hand_group
+        for winner in settlement["winners"]:
+            if winner["seatid"] == seatid:
+                hero = settlement["hero"]
+                winner["hole"] = list(hero["hole"] if hero["seatid"] == seatid and hero["hole"] else shown["hole"])
+                winner["group"] = hand_group(winner["hole"], settlement["board"], server_type=winner["server_type"])
+
+    def _result_seat(self, player: dict) -> int:
+        uid = str(player.get("uid") or "")
+        if uid:
+            match = next((i for i, s in self._seats.items() if s["uid"] == uid), None)
+            if match is not None:
+                return match
+            if "seatid" not in player:
+                return -1
+        return _chip(player.get("seatid"), 0)
+
+    def _save_settlement(self, winners: list) -> None:
+        from pf_entertainment.showdown import hand_group
+        merged: dict[str, dict] = {}
+        for item in winners:
+            if not isinstance(item, dict):
+                continue
+            seatid = self._result_seat(item)
+            seat = self._seats.get(seatid, {})
+            key = str(item.get("uid") or f"seat:{seatid}")
+            if key not in merged:
+                hole = list(self._my_hole if seatid == self._my_seat else self._public_holes.get(seatid, []))
+                server_type = _chip(item.get("type"), 0)
+                merged[key] = {"seatid": seatid, "name": seat.get("name") or "未识别玩家",
+                               "hole": hole, "chips": 0, "pools": [], "server_type": server_type,
+                               "group": hand_group(hole, self._board, server_type=server_type)}
+            winner = merged[key]
+            winner["chips"] += _chip(item.get("chips"), 0)
+            pool = _chip(item.get("poolid"), 0)
+            if pool not in winner["pools"]:
+                winner["pools"].append(pool)
+        existing = self._settlement if self._settlement and self._settlement["id"] == self._hand_token else None
+        self._settlement = {
+            "id": self._hand_token, "game_id": self._game_id, "hand_no": self._hand_no,
+            "ended_at": existing["ended_at"] if existing else time.time(),
+            "reveal_seconds": 2.5, "board": list(self._board), "winners": list(merged.values()),
+            "hero": {"seatid": self._my_seat, "hole": list(self._my_hole),
+                     "folded": self._seats.get(self._my_seat, {}).get("folded", False),
+                     "group": hand_group(self._my_hole, self._board)},
+            "revealed": [{"seatid": i, "name": self._seats.get(i, {}).get("name") or f"座位{i}",
+                          "hole": list(cards)} for i, cards in self._public_holes.items()],
+            "players": [{"seatid": i, "name": s["name"]} for i, s in self._seats.items() if not s["empty"]],
+        }
+
     def _h_winner(self, msg: dict) -> None:
         # Net profit already includes refunds and rake. Adding gross winnings
         # to the last action stack would miss refunds (or count money twice).
@@ -316,7 +463,7 @@ class LiveTableObserver:
         for w in winners:
             if not isinstance(w, dict):
                 continue
-            seatid = _chip(w.get("seatid"), 0)  # protobuf omits seat 0
+            seatid = self._result_seat(w)
             name = self._seats.get(seatid, {}).get("name") or (
                 "我" if seatid == self._my_seat else f"座位{seatid}")
             names.append(f"{name} 赢 {_chip(w.get('chips'),0)}")
@@ -330,6 +477,7 @@ class LiveTableObserver:
         if self._result:
             self._feed.append("▸ " + self._result)
         self._action_seat = None
+        self._save_settlement(winners)
 
     # ── snapshot for the web ─────────────────────────────────────────────────
     def snapshot(self) -> dict:
@@ -353,15 +501,18 @@ class LiveTableObserver:
                     "empty": bool(s["empty"]),
                     "is_me": (i == self._my_seat),
                     "acting": (i == self._action_seat),
+                    "revealed": bool(s.get("revealed")),
                 })
             return {
                 "updated": self._updated,
                 "connected": self._connected,
+                "connection_status": self._connection_status,
                 "room_id": self._room_id,
                 "sb": self._sb,
                 "bb": self._bb,
                 "seat_num": self._seat_num,
                 "hand_no": self._hand_no,
+                "game_id": self._game_id,
                 "street": self._street,
                 "board": list(self._board),
                 "pot": self._pot,
@@ -371,6 +522,7 @@ class LiveTableObserver:
                 "seats": seats,
                 "feed": list(self._feed),
                 "result": self._result,
+                "settlement": copy.deepcopy(self._settlement),
             }
 
 
@@ -416,6 +568,8 @@ async def start_live_web(
 
 
 _HANDLERS = {
+    "pb.UserLocationRSP": LiveTableObserver._h_location,
+    "pb.LeaveRoomRSP": LiveTableObserver._h_leave_room_rsp,
     "pb.EnterRoomRSP": LiveTableObserver._h_enter_room,
     "pb.SitDownRSP": LiveTableObserver._h_sit_down_rsp,
     "pb.SitDownBRC": LiveTableObserver._h_sit_down_brc,
@@ -428,4 +582,6 @@ _HANDLERS = {
     "pb.ActionNotifyBRC": LiveTableObserver._h_action_notify,
     "pb.RoundOverBRC": LiveTableObserver._h_round_over,
     "pb.WinnerRSP": LiveTableObserver._h_winner,
+    "pb.ShowHandRSP": LiveTableObserver._h_show_hand,
+    "pb.ShowMyCardBRC": LiveTableObserver._h_show_my_card,
 }

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import sqlite3
 import time
 import zlib
@@ -41,6 +42,7 @@ class FlopBookOptions:
     min_effective_stack_bb: float = 40.0
     max_effective_stack_bb: float = 170.0
     max_pot_ratio_delta: float = 0.35
+    max_stack_ratio_delta: float = 0.35
     exploit_enabled: bool = True
     max_exploit_confidence: float = 0.25
 
@@ -76,11 +78,13 @@ def _combo_rows(board: str) -> dict[frozenset[int], int]:
 
 
 class FlopBook:
-    """Reader for packed v2 flop book sqlite shards."""
+    """Reader for packed v2/v3 flop book sqlite shards."""
 
     def __init__(self, book_dir: Path | str = DEFAULT_BOOK_DIR):
         self.dir = Path(book_dir)
         self.meta = json.loads((self.dir / "meta.json").read_text())
+        if self.meta.get("schema_version", 2) >= 3 and not self.meta.get("complete"):
+            raise BookMiss("book_not_complete")
         self.iso = json.loads((self.dir / "flop_iso_map.json").read_text())
         self.clusters = json.loads((self.dir / "flop_clusters.json").read_text())["mapping"]
         self._db: dict[str, sqlite3.Connection] = {}
@@ -278,12 +282,16 @@ class FlopBook:
     ) -> tuple[str, dict[str, Any]]:
         path = "r"
         node = self._fetch(conn, flop_id, path)
+        previous_bet_bb = 0.0
         for kind, size in action_line:
-            chosen = self._match_action(list(node["actions"]), kind, float(size), float(node["pot"]))
+            chosen = self._match_action(list(node["actions"]), kind, float(size),
+                                        float(node["pot"]), previous_bet_bb)
             if chosen is None:
                 raise BookMiss(f"action_path_miss:{kind}:{size}:path={path}:actions={node['actions']}")
             path = f"{path}:{chosen}"
             node = self._fetch(conn, flop_id, path)
+            if kind in {"bet", "raise", "allin"}:
+                previous_bet_bb = float(size)
         return path, node
 
     @staticmethod
@@ -292,6 +300,7 @@ class FlopBook:
         kind: str,
         size_bb: float,
         pot_bb: float,
+        previous_bet_bb: float = 0.0,
     ) -> Optional[str]:
         simple = {"check": "x", "fold": "f", "call": "c"}
         if kind in simple:
@@ -315,13 +324,14 @@ class FlopBook:
 
         if kind == "raise":
             candidates = [a for a in actions if a.startswith("r")]
-            if "ai" in actions:
-                candidates.append("ai")
-            if not candidates:
+            if not candidates or previous_bet_bb <= 0 or size_bb <= previous_bet_bb:
                 return None
-            if len(candidates) == 1:
-                return candidates[0]
-            return min(candidates, key=_book_action_size_key)
+            multiple = size_bb / previous_bet_bb
+            best = min(candidates, key=lambda a: abs(math.log(float(a[1:-1]) / multiple)))
+            # Do not silently map a far off-tree raise (or an all-in) to the
+            # smallest size. This also works for the legacy single-size book.
+            relative_error = abs(float(best[1:-1]) - multiple) / multiple
+            return best if relative_error <= 0.50 else None
 
         return None
 
@@ -360,7 +370,9 @@ class FlopBookDecisionEngine:
 
     def __init__(self, options: Optional[FlopBookOptions] = None, book: Optional[FlopBook] = None):
         self.options = options or FlopBookOptions()
-        self.book = book or FlopBook(self.options.book_dir or DEFAULT_BOOK_DIR)
+        self.book = book or FlopBook(
+            self.options.book_dir or os.environ.get("PF_FLOP_BOOK_DIR") or DEFAULT_BOOK_DIR
+        )
         self._last_result: dict[str, Any] = {}
         self._last_error = ""
         # P(hero takes the selected action | combo) for all 1326 combos at the
@@ -527,6 +539,14 @@ class FlopBookDecisionEngine:
             )
             return None
 
+        if self.book.meta.get("schema_version", 2) >= 3:
+            expected_stack = float(scenario["effective_stack_bb"])
+            stack_delta = abs(effective_stack_bb - expected_stack) / max(expected_stack, 1e-9)
+            if stack_delta > self.options.max_stack_ratio_delta:
+                self._fallback("book_stack_mismatch", effective_stack_bb=effective_stack_bb,
+                               expected_stack_bb=expected_stack, stack_ratio_delta=stack_delta)
+                return None
+
         board = "".join(str(card) for card in gs.board)
         hero_combo = f"{hero.hole_cards[0]}{hero.hole_cards[1]}"
         try:
@@ -584,6 +604,8 @@ class FlopBookDecisionEngine:
             "pot_bb": round(pot_bb, 4),
             "expected_pot_bb": round(expected_pot, 4),
             "effective_stack_bb": round(effective_stack_bb, 4),
+            "book_effective_stack_bb": scenario.get("effective_stack_bb"),
+            "book_depth_bb": scenario.get("depth_bb"),
             "prefix": list(prefix["prefix"]),
             "book_version": self.book.meta.get("book_version"),
             "book_abstraction_hash": self.book.meta.get("abstraction_hash"),
@@ -652,23 +674,32 @@ class FlopBookDecisionEngine:
             if oop.player_id != defender.player_id or ip.player_id != opener.player_id:
                 self._fallback("book_position_order_mismatch", opener_pos=opener_pos, defender_pos=defender_pos)
                 return None
-            scenario_id = f"{opener_pos}vBB_srp100"
+            scenario_prefix = f"{opener_pos}vBB_srp"
         elif opener_pos == "SB" and defender_pos == "BB":
             if oop_pos != "SB" or ip_pos != "BB":
                 self._fallback("book_sb_vs_bb_position_mismatch", oop_pos=oop_pos, ip_pos=ip_pos)
                 return None
-            scenario_id = "SBvBB_srp100"
+            scenario_prefix = "SBvBB_srp"
         else:
             self._fallback("book_scenario_not_covered", opener_pos=opener_pos, defender_pos=defender_pos)
             return None
 
-        scenario_meta = next(
-            (s for s in list(self.book.meta.get("scenarios") or []) if s.get("id") == scenario_id),
-            {},
-        )
+        candidates = [s for s in self.book.meta.get("scenarios", [])
+                      if str(s.get("id", "")).startswith(scenario_prefix)
+                      and float(s.get("effective_stack", 0)) > 0]
+        if not candidates:
+            self._fallback("book_scenario_not_covered", opener_pos=opener_pos, defender_pos=defender_pos)
+            return None
+        bb = max(float(gs.big_blind or 0), 1e-9)
+        effective = min(float(p.stack or 0) + float(p.current_bet or 0) for p in (oop, ip)) / bb
+        scenario_meta = min(candidates, key=lambda s: abs(
+            effective / float(s["effective_stack"]) - 1.0))
+        scenario_id = scenario_meta["id"]
         return {
             "scenario_id": scenario_id,
             "pot_bb": float(scenario_meta.get("pot") or 0.0),
+            "effective_stack_bb": float(scenario_meta["effective_stack"]),
+            "depth_bb": scenario_meta.get("depth_bb"),
             "opener_pos": opener_pos,
             "defender_pos": defender_pos,
             "oop_pos": oop_pos,

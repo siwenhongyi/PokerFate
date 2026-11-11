@@ -9,15 +9,22 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass
+from collections import OrderedDict
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+
+import numpy as np
 
 
 CAT_ORDER = ("nuts", "strong", "medium", "draw", "weak_draw", "air")
 MODEL_DIR = Path(__file__).resolve().parents[2] / "data" / "local_models"
 MODEL_FILE = MODEL_DIR / "range_v2_empirical_model.json"
+# Upper bound on how much the pool action table may displace the GTO
+# likelihood row. The table's own ``blend`` is n/(n+prior_weight); the cap
+# only keeps a sliver of the GTO prior even for the busiest keys.
+MAX_GLOBAL_ACTION_BLEND = 0.9
 FEATURES = (
     "vpip",
     "pfr",
@@ -94,6 +101,9 @@ class _NumericIndex:
     preflop_counts: Dict[str, Dict[str, Dict[str, float]]]
     action_prior_weight: float
     player_count: int
+    # Lazily built (rows × FEATURES) matrices for the vectorised KNN scan.
+    z_matrix: Optional[np.ndarray] = field(default=None, repr=False, compare=False)
+    rel_matrix: Optional[np.ndarray] = field(default=None, repr=False, compare=False)
 
 
 def empirical_model_path() -> Path:
@@ -255,7 +265,7 @@ def _global_action_likelihood_from_table(
             if cat in dist
         }
         if clean:
-            return clean, _clamp(blend, 0.0, 0.75), key, n
+            return clean, _clamp(blend, 0.0, MAX_GLOBAL_ACTION_BLEND), key, n
     return None
 
 
@@ -549,7 +559,109 @@ def _empty_numeric_index() -> _NumericIndex:
     )
 
 
+_KNN_CACHE: "OrderedDict[tuple, tuple]" = OrderedDict()
+_KNN_CACHE_MAX = 256
+
+
+class _KnnResult:
+    """Lazily materialised ``[(distance, row), ...]`` sorted ascending.
+
+    Consumers walk the list in order and stop after ``_KNN_MAX_NEIGHBORS``
+    contributors, so eagerly building ~9000 tuples per query was wasted work
+    (and, with several million long-lived model objects in the process, the
+    allocation burst triggered GC passes costing more than the KNN itself).
+    """
+
+    __slots__ = ("_score", "_idx", "_rows")
+    _CHUNK = 128
+
+    def __init__(self, score: np.ndarray, idx: np.ndarray, rows: list) -> None:
+        self._score = score
+        self._idx = idx
+        self._rows = rows
+
+    def __len__(self) -> int:
+        return int(self._score.shape[0])
+
+    def __bool__(self) -> bool:
+        return self._score.shape[0] > 0
+
+    def __iter__(self):
+        rows = self._rows
+        n = self._score.shape[0]
+        for start in range(0, n, self._CHUNK):
+            stop = start + self._CHUNK
+            for d, i in zip(self._score[start:stop].tolist(), self._idx[start:stop].tolist()):
+                yield d, rows[i]
+
+    def __getitem__(self, item):
+        if isinstance(item, slice):
+            return list(zip(self._score[item].tolist(), (self._rows[i] for i in self._idx[item].tolist())))
+        return float(self._score[item]), self._rows[int(self._idx[item])]
+
+
+def _index_matrices(index: _NumericIndex) -> tuple[np.ndarray, np.ndarray]:
+    if index.z_matrix is None or index.rel_matrix is None:
+        n = len(index.rows)
+        z = np.zeros((n, len(FEATURES)), dtype=np.float64)
+        rel = np.zeros((n, len(FEATURES)), dtype=np.float64)
+        for i, row in enumerate(index.rows):
+            for j, name in enumerate(FEATURES):
+                z[i, j] = row.z.get(name, 0.0)
+                rel[i, j] = row.reliability.get(name, 0.0)
+        index.z_matrix = z
+        index.rel_matrix = rel
+    return index.z_matrix, index.rel_matrix
+
+
 def _knn_scores(profile: Any, index: _NumericIndex) -> tuple[list[tuple[float, _FeatureVector]], float]:
+    """Weighted z-distance from ``profile`` to every indexed player, ascending.
+
+    Vectorised over the ~6600 rows (one numpy op per feature, accumulated in
+    the same order as the former per-row Python loop, so scores and ordering
+    are bit-identical). The scalar loop cost ~60 ms per opponent action and
+    was the largest single item in replay and live notify_action profiles.
+    """
+    current = _profile_vector(profile, index)
+    query_conf = _query_confidence(current)
+    if query_conf <= 0.03 or not index.rows:
+        return [], query_conf
+    key = (
+        id(index),
+        tuple(current.z.get(n, 0.0) for n in FEATURES),
+        tuple(current.reliability.get(n, 0.0) for n in FEATURES),
+    )
+    hit = _KNN_CACHE.get(key)
+    if hit is not None:
+        _KNN_CACHE.move_to_end(key)
+        return hit
+
+    z_mat, rel_mat = _index_matrices(index)
+    n = z_mat.shape[0]
+    dist = np.zeros(n, dtype=np.float64)
+    weight_sum = np.zeros(n, dtype=np.float64)
+    for j, name in enumerate(FEATURES):
+        cur_rel = current.reliability.get(name, 0.0)
+        if cur_rel <= 0.04:
+            continue
+        row_rel = rel_mat[:, j]
+        active = row_rel > 0.04
+        weight = np.where(active, FEATURE_WEIGHTS[name] * cur_rel * row_rel, 0.0)
+        delta = current.z.get(name, 0.0) - z_mat[:, j]
+        dist += np.where(active, weight * delta * delta, 0.0)
+        weight_sum += weight
+    keep = np.nonzero(weight_sum > 0.12)[0]
+    score = dist[keep] / weight_sum[keep]
+    order = np.argsort(score, kind="stable")
+    scored = _KnnResult(score[order], keep[order], index.rows)
+    _KNN_CACHE[key] = (scored, query_conf)
+    if len(_KNN_CACHE) > _KNN_CACHE_MAX:
+        _KNN_CACHE.popitem(last=False)
+    return scored, query_conf
+
+
+def _knn_scores_reference(profile: Any, index: _NumericIndex) -> tuple[list[tuple[float, _FeatureVector]], float]:
+    """Pre-vectorisation scalar implementation, kept for the equivalence test."""
     current = _profile_vector(profile, index)
     query_conf = _query_confidence(current)
     if query_conf <= 0.03:

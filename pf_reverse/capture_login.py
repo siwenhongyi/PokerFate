@@ -12,10 +12,18 @@ headless_session.json refreshes itself; the Mac bot just reads it on start.
 The capture holds the account password and session token in clear text; keep it
 local.
 
-Usage:
-    mitmdump --listen-host 0.0.0.0 --listen-port 8080 \
-        --mode upstream:http://127.0.0.1:7897 --ssl-insecure \
-        --ignore-hosts '^(?!.*poker-fate)' -s pf_reverse/capture_login.py
+Usage: don't invoke mitmdump directly — run
+    python -m pf_intercept.headless.harvest_session
+which starts mitmdump with this addon, prints the phone-side setup steps, and
+exits once a fresh session has been captured.
+
+Do NOT filter by hostname (e.g. "only intercept hosts containing poker-fate"):
+the real client's candidate login addresses (see Constants.lua G_HTTP_URL /
+_2 / _3 / _4 in pf_reverse/output/lua/src/app/Constants.lua) include bare IPs
+with no hostname at all, so a host allow-list can silently miss the real
+traffic. --ignore-hosts should instead exclude known-irrelevant hosts and
+intercept everything else — see pf_intercept.config.MITM_IGNORE_HOSTS, the
+value harvest_session.py actually passes to mitmdump.
 """
 
 from __future__ import annotations

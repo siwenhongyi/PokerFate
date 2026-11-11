@@ -29,7 +29,7 @@ _BOOSTER_CACHE: Dict[str, Any] = {}
 
 
 def ml_mode() -> str:
-    raw = os.environ.get("PF_BUCKET_ML", "off")
+    raw = os.environ.get("PF_BUCKET_ML", "lgbm")
     mode = str(raw or "off").strip().lower()
     if mode in {"0", "false", "no", "none", "off", "disabled"}:
         return "off"
@@ -40,12 +40,44 @@ def ml_mode() -> str:
 
 def experiment_flags() -> dict[str, str]:
     return {
-        "PF_BUCKET_ML": os.environ.get("PF_BUCKET_ML", "off"),
+        "PF_BUCKET_ML": os.environ.get("PF_BUCKET_ML", "lgbm"),
     }
 
 
 def _model_path() -> Path:
+    # PF_BUCKET_ML_MODEL_PATH lets the closed-loop evaluator
+    # (scripts/score_bucket_rows.py workflow) replay with a candidate model
+    # without touching the deployed file.
+    override = os.environ.get("PF_BUCKET_ML_MODEL_PATH", "").strip()
+    if override:
+        return Path(override)
     return _ROOT / "runtime_lgbm_bucket_model.json"
+
+
+# Opponent-profile features. Same keys/scales as the hero-equity model so one
+# `PlayerProfile` maps to one feature dict everywhere.
+_PROFILE_SCALES = {
+    "hands_seen": 5000.0,
+    "vpip": 1.0,
+    "pfr": 1.0,
+    "af": 5.0,
+    "three_bet_pct": 1.0,
+    "fold_to_3bet": 1.0,
+    "fold_to_cbet": 1.0,
+    "wtsd": 1.0,
+    "wmsd": 1.0,
+    "river_bet_freq": 1.0,
+    "river_fold_rate": 1.0,
+    "bluff_win_rate": 1.0,
+    "pwi": 100.0,
+}
+
+
+def profile_feature_dict(profile: Any) -> Optional[dict[str, float]]:
+    """PlayerProfile -> plain feature dict (None when no profile is known)."""
+    if profile is None:
+        return None
+    return {key: float(getattr(profile, key, 0.0) or 0.0) for key in _PROFILE_SCALES}
 
 
 def _load_model(mode: str) -> Optional[dict[str, Any]]:
@@ -154,15 +186,11 @@ def _board_features(board: Iterable[Card] | None) -> dict[str, Any]:
 def _experiment_profile() -> str:
     keys = (
         "PF_TURN_FLOP_RELATIVE_GUARD",
-        "PF_RUNTIME_RANGE_CALIBRATION",
-        "PF_BUCKET_CALIBRATION",
         "PF_BUCKET_ML",
     )
     defaults = {
         "PF_TURN_FLOP_RELATIVE_GUARD": "1",
-        "PF_RUNTIME_RANGE_CALIBRATION": "1",
-        "PF_BUCKET_CALIBRATION": "1",
-        "PF_BUCKET_ML": "off",
+        "PF_BUCKET_ML": "lgbm",
     }
     return "|".join(f"{key}={os.environ.get(key, defaults[key])}" for key in keys)
 
@@ -195,7 +223,17 @@ def _feature_values(
     bet_size_bucket: str = "",
     is_raise_over: bool = False,
     action_sequence: str = "",
+    player_profile: dict[str, Any] | None = None,
 ) -> dict[str, float]:
+    """Single source of truth for bucket-ML features.
+
+    `scripts/fit_range_lgbm_calibration.py` builds its training matrix through
+    this same function (via `_bucket_features_runtime`), so the model can never
+    see a feature at training time that the runtime does not supply. The
+    2026-11-05 model was trained with 13 `profile_*` features the runtime never
+    passed (all zero live) and with constant `strategy_version` /
+    `experiment_profile` one-hots; both are gone from this feature set.
+    """
     ordered = np.sort(probs)[::-1]
     entropy = float(-np.sum(probs * np.log(np.clip(probs, EPS, 1.0))) / math.log(len(CAT_ORDER)))
     top_bucket = CAT_ORDER[int(np.argmax(probs))]
@@ -213,8 +251,6 @@ def _feature_values(
         f"texture={_board_texture(board)}": 1.0,
         f"hero_bucket={hero_bucket or '?'}": 1.0,
         f"top_bucket={top_bucket}": 1.0,
-        "strategy_version=__OTHER__": 1.0,
-        f"experiment_profile={_experiment_profile()}": 1.0,
         f"position={position or '?'}": 1.0,
         f"is_ip={'ip' if is_ip else 'oop'}": 1.0,
         f"facing_action={facing_action or '?'}": 1.0,
@@ -237,6 +273,9 @@ def _feature_values(
         v = float(val)
         out[f"p_{cat}"] = v
         out[f"logp_{cat}"] = float(np.log(max(v, EPS)) / 8.0)
+    if player_profile is not None:
+        for key, scale in _PROFILE_SCALES.items():
+            out[f"profile_{key}"] = _clip01(player_profile.get(key), scale)
     return out
 
 
@@ -299,6 +338,7 @@ def calibrate_bucket_probs(
     bet_size_bucket: str = "",
     is_raise_over: bool = False,
     action_sequence: str = "",
+    player_profile: dict[str, Any] | None = None,
 ) -> tuple[dict[str, float], dict[str, Any]]:
     mode = ml_mode()
     if mode == "off":
@@ -327,6 +367,7 @@ def calibrate_bucket_probs(
         bet_size_bucket=bet_size_bucket,
         is_raise_over=is_raise_over,
         action_sequence=action_sequence,
+        player_profile=player_profile if model.get("profile_features") else None,
     )
     ml_probs = _predict_lgbm(model, probs, features, mode=mode)
     alpha = max(0.0, min(1.0, float(model.get("blend_alpha", 0.0) or 0.0)))

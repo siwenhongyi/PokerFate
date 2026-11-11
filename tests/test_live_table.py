@@ -3,6 +3,49 @@ import pytest
 from pf_entertainment.live_table import LiveTableObserver
 
 
+def test_hero_leave_clears_table_and_reenter_replaces_snapshot(observer):
+    observer.set_connected(True)
+    observer.observe("pb.HandCardRSP", {"card1": 1037, "card2": 267})
+    observer.observe("pb.ActionNotifyBRC", {"seatid": 0})
+    observer.observe("pb.LeaveRoomRSP", {"roomid": 21205174})
+    snapshot = observer.snapshot()
+    assert snapshot["connected"] is True
+    assert snapshot["room_id"] == 0
+    assert snapshot["my_seat"] is None and snapshot["action_seat"] is None
+    assert snapshot["board"] == snapshot["my_hole"] == []
+    assert snapshot["pot"] == 0
+    assert all(s["empty"] and not s.get("acting") for s in snapshot["seats"])
+    observer.observe("pb.EnterRoomRSP", {
+        "roomid": 123, "table_status": {"seat": [
+            {"seatid": 2, "player": {"uid": "10262053", "name": "Hero"}, "hand_chips": "1000000"},
+        ]},
+    })
+    snapshot = observer.snapshot()
+    assert snapshot["room_id"] == 123 and snapshot["my_seat"] == 2
+    assert all(s["empty"] for s in snapshot["seats"] if s["seatid"] != 2)
+
+
+@pytest.mark.parametrize("msg", [{"code": 121}, {"roomid": 9999}])
+def test_failed_or_other_room_leave_keeps_table(observer, msg):
+    before = observer.snapshot()
+    observer.observe("pb.LeaveRoomRSP", msg)
+    after = observer.snapshot()
+    assert after["room_id"] == before["room_id"]
+    assert after["seats"] == before["seats"]
+
+
+def test_reconnect_status_retains_snapshot_until_authoritative_lobby(observer):
+    observer.observe("pb.ActionNotifyBRC", {"seatid": 0})
+    observer.set_connection_status("reconnecting")
+    snap = observer.snapshot()
+    assert not snap["connected"] and snap["connection_status"] == "reconnecting"
+    assert snap["room_id"] == 21205174
+    assert snap["action_seat"] is None
+    observer.observe("pb.UserLocationRSP", {})
+    assert observer.snapshot()["room_id"] == 0
+    assert all(s["empty"] for s in observer.snapshot()["seats"])
+
+
 @pytest.fixture
 def observer():
     obs = LiveTableObserver(my_uid=10262053)

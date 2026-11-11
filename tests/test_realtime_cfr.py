@@ -35,47 +35,6 @@ def _weights(*combos: str) -> list[float]:
     return out
 
 
-def test_realtime_cfr_reasoning_includes_cec_summary():
-    reasoning = PokerFateAPI._realtime_cfr_decision_reasoning({
-        "selected_label": "Call",
-        "selected_prob": 0.92,
-        "exploitability_pct": 0.27,
-        "elapsed_ms": 1100,
-        "node_path": "r:AllIn(501)",
-        "exploit": {
-            "line_context": {
-                "range_v2": {
-                    "raw_bucket_dist": {
-                        "nuts": 0.08,
-                        "strong": 0.25,
-                        "medium": 0.34,
-                        "draw": 0.07,
-                        "weak_draw": 0.06,
-                        "air": 0.20,
-                    },
-                    "bucket_dist": {
-                        "nuts": 0.10,
-                        "strong": 0.21,
-                        "medium": 0.30,
-                        "draw": 0.09,
-                        "weak_draw": 0.07,
-                        "air": 0.23,
-                    },
-                    "cec_calibration": {
-                        "used": True,
-                        "level": "line",
-                        "rows": 123,
-                        "raw_reliability": 0.84,
-                    },
-                },
-            },
-        },
-    })
-
-    assert "cec=line n=123 rel=84%" in reasoning
-    assert "N8/S25/M34/D7/W6/A20→N10/S21/M30/D9/W7/A23" in reasoning
-
-
 def test_realtime_cfr_turn_decision_uses_solver_strategy(monkeypatch):
     hero = Player(0, "Hero", 1000.0, hole_cards=_cards("As", "Ah"), current_bet=0.0)
     villain = Player(1, "Villain", 940.0, current_bet=60.0)

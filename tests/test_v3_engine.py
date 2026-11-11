@@ -715,6 +715,21 @@ class TestEngineDefense:
         out = engine.decide(ctx)
         assert out.action == 'fold'
 
+    def test_all_in_ignores_equity_vs_random_hand(self):
+        """2026-11-10: the all-in check used to floor the estimate with
+        ``equity_mc - penalty`` (equity vs a random hand). A hand that crushes
+        random holdings but is behind the actual betting range must fold."""
+        engine = V3Engine()
+        ctx = self._setup_facing_bet(
+            to_call=100.0, pot=100.0, stack=100.0,
+            pot_odds=0.50,
+            equity_range=0.21,
+            equity_mc=0.93,
+        )
+        out = engine.decide(ctx)
+        assert out.action == 'fold'
+        assert 'blended_eq=0.21' in out.reason
+
     def test_all_in_uses_uncertainty_not_raw_range_only(self):
         engine = V3Engine()
         ctx = self._setup_facing_bet(

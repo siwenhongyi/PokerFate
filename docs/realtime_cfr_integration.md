@@ -2,6 +2,10 @@
 
 ## DECISION_ENGINE 模式
 
+未设置时默认 `cfr`（实战默认；下列环境变量未设置时同样取实战值：`PF_BUCKET_ML=lgbm`（2026-11-11 重建的模型，见 docs/range_v2_bucket_ml.md）、
+`PF_POSTFLOP_PROFIT_EXPAND_V1=1`、`REALTIME_CFR_TIMEOUT_SEC=10`，headless 入口还会自动等价设置
+`PYTHONUNBUFFERED=1`。hero 胜率 ML、河牌相对 ML、运行时 gamma/theta 公式参数、CEC 校准、showdown 学习器等层已于 2026-11-11 删除，`PF_EQUITY_ML` / `PF_RIVER_RELATIVE_ML` / `PF_RUNTIME_RANGE_CALIBRATION` / `PF_BUCKET_CALIBRATION` 不再存在，见 docs/range_v2_bucket_ml.md）。
+
 - `local` 或非法值：PokerFate 纯本地决策。
 - `g5_all`：翻前、翻后都由 g5 接管，PokerFate 只做旁路对照。
 - `g5`：翻前 PokerFate 查表/本地，翻后 g5 接管；翻前仍同步 g5 shadow，保证翻后状态连续。
@@ -44,6 +48,8 @@ cargo build --release
 `build.rs` 会为 PyO3 extension module 注入 macOS 所需链接参数。
 
 ## 离线翻牌书
+
+v3 正式升级约定：外部目录仅用于试运行，验证通过后将两档新书实体文件导入项目，并完整替换旧翻牌书逻辑。旧书移至 `/Users/zhangmingli/dev-tool/pf_offline_book/archive/`，PokerFate 内只保留 v3；同时删除旧书专用兼容分支，清除启动配置中的旧书／外部路径。回退时从归档恢复对应的代码与书，不在运行项目内常驻两套版本。完整发布步骤见 [离线工程运行手册](/Users/zhangmingli/dev-tool/pf_offline_book/docs/RUN.md)。以下 v2 说明记录升级前状态，正式发布时应更新为 v3 的实际配置。
 
 注意：v2 书是按 97bb、无抽水（meta `rake.cap=0`）、2.5/3bb 开池解的；现场是 9% 不封顶抽水、hero 多为 40–60bb、开池 3.5/4bb。书未重算，命中窗口（`FlopBookOptions`）保持原样，底池偏离 >35% 或后手不在 40–170bb 时回退本地。sqlite 连接以 `check_same_thread=False` 打开，因为决策跑在 asyncio 线程池里，否则第二个线程查书会直接报错回退。
 

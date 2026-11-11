@@ -40,7 +40,7 @@ from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
 from pokerfate.calibration.spool_showdown_calibration import spool_backpressure_status
 from pf_intercept import config
 from pf_intercept.game_api.collcard import _sync_collect_game
-from pf_intercept.game_api.gamedata import _sync_fetch, seed_from_server
+from pf_intercept.game_api.gamedata import GameDataHTTPContext, _sync_fetch, seed_from_server
 from pf_intercept.game_api.http import load_auth_token
 from pf_intercept.wire.action_types import ACTION_TYPE_TO_EVENT_ACTION, FOLD_ACTION_TYPES
 from pf_notify.client import notify
@@ -54,10 +54,12 @@ InjectGuard: TypeAlias = tuple[str, int]
 _MAX_INJECT_DELAY = float(config.ACTION_INJECT_DELAY_MAX_SEC)
 _BANKROLL_SAMPLE_LIMIT = 200
 _HERO_ACTION_PENDING_SUPPRESS_SEC = 8.0
+_GAMEDATA_RETRY_SEC = 30.0
 _BANKROLL_REASONS: dict[str, str] = {
     "startup": "启动基线",
     "refresh": "余额刷新",
     "leave_room": "离桌后余额刷新",
+    "unexpected_leave": "异常离桌重进前",
     "stand_up": "站起后余额刷新",
     "auto_rebuy": "破产买入前",
     "room_escape": "连续破产换桌",
@@ -345,6 +347,9 @@ class BotBridge:
         # _auto_rebuy_done：本代理进程内累计已自动续入次数，进/出房间不重置（避免反复进出刷爆亏损）。
         self._max_auto_rebuy: int = max(0, min(20, int(max_auto_rebuy)))  # 0 = 破产不补买
         self._auto_rebuy_done: int = 0
+        self._auto_rejoin_fields: dict | None = None
+        self._shutdown_requested = False
+        self._transport_can_match: bool | None = None
 
         # 盈利锁仓：WinnerRSP 达标后立刻设置服务端「下一手离桌」
         # DelayLeaveRoomREQ；真正 LeaveRoomRSP 成功后再采样余额并 EnterRoom（100BB）。
@@ -353,11 +358,16 @@ class BotBridge:
         self._profit_lock_award_rebuy_after_enter: bool = False
         # 最近一次注入的 EnterRoomREQ 字段（失败时打日志 / 人工对照）
         self._profit_lock_last_enter_fields: dict | None = None
-        # 资金看板：只用 UserValueRSP 钱包余额 + 当前桌上筹码计算本次启动盈亏。
+        # 资金看板：钱包余额 + 桌上筹码相对启动基线的变化，扣除确认到账的奖励。
         # 不再用牌局内输赢/买入事件维护近似累计值。
         self._bankroll_login_sample_requested: bool = False
         self._bankroll_base_total_chips: int | None = None
         self._bankroll_base_at: float | None = None
+        self._bankroll_reward_chips = 0
+        self._bankroll_wallet_reward_chips = 0
+        self._bankroll_base_reward_chips = 0
+        self._bankroll_rewards_uncertain = False
+        self._bankroll_reward_claim_inflight = False
         self._bankroll_wallet_chips: int | None = None
         self._bankroll_last_total_chips: int | None = None
         self._bankroll_last_sample_at: float | None = None
@@ -393,8 +403,14 @@ class BotBridge:
         self._pending_hero_wire_action: dict | None = None
         self._last_hero_action_context: dict | None = None
 
-        # GameData API: 已拉取过的 uid（本次 proxy 进程内不重复拉）
+        # Only successful, validated responses count as fetched.
         self._fetched_uids: set[str] = set()
+        self._gamedata_inflight: set[str] = set()
+        self._gamedata_retry_at: dict[str, float] = {}
+        self._gamedata_lock = threading.RLock()
+        self._gamedata_session: GameDataHTTPContext | None = None
+        self._gamedata_failed_auth: GameDataHTTPContext | None = None
+        self._gamedata_closed = False
         # 在 API 创建前到达的 server stats，缓存至 _ensure_api 创建后再注入
         self._pending_seeds: dict[int, dict] = {}   # uid -> {"data": raw stats, "name": display name}
 
@@ -477,9 +493,13 @@ class BotBridge:
         base_total = self._bankroll_base_total_chips
         delta = (
             int(current_total) - int(base_total)
+            - (self._bankroll_wallet_reward_chips - self._bankroll_base_reward_chips)
             if current_total is not None and base_total is not None
             else None
         )
+        pending_rewards = self._rewards_pending()
+        if self._bankroll_rewards_uncertain or pending_rewards:
+            delta = None
         bb = float(self._bb or 0.0)
         return {
             "wallet_chips": wallet,
@@ -488,6 +508,9 @@ class BotBridge:
             "base_total_chips": base_total,
             "session_delta_chips": delta,
             "session_delta_bb": (delta / bb) if delta is not None and bb > 0 else None,
+            "reward_chips": self._bankroll_reward_chips,
+            "rewards_uncertain": self._bankroll_rewards_uncertain,
+            "rewards_pending": pending_rewards,
             "big_blind": bb if bb > 0 else None,
             "auto_rebuy_count": self._auto_rebuy_done,
             "max_auto_rebuy": self._max_auto_rebuy,
@@ -499,6 +522,22 @@ class BotBridge:
             "samples": list(self._bankroll_samples),
             "hand_points": list(self._bankroll_hand_points),
         }
+
+    def record_reward_credit(self, chips: int, uncertain: bool = False) -> None:
+        """Record confirmed lobby rewards separately from poker PnL.
+
+        The session attaches the cumulative credit watermark to wallet replies;
+        do not subtract a newly claimed reward from an older wallet snapshot.
+        """
+        self._bankroll_reward_chips += max(0, int(chips))
+        self._bankroll_rewards_uncertain |= uncertain
+
+    def set_reward_claim_inflight(self, in_flight: bool) -> None:
+        self._bankroll_reward_claim_inflight = in_flight
+
+    def _rewards_pending(self) -> bool:
+        return (self._bankroll_reward_claim_inflight
+                or self._bankroll_wallet_reward_chips < self._bankroll_reward_chips)
 
     def update_runtime_settings(
         self,
@@ -570,6 +609,53 @@ class BotBridge:
         rid = _chip_int(room_id, 0)
         if rid != 0:
             self._table_room_id = rid
+
+    def configure_auto_rejoin(self, fields: dict) -> None:
+        """Only headless cash matchmaking opts into unexpected-leave recovery."""
+        self._auto_rejoin_fields = dict(fields)
+
+    def set_session_uid(self, uid: int) -> None:
+        # Login supplies identity before a possibly delayed SelfUserInfoRSP;
+        # an early room snapshot must still identify our seat correctly.
+        self._my_uid = str(uid)
+
+    def stop_auto_rejoin(self) -> None:
+        self._shutdown_requested = True
+
+    def prepare_transport_reconnect(self) -> None:
+        """Forget ambiguous outbound work, retaining run counters and models."""
+        pending_kind = (self._bankroll_pending_action or {}).get("kind")
+        if self._transport_can_match is None:
+            self._transport_can_match = (
+                (self._my_seat is None or self._current_table_chips() > 0
+                 or pending_kind in {"unexpected_leave", "profit_lock", "room_escape"}
+                 or self._bankroll_pending_buyin_reason in {"unexpected_leave", "profit_lock", "room_escape"})
+                and not self._shutdown_requested and not self._is_friend_room
+                and not self._tournament_passthrough and not self._calibration_backpressure_leaving
+            )
+        self._pending_injects.clear()
+        self._pending_hero_wire_action = None
+        self._last_hero_action_notify_sig = None
+        self._last_hero_action_notify_at = 0.0
+        self._profit_lock_cancel_reenter()
+        self._room_escape_reenter = None
+        self._bankroll_pending_action = None
+        self._bankroll_pending_reason = ""
+        self._bankroll_pending_buyin_reason = ""
+
+    def restore_lobby_after_disconnect(self) -> bool:
+        """Authoritative UserLocationRSP says lobby; don't revive busted seats."""
+        allowed = self._transport_can_match
+        self._transport_can_match = None
+        if allowed is None:
+            allowed = self._my_seat is None or self._current_table_chips() > 0
+        self._mark_my_table_chips_zero()
+        self._table_room_id = 0
+        self._current_gameid = ""
+        self._reset_hand_local_state(stage=0)
+        return bool(allowed and not self._shutdown_requested
+                    and not self._is_friend_room and not self._tournament_passthrough
+                    and self._runtime_calibration_should_pause_play() is None)
 
     def room_id_for_c2s(self, frame_room_id: int) -> int:
         """room_id to attach to injected C2S (match client Net.packNetData)."""
@@ -672,17 +758,23 @@ class BotBridge:
         log.info("[BOT] 余额采样：请求 UserValueREQ reason=%s action=%s", reason, action.get("kind") if action else "-")
         return "pb.UserValueREQ", fields, max(0.0, float(delay_sec))
 
-    def _record_bankroll_sample(self, reason: str, wallet_chips: int) -> dict:
+    def _record_bankroll_sample(self, reason: str, wallet_chips: int, *, reward_chips: int | None = None) -> dict:
         now = time.time()
         wallet = max(0, int(wallet_chips))
         table = self._current_table_chips()
         total = wallet + table
+        self._bankroll_wallet_reward_chips = min(
+            self._bankroll_reward_chips,
+            max(0, self._bankroll_reward_chips if reward_chips is None else int(reward_chips)),
+        )
         if self._bankroll_base_total_chips is None:
             self._bankroll_base_total_chips = total
             self._bankroll_base_at = now
+            self._bankroll_base_reward_chips = self._bankroll_wallet_reward_chips
             reason = "startup" if reason == "refresh" else reason
-        base = int(self._bankroll_base_total_chips or total)
-        delta = total - base
+        base = int(self._bankroll_base_total_chips)
+        rewards = self._bankroll_wallet_reward_chips - self._bankroll_base_reward_chips
+        delta = total - base - rewards
         bb = float(self._bb or 0.0)
         sample = {
             "ts": now,
@@ -692,6 +784,9 @@ class BotBridge:
             "table_chips": table,
             "total_chips": total,
             "base_total_chips": base,
+            "reward_chips": rewards,
+            "rewards_uncertain": self._bankroll_rewards_uncertain,
+            "rewards_pending": self._rewards_pending(),
             "delta_chips": delta,
             "delta_bb": (delta / bb) if bb > 0 else None,
             "big_blind": bb if bb > 0 else None,
@@ -735,7 +830,8 @@ class BotBridge:
         wallet = max(0, int(self._bankroll_wallet_chips))
         total = wallet + table
         base = int(self._bankroll_base_total_chips)
-        delta = total - base
+        rewards = self._bankroll_wallet_reward_chips - self._bankroll_base_reward_chips
+        delta = total - base - rewards
         bb = float(self._bb or 0.0)
         point = {
             "ts": time.time(),
@@ -748,6 +844,9 @@ class BotBridge:
             "table_chips": table,
             "total_chips": total,
             "base_total_chips": base,
+            "reward_chips": rewards,
+            "rewards_uncertain": self._bankroll_rewards_uncertain,
+            "rewards_pending": self._rewards_pending(),
             "delta_chips": delta,
             "delta_bb": (delta / bb) if bb > 0 else None,
             "hand_delta_chips": int(profit_delta),
@@ -758,18 +857,26 @@ class BotBridge:
         self._bankroll_hand_points.append(point)
 
     def _bankroll_notify_fields(self, sample: dict) -> dict:
+        pending = sample.get("rewards_pending") or sample.get("rewards_uncertain")
         return {
             "current_total_chips": int(sample.get("total_chips", 0)),
             "wallet_chips": int(sample.get("wallet_chips", 0)),
             "table_chips": int(sample.get("table_chips", 0)),
-            "session_delta_chips": int(sample.get("delta_chips", 0)),
-            "session_delta_bb": sample.get("delta_bb"),
+            "session_delta_chips": None if pending else int(sample.get("delta_chips", 0)),
+            "session_delta_bb": None if pending else sample.get("delta_bb"),
         }
 
     def _complete_bankroll_action(self, action: dict | None, sample: dict) -> WireInject | None:
         if action is None:
             return None
         kind = str(action.get("kind") or "")
+        if self._shutdown_requested:
+            return None
+        if kind == "unexpected_leave":
+            self._bankroll_pending_buyin_reason = "unexpected_leave"
+            log.warning("[BOT] 异常离桌：余额已刷新，重新匹配；续入次数保持 %d/%d。",
+                        self._auto_rebuy_done, self._max_auto_rebuy)
+            return "pb.QuickStartREQ", dict(action["quickstart_fields"]), 0.0
         if kind == "auto_rebuy":
             rebuy_chips = _chip_int(action.get("rebuy_chips", 0), 0)
             self._bankroll_pending_buyin_reason = "auto_rebuy"
@@ -1022,6 +1129,11 @@ class BotBridge:
     # ── Session setup ─────────────────────────────────────────────────────────
 
     def close(self) -> None:
+        with self._gamedata_lock:
+            self._gamedata_closed = True
+        self._close_api()
+
+    def _close_api(self) -> None:
         if self._api is not None:
             close = getattr(self._api, "close_g5_shadow", None)
             if callable(close):
@@ -1035,8 +1147,13 @@ class BotBridge:
         old = self._my_seat
         self._my_seat = seat
         log.info("[BOT] My seat detected: %s -> %d (%s)", old, seat, reason)
+        if (self._api is not None and self._my_uid
+                and getattr(self._api, "my_player_id", None) == int(self._my_uid)):
+            # Models are keyed by uid. Moving seats must not reload the entire
+            # historical model while a new table is already dealing cards.
+            return
         # Recreate API when seat changes (reconnect / table rejoin).
-        self.close()
+        self._close_api()
         self._api = None
 
     def _on_user_login_rsp(self, msg: dict) -> WireInject | None:
@@ -1068,7 +1185,10 @@ class BotBridge:
         self._bankroll_pending_reason = ""
         if not reason:
             reason = "startup" if self._bankroll_base_total_chips is None else "refresh"
-        sample = self._record_bankroll_sample(reason, _chip_int(msg.get("value", 0), 0))
+        sample = self._record_bankroll_sample(
+            reason, _chip_int(msg.get("value", 0), 0),
+            reward_chips=msg.get("_reward_chips_at_request"),
+        )
         return self._complete_bankroll_action(pending, sample)
 
     def _on_sit_down(self, msg: dict) -> None:
@@ -1185,7 +1305,10 @@ class BotBridge:
 
         code = _s2c_rsp_code(msg, 0)
         if code == 0:
+            self._transport_can_match = None
             self._clear_room_escape_stats_for_rematch()
+            if self._bankroll_pending_buyin_reason == "unexpected_leave":
+                self._bankroll_pending_buyin_reason = ""
             if self._bankroll_pending_buyin_reason in {"profit_lock", "room_escape"}:
                 self._note_bankroll_buyin(self._bankroll_pending_buyin_reason)
         fallback_inject: tuple[str, dict, float] | None = None
@@ -1411,6 +1534,34 @@ class BotBridge:
     def _seat_showdown_to_player_ids(self, hands: dict[int, list[str]]) -> dict[int, list[str]]:
         return {self._seat_to_player_id(seat): cards for seat, cards in hands.items()}
 
+    def set_gamedata_session(self, *, authorization: str, http_base: str,
+                             chnl: int, version: str) -> None:
+        """Bind headless HTTP to its own login/line, never the legacy token file."""
+        context = GameDataHTTPContext(authorization, http_base, int(chnl), str(version))
+        with self._gamedata_lock:
+            if context != self._gamedata_session:
+                self._gamedata_session = context
+                self._gamedata_failed_auth = None
+                self._gamedata_retry_at = dict.fromkeys(self._gamedata_retry_at, 0.0)
+
+    def _gamedata_context(self) -> GameDataHTTPContext:
+        if self._gamedata_session is not None:
+            return self._gamedata_session
+        # MITM mode still gets its token from capture; headless always binds a
+        # context, even when its authorization is missing (no stale fallback).
+        return GameDataHTTPContext(load_auth_token() or "", config.GAMEDATA_HTTP_HOST,
+                                   config.GAMEDATA_CHNL, config.GAME_HTTP_VERSION)
+
+    def _retry_gamedata_for_seated_players(self) -> None:
+        with self._gamedata_lock:
+            pending = list(self._gamedata_retry_at)
+        for uid in pending:
+            seat = self._uid_to_seat.get(uid)
+            if seat in self._all_seats and self._seat_uids.get(seat) == uid:
+                self._trigger_gamedata_fetch({"seatid": seat, "player": {
+                    "uid": uid, "name": self._seat_names.get(seat, ""),
+                }})
+
     def _trigger_gamedata_fetch(self, seat_status: dict) -> None:
         """Fire-and-forget async fetch of 30-day server stats for one seat."""
         player = seat_status.get("player") or {}
@@ -1427,10 +1578,18 @@ class BotBridge:
         # Skip self
         if uid_str == self._my_uid:
             return
-        # Only fetch once per uid per proxy session
-        if uid_str in self._fetched_uids:
-            return
-        self._fetched_uids.add(uid_str)
+        with self._gamedata_lock:
+            if (self._gamedata_closed or uid_str in self._fetched_uids
+                    or uid_str in self._gamedata_inflight
+                    or time.monotonic() < self._gamedata_retry_at.get(uid_str, 0.0)):
+                return
+            if self._gamedata_failed_auth is not None:
+                if self._gamedata_context() == self._gamedata_failed_auth:
+                    self._gamedata_retry_at.setdefault(uid_str, 0.0)
+                    return
+                self._gamedata_failed_auth = None
+            self._gamedata_inflight.add(uid_str)
+            self._gamedata_retry_at[uid_str] = time.monotonic() + _GAMEDATA_RETRY_SEC
         seat = _chip_int(seat_status.get("seatid", 0), 0)
         name = (seat_status.get("player") or {}).get("name", "")
         log.info("[gamedata] 触发拉取 %s", name or uid_str)
@@ -1460,42 +1619,42 @@ class BotBridge:
 
     async def _do_gamedata_fetch(self, uid: int, seat: int, name: str = "") -> None:
         """Async: fetch stats and write into opponent model (or buffer if API not ready)."""
-        http_host  = config.GAMEDATA_HTTP_HOST
-        chnl       = config.GAMEDATA_CHNL
-        game_type  = config.GAMEDATA_GAME_TYPE
-
-        pname = name or self._seat_names.get(seat) or f"seat{seat}"
-
-        token = load_auth_token()
-        if not token:
-            log.warning("[gamedata] %s: auth_token.txt 缺失，跳过", pname)
-            return
-
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None, _sync_fetch, uid, http_host, chnl, game_type, token
-        )
-        self._apply_gamedata_fetch_result(uid, seat, name, result)
+        context = self._gamedata_context()
+        try:
+            if not context.authorization:
+                log.warning("[gamedata] %s: HTTP 凭证缺失，跳过", name or uid)
+                return
+            result = await asyncio.to_thread(
+                _sync_fetch, uid, context.http_base, context.chnl,
+                config.GAMEDATA_GAME_TYPE, context.authorization, version=context.version,
+            )
+            self._apply_gamedata_fetch_result(uid, seat, name, result, context=context)
+        except Exception:
+            log.exception("[gamedata] %s: 请求或结果处理异常", name or uid)
+        finally:
+            self._finish_gamedata_fetch(uid)
 
     def _do_gamedata_fetch_sync(self, uid: int, seat: int, name: str = "") -> None:
         """Sync worker-thread equivalent of _do_gamedata_fetch."""
-        http_host = config.GAMEDATA_HTTP_HOST
-        chnl = config.GAMEDATA_CHNL
-        game_type = config.GAMEDATA_GAME_TYPE
-
-        pname = name or self._seat_names.get(seat) or f"seat{seat}"
-
-        token = load_auth_token()
-        if not token:
-            log.warning("[gamedata] %s: auth_token.txt 缺失，跳过", pname)
-            return
-
+        context = self._gamedata_context()
         try:
-            result = _sync_fetch(uid, http_host, chnl, game_type, token)
+            if not context.authorization:
+                log.warning("[gamedata] %s: HTTP 凭证缺失，跳过", name or uid)
+                return
+            result = _sync_fetch(uid, context.http_base, context.chnl,
+                                 config.GAMEDATA_GAME_TYPE, context.authorization,
+                                 version=context.version)
+            self._apply_gamedata_fetch_result(uid, seat, name, result, context=context)
         except Exception:
-            log.exception("[gamedata] %s: 请求异常", pname)
-            return
-        self._apply_gamedata_fetch_result(uid, seat, name, result)
+            log.exception("[gamedata] %s: 请求或结果处理异常", name or uid)
+        finally:
+            self._finish_gamedata_fetch(uid)
+
+    def _finish_gamedata_fetch(self, uid: int) -> None:
+        with self._gamedata_lock:
+            self._gamedata_inflight.discard(str(uid))
+            if str(uid) not in self._fetched_uids:
+                self._gamedata_retry_at[str(uid)] = time.monotonic() + _GAMEDATA_RETRY_SEC
 
     def _apply_gamedata_fetch_result(
         self,
@@ -1503,27 +1662,50 @@ class BotBridge:
         seat: int,
         name: str,
         result: dict | None,
+        *, context: GameDataHTTPContext | None = None,
     ) -> None:
+        with self._gamedata_lock:
+            if self._gamedata_closed or (context is not None and context != self._gamedata_context()):
+                return
+            self._apply_gamedata_fetch_result_locked(uid, seat, name, result, context)
+
+    def _apply_gamedata_fetch_result_locked(self, uid, seat, name, result, context) -> None:
         pname = name or self._seat_names.get(seat) or f"seat{seat}"
 
-        if not result:
+        if not isinstance(result, dict) or not result:
             log.warning("[gamedata] %s: 请求无响应", pname)
             return
         if result.get("code") != 0:
             code = result.get("code")
             if code == -2:
-                log.info("[gamedata] %s: 无历史数据 (code=-2)", pname)
-                if not self._gamedata_no_history_notified:
-                    self._gamedata_no_history_notified = True
-                    self._notify("gamedata_no_history")
+                failed_context = context or self._gamedata_context()
+                if self._gamedata_failed_auth != failed_context:
+                    self._gamedata_failed_auth = failed_context
+                    log.warning("[gamedata] HTTP 鉴权失败 (code=-2)，暂停历史查询，等待有效凭证更新")
+                    self._notify("gamedata_auth_failed")
             else:
-                log.warning("[gamedata] %s: 服务端错误 code=%s msg=%s",
-                            pname, code, result.get("msg") or result)
+                log.warning("[gamedata] %s: 服务端错误 code=%s", pname, code)
             return
 
-        data = result.get("data") or {}
-        if not data or not data.get("play_times"):
+        data = result.get("data")
+        raw_hands = data.get("play_times") if isinstance(data, dict) else None
+        try:
+            if isinstance(raw_hands, bool) or not isinstance(raw_hands, (int, str)):
+                raise ValueError("missing/invalid play_times")
+            hands = int(raw_hands)
+            if hands < 0:
+                raise ValueError("negative play_times")
+        except ValueError:
+            log.warning("[gamedata] %s: 返回统计缺失或无效，稍后重试", pname)
+            return
+        data = {**data, "play_times": hands}
+        if hands == 0:
             log.info("[gamedata] %s: 服务端无历史数据 (play_times=0)", pname)
+            self._fetched_uids.add(str(uid))
+            self._gamedata_retry_at.pop(str(uid), None)
+            if not self._gamedata_no_history_notified:
+                self._gamedata_no_history_notified = True
+                self._notify("gamedata_no_history", name=pname, uid=uid)
             return
 
         api_bot = getattr(self._api, "_bot", None) if self._api is not None else None
@@ -1550,6 +1732,8 @@ class BotBridge:
             self._pending_seeds[int(uid)] = {"data": data, "name": display_name}
             log.info("[gamedata] %s: API 未就绪，数据已缓存 (hands=%d)",
                      display_name, data.get("play_times", 0))
+        self._fetched_uids.add(str(uid))
+        self._gamedata_retry_at.pop(str(uid), None)
 
     def _reset_hand_local_state(self, *, stage: int = 1) -> None:
         self._stage = stage
@@ -2060,6 +2244,8 @@ class BotBridge:
         return None
 
     def _on_round_start(self, msg: dict) -> None:
+        if _chip_int(msg.get("stage", 0)) == 1:
+            self._retry_gamedata_for_seated_players()
         stage = msg.get("stage", 1)
         self._stage   = stage
         self._my_bet  = 0
@@ -2637,6 +2823,20 @@ class BotBridge:
 
     def _on_leave_room_rsp(self, msg: dict) -> WireInject | None:
         """盈利锁仓：离桌成功后带买入重新进房；房间逃离：离桌后 QuickStart。"""
+        code = _s2c_rsp_code(msg, 0)
+        was_seated = bool(self._table_room_id) and self._my_seat is not None
+        chips_before_leave = self._current_table_chips()
+        if code in (0, 2, 3):
+            # Invalidate pending actions and avoid a 45s graceful-leave wait
+            # when the server has already put us back in the lobby.
+            self._table_room_id = 0
+            self._current_gameid = ""
+            self._hand_seq += 1
+            if self._shutdown_requested:
+                self._profit_lock_cancel_reenter()
+                self._room_escape_reenter = None
+                self._bankroll_pending_action = None
+                return self._mark_my_left_table("leave_room")
         if self._calibration_backpressure_leaving:
             code = _s2c_rsp_code(msg, 0)
             self._calibration_backpressure_leaving = False
@@ -2665,6 +2865,15 @@ class BotBridge:
         pending = self._profit_lock_reenter
         if pending is None:
             if code in (0, 2, 3):
+                if (was_seated and chips_before_leave > 0 and self._auto_rejoin_fields
+                        and not self._is_friend_room and not self._tournament_passthrough
+                        and self._runtime_calibration_should_pause_play() is None):
+                    self._mark_my_table_chips_zero()
+                    log.warning("[BOT] 非破产、非锁仓离桌：将重新匹配，续入次数保持 %d/%d。",
+                                self._auto_rebuy_done, self._max_auto_rebuy)
+                    return self._request_bankroll_sample("unexpected_leave", action={
+                        "kind": "unexpected_leave", "quickstart_fields": dict(self._auto_rejoin_fields),
+                    })
                 return self._mark_my_left_table("leave_room")
             return None
         # 与客户端 net:LeaveRoomRSP 一致：0/2/3 视为离桌成功路径（code 常省略=成功）

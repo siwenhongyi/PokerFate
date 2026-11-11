@@ -23,7 +23,6 @@ from pokerfate.core.card import Card
 from pokerfate.core.config import MIN_HANDS_FOR_CLASSIFICATION
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
 from pokerfate.strategy.range_v2 import hand_categorizer as hcat
-from pokerfate.strategy.range_v2.blocker import blocker_weights
 from pokerfate.strategy.range_v2.empirical_model import (
     empirical_action_likelihood,
     population_rate,
@@ -282,6 +281,7 @@ SIZING_CATEGORY_ADJ_MERGED: Dict[str, Dict[str, float]] = {
 SIZING_CATEGORY_ADJ = SIZING_CATEGORY_ADJ_POLARIZED
 
 
+
 def _sizing_bucket(bet_ratio: float) -> str:
     """Classify bet/pot ratio into a sizing bucket."""
     if bet_ratio <= 0:
@@ -384,8 +384,8 @@ class ActionModel:
     Used by BayesianRangeTracker to perform Bayesian updates.
     """
 
-    def __init__(self, showdown_learner=None):
-        self.showdown_learner = showdown_learner
+    def __init__(self):
+        pass
         # Per-board categorization cache. Same board reused across all opp
         # actions on the same street → 1326 hcat.categorize() calls per
         # notify_action used to dominate hot path. Cache key = sorted tuple
@@ -568,22 +568,6 @@ class ActionModel:
             empirical_blended = (1.0 - blend) * result + blend * empirical_arr
             result = np.where(empirical_present_arr, empirical_blended, result)
 
-        # Showdown learner override (vectorized blend)
-        if self.showdown_learner is not None and prof.name:
-            learned = self.showdown_learner.get_learned_freq(
-                prof.name, street, action
-            )
-            if learned is not None:
-                n = self.showdown_learner.sample_count(prof.name, street, action)
-                blend = n / (n + 50.0)
-                # 按 _CAT_ORDER 取 learned 频率，缺失桶回落 0.01
-                learned_per_cat = np.array(
-                    [_clip(float(learned.get(c, 0.01)), 0.01, 0.99)
-                     for c in _CAT_ORDER],
-                    dtype=np.float64,
-                )
-                learned_arr = learned_per_cat[cat_idx]
-                result = (1.0 - blend) * result + blend * learned_arr
 
         # Polar reraise narrow (vectorized)
         if (action == 'raise'
@@ -598,10 +582,6 @@ class ActionModel:
             polar_mul = np.array([1.8, 0.55, 0.20, 0.10, 0.10, 0.10], dtype=np.float64)
             result *= polar_mul[cat_idx]
             np.clip(result, 0.01, 0.99, out=result)
-
-        # Hero blocker (already vectorized in blocker_weights)
-        if hero_cards:
-            result *= blocker_weights(hero_cards, board)
 
         # Floor
         np.maximum(result, 0.01, out=result)
@@ -653,20 +633,6 @@ class ActionModel:
                         + blend * empirical_value
                     )
 
-        if self.showdown_learner is not None and prof.name:
-            learned = self.showdown_learner.get_learned_freq(
-                prof.name, street, action
-            )
-            if learned is not None:
-                n = self.showdown_learner.sample_count(prof.name, street, action)
-                blend = n / (n + 50.0)
-                for idx in range(1326):
-                    cat = categories[idx]
-                    if street == 'river' and cat in ('draw', 'weak_draw'):
-                        cat = 'air'
-                    learned_freq = learned.get(cat, 0.01)
-                    result[idx] = ((1.0 - blend) * result[idx]
-                                   + blend * _clip(learned_freq, 0.01, 0.99))
 
         if (action == 'raise' and ctx is not None and ctx.is_raise_over
                 and street in ('turn', 'river')
@@ -686,9 +652,6 @@ class ActionModel:
                     result[idx] *= 0.10
             np.clip(result, 0.01, 0.99, out=result)
 
-        if hero_cards:
-            result *= blocker_weights(hero_cards, board)
-
         np.maximum(result, 0.01, out=result)
         return result
 
@@ -701,16 +664,9 @@ class ActionModel:
         if self._cat_cache_key == key and self._cat_cache is not None:
             return self._cat_cache
 
-        categories = ['air'] * 1326
-        # Build known board card set for quick blocking check
-        board_ints = {hcm.card_to_int(c) for c in board}
-
-        for idx in range(1326):
-            c1, c2 = hcm.ALL_COMBOS[idx]
-            # Skip combos that conflict with board (will be zeroed by tracker anyway)
-            if c1 in board_ints or c2 in board_ints:
-                continue
-            categories[idx] = hcat.categorize(idx, board)
+        # Shared with the range tracker through hcat.categorize_all (board-
+        # blocked combos come back as 'air', exactly as the old loop left them).
+        categories = hcat.categorize_all(list(board))
         self._cat_cache_key = key
         self._cat_cache = categories
         # Pre-build int-array forms for vectorization (str→int via _CAT_IDX)

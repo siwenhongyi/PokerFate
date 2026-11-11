@@ -596,30 +596,20 @@ class V3Engine:
 
     @staticmethod
     def _legacy_blended_eq(ctx: DecisionCtx) -> float:
-        penalty = 0.10
-        vs = ctx.worst_villain_stats if ctx.worst_villain_stats.hands_seen else ctx.villain_stats
-        stickyish = (
-            ctx.n_sticky >= 1
-            or ctx.max_value_lean >= 1.2
-            or (
-                vs.hands_seen >= 20
-                and vs.af <= 1.0
-                and (vs.wtsd >= 0.32 or vs.fold_to_cbet <= 0.30)
-            )
-        )
-        if stickyish:
-            penalty += 0.10
-        street_order = {"flop": 1, "turn": 2, "river": 3}
-        if (
-            street_order.get(ctx.street, 0) >= 2
-            and ctx.pot > 0
-            and ctx.to_call / max(ctx.pot, 1.0) >= 0.20
-            and ctx.equity_mc - ctx.equity_range >= 0.18
-        ):
-            penalty += 0.15
+        """Pessimistic range equity used by the all-in and fold-override checks.
+
+        2026-11-10: removed the former ``equity_mc - penalty`` floor.
+        ``equity_mc`` is hero's equity against a *random* hand; letting it
+        floor the estimate meant a villain all-in could be called because the
+        hand beats random holdings while the range model said hero was behind
+        (live 2026-11-09 hand 31:166: set of tens on a three-flush river,
+        range equity 0.21 vs the bettor's range, floor gave 0.83). Equity vs
+        a random hand is not an estimate of equity vs the actual betting
+        range, so only the range estimate, widened by its uncertainty, counts.
+        """
         return max(
+            0.0,
             float(ctx.equity_range or 0.0) - float(ctx.equity_uncertainty or 0.0),
-            float(ctx.equity_mc or 0.0) - penalty,
         )
 
     def _legacy_fold_override_allowed(

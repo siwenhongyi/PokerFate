@@ -1,16 +1,20 @@
 """Headless game client: play without the real client or a device.
 
 Replaces the MITM chain (DNS hijack + certs + mitmweb + proxy) with a direct
-connection to the game servers:
+WSS connection, resuming a session harvested from one real device login
+(data/headless_session.json, git-ignored — see harvest_session) instead of
+performing /login itself:
 
-    HTTP POST /login            -> uid, rdkey, authorization, server list
+    resume data/headless_session.json -> uid, rdkey, authorization, server list
     WSS  pb.UserLoginREQ        -> pb.UserLoginRSP
     WSS  pb.HeartBeatREQ / 5s   -> keep-alive (server drops after 2 misses)
     WSS  pb.QuickStartREQ       -> server seats us; from there BotBridge drives
                                    the hand exactly as it did behind the proxy.
 
 Modules:
-    credentials  account file (data/headless_account.json, git-ignored)
-    login        HTTP login, mirrors LoginModel.lua + Net.lua addSaltArgs
-    session      WSS session driver around BotBridge
+    harvest_session  standalone entry point that captures/refreshes the
+                      session file from one real device login (run this
+                      first, and again whenever the saved session expires)
+    login            LoginResult/ServerEntry types + /ping latency probe
+    session          WSS session driver around BotBridge
 """

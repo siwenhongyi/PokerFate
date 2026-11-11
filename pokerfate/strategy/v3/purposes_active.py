@@ -78,7 +78,9 @@ _BLUFF_CONTEXT_DELAYED_MIN = 0.55
 _BLUFF_CONTEXT_PROBE_FLOAT_MIN = 0.50
 _BLUFF_CONTEXT_BARREL_MIN = 0.58
 _BLUFF_CONTEXT_RIVER_MIN = 0.48
-_PROFIT_EXPAND_V1 = _os.environ.get('PF_POSTFLOP_PROFIT_EXPAND_V1', '0') == '1'
+_PROFIT_EXPAND_V1 = _os.environ.get(
+    'PF_POSTFLOP_PROFIT_EXPAND_V1', '1'
+).lower() not in {'0', 'false', 'off', 'no'}
 _PROFIT_PAID_VALUE_ENABLED = _os.environ.get(
     'PF_PROFIT_PAID_VALUE_ENABLED', '1'
 ).lower() not in {'0', 'false', 'off', 'no'}

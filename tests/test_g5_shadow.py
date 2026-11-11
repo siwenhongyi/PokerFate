@@ -12,6 +12,7 @@ from pokerfate.api import BotDecision, PlayerInfo, PokerFateAPI
 from pokerfate.core.game_state import Action, ActionType, GameState, Player, Street
 from pokerfate.decision.g5_engine import G5EngineOptions, G5JsonDecisionEngine
 from pokerfate.decision.g5_shadow import G5ShadowObserver
+from pokerfate.logger import _JsonlWriter
 from scripts.g5_json_worker import G5Worker
 
 
@@ -170,6 +171,86 @@ def test_unconfirmed_hero_action_invalidates_following_snapshot():
         assert row["reason"] == "missing_hero_action_confirmation"
     finally:
         observer.close()
+
+
+@pytest.mark.parametrize("outcome", ["ok", "error", "skipped"])
+def test_local_shadow_decision_can_be_written_as_json(tmp_path, outcome):
+    rows = queue.Queue()
+    path = tmp_path / "shadow.jsonl"
+    writer = _JsonlWriter(str(path))
+
+    def emit(row):
+        writer.write(row)
+        rows.put(row)
+
+    class ResultEngine(FakeEngine):
+        def decide(self, *args, **kwargs):
+            if outcome == "error":
+                raise RuntimeError("test worker error")
+            return super().decide(*args, **kwargs)
+
+    observer = G5ShadowObserver(G5EngineOptions("unused"), emit, engine_factory=ResultEngine)
+    shadow = {"status": "ok", "decision": BotDecision("raise", 9),
+              "elapsed_ms": 1.5, "diagnostics": {"equity": 0.6}}
+    try:
+        start(observer)
+        if outcome == "skipped":
+            observer.invalidate("test invalidation")
+        observer.submit(state(), my_current_bet=1, decision=BotDecision("call"),
+                        source="flop_book", local_shadow=shadow)
+        assert rows.get(timeout=3)["status"] == outcome
+    finally:
+        observer.close()
+        writer.close()
+
+    row = json.loads(path.read_text().splitlines()[0])
+    assert row["local_shadow"]["decision"] == {"action": "raise", "amount": 9}
+    assert row["local_shadow"]["diagnostics"] == {"equity": 0.6}
+    assert row["main_decision"]["action"] == "call"
+    assert isinstance(shadow["decision"], BotDecision)
+    assert observer._queue.unfinished_tasks == 0
+
+
+def test_close_serializes_queued_local_shadow_snapshot(tmp_path):
+    entered, release = threading.Event(), threading.Event()
+    path = tmp_path / "shadow.jsonl"
+    writer = _JsonlWriter(str(path))
+
+    class BlockedEngine(FakeEngine):
+        def decide(self, *args, **kwargs):
+            entered.set()
+            assert release.wait(3)
+            return super().decide(*args, **kwargs)
+
+        def shutdown(self):
+            release.set()
+            super().shutdown()
+
+    observer = G5ShadowObserver(G5EngineOptions("unused"), writer.write, engine_factory=BlockedEngine)
+    shadow = {"status": "ok", "decision": BotDecision("raise", 9),
+              "diagnostics": {"equity": 0.6}}
+    try:
+        start(observer)
+        submit(observer)
+        assert entered.wait(3)
+        confirm(observer)
+        queued_id = observer.submit(state(), my_current_bet=1, decision=BotDecision("call"),
+                                    source="flop_book", local_shadow=shadow)
+        shadow["decision"].amount = 99
+        shadow["diagnostics"]["equity"] = 0.9
+        observer.close()
+    finally:
+        release.set()
+        observer.close()
+        writer.close()
+
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    queued = next(row for row in rows if row["decision_id"] == queued_id)
+    assert queued["status"] == "skipped" and queued["reason"] == "closed"
+    assert queued["local_shadow"]["decision"] == {"action": "raise", "amount": 9}
+    assert queued["local_shadow"]["diagnostics"] == {"equity": 0.6}
+    assert not observer._thread.is_alive()
+    assert observer._queue.unfinished_tasks == 0
 
 
 @pytest.mark.parametrize("source", ["pokerfate", "flop_book", "realtime_cfr"])

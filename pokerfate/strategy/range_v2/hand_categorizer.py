@@ -12,9 +12,92 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import List
 
+from collections import OrderedDict
+
 from pokerfate.core.card import Card
-from pokerfate.core.hand_evaluator import HandEvaluator, HandRank
+from pokerfate.core.hand_evaluator import HandEvaluator, HandRank, _EVAL7_CARDS, _HAS_EVAL7, _eval7
 from pokerfate.strategy.range_v2.hand_combo_map import cards_of
+
+# eval7 hand-type label -> HandRank. Used by the fast scorer below.
+_EVAL7_TYPE_TO_RANK = {
+    'High Card': HandRank.HIGH_CARD, 'Pair': HandRank.ONE_PAIR, 'Two Pair': HandRank.TWO_PAIR,
+    'Trips': HandRank.THREE_OF_A_KIND, 'Straight': HandRank.STRAIGHT, 'Flush': HandRank.FLUSH,
+    'Full House': HandRank.FULL_HOUSE, 'Quads': HandRank.FOUR_OF_A_KIND,
+    'Straight Flush': HandRank.STRAIGHT_FLUSH,
+}
+
+
+def _score(cards):
+    """(HandRank, r1, r2, strength) for 5-7 cards.
+
+    ``r1``/``r2`` are the group ranks the categorizer reads from
+    ``HandEvaluator.evaluate`` (pair rank, top two pair ranks, trips rank,
+    full-house trips/pair ranks, quads rank). ``strength`` is a comparable
+    value (eval7 int when available, else the evaluate() tuple) used only for
+    "does hero improve the board" equality checks.
+
+    With eval7 installed this is one C lookup plus a rank count instead of
+    C(7,5)=21 pure-Python five-card evaluations; categorising the 1326 combos
+    of one board drops from ~130 ms to ~15 ms, which was 60% of replay and
+    live notify_action time (profiled 2026-11-09).
+    """
+    if not _HAS_EVAL7:
+        sc = HandEvaluator.evaluate(cards)
+        r1 = sc[1] if len(sc) > 1 else 0
+        r2 = sc[2] if len(sc) > 2 else 0
+        return HandRank(sc[0]), r1, r2, tuple(sc)
+    value = _eval7.evaluate([_EVAL7_CARDS[(int(c.rank) - 2) * 4 + int(c.suit)] for c in cards])
+    hand_rank = _EVAL7_TYPE_TO_RANK[_eval7.handtype(value)]
+    r1 = r2 = 0
+    if hand_rank in (HandRank.ONE_PAIR, HandRank.TWO_PAIR, HandRank.THREE_OF_A_KIND,
+                     HandRank.FULL_HOUSE, HandRank.FOUR_OF_A_KIND):
+        counts = Counter(int(c.rank) for c in cards)
+        quads = sorted((r for r, n in counts.items() if n == 4), reverse=True)
+        trips = sorted((r for r, n in counts.items() if n == 3), reverse=True)
+        pairs = sorted((r for r, n in counts.items() if n == 2), reverse=True)
+        if hand_rank == HandRank.FOUR_OF_A_KIND:
+            r1 = quads[0]
+        elif hand_rank == HandRank.FULL_HOUSE:
+            r1 = trips[0]
+            r2 = max([t for t in trips[1:]] + pairs)
+        elif hand_rank == HandRank.THREE_OF_A_KIND:
+            r1 = trips[0]
+        elif hand_rank == HandRank.TWO_PAIR:
+            r1, r2 = pairs[0], pairs[1]
+        else:
+            r1 = pairs[0]
+    return hand_rank, r1, r2, value
+
+
+_ALL_COMBOS_CACHE: "OrderedDict[tuple, List[str]]" = OrderedDict()
+_ALL_COMBOS_CACHE_MAX = 32
+
+
+def categorize_all(board: List[Card]) -> List[str]:
+    """Categories of all 1326 combos on ``board`` (combos that share a card
+    with the board are returned as 'air'; callers mask them anyway).
+
+    Shared, board-keyed LRU so the range tracker and the action model do not
+    each recompute the same 1326 evaluations for every opponent action.
+    """
+    key = tuple(sorted((int(c.rank), int(c.suit)) for c in board)) if board else ()
+    hit = _ALL_COMBOS_CACHE.get(key)
+    if hit is not None:
+        _ALL_COMBOS_CACHE.move_to_end(key)
+        return hit
+    board_list = list(board) if key else []
+    board_ints = {(int(c.rank), int(c.suit)) for c in board_list}
+    out = []
+    for idx in range(1326):
+        c1, c2 = cards_of(idx)
+        if board_list and ((int(c1.rank), int(c1.suit)) in board_ints or (int(c2.rank), int(c2.suit)) in board_ints):
+            out.append(AIR)
+        else:
+            out.append(categorize_cards([c1, c2], board_list))
+    _ALL_COMBOS_CACHE[key] = out
+    if len(_ALL_COMBOS_CACHE) > _ALL_COMBOS_CACHE_MAX:
+        _ALL_COMBOS_CACHE.popitem(last=False)
+    return out
 
 # Bucket names (ordered strong → weak)
 NUTS = 'nuts'           # set+, two pair top, straights, flushes, full houses, quads
@@ -49,7 +132,7 @@ def categorize(combo_idx: int, board: List[Card]) -> str:
     return categorize_cards([c1, c2], board)
 
 
-def _board_made_bucket(hole, board, score, hand_rank, board_ranks_desc):
+def _board_made_bucket(hole, board, score, hand_rank, board_ranks_desc, strength=None):
     """Bucket for made hands that live entirely on the board, else ``None``.
 
     The evaluator scores hole+board together, so on 6♦J♣6♣6♥ a K♥T♦ holding
@@ -78,12 +161,12 @@ def _board_made_bucket(hole, board, score, hand_rank, board_ranks_desc):
         return kicker_bucket()
     if len(board) < 5:
         return None
-    board_score = HandEvaluator.evaluate(list(board))
-    if HandRank(board_score[0]) < HandRank.STRAIGHT:
+    board_rank, _b1, _b2, board_strength = _score(list(board))
+    if board_rank < HandRank.STRAIGHT:
         return None
-    if tuple(score) == tuple(board_score):
+    if (strength if strength is not None else tuple(score)) == board_strength:
         return MEDIUM  # hero plays the board: a chop unless someone improves
-    if hand_rank == HandRank.FLUSH and HandRank(board_score[0]) == HandRank.FLUSH:
+    if hand_rank == HandRank.FLUSH and board_rank == HandRank.FLUSH:
         suit = Counter(c.suit for c in board).most_common(1)[0][0]
         if any(c.suit == suit and c.rank == 14 for c in hole):
             return NUTS
@@ -97,13 +180,13 @@ def categorize_cards(hole: List[Card], board: List[Card]) -> str:
         return _preflop_bucket(hole)
 
     all_cards = list(hole) + list(board)
-    score = HandEvaluator.evaluate(all_cards)
-    hand_rank = HandRank(score[0])
+    hand_rank, r1, r2, strength = _score(all_cards)
+    score = (hand_rank, r1, r2)
     is_river = len(board) >= 5
     board_ranks = sorted([c.rank for c in board], reverse=True)
 
     # --- Hands the board makes by itself ---
-    board_made = _board_made_bucket(hole, board, score, hand_rank, board_ranks)
+    board_made = _board_made_bucket(hole, board, score, hand_rank, board_ranks, strength)
     if board_made is not None:
         return board_made
 

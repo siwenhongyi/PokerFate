@@ -32,6 +32,7 @@ Rate field scaling (all /10000 to a [0, 1] percentage):
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from typing import Optional
 
 from pf_intercept import config
@@ -49,6 +50,14 @@ _SSL_CTX = GAME_HTTP_SSL_CTX
 _AFQ_TO_AF_CALL_SHARE = 0.3109
 
 
+@dataclass(frozen=True)
+class GameDataHTTPContext:
+    authorization: str = field(repr=False)
+    http_base: str
+    chnl: int
+    version: str
+
+
 # ── Signing ───────────────────────────────────────────────────────────────────
 
 def _sign(rand: str, ts: str) -> str:
@@ -63,17 +72,21 @@ def _load_token() -> Optional[str]:
 
 # ── HTTP fetch (sync, run in executor) ───────────────────────────────────────
 
-def _sync_fetch(uid: int, http_host: str, chnl: int, game_type: int, token: str) -> Optional[dict]:
+def _sync_fetch(uid: int, http_host: str, chnl: int, game_type: int, token: str,
+                *, version: str | None = None) -> Optional[dict]:
+    base = http_host or config.GAMEDATA_HTTP_HOST
+    if not base.startswith(("https://", "http://")):
+        base = f"https://{base}"
     result = signed_post_json(
-        "/player/gameData",
+        f"{base.rstrip('/')}/player/gameData",
         {
             "game_type": game_type or config.GAMEDATA_GAME_TYPE,
             "player_uid": uid,
         },
-        host=http_host or config.GAMEDATA_HTTP_HOST,
         chnl=chnl,
         token=token,
         timeout=8,
+        extra_headers={"Version": version} if version is not None else None,
     )
     if result is None:
         log.warning("[gamedata] uid=%d 请求失败 host=%s", uid, http_host)

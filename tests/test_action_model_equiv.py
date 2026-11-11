@@ -143,7 +143,7 @@ def legacy_outputs():
     preflop 路径只有 _preflop_batch（未参与向量化），通过 batch_likelihood
     自然走到，与 legacy 比较时直接复用。
     """
-    am = ActionModel(showdown_learner=None)
+    am = ActionModel()
     out = {}
     for label, action, street, ctx, prof, board, hero in _make_inputs():
         if street == 'preflop':
@@ -158,7 +158,7 @@ def legacy_outputs():
 
 def test_vectorized_matches_legacy(legacy_outputs):
     """新（向量化）batch_likelihood 必须和 legacy 实现逐元素一致。"""
-    am = ActionModel(showdown_learner=None)
+    am = ActionModel()
     for label, action, street, ctx, prof, board, hero in _make_inputs():
         result = am.batch_likelihood(action, street, ctx, prof, board, hero_cards=hero)
         np.testing.assert_allclose(
@@ -181,7 +181,7 @@ def test_categorize_all_cache_correctness():
 
     用两个不同板面交替调用,验证缓存不会"粘住"。
     """
-    am = ActionModel(showdown_learner=None)
+    am = ActionModel()
     b1 = _board('As', '7d', '2c')
     b2 = _board('Jh', 'Th', '9h')
     cats_b1_v1 = am._categorize_all(b1)

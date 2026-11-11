@@ -10,6 +10,92 @@ from pokerfate.api import BotDecision
 from pokerfate.bot.opponent_model import OpponentModel, OpponentStats
 
 
+def _recoverable_bridge():
+    b = BotBridge(max_auto_rebuy=5)
+    b._auto_rebuy_done = 2
+    b._table_room_id = 21205174
+    b._current_gameid = "last-hand"
+    b._my_seat = 3
+    b._my_chips = 952600
+    b._seat_chips = {3: 952600}
+    b.configure_auto_rejoin({"boot": 10000, "game_type": 10010101,
+                            "lobby_coin": 10100001, "byin_chips": 1000000,
+                            "wait_blind": False, "ip": ""})
+    return b
+
+
+def test_server_kick_rejoins_without_changing_rebuy_budget(monkeypatch):
+    b = _recoverable_bridge()
+    monkeypatch.setattr(b, "_runtime_calibration_should_pause_play", lambda: None)
+    guard = b.injection_guard_for(("pb.ActionREQ", {}))
+    sample = b.handle("pb.LeaveRoomRSP", {"roomid": 21205174})
+    assert sample[0] == "pb.UserValueREQ"
+    assert b.room_id_for_c2s(0) == 0
+    assert not b.injection_guard_is_current(guard)
+    assert b._current_table_chips() == 0
+    # A duplicate leave must not schedule a second entry.
+    assert b.handle("pb.LeaveRoomRSP", {"roomid": 21205174}) is None
+    rejoin = b.handle("pb.UserValueRSP", {"type": 10100001, "value": "105363439"})
+    assert rejoin[0] == "pb.QuickStartREQ"
+    assert rejoin[1]["boot"] == 10000 and rejoin[1]["byin_chips"] == 1000000
+    assert (b._auto_rebuy_done, b._max_auto_rebuy) == (2, 5)
+    assert b._bankroll_profit_lock_count == b._bankroll_room_escape_count == 0
+    assert b.handle("pb.UserValueRSP", {"type": 10100001, "value": "105363439"}) is None
+
+
+@pytest.mark.parametrize("reason", ["stop", "bust", "friend", "backpressure", "disabled", "failed"])
+def test_leave_recovery_does_not_override_intent_or_budget(monkeypatch, reason):
+    b = _recoverable_bridge()
+    monkeypatch.setattr(b, "_runtime_calibration_should_pause_play", lambda: None)
+    if reason == "stop":
+        b.stop_auto_rejoin()
+    elif reason == "bust":
+        b._seat_chips[3] = b._my_chips = 0
+    elif reason == "friend":
+        b._is_friend_room = True
+    elif reason == "backpressure":
+        b._calibration_backpressure_leaving = True
+    elif reason == "disabled":
+        b._auto_rejoin_fields = None
+    b.handle("pb.LeaveRoomRSP", {"code": 121} if reason == "failed" else {})
+    result = b.handle("pb.UserValueRSP", {"type": 10100001, "value": "105363439"})
+    assert result is None
+    assert (b._auto_rebuy_done, b._max_auto_rebuy) == (2, 5)
+
+
+def test_shutdown_after_leave_before_wallet_cancels_rejoin(monkeypatch):
+    b = _recoverable_bridge()
+    monkeypatch.setattr(b, "_runtime_calibration_should_pause_play", lambda: None)
+    b.handle("pb.LeaveRoomRSP", {})
+    b.stop_auto_rejoin()
+    assert b.handle("pb.UserValueRSP", {"type": 10100001, "value": "105363439"}) is None
+
+
+def test_seat_move_keeps_models_for_same_uid():
+    from types import SimpleNamespace
+    b = BotBridge()
+    b._my_uid = "42"
+    b._my_seat = 3
+    api = SimpleNamespace(my_player_id=42)
+    b._api = api
+    b._set_my_seat(2, "rejoin")
+    assert b._my_seat == 2
+    assert b._api is api
+
+
+@pytest.fixture(autouse=True)
+def _isolate_game_http_and_pushes(monkeypatch):
+    import pf_intercept.bot as bot_mod
+    monkeypatch.setattr(bot_mod, "load_auth_token", lambda: "test-token")
+    monkeypatch.setattr(bot_mod, "_sync_fetch", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot_mod, "notify", lambda *args, **kwargs: None)
+    yield
+    # Finish request workers before monkeypatch restores real HTTP functions.
+    for thread in threading.enumerate():
+        if thread.name.startswith("pf-gamedata-"):
+            thread.join(timeout=2.0)
+
+
 class TestBotBridgeActionAmounts:
     class _FakeAPI:
         def __init__(self):

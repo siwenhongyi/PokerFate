@@ -120,9 +120,11 @@ bash pf_intercept/tools/gen_pb2.sh
 | `auth_token.txt` | 游戏 REST API 鉴权 token（由 `force_domain.py` 登录时自动写入，无需手动填写） |
 | `ip_cache.json` | DNS 解析结果缓存（跨重启复用，加速连接） |
 | `entertainment_color_records.json` | 小游戏 Web 记录的彩球任务历史与每局盈亏 |
-| `resources.md` | 游戏内角色/皮肤/道具 ID 速查表 |
 
 ---
+
+纯 API 模式的基金、每日／每周任务自动领取默认开启，配置、日志与异常处理见
+[自动领取说明](pf_intercept/headless/README.md)。
 
 ## 快速启动（代理模式）
 
@@ -167,8 +169,12 @@ bash pf_intercept/tools/gen_pb2.sh
    ```
 3. 启动 mitmweb，挂载 `force_domain.py` 插件：
    ```bash
-   mitmweb --listen-port 8080 -s pf_reverse/force_domain.py
+   mitmweb --listen-port 8080 --ignore-hosts "xiaomi.com|xiaomi.net|miui.com|aliyuncs.com" -s pf_reverse/force_domain.py
    ```
+   `--ignore-hosts` 排除已知与游戏无关的推送/云存储域名，其余全部拦截；不要反过来只放行游戏域名
+   ——真机登录可能走裸 IP（见 `pf_reverse/output/lua/src/app/Constants.lua` 的 `G_HTTP_URL_2/_3/_4`），
+   域名白名单会直接漏掉这些连接。`python -m pf_intercept.launcher` 会自动按同样的参数拉起 mitmweb，
+   手动起 mitmweb 时才需要自己写这一串。
    插件会：
    - 自动从登录响应中提取 `authorization` token，写入 `data/auth_token.txt`（无需手动填写）
    - 过滤服务器列表，只保留证书覆盖范围内的域名服务器，并将首选域名记录到 `data/discovered_server.json`
@@ -219,6 +225,67 @@ data/entertainment_color_records.json
 .venv/bin/python -m pf_intercept.proxy --entertainment-web-port 19022
 .venv/bin/python -m pf_intercept.proxy --entertainment-web-host 127.0.0.1
 ```
+
+---
+
+## 快速启动（纯 API / headless 模式）
+
+跟上面的代理模式是两条独立的路：headless 不需要设备常驻连代理、不需要 DNS 劫持，直接用 WSS 连游戏服务器。
+代价是拿凭证本身仍然离不开一台真机——登录接口需要游戏客户端自带的网易易盾风控 SDK 在运行时生成的动态 token，
+这段 SDK 没法在纯 Python 里复现，所以不存在"完全不用设备就能登录"的办法；
+但只需要**登录这一步**在真机上做一次，拿到凭证之后的日常对局就不再需要设备或代理了。
+
+### 1. 首次获取凭证（新用户，或凭证过期后重做一次）
+
+凭证存在 `data/headless_session.json`，约 30 天过期；过期后 `pf_intercept.headless` 会报
+`ResumeError`（提示"请重新薅凭证"），重复这一步即可。
+
+```bash
+.venv/bin/python -m pf_intercept.headless.harvest_session
+```
+
+这个脚本会自己拉起 `mitmdump` 挂载 `pf_reverse/capture_login.py`：
+
+- 默认不加 `--mode upstream`；只有当脚本探测到本机直连不了游戏服务器时，才会去读
+  `https_proxy`/`HTTPS_PROXY`/`all_proxy` 等环境变量，复用你已经配置好的本地代理/VPN——
+  不会凭空假设一个代理端口。
+- `--ignore-hosts` 用的是排除法（见 `pf_intercept.config.MITM_IGNORE_HOSTS`），不是只放行游戏域名；
+  真机登录可能走裸 IP（`Constants.lua` 的 `G_HTTP_URL_2/_3/_4`），域名白名单会漏掉这些连接。
+
+脚本启动后按提示操作：
+
+1. 手机 Wi-Fi 设置 → 代理 → 手动，填脚本打印出来的局域网 IP 和端口（默认 `8080`）
+2. 首次使用本机 mitmproxy 需要装根证书（手机浏览器访问 `mitm.it`）
+3. 手机上正常打开 PokerFate app，用真实账号登录一次
+
+脚本看到 `capture_login.py` 写出新的 `data/headless_session.json` 后会自动停掉 mitmdump 并退出；
+之后不再需要这台手机。
+
+### 2. 启动 headless
+
+```bash
+.venv/bin/python -m pf_intercept.headless --bb 10000 --buyin-bb 50
+```
+
+常用参数：
+
+- `--bb`：进桌的大盲（不传则只登录+心跳，不进桌）。
+- `--buyin-bb`：买入多少个大盲，默认 100。
+- `--max-auto-rebuy` / `--profit-lock-bb`：含义同代理模式。
+- `--no-web`：不启动实时对局 Web（默认启动，监听 `0.0.0.0:9022`，手机同 WiFi 可看）。
+- `--stop`：校验 `pf_intercept/logs/headless.pid` 对应实例后发送优雅停止请求，不登录游戏。
+
+优雅停止（终端或 PyCharm 启动均适用）：
+
+```bash
+.venv/bin/python -m pf_intercept.headless --stop
+```
+
+PID 由 bot 自动维护，退出后删除；同一项目通过文件锁防止重复启动。
+停止请求发送后仍需等待离桌及收尾，详见 [运行说明](pf_intercept/headless/README.md)。
+
+日志见 `pf_intercept/logs/headless.log`；基金/任务自动领取见
+[自动领取说明](pf_intercept/headless/README.md)。
 
 ---
 

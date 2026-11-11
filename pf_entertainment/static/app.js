@@ -53,104 +53,7 @@
       return `<span class="cards">${arr.map(cardHtml).join("")}</span>`;
     }
 
-    // ── live table ──────────────────────────────────────────────
-    const SUIT_SYM = { s: "♠", h: "♥", d: "♦", c: "♣" };
-    function suitify(card) {
-      const t = String(card || "");
-      if (!t) return "";
-      const suit = t.slice(-1).toLowerCase();
-      return SUIT_SYM[suit] ? t.slice(0, -1) + SUIT_SYM[suit] : t;
-    }
-    function liveCardHtml(card) { return cardHtml(suitify(card)); }
-    let liveSeenPlaying = false;
-
-    function renderLive(payload) {
-      const data = payload || {};
-      const conn = $("live-conn");
-      const available = payload && payload.__available;
-      if (conn) {
-        const on = !!data.connected;
-        conn.className = "live-conn " + (on ? "on" : "off");
-        conn.textContent = on ? "● 已连接" : (available ? "● 等待对局" : "● 无 headless 会话");
-      }
-      $("live-room").textContent = data.room_id || "-";
-      $("live-blinds").textContent = (data.sb && data.bb) ? `${data.sb}/${data.bb}` : "-";
-      $("live-street").textContent = ({preflop:"翻前",flop:"翻牌",turn:"转牌",river:"河牌"}[data.street]) || "-";
-      $("live-pot").textContent = Number(data.pot || 0).toLocaleString();
-      $("live-hand").textContent = data.hand_no || "-";
-      $("live-board").innerHTML = (data.board || []).map(liveCardHtml).join("");
-      $("live-potc").textContent = "底池 " + Number(data.pot || 0).toLocaleString();
-      $("live-result").textContent = data.result || "";
-
-      const seats = data.seats || [];
-      const seatNum = Math.max(data.seat_num || 6, seats.length || 0) || 6;
-      const mySeat = (data.my_seat == null) ? 0 : data.my_seat;
-      const felt = $("live-felt");
-      const anyPlayer = seats.some((s) => s && !s.empty);
-      $("live-empty").style.display = anyPlayer ? "none" : "block";
-      if (anyPlayer) liveSeenPlaying = true;
-
-      // responsive geometry: keep every seat box fully inside the felt so
-      // names never get clipped, even on a narrow phone.
-      const fw = felt.clientWidth || 600, fh = felt.clientHeight || 440;
-      const compact = fw < 540;
-      felt.classList.toggle("compact", compact);
-      const seatW = Math.max(92, Math.min(150, Math.round(fw * (compact ? 0.30 : 0.26))));
-      const seatHalfH = compact ? 42 : 52;
-      const rx = Math.max(20, 50 - ((seatW / 2 + 8) / fw) * 100);
-      const ry = Math.max(26, 50 - ((seatHalfH + 6) / fh) * 100);
-      // keep a stable set of seat nodes
-      felt.querySelectorAll(".live-seat").forEach((n) => { n.dataset.keep = "0"; });
-      for (let i = 0; i < seatNum; i++) {
-        const rel = ((i - mySeat) % seatNum + seatNum) % seatNum;
-        const ang = (90 + rel * (360 / seatNum)) * Math.PI / 180;
-        const x = 50 + rx * Math.cos(ang);
-        const y = 50 + ry * Math.sin(ang);
-        let node = felt.querySelector(`.live-seat[data-seat="${i}"]`);
-        if (!node) {
-          node = document.createElement("div");
-          node.className = "live-seat";
-          node.dataset.seat = String(i);
-          felt.appendChild(node);
-        }
-        node.dataset.keep = "1";
-        node.style.left = x + "%";
-        node.style.top = y + "%";
-        node.style.width = seatW + "px";
-        const s = seats.find((e) => e && e.seatid === i) || { empty: true, seatid: i };
-        if (s.empty) {
-          node.className = "live-seat empty";
-          node.innerHTML = `<div class="s-name">空位</div>`;
-          continue;
-        }
-        const cls = ["live-seat"];
-        if (s.is_me) cls.push("me");
-        if (s.acting) cls.push("acting");
-        if (s.folded) cls.push("folded");
-        node.className = cls.join(" ");
-        let cardsHtmlStr = "";
-        if (s.cards && s.cards.length) {
-          cardsHtmlStr = s.cards.map(liveCardHtml).join("");
-        } else if (!s.folded) {
-          cardsHtmlStr = '<div class="back"></div><div class="back"></div>';
-        }
-        const tags = [];
-        if (s.allin) tags.push('<span class="pill allin">ALLIN</span>');
-        node.innerHTML =
-          `<div class="s-name">${escapeHtml(s.name || ("玩家" + i))}${s.is_me ? " ·我" : ""}</div>` +
-          `<div class="s-stack">${Number(s.stack || 0).toLocaleString()}</div>` +
-          (tags.length ? `<div class="s-tags">${tags.join("")}</div>` : "") +
-          `<div class="s-cards">${cardsHtmlStr}</div>` +
-          `<div class="s-last">${escapeHtml(s.last || "")}</div>` +
-          (s.bet > 0 ? `<div class="s-bet">${Number(s.bet).toLocaleString()}</div>` : "");
-      }
-      felt.querySelectorAll('.live-seat[data-keep="0"]').forEach((n) => n.remove());
-
-      const feed = data.feed || [];
-      $("live-feed").innerHTML = feed.length
-        ? feed.slice().reverse().map((t) => `<li class="${t.startsWith("▸") ? "win" : ""}">${escapeHtml(t)}</li>`).join("")
-        : '<li class="muted">暂无</li>';
-    }
+    const renderLive = window.PFLiveTable.render;
 
     async function refreshLive() {
       try {
@@ -281,8 +184,10 @@
       $("bank-total").textContent = chipsMaybe(d.current_total_chips);
       $("bank-wallet").textContent = chipsMaybe(d.wallet_chips);
       $("bank-table").textContent = chipsMaybe(d.table_chips);
-      $("bank-delta").textContent = signedMaybe(d.session_delta_chips);
+      $("bank-delta").textContent = d.rewards_uncertain ? "奖励待核对"
+        : d.rewards_pending ? "余额刷新中" : signedMaybe(d.session_delta_chips);
       $("bank-delta").className = handMoneyClass(d.session_delta_chips);
+      $("bank-rewards").textContent = chipsMaybe(d.reward_chips || 0);
       $("bank-last").textContent = timeMaybe(d.last_sample_at);
       $("bank-locks").textContent = Number(d.profit_lock_count || 0).toLocaleString();
       $("bank-rebuys").textContent = `${Number(d.auto_rebuy_count || 0).toLocaleString()} / ${Number(d.max_auto_rebuy || 0).toLocaleString()}`;
@@ -303,6 +208,7 @@
     }
 
     function renderBankChart(points, perHand = false) {
+      points = points.filter((s) => !s.rewards_uncertain && !s.rewards_pending);
       const box = $("bank-chart");
       if (!points.length) {
         box.className = "chart-box";
@@ -372,7 +278,7 @@
             ${title}<br>
             <span class="muted">${sub}</span>
           </div>
-          <div class="${deltaCls}">${signedMaybe(s.delta_chips)}<br><span class="muted">${bbMaybe(s.delta_bb)}</span></div>
+          <div class="${deltaCls}">${s.rewards_uncertain ? "奖励待核对" : s.rewards_pending ? "余额刷新中" : signedMaybe(s.delta_chips)}<br><span class="muted">${s.rewards_uncertain || s.rewards_pending ? "-" : bbMaybe(s.delta_bb)}</span></div>
         </div>`;
       }).join("");
     }
@@ -487,46 +393,6 @@
       return "zero";
     }
 
-    function renderCecOverall(cec) {
-      const row = ((cec || {}).overall || {});
-      const body = $("range-cec-overall-body");
-      if (!row.count) {
-        body.innerHTML = '<tr><td colspan="6" class="muted">暂无 CEC 接入样本</td></tr>';
-        return;
-      }
-      const nllGain = Number(row.nll_gain || 0);
-      const eceGain = Number(row.ece_gain || 0);
-      body.innerHTML = `<tr>
-        <td>overall<br><span class="muted">${row.winner === "cec" ? "CEC 更优" : (row.winner === "raw" ? "Raw 更优" : "接近")}</span></td>
-        <td>${Number(row.count || 0).toLocaleString()}<br><span class="muted">${pctMaybe(row.positive_rate)} 改善</span></td>
-        <td>CEC ${probMaybe(row.avg_cec_prob)}<br><span class="muted">Raw ${probMaybe(row.avg_raw_prob)} Δ${probMaybe(row.avg_prob_delta)}</span></td>
-        <td>CEC ${probMaybe(row.cec_nll)}<br><span class="${gainClass(nllGain)}">Gain ${nllGain >= 0 ? "+" : ""}${probMaybe(nllGain)}</span></td>
-        <td>CEC ${probMaybe(row.cec_ece)}<br><span class="${gainClass(eceGain)}">Gain ${eceGain >= 0 ? "+" : ""}${probMaybe(eceGain)}</span></td>
-        <td>CEC ${pctMaybe(row.cec_top1)}<br><span class="muted">Raw ${pctMaybe(row.raw_top1)}</span></td>
-      </tr>`;
-    }
-
-    function renderCecRows(bodyId, rows, emptyText) {
-      const body = $(bodyId);
-      if (!rows || !rows.length) {
-        body.innerHTML = `<tr><td colspan="6" class="muted">${escapeHtml(emptyText || "暂无 CEC 接入分析")}</td></tr>`;
-        return;
-      }
-      body.innerHTML = rows.map((row) => {
-        const nllGain = Number(row.nll_gain || 0);
-        const eceGain = Number(row.ece_gain || 0);
-        const title = row.source ? `${row.source}: ${row.key || "-"}` : (row.key || "-");
-        return `<tr>
-          <td>${escapeHtml(title)}</td>
-          <td>${Number(row.count || 0).toLocaleString()}<br><span class="muted">${pctMaybe(row.positive_rate)} 改善</span></td>
-          <td>CEC ${probMaybe(row.avg_cec_prob)}<br><span class="muted">Raw ${probMaybe(row.avg_raw_prob)}</span></td>
-          <td class="${gainClass(nllGain)}">${nllGain >= 0 ? "+" : ""}${probMaybe(nllGain)}<br><span class="muted">Raw ${probMaybe(row.raw_nll)}</span></td>
-          <td class="${gainClass(eceGain)}">${eceGain >= 0 ? "+" : ""}${probMaybe(eceGain)}<br><span class="muted">Raw ${probMaybe(row.raw_ece)}</span></td>
-          <td>${row.winner === "cec" ? "CEC" : (row.winner === "raw" ? "Raw" : "接近")}<br><span class="muted">rel ${pctMaybe(row.avg_reliability)}</span></td>
-        </tr>`;
-      }).join("");
-    }
-
     function renderRangeExamples(examples) {
       const rows = [
         ...((examples && examples.improved) || []).map((item) => ({...item, side: "改善"})),
@@ -561,15 +427,6 @@
         ? Number(summary.bucket_ece).toFixed(4)
         : "-";
       $("range-top-acc").textContent = pctMaybe(summary.top_bucket_accuracy, 1);
-      const cecOverall = ((data.cec_integration || {}).overall || {});
-      $("range-cec-nll-gain").textContent = cecOverall.nll_gain !== null && cecOverall.nll_gain !== undefined
-        ? `${Number(cecOverall.nll_gain) >= 0 ? "+" : ""}${Number(cecOverall.nll_gain).toFixed(4)}`
-        : "-";
-      $("range-cec-nll-gain").className = gainClass(cecOverall.nll_gain);
-      $("range-cec-ece-gain").textContent = cecOverall.ece_gain !== null && cecOverall.ece_gain !== undefined
-        ? `${Number(cecOverall.ece_gain) >= 0 ? "+" : ""}${Number(cecOverall.ece_gain).toFixed(4)}`
-        : "-";
-      $("range-cec-ece-gain").className = gainClass(cecOverall.ece_gain);
       $("range-winner").textContent = rangeWinnerText(summary.winner);
       $("range-winner").className = summary.winner === "bayes" ? "pos" : (summary.winner === "static" ? "neg" : "zero");
       $("range-meta").textContent = [
@@ -590,8 +447,6 @@
       renderEceBins(data.calibration || {});
       renderEceRows("range-ece-bucket-body", ((data.calibration || {}).by_bucket || []), "暂无 bucket 校准分析");
       renderEceRows("range-ece-hotspot-body", ((data.calibration || {}).hotspots || []), "暂无校准热点");
-      renderCecOverall(data.cec_integration || {});
-      renderCecRows("range-cec-hotspot-body", ((data.cec_integration || {}).hotspots || []), "暂无 CEC 接入热点");
       renderRangeExamples(data.examples || {});
     }
 
@@ -617,7 +472,7 @@
 
     async function runRangeAnalysis() {
       $("range-run-btn").disabled = true;
-      setRangeNotice("正在启动独立进程分析 NLL / CEC / CEC 接入...", "warn");
+      setRangeNotice("正在启动独立进程分析 NLL / ECE...", "warn");
       try {
         const started = await api("/api/range/compare", {method: "POST"});
         const data = started.summary ? started : await waitRangeAnalysisJob(started.job || {});

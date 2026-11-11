@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PokerFate 实时对局</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/live-table.js" defer></script>
+  <script src="/static/live-remote.js" defer></script>
+</head>
+<body>
+  <header><h1>PokerFate 实时对局</h1><div class="status"><span id="live-freshness">等待实时数据…</span>
+    <form method="post" action="/logout"><button type="submit" class="viewer-logout">退出登录</button></form></div></header>
+  <main>
+    <div id="tab-live" class="tab-panel active">
+    <section>
+      <div class="live-head">
+        <span>房间 <b id="live-room">-</b></span>
+        <span>盲注 <b id="live-blinds">-</b></span>
+        <span>街 <b id="live-street">-</b></span>
+        <span>底池 <b id="live-pot">-</b></span>
+        <span>第 <b id="live-hand">-</b> 手</span>
+        <span id="live-conn" class="live-conn off">● 未连接</span>
+      </div>
+      <div class="live-wrap">
+        <div class="live-felt" id="live-felt">
+          <div class="live-center">
+            <div class="live-result" id="live-result"></div>
+            <div class="live-board" id="live-board"></div>
+            <div class="live-potc" id="live-potc">底池 0</div>
+          </div>
+          <div class="live-empty" id="live-empty">等待实时数据…</div>
+        </div>
+        <div class="live-settlement" id="live-settlement" aria-live="polite" hidden></div>
+        <aside class="live-feed">
+          <h3>关键动作</h3>
+          <ul id="live-feed"><li class="muted">暂无</li></ul>
+        </aside>
+      </div>
+    </section>
+    </div>
+
+  </main>
+</body>
+</html>

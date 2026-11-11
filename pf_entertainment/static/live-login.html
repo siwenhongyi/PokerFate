@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 · PokerFate 实时对局</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="viewer-login">
+    <section>
+      <h1>登录实时对局</h1>
+      <form method="post" action="/login" autocomplete="on">
+        <label>观看账号<input name="username" value="viewer" autocomplete="username" autocapitalize="none" required></label>
+        <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+        <label class="viewer-remember"><input type="checkbox" name="remember" value="yes" checked>在此设备上保持登录 90 天</label>
+        <!-- login-error -->
+        <button type="submit">进入直播</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

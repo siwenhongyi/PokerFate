@@ -8,6 +8,7 @@ applied, and neither cards nor model updates after the request can leak in.
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -65,6 +66,13 @@ class G5ShadowObserver:
                 self._pending = None
 
     def submit(self, gs, *, my_current_bet, decision, source, local_shadow=None):
+        shadow_snapshot = deepcopy(local_shadow)
+        if isinstance(shadow_snapshot, dict):
+            shadow_decision = shadow_snapshot.get("decision")
+            if is_dataclass(shadow_decision):
+                # BotDecision is a runtime object; every result/skip/close path
+                # must receive a JSON-ready snapshot before it enters the queue.
+                shadow_snapshot["decision"] = asdict(shadow_decision)
         self._index += 1
         decision_id = f"{self._session_id}:{self._index}"
         hand = self._start["hand_number"] if self._start else 0
@@ -73,7 +81,7 @@ class G5ShadowObserver:
             "decision_id": decision_id, "hand": hand, "street": str(gs.street).lower(),
             "requested_at": datetime.now(timezone.utc).isoformat(),
             "main_decision": {"action": decision.action, "amount": decision.amount, "source": source},
-            "local_shadow": deepcopy(local_shadow),
+            "local_shadow": shadow_snapshot,
             "context": {
                 "pot": gs.pot, "current_bet": gs.current_bet,
                 "my_current_bet": my_current_bet,

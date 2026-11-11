@@ -34,8 +34,6 @@ def main() -> None:
     summary = payload.get("summary") or {}
     calibration = payload.get("calibration") or {}
     overall = calibration.get("overall") or {}
-    cec = payload.get("cec_integration") or {}
-    cec_overall = cec.get("overall") or {}
     print("Range NLL / ECE")
     print(f"runtime_root: {summary.get('runtime_root')}")
     print(
@@ -59,12 +57,6 @@ def main() -> None:
             top=_pct(overall.get("top_bucket_accuracy")),
         )
     )
-    print(
-        "cec_integration nll_gain={nll} ece_gain={ece} winner={winner}".format(
-            nll=_signed(cec_overall.get("nll_gain")),
-            ece=_signed(cec_overall.get("ece_gain")),
-            winner=cec_overall.get("winner", "-"),
-        )
     )
     print()
     print("Calibration hotspots:")
@@ -81,19 +73,6 @@ def main() -> None:
                 label=item.get("bias_label", "-"),
             )
         )
-    print()
-    print("CEC integration hotspots:")
-    for item in list(cec.get("hotspots") or [])[:12]:
-        print(
-            "  {source}:{key} n={count} nll_gain={nll} ece_gain={ece} rel={rel} winner={winner}".format(
-                source=item.get("source", "-"),
-                key=item.get("key", "-"),
-                count=item.get("count", 0),
-                nll=_signed(item.get("nll_gain")),
-                ece=_signed(item.get("ece_gain")),
-                rel=_pct(item.get("avg_reliability")),
-                winner=item.get("winner", "-"),
-            )
         )
 
 

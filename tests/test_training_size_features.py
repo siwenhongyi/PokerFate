@@ -6,7 +6,6 @@ import numpy as np
 from pokerfate.core.card import Card
 from pokerfate.strategy.range_v2 import bucket_ml_calibration as bucket_ml
 from pokerfate.strategy.range_v2 import hero_eq_calibrator as heq
-from scripts import fit_range_calibration_v2 as formula
 
 
 def _row() -> dict:
@@ -42,30 +41,11 @@ def test_lgbm_context_features_include_bet_size() -> None:
 
     row = _row()
 
-    base = lgbm._features(row, include_context=False)
-    with_context = lgbm._features(row, include_context=True)
+    feats = lgbm._bucket_features_runtime(row)
 
-    assert "bet_size_bucket=overpot" not in base
-    assert with_context["bet_size_bucket=overpot"] == 1
-    assert with_context["action_bet_ratio"] == pytest.approx(0.3)
-    assert with_context["is_raise_over"] == 1.0
-
-
-def test_formula_size_context_keys() -> None:
-    row = _row()
-
-    assert formula._bucket_context(row, "size") == (
-        "turn action:raise size=overpot rr=1"
-    )
-    assert formula._bucket_context(row, "rich_size") == (
-        "turn action:raise nopp=2 tex=unpaired:rainbow size=overpot rr=1"
-    )
-    assert formula._eq_context(row, "action_size") == (
-        "turn|medium|2|raise|size=overpot rr=1"
-    )
-    assert formula._eq_context(row, "rich_size") == (
-        "turn|medium|2|raise|unpaired:rainbow|size=overpot rr=1"
-    )
+    assert feats["bet_size_bucket=overpot"] == 1.0
+    assert feats["action_bet_ratio"] == pytest.approx(bucket_ml._clip01(row["action_bet_ratio"], 4.0))
+    assert feats["is_raise_over"] == 1.0
 
 
 def test_bucket_ml_runtime_features_include_bet_size() -> None:
@@ -98,29 +78,3 @@ def test_bucket_ml_runtime_features_include_bet_size() -> None:
     assert features["position=BTN"] == 1.0
 
 
-def test_runtime_equity_formula_prefers_size_context(monkeypatch) -> None:
-    def fake_load_runtime_params():
-        return {
-            "flop|strong|2|bet": {"type": "bias", "bias": -0.20},
-            "flop|strong|2|bet|size=pot rr=1": {"type": "bias", "bias": 0.20},
-        }
-
-    def fake_ml(raw_eq, **_kwargs):
-        return raw_eq, {"mode": "off", "used": False}
-
-    monkeypatch.setattr(heq, "_load_runtime_equity_params", fake_load_runtime_params)
-    monkeypatch.setattr(heq, "calibrate_equity", fake_ml)
-
-    cal = heq.HeroEquityCalibrator()
-    out = cal.calibrate(
-        0.50,
-        "strong",
-        "flop",
-        2,
-        action_ctx="bet",
-        action_bet_ratio=1.0,
-        bet_size_bucket="pot",
-        is_raise_over=True,
-    )
-
-    assert out == pytest.approx(0.70)

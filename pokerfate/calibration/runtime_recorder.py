@@ -23,12 +23,8 @@ _RIVER_VALUE_SIZING_SCHEMA = "runtime_river_value_sizing_v1"
 _RANGE_COMPARE_SCHEMA = "runtime_range_compare_169_v1"
 _EXPERIMENT_FLAG_DEFAULTS = {
     "PF_TURN_FLOP_RELATIVE_GUARD": "1",
-    "PF_RUNTIME_RANGE_CALIBRATION": "1",
-    "PF_BUCKET_CALIBRATION": "1",
-    "PF_BUCKET_ML": "off",
-    "PF_EQUITY_ML": "lgbm",
-    "PF_RIVER_RELATIVE_ML": "off",
-    "PF_POSTFLOP_PROFIT_EXPAND_V1": "0",
+    "PF_BUCKET_ML": "lgbm",
+    "PF_POSTFLOP_PROFIT_EXPAND_V1": "1",
 }
 
 
@@ -329,4 +325,5 @@ class RuntimeCalibrationRecorder:
                 if result.actual_hero_eq_street_multi_shown is not None else None
             ),
             "active_player_count": len(getattr(rec, "active_player_ids", []) or []),
+            "player_profile": _json_safe(getattr(rec, "player_profile", {}) or {}),
         }

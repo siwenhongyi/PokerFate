@@ -325,6 +325,7 @@ class PokerLogger:
         vs_hero: Optional[Dict[str, float]] = None,
         to_call: float = 0.0,
         pot_before_action: float = 0.0,
+        layer_trace: Optional[Dict] = None,
     ):
         self._file({
             "event": "opponent_action",
@@ -337,6 +338,8 @@ class PokerLogger:
             "bucket_dist": {k: round(v, 3) for k, v in (bucket_dist or {}).items() if v > 0.01} or None,
             "vs_hero": {k: round(v, 3) for k, v in (vs_hero or {}).items()} or None,
             "pot_before_action": round(pot_before_action, 2) if pot_before_action > 0 else None,
+            # Range V2 per-layer update trace (BayesianRangeTracker.last_update_trace).
+            "layer_trace": layer_trace or None,
         })
         if not self._console:
             return
@@ -427,8 +430,14 @@ class PokerLogger:
         river_relative: Optional[Dict] = None,
         street_relative: Optional[Dict] = None,
         decision_id: Optional[str] = None,
+        extra: Optional[Dict] = None,
     ):
-        """Log the bot's own decision."""
+        """Log the bot's own decision.
+
+        ``extra`` carries engine diagnostics (decision_source, purpose,
+        calibration layers, CFR strategy/EV/safety) so the structured log is
+        self-sufficient for attribution; the console text only renders them.
+        """
         rec: Dict = {
             "event": "decision",
             "hand": self._hand_num[0],
@@ -439,6 +448,10 @@ class PokerLogger:
             "pot": pot,
             "to_call": to_call,
         }
+        if extra:
+            for key, value in extra.items():
+                if value is not None and key not in rec:
+                    rec[key] = value
         if decision_id is not None:
             rec["decision_id"] = decision_id
         if equity_random is not None:
@@ -681,68 +694,6 @@ class PokerLogger:
         self._raw("")
         self._raw(f"  ✔ {winners_str} 赢得 {pot:.0f}    {delta_str}{my_combo_str}{stacks_str}",
                   color=color, bold=True)
-
-    def showdown_learner(
-        self,
-        player_name: str,
-        cards: List[str],
-        streets: List[Dict],
-    ):
-        """Log a Range V2 ShowdownLearner update.
-
-        Parameters
-        ----------
-        streets : list of dict
-            Each dict: {"street": str, "action": str, "sample_count": int,
-                        "category": str or None,
-                        "learned_freq": dict or None}
-            category: 本次摊牌该街道的手牌分类 (nuts/strong/medium/draw/air)
-            learned_freq: 积累够样本后的分布 {category: pct}，不够时 None
-        """
-        self._file({
-            "event": "showdown_learner",
-            "hand": self._hand_num[0],
-            "player": player_name,
-            "cards": cards,
-            "streets": streets,
-        })
-        if not self._console or not streets:
-            return
-        cards_str = _fmt_cards(cards, self._color)
-
-        _LEARNER_THRESHOLD = 8
-
-        # 分类缩写
-        _CAT_SHORT = {
-            'nuts': '坚果', 'strong': '强', 'medium': '中',
-            'draw': '听牌', 'weak_draw': '弱听', 'air': '空气',
-        }
-
-        first_active = any(s["sample_count"] == _LEARNER_THRESHOLD for s in streets)
-
-        def _street_tag(s: Dict) -> str:
-            n = s["sample_count"]
-            cat = s.get("category")
-            cat_str = _CAT_SHORT.get(cat, cat) if cat else ""
-
-            if n >= _LEARNER_THRESHOLD:
-                learned = s.get("learned_freq")
-                if learned:
-                    # 显示 top 3 类别
-                    sorted_cats = sorted(learned.items(), key=lambda x: x[1], reverse=True)[:3]
-                    dist_str = "/".join(f"{_CAT_SHORT.get(c, c)}{p:.0%}" for c, p in sorted_cats)
-                else:
-                    dist_str = "?"
-                suffix = " ★首次生效" if n == _LEARNER_THRESHOLD else ""
-                return f"{s['street']}:[{cat_str}] {dist_str}({n}手){suffix}"
-            return f"{s['street']}:[{cat_str}] 积累{n}/{_LEARNER_THRESHOLD}"
-
-        streets_str = "  ".join(_street_tag(s) for s in streets)
-        self._raw(
-            f"  ◈ 学习  {player_name}  {cards_str}  {streets_str}",
-            color=_C.MAGENTA,
-            dim=not first_active,
-        )
 
     def opponent_pattern(
         self,

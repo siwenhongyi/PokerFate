@@ -438,7 +438,6 @@ class FileSpoolShowdownCalibrator:
     def apply_pending_updates(
         self,
         hero_eq_calibrator,
-        river_relative_calibrator,
         *,
         max_files: int = 200,
     ) -> int:
@@ -459,16 +458,6 @@ class FileSpoolShowdownCalibrator:
                             predicted=float(update.get("predicted", 0.0) or 0.0),
                             actual=float(update.get("actual", 0.0) or 0.0),
                             action_ctx=update.get("action_ctx", "passive"),
-                        )
-                        applied += 1
-                    elif kind == "river_relative":
-                        river_relative_calibrator.record(
-                            hero_bucket=update.get("hero_bucket", ""),
-                            hero_made_subtype=update.get("hero_made_subtype", ""),
-                            board_texture=update.get("board_texture", ""),
-                            action_ctx=update.get("action_ctx", "passive"),
-                            predicted_dist=dict(update.get("predicted_dist", {}) or {}),
-                            actual_relation=update.get("actual_relation", ""),
                         )
                         applied += 1
                 path.unlink()
@@ -736,21 +725,6 @@ def _updates_from_results(results: list[CalibrationResult]) -> list[dict[str, An
                 "predicted": float(rec.predicted_hero_eq_multi),
                 "actual": float(result.actual_hero_eq_street_multi),
                 "action_ctx": action_ctx,
-            })
-        if (
-            rec.street == "river"
-            and rec.villain_vs_hero_dist
-            and result.actual_relation
-            and rec.hero_bucket
-        ):
-            updates.append({
-                "kind": "river_relative",
-                "hero_bucket": rec.hero_bucket,
-                "hero_made_subtype": rec.hero_made_subtype,
-                "board_texture": rec.board_texture,
-                "action_ctx": action_ctx,
-                "predicted_dist": dict(rec.villain_vs_hero_dist),
-                "actual_relation": result.actual_relation,
             })
     return updates
 

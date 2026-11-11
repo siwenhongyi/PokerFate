@@ -39,6 +39,7 @@ import sys
 import time
 from pathlib import Path
 
+from pf_intercept import config
 from pf_intercept.proxy import _parse_proxy_args, main as proxy_main
 
 log = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # mitmweb 默认参数
 _MITMWEB_PORT = 8080
-_MITMWEB_IGNORE = "xiaomi.com|xiaomi.net|miui.com|aliyuncs.com"
+_MITMWEB_IGNORE = config.MITM_IGNORE_HOSTS
 _FORCE_DOMAIN_SCRIPT = _PROJECT_ROOT / "pf_reverse" / "force_domain.py"
 
 # 子进程引用（模块级，供 cleanup 访问）

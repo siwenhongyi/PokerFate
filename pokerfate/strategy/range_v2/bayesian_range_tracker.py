@@ -23,6 +23,8 @@ import logging
 import os as _os
 from typing import Any, Dict, List, Optional, Set
 
+from collections import OrderedDict
+
 import numpy as np
 
 from pokerfate.core.card import Card
@@ -37,21 +39,17 @@ from pokerfate.strategy.range_v2.action_model import (
     GTO_VPIP,
     PlayerProfile,
 )
-from pokerfate.strategy.range_v2.bucket_ml_calibration import calibrate_bucket_probs
+from pokerfate.strategy.range_v2.bucket_ml_calibration import (
+    calibrate_bucket_probs,
+    profile_feature_dict,
+)
 from pokerfate.strategy.range_v2.empirical_model import (
     CAT_ORDER as EMPIRICAL_CAT_ORDER,
     empirical_preflop_bucket_prior,
 )
-from pokerfate.strategy.range_v2.runtime_formula_calibration import load_params
 
 log = logging.getLogger(__name__)
 
-_LP_SIGNAL_FACTOR = 0.5
-_NEW_SIGNAL_FACTOR = 0.7
-_BUCKET_CALIBRATION_ENABLED = (
-    _os.environ.get('PF_BUCKET_CALIBRATION', '1').lower()
-    not in ('0', 'false', 'no')
-)
 _BUCKET_CAL_MIN_FACTOR = 0.25
 _BUCKET_CAL_MAX_FACTOR = 8.0
 _BUCKET_CAL_CATS = ('nuts', 'strong', 'medium', 'draw', 'weak_draw', 'air')
@@ -61,71 +59,7 @@ _PREFLOP_CAT_IDX = np.array(
      for idx in range(1326)],
     dtype=np.int8,
 )
-_RUNTIME_BUCKET_CAL_CACHE: Dict[str, Optional[Dict[str, tuple[float, Dict[str, float]]]]] = {}
 
-# Safe subset fitted on 2-5 logs and cross-validated on 6 logs with full
-# bucket-distribution rows (2026-05-16). We only keep contexts where validation
-# NLL improves and strong/nuts under-20% risk does not worsen. Formula:
-# q = softmax(gamma * log(p) + theta). The layer preserves combo ordering
-# inside each bucket; it only recalibrates bucket mass.
-_BUCKET_CALIBRATION: Dict[str, tuple[float, Dict[str, float]]] = {
-    'flop action:raise_over': (
-        0.5500,
-        {
-            'air': -0.5363, 'draw': 0.0685, 'medium': 0.8187,
-            'nuts': -0.5516, 'strong': 0.2476, 'weak_draw': -0.0469,
-        },
-    ),
-    'turn action:call': (
-        0.7399,
-        {
-            'air': 0.1453, 'draw': 0.0993, 'medium': 0.0515,
-            'nuts': -0.0643, 'strong': -0.0931, 'weak_draw': -0.1386,
-        },
-    ),
-    'turn action:raise_over': (
-        0.5500,
-        {
-            'air': -0.4089, 'draw': -0.0657, 'medium': 0.8308,
-            'nuts': -0.4810, 'strong': 0.0835, 'weak_draw': 0.0413,
-        },
-    ),
-    'river action:bet': (
-        0.7149,
-        {'air': -0.1820, 'medium': 0.7050, 'nuts': -0.5129, 'strong': -0.0077},
-    ),
-    'river action:call': (
-        0.6994,
-        {'air': -0.0731, 'medium': -0.0282, 'nuts': 0.0259, 'strong': 0.0778},
-    ),
-    'river action:raise_over': (
-        0.6931,
-        {'air': -0.3667, 'medium': 0.7555, 'nuts': -0.3807},
-    ),
-}
-
-
-def _nopp_bin(n: int) -> str:
-    if n <= 1:
-        return '1'
-    if n == 2:
-        return '2'
-    return '3+'
-
-
-def _board_texture_key(board: List[Card]) -> str:
-    if len(board) < 3:
-        return 'pre'
-    ranks = [c.rank for c in board]
-    suits = [c.suit for c in board]
-    paired = len(set(ranks)) < len(ranks)
-    if len(suits) >= 3 and len(set(suits[:3])) == 1:
-        flush = 'mono'
-    elif len(suits) >= 3 and max(suits[:3].count(s) for s in set(suits[:3])) >= 2:
-        flush = 'fd'
-    else:
-        flush = 'rainbow'
-    return ('paired' if paired else 'unpaired') + ':' + flush
 
 
 def _bet_size_bucket(ratio: float) -> str:
@@ -181,36 +115,6 @@ def _preflop_action_type(action: str, context: ActionContext) -> str:
     if action == 'fold':
         return 'fold'
     return action or ''
-
-
-def _load_runtime_bucket_calibration() -> Optional[Dict[str, tuple[float, Dict[str, float]]]]:
-    key = "bucket"
-    if key in _RUNTIME_BUCKET_CAL_CACHE:
-        return _RUNTIME_BUCKET_CAL_CACHE[key]
-
-    raw = load_params('bucket')
-    if raw is None:
-        _RUNTIME_BUCKET_CAL_CACHE[key] = None
-        return None
-
-    try:
-        parsed: Dict[str, tuple[float, Dict[str, float]]] = {}
-        for context_key, params in (raw or {}).items():
-            theta_raw = params.get('theta', {}) or {}
-            parsed[str(context_key)] = (
-                float(params.get('gamma', 1.0)),
-                {
-                    cat: float(v)
-                    for cat, v in theta_raw.items()
-                    if cat in _BUCKET_CAL_IDX
-                },
-            )
-        _RUNTIME_BUCKET_CAL_CACHE[key] = parsed
-        return parsed
-    except Exception:
-        log.exception('runtime bucket calibration parse failed for %s', key)
-        _RUNTIME_BUCKET_CAL_CACHE[key] = None
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +294,32 @@ def _detect_sequence_pattern(history: List[tuple]) -> Optional[str]:
     return None
 
 
+_RIVER_SCORE_CACHE: "OrderedDict[tuple, List[int]]" = OrderedDict()
+_RIVER_SCORE_CACHE_MAX = 16
+
+
+def _river_combo_scores(board: List[Card]) -> List[int]:
+    """eval_int strength of each of the 1326 combos on a 5-card ``board``
+    (combos sharing a card with the board get 0; callers mask them)."""
+    key = tuple(sorted(hcm.card_to_int(c) for c in board))
+    hit = _RIVER_SCORE_CACHE.get(key)
+    if hit is not None:
+        _RIVER_SCORE_CACHE.move_to_end(key)
+        return hit
+    board_l = list(board)
+    board_ints = set(key)
+    out: List[int] = []
+    for c1, c2 in hcm.ALL_COMBOS:
+        if c1 in board_ints or c2 in board_ints:
+            out.append(0)
+        else:
+            out.append(HandEvaluator.eval_int([hcm.int_to_card(c1), hcm.int_to_card(c2)] + board_l))
+    _RIVER_SCORE_CACHE[key] = out
+    if len(_RIVER_SCORE_CACHE) > _RIVER_SCORE_CACHE_MAX:
+        _RIVER_SCORE_CACHE.popitem(last=False)
+    return out
+
+
 class BayesianRangeTracker:
     """Per-opponent 1326-dim Bayesian range tracker."""
 
@@ -407,6 +337,14 @@ class BayesianRangeTracker:
         # never bleed across hand boundaries.
         self._action_history: Dict[int, List[tuple]] = {}
         self._action_meta: Dict[int, Dict[str, Any]] = {}
+        # Last PlayerProfile seen per opponent this hand (bucket-ML profile features).
+        self._player_profiles: Dict[int, PlayerProfile] = {}
+        # Bucket-ML is a read-only overlay (2026-11-11). When it is applied the
+        # formula-only weights are kept here and restored before the next
+        # update, so ML corrections never compound across triggers. Compounding
+        # was measured to roughly double the layer's strength over-statement
+        # (turn check +0.10 vs +0.06 non-compounding) and to cost 0.01 Brier.
+        self._formula_weights: Dict[int, np.ndarray] = {}
         # 2026-04-23 showdown calibration hook。可选 callback，在每次
         # _weights[pid] 更新后被调，参数：
         #   (player_id, street, board, weights, trigger)
@@ -426,6 +364,9 @@ class BayesianRangeTracker:
         self._board_int_cache_key: Optional[tuple] = None
         self._board_int_cache: Set[int] = set()
         self._blocked_mask_cache: Dict[tuple, np.ndarray] = {}
+        # Per-layer trace of the most recent observe_action; consumed by the
+        # API's opponent_action log.
+        self.last_update_trace: Dict[str, Any] = {}
 
     def set_big_blind(self, big_blind: float) -> None:
         self._big_blind = float(big_blind or 0.0)
@@ -440,6 +381,8 @@ class BayesianRangeTracker:
         self._folded.clear()
         self._action_history.clear()
         self._action_meta.clear()
+        self._player_profiles.clear()
+        self._formula_weights.clear()
 
     def _board_key(self, board: List[Card]) -> tuple:
         if board and len(board) >= 3:
@@ -470,41 +413,27 @@ class BayesianRangeTracker:
         """
         key = self._board_key(board)
         if self._cat_cache_key != key:
-            board_arg = board if key else []
-            # Build in one pass; hcat.categorize is ~0.1 ms so 1326 calls
-            # cost ~130 ms worst case, but this happens at most once per
-            # street change — amortised to effectively free.
-            self._cat_cache = [hcat.categorize(i, board_arg) for i in range(1326)]
+            # Shared module-level LRU (hcat.categorize_all): the action model
+            # categorises the same board, so the work is done once per board
+            # for the whole process, not once per consumer.
+            self._cat_cache = hcat.categorize_all(board if key else [])
             self._cat_cache_key = key
         return self._cat_cache
 
     def _apply_bucket_calibration(self, player_id: int, street: str,
                                   board: List[Card], trigger: str) -> None:
-        """Calibrate posterior bucket mass with offline-fitted reliability params."""
-        if not _BUCKET_CALIBRATION_ENABLED:
-            return
+        """Bucket-ML overlay: recalibrate bucket masses (read-only, see _formula_weights).
+
+        The offline gamma/theta formula params that used to run before the ML
+        step were removed 2026-11-11: with the ML on they changed nothing in
+        closed-loop replay (ΔBrier −0.0014 ± 0.0015) and without it they hurt.
+        """
         if not board or len(board) < 3:
             return
-        runtime_params = _load_runtime_bucket_calibration() or {}
-        base_key = f'{street} {trigger}'
         active_count = sum(1 for pid in self._weights if pid not in self._folded)
         meta = self._action_meta.get(player_id, {})
         size_bucket = str(meta.get('bet_size_bucket') or 'none')
         is_raise_over = bool(meta.get('is_raise_over') or False)
-        size_ctx = f'size={size_bucket} rr={"1" if is_raise_over else "0"}'
-        rich_key = (
-            f'{base_key} nopp={_nopp_bin(active_count)} '
-            f'tex={_board_texture_key(board)}'
-        )
-        nopp_key = f'{base_key} nopp={_nopp_bin(active_count)}'
-        params = (
-            runtime_params.get(f'{rich_key} {size_ctx}')
-            or runtime_params.get(f'{base_key} {size_ctx}')
-            or runtime_params.get(rich_key)
-            or runtime_params.get(nopp_key)
-            or runtime_params.get(base_key)
-            or _BUCKET_CALIBRATION.get(base_key)
-        )
         w = self._weights.get(player_id)
         if w is None:
             return
@@ -550,23 +479,6 @@ class BayesianRangeTracker:
         if total <= 1e-15:
             return
         p = bucket_mass / total
-        if params is not None:
-            gamma, theta_dict = params
-            theta = np.array(
-                [float(theta_dict.get(cat, 0.0)) for cat in _BUCKET_CAL_CATS],
-                dtype=np.float64,
-            )
-            logits = gamma * np.log(np.clip(p, 1e-6, 1.0)) + theta
-            logits -= float(logits.max())
-            q = np.exp(logits)
-            q /= float(q.sum())
-            if _apply_target(q, p):
-                bucket_mass = _bucket_mass_vec()
-                total = float(bucket_mass.sum())
-                if total <= 1e-15:
-                    return
-                p = bucket_mass / total
-
         range_threshold = (1.0 / 1326) * 0.1
         range_pct = float((w > range_threshold).sum()) / 1326
         ml_target, _diag = calibrate_bucket_probs(
@@ -585,6 +497,7 @@ class BayesianRangeTracker:
             bet_size_bucket=size_bucket,
             is_raise_over=is_raise_over,
             action_sequence=str(meta.get('action_sequence') or ''),
+            player_profile=profile_feature_dict(self._player_profiles.get(player_id)),
         )
         if ml_target:
             target = np.array(
@@ -593,6 +506,9 @@ class BayesianRangeTracker:
             )
             target_sum = float(target.sum())
             if target_sum > 1e-15:
+                # Read-only overlay: remember the formula state first so the
+                # next observe_action / reweight_for_board starts from it.
+                self._formula_weights[player_id] = w.copy()
                 _apply_target(target / target_sum, p)
 
     def reset_hand(self, player_id: int, position: str,
@@ -611,6 +527,8 @@ class BayesianRangeTracker:
         # unknown so BB 0.40 never accidentally maps to 0.27.
         if not position:
             position = 'CO'
+        self._player_profiles[player_id] = profile
+        self._formula_weights.pop(player_id, None)
 
         w = np.ones(1326, dtype=np.float64)
 
@@ -683,84 +601,24 @@ class BayesianRangeTracker:
         self._emit_prediction(player_id, 'preflop', [], 'reset')
 
     def reweight_for_board(self, board: List[Card]) -> None:
-        """Board-aware prior recalibration on new community cards.
+        """New community cards: emit a ``board:<street>`` calibration
+        prediction for every live opponent.
 
-        Problem: preflop priors score hands by preflop strength. 74o → 0.03
-        weight. But on a 77x flop, 74o is TRIPS. The Bayesian call-likelihood
-        for nuts ≈ that for medium (~0.30-0.35), so calling alone won't
-        differentiate them. Without this reweight, trips combos on paired
-        boards stay invisible.
-
-        Fix: boost combos that make nuts / strong on the current board
-        (regardless of preflop weight). Does NOT scale down other combos —
-        that rebalancing is already handled by the renormalize step.
-
-        Issue D/E (gameplay analysis): the boost floor must scale with the
-        opponent's range WIDTH. Loose high-VPIP profiles can reach postflop
-        with ~600 live combos; nuts combos are DILUTED across that wide
-        reach. Tight players reach with ~150 live combos; nuts are
-        CONCENTRATED. A fixed 3× avg floor over-inflates wide-range bucket[nuts]
-        (observed: 369 decisions showed wide-range bucket[nuts] ≥ 0.40;
-        4 catastrophic river cold-calls vs obvious nuts).
-
-        Math: P(nuts | reach) ∝ n_nuts_combos / n_reach_combos.
-        Linear interpolation by reach_pct so wider ranges get a lower floor.
+        The weight floor that used to live here (raising every nuts/strong
+        combo to 1.5–2.85× the average weight) was removed on 2026-11-09:
+        scored against revealed showdown hands it inflated the predicted
+        nuts+strong mass on every street (flop 0.237 vs 0.213 actual, turn
+        0.368 vs 0.311, river 0.520 vs 0.432) and over-stated P(villain beats
+        hero) on the river by 0.06; without it the masses match (0.195 /
+        0.306 / 0.446). The postflop likelihoods already keep low-prior
+        board-made combos alive.
         """
         if not board or len(board) < 3:
             return
-
-        board_ints = self._board_ints(board)
-        categories = self._get_categories(board)
-
-        # Threshold for "meaningful weight" (same bar as
-        # get_effective_range_pct): weight > 10% of uniform. Combos at
-        # 0.03/total (outside VPIP tier) don't count as part of reach.
-        _MEANINGFUL_W = 1.0 / 13260  # 10% of 1/1326
-        for w in self._weights.values():
-            # avg_w still uses full "alive" (w>1e-10) as the denominator to
-            # keep the magnitude of boost comparable across opponents.
-            live_mask = w > 1e-10
-            n_active = int(live_mask.sum())
-            if n_active == 0:
-                continue
-            avg_w = 1.0 / n_active
-
-            # Range-width-aware floor multipliers.
-            # meaningful_pct counts combos with 10%+ of uniform weight — a
-            # proxy for "how wide is the believable part of villain's range".
-            # Tight prior (UTG) meaningful_pct ≈ 0.14 → nuts_mul ≈ 2.8
-            # Loose prior (BB vs limp) meaningful_pct ≈ 0.55 → nuts_mul ≈ 2.2
-            # Very wide range meaningful_pct ≈ 0.80 → 1.8
-            meaningful_pct = float((w > _MEANINGFUL_W).sum()) / 1326.0
-            # Clamp to [0.1, 1.0] so edge cases (near-empty or near-uniform)
-            # produce sane floors.
-            meaningful_pct = max(0.1, min(1.0, meaningful_pct))
-            nuts_floor_mul = 1.5 + 1.5 * (1.0 - meaningful_pct)      # 1.5 – 2.85
-            strong_floor_mul = 0.75 + 0.75 * (1.0 - meaningful_pct)  # 0.75 – 1.425
-
-            modified = False
-            for idx in range(1326):
-                if w[idx] < 1e-10:
-                    continue
-                c1, c2 = hcm.ALL_COMBOS[idx]
-                if c1 in board_ints or c2 in board_ints:
-                    continue
-                cat = categories[idx]
-                if cat == 'nuts':
-                    floor = avg_w * nuts_floor_mul
-                    if w[idx] < floor:
-                        w[idx] = floor
-                        modified = True
-                elif cat == 'strong':
-                    floor = avg_w * strong_floor_mul
-                    if w[idx] < floor:
-                        w[idx] = floor
-                        modified = True
-
-            if modified:
-                s = w.sum()
-                if s > 0:
-                    w /= s
+        for pid, formula_w in list(self._formula_weights.items()):
+            if pid in self._weights:
+                self._weights[pid] = formula_w
+        self._formula_weights.clear()
 
         # Calibration hook — board 变化也算 range 调整，记录预测
         # 推断 street（board 长度）
@@ -783,9 +641,7 @@ class BayesianRangeTracker:
 
     def observe_action(self, player_id: int, action: str, street: str,
                        context: ActionContext, profile: PlayerProfile,
-                       board: List[Card],
-                       *, high_signal: bool = False,
-                       signal_strength: Optional[float] = None) -> None:
+                       board: List[Card]) -> None:
         """Tempered Bayesian update with entropy-adaptive damping.
 
         Standard Bayes: w *= likelihood
@@ -801,33 +657,26 @@ class BayesianRangeTracker:
           - Grünwald 2012, SafeBayes — power likelihood / likelihood tempering
           - Posterior regularization — floor mixing to prevent zero probabilities
 
-        2026-04-24 (方案 B 升级)：`signal_strength ∈ [0, 1]` 替代原 `high_signal`
-        离散门。强度含义：villain 本次动作对其 range 的窄化证据力度。
-          - strength=0 → 原 tempered 路径（α 自适应 0.1–0.85, λ=0.08, floor 生效）
-          - strength=1 → 标准 Bayes（α=1.0, λ=0, 无 floor）
-          - 中间连续插值。
-        原 `high_signal=True` 等价于 strength=1.0（保留作向后兼容）。
         """
-        if signal_strength is None:
-            signal_strength = 1.0 if high_signal else 0.0
-        signal_strength = max(0.0, min(1.0, float(signal_strength)))
-
-        # 2026-04-28 P0.3：loose-passive 对手 + 新对手信号降权（env 可调）。
-        # 极松被动对手的下注 range 极宽且不极化，下注信号噪声远大于低 VPIP/PFR gap 的高攻击 profile；
-        # tracker 把他们的 0.3x pot bet 当强信号收紧，导致 hero "胜率 25%(vs随机
-        # 35%)" 这类系统性压制。新对手 (hands_seen<30) vpip/pfr 都不稳定，同样降权。
-        if profile.hands_seen >= MIN_HANDS_FOR_CLASSIFICATION:
-            pfr_ratio = (profile.pfr / profile.vpip) if profile.vpip > 0 else 1.0
-            if profile.vpip >= 0.45 and pfr_ratio <= 0.30:
-                signal_strength *= _LP_SIGNAL_FACTOR
-        if profile.hands_seen < 30:
-            signal_strength *= _NEW_SIGNAL_FACTOR
         if player_id not in self._weights:
             self.reset_hand(player_id, context.position or 'CO', profile)
         if context.big_blind <= 0 and self._big_blind:
             context.big_blind = float(self._big_blind)
 
+        self._player_profiles[player_id] = profile
+        formula_w = self._formula_weights.pop(player_id, None)
+        if formula_w is not None:
+            self._weights[player_id] = formula_w
         w = self._weights[player_id]
+        trace: Optional[Dict[str, Any]] = None
+        self.last_update_trace = {}
+        if board and len(board) >= 3:
+            trace = {
+                'street': street, 'action': action,
+                'bet_ratio': round(float(context.bet_ratio or 0.0), 3),
+                'layers': {},
+            }
+            self._trace_layer(trace, 'pre', w, board)
 
         # Card removal: board cards
         if board:
@@ -857,12 +706,15 @@ class BayesianRangeTracker:
             confidence = 1.0
         # α_adaptive ∈ [0.10, 0.85]: high confidence → very low α (强抗集中)。
         # 2026-04-23：按 Grünwald SafeBayes (2012) 的 adaptive tempering 思路。
-        alpha_adaptive = max(0.1, 0.85 - 0.75 * confidence)
-        # signal_strength 线性插值到 α=1.0：strength=0 用自适应，strength=1 纯 Bayes
-        alpha = (1.0 - signal_strength) * alpha_adaptive + signal_strength * 1.0
+        # The "signal strength" interpolation towards α=1 / λ=0 that used to sit
+        # here was removed 2026-11-11: forcing it off changed nothing in closed-loop
+        # replay (ΔBrier −0.0003) and forcing it on cost +0.010.
+        alpha = max(0.1, 0.85 - 0.75 * confidence)
 
-        # Bayesian update (standard when high_signal, tempered otherwise)
+        # Tempered Bayesian update
         w *= likelihoods ** alpha
+        if trace is not None:
+            trace['alpha'] = round(float(alpha), 3)
 
         # Normalize
         total = w.sum()
@@ -885,8 +737,10 @@ class BayesianRangeTracker:
         # α 管"单次更新激进度"、floor mixing 管"累积集中度上限"。
         # 混入 λ 的"对 active combos 均匀分布"，阻止连续 pot-size barrels
         # 把 air 权重压到 ~0。
-        # signal_strength 线性降 λ：强度=0 → λ=0.08，强度=1 → λ=0。
-        lam = 0.08 * (1.0 - signal_strength)
+        lam = 0.08
+        self._trace_layer(trace, 'likelihood', w, board)
+        if trace is not None:
+            trace['lam'] = round(float(lam), 4)
         if lam > 1e-6:
             active_mask = w > 0
             n_active = int(active_mask.sum())
@@ -896,19 +750,18 @@ class BayesianRangeTracker:
                 w = (1.0 - lam) * w + lam * uniform
 
         # ── Probability floor: no combo drops below floor ──
-        # 强信号（signal_strength > 0.8）时跳过：让 "villain 绝不会这么下"
-        # 的空气 combo 真正归零，不再贡献 hero eq。
         # 有了 floor mixing 这一层基本不做事（mixing 后每个 active combo 至少
         # λ/n_active ≈ 8e-5，超过 1e-4/n_active 的 floor 阈值），保留为兜底。
-        if signal_strength <= 0.8:
-            active = w > 0
-            n_active = int(active.sum())
-            if n_active > 0:
-                floor = 1e-4 / n_active
-                below = active & (w < floor)
-                if below.any():
-                    w[below] = floor
-                    w /= w.sum()
+        active = w > 0
+        n_active = int(active.sum())
+        if n_active > 0:
+            floor = 1e-4 / n_active
+            below = active & (w < floor)
+            if below.any():
+                w[below] = floor
+                w /= w.sum()
+
+        self._trace_layer(trace, 'floor', w, board)
 
         # ── Cross-street sequence pattern correction ──
         # Refine action: distinguish 'bet' (first) from 'raise_over' (re-raise/CR).
@@ -976,9 +829,15 @@ class BayesianRangeTracker:
             'action_sequence': action_sequence,
         }
         self._weights[player_id] = w
+        if trace is not None:
+            trace['pattern'] = pattern_name or ''
+            self._trace_layer(trace, 'sequence', w, board)
         self._apply_bucket_calibration(
             player_id, street, board, f'action:{refined}'
         )
+        if trace is not None:
+            self._trace_layer(trace, 'bucket_cal', self._weights[player_id], board)
+            self.last_update_trace = trace
 
         # Mark as folded BEFORE emitting so active_weights excludes them for
         # this emit and subsequent fold_other emits.
@@ -1042,6 +901,7 @@ class BayesianRangeTracker:
                 bet_size_bucket=str(meta.get('bet_size_bucket') or ''),
                 is_raise_over=bool(meta.get('is_raise_over') or False),
                 action_sequence=str(meta.get('action_sequence') or ''),
+                player_profile=profile_feature_dict(self._player_profiles.get(player_id)),
             )
         except Exception:
             # Calibration hook 失败不应影响正常决策，但必须暴露出来。
@@ -1091,7 +951,13 @@ class BayesianRangeTracker:
         w = self._weights.get(player_id)
         if w is None:
             return {}
+        return self._vs_hero_from_weights(w, board, hero_cards)
 
+    def _vs_hero_from_weights(self, w: np.ndarray, board: List[Card],
+                              hero_cards: List[Card]) -> Dict[str, float]:
+        """``get_vs_hero_dist`` for an explicit weight vector (layer trace)."""
+        if not board or len(board) < 5 or not hero_cards or len(hero_cards) < 2:
+            return {}
         board_ints = self._board_ints(board)
         hero_ints = {hcm.card_to_int(c) for c in hero_cards}
         all_known = self._known_cards | board_ints | hero_ints
@@ -1105,12 +971,15 @@ class BayesianRangeTracker:
         hero_score = HandEvaluator.eval_int(list(hero_cards) + list(board))
         win_w = tie_w = loss_w = 0.0
         nz = np.flatnonzero(valid)
-        board_l = list(board)
-        for idx in nz:
-            c1, c2 = hcm.ALL_COMBOS[idx]
-            opp_cards = [hcm.int_to_card(c1), hcm.int_to_card(c2)]
-            opp_score = HandEvaluator.eval_int(opp_cards + board_l)
-            p = float(valid[idx])
+        # Every combo's river strength depends only on the board, so it is
+        # scored once per board (shared by all players and trace layers)
+        # instead of re-evaluated ~1000 times per call. The accumulation
+        # order below is unchanged, so the sums are bit-identical.
+        scores = _river_combo_scores(board)
+        valid_l = valid.tolist()
+        for idx in nz.tolist():
+            opp_score = scores[idx]
+            p = valid_l[idx]
             if hero_score > opp_score:
                 win_w += p
             elif hero_score == opp_score:
@@ -1145,6 +1014,34 @@ class BayesianRangeTracker:
         if total > 0:
             buckets = {k: v / total for k, v in buckets.items()}
         return buckets
+
+    def _strong_mass_from_weights(self, w: np.ndarray, board: List[Card]) -> Dict[str, float]:
+        """Mass of the nuts / strong / air buckets for a weight vector (layer trace)."""
+        if not board or len(board) < 3:
+            return {}
+        cats = np.asarray(self._get_categories(board))
+        board_ints = self._board_ints(board)
+        valid = w.copy()
+        valid[self._blocked_mask(self._known_cards | board_ints)] = 0.0
+        total = float(valid.sum())
+        if total <= 1e-15:
+            return {}
+        out: Dict[str, float] = {}
+        for cat in ('nuts', 'strong', 'air'):
+            out[cat] = round(float(valid[cats == cat].sum()) / total, 4)
+        return out
+
+    def _trace_layer(self, trace: Optional[Dict[str, Any]], name: str,
+                     w: np.ndarray, board: List[Card]) -> None:
+        if trace is None:
+            return
+        entry: Dict[str, Any] = dict(self._strong_mass_from_weights(w, board))
+        if len(board) >= 5 and len(self._known_cards) >= 2:
+            hero_cards = [hcm.int_to_card(i) for i in sorted(self._known_cards)]
+            rel = self._vs_hero_from_weights(w, board, hero_cards)
+            if rel:
+                entry['loss'] = round(float(rel.get('loss', 0.0)), 4)
+        trace['layers'][name] = entry
 
     def get_range_summary(self, player_id: int) -> dict:
         """Return summary dict for logging/debugging."""

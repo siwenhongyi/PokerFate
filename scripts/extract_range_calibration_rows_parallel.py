@@ -12,9 +12,9 @@ Two modes are supported:
 * bucket - bucket-only rows.  Skips hero-equity MC and is much faster.  Use it
            when only fitting bucket distribution calibration.
 
-By default runtime bucket calibration is disabled while extracting rows
-(`PF_BUCKET_CALIBRATION=0`) so the rows represent the raw model.  That avoids
-fitting a second calibration layer on top of already-calibrated output.
+Rows carry the tracker's formula-layer bucket distribution (run with
+PF_BUCKET_ML=off to train the bucket model; with PF_BUCKET_ML=lgbm and
+PF_BUCKET_ML_MODEL_PATH to score a candidate closed-loop).
 """
 
 from __future__ import annotations
@@ -213,6 +213,7 @@ def _row_from_result(result: Any, source: str) -> dict[str, Any]:
             if result.actual_hero_eq_street_multi_shown is not None else None
         ),
         "active_player_count": len(getattr(rec, "active_player_ids", []) or []),
+        "player_profile": dict(getattr(rec, "player_profile", {}) or {}),
     }
 
 
@@ -225,7 +226,6 @@ def _task_signature(task: dict[str, Any]) -> dict[str, Any]:
         "seed": int(task["seed"]),
         "equity_iterations": int(task["equity_iterations"]),
         "sample_scale": float(task["sample_scale"]),
-        "bucket_calibration": str(task["bucket_calibration"]),
     }
 
 
@@ -262,6 +262,35 @@ def _write_jsonl_rows(f: TextIO, rows: Iterable[dict[str, Any]]) -> int:
     return count
 
 
+def _attach_inline_calibrator(api: Any, calibrator: Any) -> None:
+    """Wire a synchronous calibrator into a replay API and seal off live data.
+
+    The API's own `enable_showdown_calibration=True` path uses the file spool
+    (async worker processes under data/runtime_calibration/live_spool) and the
+    runtime row recorder (appends to data/runtime_calibration/*.rows.jsonl).
+    Neither belongs in a replay: the spool never returns rows to this process
+    and the recorder would pollute the live training set (it did, 2026-11-11).
+    """
+    hero_id = api.my_player_id
+    tracker = api._bot._range_tracker
+
+    def _hook(**kwargs: Any) -> None:
+        if kwargs.get("player_id") == hero_id:
+            return
+        aw = kwargs.get("active_weights")
+        if aw:
+            kwargs["active_weights"] = {p: w for p, w in aw.items() if p != hero_id}
+        calibrator.record_prediction(**kwargs)
+
+    tracker._prediction_hook = _hook
+    tracker._name_resolver = lambda pid: api._session_names.get(pid, str(pid))
+    api._calibrator = calibrator
+    api._runtime_calibration_recorder = None
+    api._range_compare_collector = None
+    api._runtime_collection_enabled = False
+    api.set_runtime_collection_enabled = lambda *a, **k: None
+
+
 class FullRowsLogger:
     """ShowdownCalibrator logger that stores JSON-serializable rows."""
 
@@ -280,9 +309,8 @@ def _bucket_only_collector(source: str):
     distributions and actual showdown buckets only.
     """
     np = importlib.import_module("numpy")
-    ShowdownCalibrator = importlib.import_module(
-        "pokerfate.calibration.showdown_calibration"
-    ).ShowdownCalibrator
+    _sc = importlib.import_module("pokerfate.calibration.showdown_calibration")
+    ShowdownCalibrator = _sc.ShowdownCalibrator
     Card = importlib.import_module("pokerfate.core.card").Card
     hcat = importlib.import_module("pokerfate.strategy.range_v2.hand_categorizer")
 
@@ -317,7 +345,30 @@ def _bucket_only_collector(source: str):
             bucket_dist = ShowdownCalibrator._compute_bucket_dist(weights / total, board)
             threshold = (1.0 / 1326) * 0.1
             range_pct = float(((weights / total) > threshold).sum()) / 1326
+            # Same hero-side fields as the full calibrator, so bucket-mode rows
+            # carry every input the runtime bucket-ML layer receives.
+            hero = list(hero_cards or [])
+            board_cards = list(board)
+            hero_bucket = hero_made_subtype = hero_hand_rank = ""
+            hero_draw: dict[str, Any] = {}
+            hero_blockers: dict[str, Any] = {}
+            if len(hero) >= 2:
+                hero_bucket = hcat.categorize_cards(hero, board_cards)
+                hmi = hcat.made_hand_info(hero, board_cards)
+                hero_made_subtype = hmi.subtype
+                hero_hand_rank = hmi.hand_rank
+                hero_draw = dict(_sc._hero_draw_features(hero, board_cards))
+                hero_blockers = dict(_sc._hero_blocker_features(hero, board_cards))
             self._hand_predictions.setdefault(player_id, []).append({
+                "hero_cards": [str(c) for c in hero],
+                "hero_bucket": hero_bucket,
+                "hero_made_subtype": hero_made_subtype,
+                "hero_hand_rank": hero_hand_rank,
+                "board_texture": _sc.board_texture_key(board_cards),
+                "hero_draw": hero_draw,
+                "hero_blockers": hero_blockers,
+                "active_player_count": len(active_weights or {}),
+                "player_profile": dict(meta.get("player_profile") or {}),
                 "source": self.source,
                 "hand": self._hand_id,
                 "street": street,
@@ -364,14 +415,7 @@ def _bucket_only_collector(source: str):
                     "actual_bucket": actual_bucket,
                     "range_pct": float(rec.get("range_pct", 0.0) or 0.0),
                     "predicted_bucket_prob": float(bucket_dist.get(actual_bucket, 0.0)),
-                    "hero_cards": [],
-                    "hero_bucket": "",
-                    "hero_made_subtype": "",
-                    "hero_hand_rank": "",
-                    "board_texture": "",
                     "board_features": {},
-                    "hero_draw": {},
-                    "hero_blockers": {},
                     "villain_vs_hero_dist": {},
                     "predicted_relation_eq": None,
                     "actual_relation": "",
@@ -380,7 +424,6 @@ def _bucket_only_collector(source: str):
                     "predicted_hero_eq_multi": None,
                     "actual_hero_eq_street_multi": None,
                     "actual_hero_eq_street_multi_shown": None,
-                    "active_player_count": 0,
                 })
             return []
 
@@ -403,7 +446,6 @@ def _run_task(task: dict[str, Any]) -> dict[str, Any]:
     seed = int(task["seed"])
     equity_iterations = int(task["equity_iterations"])
     sample_scale = float(task["sample_scale"])
-    bucket_calibration = str(task["bucket_calibration"])
     progress_every = int(task["progress_every"])
     resume = bool(task.get("resume", True))
     part_path = Path(task["part_path"])
@@ -427,10 +469,6 @@ def _run_task(task: dict[str, Any]) -> dict[str, Any]:
 
     os.environ.setdefault("PYTEST_CURRENT_TEST", "scripts/extract_range_calibration_rows_parallel.py")
     os.environ.update(_sample_env(sample_scale))
-    if bucket_calibration == "raw":
-        os.environ["PF_BUCKET_CALIBRATION"] = "0"
-    elif bucket_calibration == "current":
-        os.environ["PF_BUCKET_CALIBRATION"] = "1"
 
     try:
         PokerFateAPI = importlib.import_module("pokerfate.api").PokerFateAPI
@@ -502,17 +540,19 @@ def _run_task(task: dict[str, Any]) -> dict[str, Any]:
                         log_file=None,
                         verbose=False,
                         equity_iterations=equity_iterations,
-                        enable_showdown_calibration=True,
+                        enable_showdown_calibration=False,
                         decision_seed=seed + line_idx + 1,
                     )
                     api._log._console = False
                     if mode == "full":
                         logger = FullRowsLogger(str(replay_path))
-                        if api._calibrator is not None:
-                            api._calibrator._logger = logger
+                        ShowdownCalibrator = importlib.import_module(
+                            "pokerfate.calibration.showdown_calibration"
+                        ).ShowdownCalibrator
+                        _attach_inline_calibrator(api, ShowdownCalibrator(logger=logger))
                     else:
                         bucket_collector = _bucket_only_collector(str(replay_path))
-                        api._calibrator = bucket_collector
+                        _attach_inline_calibrator(api, bucket_collector)
                     last_session = session
                     last_big_blind = table_bb
 
@@ -614,7 +654,6 @@ def main() -> None:
     ap.add_argument("--replay", type=Path, action="append", required=True)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--mode", choices=("full", "bucket"), default="full")
-    ap.add_argument("--bucket-calibration", choices=("raw", "current"), default="raw")
     ap.add_argument("--max-hands", type=int, default=0, help="cap hands per replay, 0 = all")
     ap.add_argument("--task-split", choices=("session", "shard"), default="session",
                     help="session keeps opponent-model continuity and gives resumable parts")
@@ -660,7 +699,6 @@ def main() -> None:
                 "seed": args.seed + task_id * 1009,
                 "equity_iterations": args.equity_iterations,
                 "sample_scale": args.sample_scale,
-                "bucket_calibration": args.bucket_calibration,
                 "progress_every": args.progress_every,
                 "resume": not args.no_resume,
             })
@@ -669,7 +707,7 @@ def main() -> None:
     workers = args.workers if args.workers > 0 else max(1, min(_default_workers(), len(tasks)))
     _log(
         f"start tasks={len(tasks)} workers={workers} split={args.task_split} "
-        f"mode={args.mode} bucket_calibration={args.bucket_calibration} "
+        f"mode={args.mode} "
         f"out={args.out} parts={parts_dir}"
     )
     if args.combine_only:
@@ -680,7 +718,6 @@ def main() -> None:
             "errors": 0,
             "elapsed_s": 0.0,
             "mode": args.mode,
-            "bucket_calibration": args.bucket_calibration,
             "out": str(args.out),
             "parts_dir": str(parts_dir),
             "combined_only": True,
@@ -753,7 +790,6 @@ def main() -> None:
         "task_rows_seen": total_rows,
         "elapsed_s": round(time.time() - t0, 2),
         "mode": args.mode,
-        "bucket_calibration": args.bucket_calibration,
         "out": str(args.out),
         "parts_dir": str(parts_dir),
         "skipped_malformed_board": skipped_malformed_board,

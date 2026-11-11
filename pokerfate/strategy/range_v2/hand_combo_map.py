@@ -25,8 +25,14 @@ def card_to_int(c: Card) -> int:
     return (int(c.rank) - 2) * 4 + int(c.suit)
 
 
+# Cards are immutable in practice (nothing assigns .rank/.suit after
+# construction), so hand out 52 shared instances instead of allocating one
+# per call: this ran ~1.7M times per 80 replayed hands.
+_INT_TO_CARD: Tuple[Card, ...] = tuple(Card(i // 4 + 2, i % 4) for i in range(52))
+
+
 def int_to_card(i: int) -> Card:
-    return Card(i // 4 + 2, i % 4)
+    return _INT_TO_CARD[i]
 
 
 # ---------------------------------------------------------------------------

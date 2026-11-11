@@ -50,6 +50,16 @@ PREFERRED_WSS_HOSTS: list[str] = [
 ]
 CERT_ALT_HOSTS = PREFERRED_WSS_HOSTS  # alias used by certificates/generator.py
 
+# mitmproxy --ignore-hosts for any addon that MITMs the whole device (not just
+# the game's own traffic): exclude known-noisy non-game hosts and intercept
+# everything else, rather than allow-listing the game's own domain. The real
+# client can reach login/game servers through several hosts depending on
+# channel/region — including bare IPs with no hostname at all (see
+# pf_reverse/output/lua/src/app/Constants.lua, G_HTTP_URL / _2 / _3 / _4) — so
+# an allow-list keyed on "poker-fate" would silently miss some of them.
+# Single source of truth for launcher.py and the headless credential harvester.
+MITM_IGNORE_HOSTS = "xiaomi.com|xiaomi.net|miui.com|aliyuncs.com"
+
 # ── Bot / game logic ─────────────────────────────────────────────────────────
 # MY_SEAT_ID: auto-detected from SitDownRSP — no need to set manually.
 
@@ -63,12 +73,13 @@ SMALL_BLIND: float | None = None   # None = auto-detect
 ACTION_INJECT_DELAY_MAX_SEC = 3.0
 
 # 决策引擎：
-#   未设置/非法/local = PokerFate 纯本地
+#   未设置            = cfr（2026-11-11 起的实战默认，和启动命令里显式写 DECISION_ENGINE=cfr 等价）
+#   非法/local        = PokerFate 纯本地
 #   g5_all          = 翻前/翻后都由 g5 接管，PokerFate 旁路对照
 #   g5              = 翻前 PokerFate；翻后 g5 接管
 #   cfr             = 翻前 PokerFate；翻牌可选离线 CFR 书；转/河实时 CFR，miss/超时回退 PokerFate
 # 可用环境变量覆盖：DECISION_ENGINE=g5_all / g5 / cfr / local
-_DEFAULT_DECISION_ENGINE = "local"
+_DEFAULT_DECISION_ENGINE = "cfr"
 DECISION_ENGINE = os.environ.get(
     "DECISION_ENGINE",
     _DEFAULT_DECISION_ENGINE,

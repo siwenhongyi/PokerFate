@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Optional
 
@@ -34,13 +35,17 @@ if sys.platform == 'win32':
         pass
 
 
-def parse_json_log(log_path: Path, hero_names: HeroNames) -> list[dict]:
+def parse_json_log(log_path: Path, hero_names: HeroNames, big_blind: float = 0.0) -> list[dict]:
     """把 pokerfate.log（结构化 JSONL 决策日志）转成 replay JSONL。
 
     与 console 解析器输出同一格式。JSON 日志里 ``opponent_action.amount`` 对
     call 是本次补入筹码、对 raise 是加注到的总额；replay 需要“跟到的总额”，
-    这里按街累计换算。大盲从翻前首个 ``pot_before_action``/``decision.pot``
-    推回（底池 = 1.5bb）。
+    这里按街累计换算。大盲按 session 取众数：每手先用翻前最小
+    ``pot_before_action``/``decision.pot`` 除以 1.5 得到候选值，再用同一
+    session（同一次 ``decision_engine_enabled``）内的众数覆盖。单手推断在
+    hero 补盲入座（底池 2.5bb）或死盲（底池 1bb）时会差 1.67×/0.67×
+    （2026-11-07..09 日志 3947 手里有 137 手），桌级盲注在一个 session 内不变。
+    ``big_blind`` 参数非 0 时直接覆盖所有手。
     """
     hands: list[dict] = []
     cur: Optional[dict] = None
@@ -111,7 +116,25 @@ def parse_json_log(log_path: Path, hero_names: HeroNames) -> list[dict]:
                 if cur["big_blind"] > 0:
                     hands.append(cur)
                 cur = None
+    _apply_session_big_blind(hands, big_blind)
     return hands
+
+
+def _apply_session_big_blind(hands: list[dict], big_blind: float = 0.0) -> None:
+    """Replace per-hand blind guesses with the session mode (or an override)."""
+    if big_blind > 0:
+        for h in hands:
+            h["big_blind"] = float(big_blind)
+        return
+    by_session: dict[int, Counter] = {}
+    for h in hands:
+        # Round to 3 significant digits so 10000.0 and 10000.0000001 agree.
+        guess = float(f"{h['big_blind']:.3g}")
+        by_session.setdefault(h["session"], Counter())[guess] += 1
+    for h in hands:
+        counts = by_session.get(h["session"])
+        if counts:
+            h["big_blind"] = counts.most_common(1)[0][0]
 
 
 def main():
@@ -121,6 +144,9 @@ def main():
     ap.add_argument("--out", required=True, help="replay JSONL output")
     ap.add_argument("--source-label", default="",
                     help="single source_log label written to every hand")
+    ap.add_argument("--big-blind", type=float, default=0.0,
+                    help="override the table big blind (chips) for every hand; "
+                         "default infers the per-session mode from preflop pots")
     args = ap.parse_args()
     try:
         hero_names = load_hero_names()
@@ -128,11 +154,18 @@ def main():
         ap.error(str(exc))
 
     hands = []
+    session_offset = 0
     for log in args.json_log:
-        parsed = parse_json_log(Path(log), hero_names)
+        parsed = parse_json_log(Path(log), hero_names, big_blind=args.big_blind)
         source = args.source_label or str(log)
+        # Session numbers restart per file; make them unique across files so
+        # the replay harness resets its API at every real process boundary
+        # and (session, hand) identifies a hand across the whole replay.
         for h in parsed:
             h["source_log"] = source
+            h["session"] += session_offset
+        if parsed:
+            session_offset = max(h["session"] for h in parsed)
         hands.extend(parsed)
 
     with open(args.out, "w", encoding='utf-8') as f:

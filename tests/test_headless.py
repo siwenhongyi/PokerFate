@@ -1,129 +1,23 @@
-"""Headless client: login payload/signing, response parsing, WSS session."""
+"""Headless client: resumed-session types + WSS session driver."""
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
+import os
 import time
 
 import pytest
 
 from pf_intercept.headless import login as hl
 from pf_intercept.headless import session as hs
-from pf_intercept.headless.credentials import (
-    LOGIN_TYPE_EMAIL,
-    LOGIN_TYPE_GUEST,
-    Account,
-    AccountError,
-    load_account,
-)
 from pf_intercept.wire import codec
 from pf_intercept.wire.framing import FrameBuffer, encode_frame
 
 
-# ── credentials ───────────────────────────────────────────────────────────
-
-def test_load_email_account_persists_generated_device_id(tmp_path):
-    path = tmp_path / "acc.json"
-    path.write_text(json.dumps({"type": "email", "email": "a@b.c", "password": "pw"}))
-    acc = load_account(path)
-    assert acc.login_type == LOGIN_TYPE_EMAIL
-    assert acc.token == "a@b.c" and acc.secret == "pw"
-    assert len(acc.device_id) == 32
-    assert json.loads(path.read_text())["device_id"] == acc.device_id
-    assert "pw" not in acc.redacted()
-
-
-def test_load_guest_account_uses_device_id_as_token(tmp_path):
-    path = tmp_path / "acc.json"
-    path.write_text(json.dumps({"type": "guest", "device_id": "dev-1", "lang": "zh_CN", "chnl": 5}))
-    acc = load_account(path)
-    assert acc.login_type == LOGIN_TYPE_GUEST
-    assert acc.token == "dev-1" and acc.lang == "zh_CN" and acc.chnl == 5
-
-
-def test_load_account_rejects_bad_type(tmp_path):
-    path = tmp_path / "acc.json"
-    path.write_text(json.dumps({"type": "steam"}))
-    with pytest.raises(AccountError):
-        load_account(path)
-
-
-# ── login payload ─────────────────────────────────────────────────────────
-
-def test_email_payload_matches_lua_fields():
-    acc = Account(LOGIN_TYPE_EMAIL, "a@b.c", "secret", "dev-1", os="android", lang="en", chnl=5)
-    body = hl.build_login_payload(acc)
-    assert body["type"] == 2 and body["token"] == "a@b.c" and body["verify"] == "secret"
-    assert body["imei"] == "dev-1" and body["os"] == "android"
-    risk = body["yidun_risk_check"]
-    assert risk["token"] == "" and risk["sceneData"]["operationType"] == "log"
-
-
-def test_guest_verify_is_md5_of_os_imei_and_salt():
-    acc = Account(LOGIN_TYPE_GUEST, "dev-1", "", "dev-1")
-    body = hl.build_login_payload(acc)
-    expect = hashlib.md5(("androiddev-1" + hl._CHECK_SALT).encode()).hexdigest()
-    assert body["verify"] == expect
-
-
-def test_http_login_posts_signed_body_and_saves_token(monkeypatch, tmp_path):
-    captured = {}
-
-    def fake_post(url, body, headers, timeout):
-        captured["url"] = url
-        captured["body"] = body
-        captured["headers"] = headers
-        return {
-            "code": 0, "uid": 42, "rdkey": "rk", "authorization": "auth-token",
-            "login_ip": "1.2.3.4",
-            "server": {"server": [{"server_host": "wss://10.0.0.1:9013", "http_host": "http://10.0.0.1:8888/"}]},
-        }
-
-    monkeypatch.setattr(hl, "_post_json", fake_post)
-    monkeypatch.setattr(hl, "_TOKEN_FILE", tmp_path / "auth_token.txt")
-    acc = Account(LOGIN_TYPE_EMAIL, "a@b.c", "pw", "dev-1", chnl=7)
-
-    res = hl.http_login(acc, hosts=("https://h1.example/",))
-
-    assert captured["url"] == "https://h1.example/login"
-    body = captured["body"]
-    assert body["chnl"] == 7 and len(body["random"]) == 6
-    assert body["sign"] == hl.add_signed_args.__globals__["sign_request"](body["random"], body["ts"])
-    assert captured["headers"]["Version"] == hl.config.GAME_HTTP_VERSION
-    assert captured["headers"]["Authorization"] == ""
-    assert res.uid == 42 and res.rdkey == "rk" and res.login_ip == "1.2.3.4"
-    assert res.servers[0].server_host == "wss://10.0.0.1:9013"
-    assert (tmp_path / "auth_token.txt").read_text() == "auth-token"
-
-
-def test_http_login_falls_through_hosts_then_raises(monkeypatch):
-    calls = []
-
-    def fake_post(url, body, headers, timeout):
-        calls.append(url)
-        raise OSError("down")
-
-    monkeypatch.setattr(hl, "_post_json", fake_post)
-    acc = Account(LOGIN_TYPE_GUEST, "d", "", "d")
-    with pytest.raises(hl.LoginError):
-        hl.http_login(acc, hosts=("https://a/", "https://b/"), save_token=False)
-    assert calls == ["https://a/login", "https://b/login"]
-
-
-def test_parse_login_response_rejects_error_code():
-    with pytest.raises(hl.LoginError) as ei:
-        hl.parse_login_response({"code": -5, "reason": "key"})
-    assert ei.value.code == -5
-
-
-def test_parse_login_response_accepts_risk_warning_minus_6():
-    res = hl.parse_login_response({
-        "code": -6, "uid": 1, "rdkey": "k", "authorization": "a",
-        "server": {"server": [{"server_host": "wss://1.1.1.1:9013"}]},
-    })
-    assert res.code == -6 and res.uid == 1
+@pytest.fixture(autouse=True)
+def _isolate_session_proxy_environment(monkeypatch):
+    monkeypatch.setattr(os, "environ", dict(os.environ))
 
 
 # ── WSS session ───────────────────────────────────────────────────────────
@@ -201,7 +95,76 @@ def _login_result():
                           servers=[hl.ServerEntry("wss://10.0.0.1:9013", "")])
 
 
-async def _connect_with_fake(monkeypatch, bridge, login_code=0):
+def test_backlogged_action_is_discarded_after_server_system_fold(monkeypatch):
+    async def run():
+        bridge = _RecordingBridge()
+        bridge.slow["pb.WinnerRSP"] = 0.15
+        bridge.injects["pb.ActionNotifyBRC"] = ("pb.ActionREQ", {"action_type": 4, "chips": 60000}, 0.0)
+        sess, ws = await _connect_with_fake(monkeypatch, bridge)
+        try:
+            ws.push("pb.WinnerRSP", {})
+            ws.push("pb.DealerInfoRSP", {"gameid": "new"})
+            ws.push("pb.ActionNotifyBRC", {"seatid": 3})
+            ws.push("pb.ActionBRC", {"seatid": 3, "action_type": 12})
+            for _ in range(100):
+                if any(t == "pb.ActionBRC" for t, _ in bridge.handled):
+                    break
+                await asyncio.sleep(0.01)
+            assert not any(t == "pb.ActionNotifyBRC" for t, _ in bridge.handled)
+            assert "pb.ActionREQ" not in ws.sent_types()
+            assert sess.stats.injects_dropped == 1
+            assert sess.stats.heartbeats_sent > 0
+        finally:
+            await sess.close()
+    asyncio.run(run())
+
+
+def test_action_delay_cannot_outlive_server_turn(monkeypatch):
+    async def run():
+        bridge = _RecordingBridge()
+        sess, ws = await _connect_with_fake(monkeypatch, bridge)
+        try:
+            task = asyncio.create_task(sess._inject(("pb.ActionREQ", {"action_type": 3}, 0.06), 777,
+                                                   wire_turn=sess._wire_turn, received_at=time.monotonic()))
+            ws.push("pb.ActionBRC", {"seatid": 0, "action_type": 12})
+            await task
+            assert "pb.ActionREQ" not in ws.sent_types()
+            assert sess.stats.injects_dropped == 1
+        finally:
+            await sess.close()
+    asyncio.run(run())
+
+
+def test_graceful_stop_in_lobby_does_not_wait_or_rejoin(monkeypatch):
+    from pf_intercept.headless.__main__ import _graceful_leave
+    async def run():
+        bridge = _RecordingBridge()
+        bridge.room_ids = [777]  # old bridge snapshot can lag behind reception
+        sess, ws = await _connect_with_fake(monkeypatch, bridge)
+        try:
+            sess._wire_room_id = 0
+            await _graceful_leave(sess, asyncio.Event(), timeout=0.01)
+            assert sess._stopping
+            await sess._inject(("pb.QuickStartREQ", {"boot": 10000}, 0), 777)
+            assert "pb.DelayLeaveRoomREQ" not in ws.sent_types()
+            assert "pb.QuickStartREQ" not in ws.sent_types()
+        finally:
+            await sess.close()
+    asyncio.run(run())
+
+
+def test_quickstart_injection_always_uses_lobby_header(monkeypatch):
+    async def run():
+        sess, ws = await _connect_with_fake(monkeypatch, _RecordingBridge())
+        try:
+            await sess._inject(("pb.QuickStartREQ", {"boot": 10000}, 0), 777)
+            assert ws.sent[-1][0:2] == ("pb.QuickStartREQ", 0)
+        finally:
+            await sess.close()
+    asyncio.run(run())
+
+
+async def _connect_with_fake(monkeypatch, bridge, login_code=0, *, auto_rewards=False):
     ws = _FakeWS()
 
     async def fake_connect(uri, **kwargs):
@@ -210,7 +173,7 @@ async def _connect_with_fake(monkeypatch, bridge, login_code=0):
 
     monkeypatch.setattr(hs.websockets, "connect", fake_connect)
     monkeypatch.setattr(hs, "HEARTBEAT_INTERVAL_SEC", 0.05)
-    sess = hs.HeadlessSession(_login_result(), bridge=bridge, chnl=5, client_version="1.7.0")
+    sess = hs.HeadlessSession(_login_result(), bridge=bridge, chnl=5, client_version="1.7.0", auto_rewards=auto_rewards)
     ws.push("pb.UserLoginRSP", {"code": login_code, "server_timestamp": 1})
     await sess.connect()
     return sess, ws
@@ -227,6 +190,10 @@ def test_session_login_handshake_and_bootstrap(monkeypatch):
             assert login[2] == {"uid": "42", "key": "rk", "ver": "1.7.0", "chnl": 5}
             assert ws.sent_types()[1:3] == ["pb.SelfUserInfoREQ", "pb.UserValueREQ"]
             # UserLoginRSP is in WATCH_S2C, so the bridge saw it too.
+            for _ in range(50):
+                if bridge.handled:
+                    break
+                await asyncio.sleep(0.01)
             assert bridge.handled[0][0] == "pb.UserLoginRSP"
         finally:
             await sess.close()
@@ -478,7 +445,7 @@ def test_bankroll_display_error_does_not_drop_bot_action(monkeypatch):
     asyncio.run(run())
 
 
-def test_headless_cli_web_follows_current_session_on_server_fallback(monkeypatch):
+def test_headless_cli_web_follows_current_session_on_server_fallback(monkeypatch, caplog):
     from types import SimpleNamespace
 
     from pf_entertainment import live_table
@@ -520,4 +487,88 @@ def test_headless_cli_web_follows_current_session_on_server_fallback(monkeypatch
     args = SimpleNamespace(no_notify=True, session_file="unused", profit_lock_bb=None,
                            no_web=False, web_host="127.0.0.1", web_port=9022, max_auto_rebuy=5)
     assert asyncio.run(cli._run(args)) == 2
+    assert "连接/登录失败" in caplog.text
+    assert "所有服务器登录失败" in caplog.text
     assert len(attempts) == 2 and attempts[0] is not attempts[1]
+
+
+def test_rewards_http_does_not_block_heartbeats_or_actions_and_notice_wakes_worker(monkeypatch, tmp_path):
+    import threading
+    from pf_intercept.headless.rewards import RewardService
+    from tests.test_headless_rewards import eventually, task_list
+
+    async def run():
+        entered, release = threading.Event(), threading.Event()
+        calls, credits = [], []
+        bridge = _RecordingBridge()
+        bridge.bankroll_dashboard = lambda: {"base_total_chips": 1000}
+        bridge.record_reward_credit = lambda chips, uncertain: credits.append((chips, uncertain))
+        bridge.set_reward_claim_inflight = lambda in_flight: None
+        bridge.injects["pb.ActionNotifyBRC"] = ("pb.ActionREQ", {"action_type": 3, "chips": 50}, 0.0)
+
+        def post(url, payload, **kwargs):
+            calls.append(url)
+            assert kwargs['token'] == 'a'  # saved WSS session, never legacy auth_token.txt
+            if url.endswith('/task/list'):
+                entered.set()
+                assert release.wait(2)
+                return task_list()
+            if url.endswith('/activity/rebate'):
+                return {"code": 0, "status": 1, "reward": 20}
+            return {"code": 0, "status": 1 if len(calls) == 3 else 0}
+
+        def create_service(**kwargs):
+            return RewardService(**kwargs, post=post, journal_path=tmp_path / 'rewards.jsonl')
+
+        monkeypatch.setattr(hs, 'RewardService', create_service)
+        sess, ws = await _connect_with_fake(monkeypatch, bridge, auto_rewards=True)
+        try:
+            await eventually(entered.is_set)
+            ws.push('pb.NoticeBRC', {'type': 10082, 'message': '{}'})
+            ws.push('pb.ActionNotifyBRC', {'seatid': 0, 'call_need_chips': 50}, room_id=777)
+            await eventually(lambda: any(t == 'pb.ActionREQ' for t, _, _ in ws.sent))
+            await asyncio.sleep(.16)
+            assert sess.connected
+            assert sess.stats.heartbeats_sent >= 2
+            assert sess.stats.heartbeats_missed == 0
+            assert not any(t == 'pb.NoticeBRC' for t, _ in bridge.handled)
+            release.set()
+            await eventually(lambda: credits == [(20, False)])
+            assert any(url.endswith('/activity/rebate') for url in calls)
+        finally:
+            release.set()
+            await sess.close()
+
+    asyncio.run(run())
+
+
+def test_reward_wallet_refresh_matches_post_claim_request(monkeypatch):
+    from pf_intercept.bot import BotBridge
+    from tests.test_headless_rewards import eventually
+
+    async def run():
+        bridge = BotBridge()
+        sess, ws = await _connect_with_fake(monkeypatch, bridge)
+        try:
+            await eventually(lambda: len(sess._wallet_requests) == 2)
+            for _ in range(2):
+                ws.push('pb.UserValueRSP', {'type': 10100001, 'value': 1000})
+            await eventually(lambda: sess.bankroll_dashboard()['base_total_chips'] == 1000 and not sess._wallet_requests)
+            await sess.send('pb.UserValueREQ', {'type': 10100001})
+            await sess._on_reward_claim_state(True)
+            # This wallet update can beat the HTTP success response. The claim
+            # guard must hide apparent winnings before its amount is known.
+            ws.push('pb.UserValueRSP', {'type': 10100001, 'value': 1100})
+            await eventually(lambda: sess.bankroll_dashboard()['wallet_chips'] == 1100)
+            assert sess.bankroll_dashboard()['session_delta_chips'] is None
+            await sess._on_reward_credit(100, False)
+            await sess._on_reward_claim_state(False)
+            assert sess.bankroll_dashboard()['session_delta_chips'] is None
+            ws.push('pb.UserValueRSP', {'type': 10100001, 'value': 1130})
+            await eventually(lambda: sess.bankroll_dashboard()['session_delta_chips'] == 30)
+            assert sess.bankroll_dashboard()['reward_chips'] == 100
+            assert not sess.bankroll_dashboard()['rewards_pending']
+        finally:
+            await sess.close()
+
+    asyncio.run(run())

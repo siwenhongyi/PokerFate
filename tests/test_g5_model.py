@@ -1,7 +1,80 @@
 from pathlib import Path
+import threading
 
 from pokerfate.core.game_state import Action, ActionType
 from pokerfate.decision.g5_model import G5ActionModel, stable_player_name
+
+
+def test_background_checkpoint_is_frozen_coalesced_and_flushed(tmp_path, monkeypatch):
+    model = G5ActionModel()
+    a = model.get_or_create("uid:1")
+    b = model.get_or_create("uid:2")
+    a.vpip_total = 1
+    entered, release = threading.Event(), threading.Event()
+    writes = []
+    original = model._write_checkpoint
+
+    def blocked_write(path, header, players):
+        writes.append(players)
+        entered.set()
+        assert release.wait(5)
+        original(path, header, players)
+
+    monkeypatch.setattr(model, "_write_checkpoint", blocked_write)
+    path = tmp_path / "g5.json"
+    model.save_async(path)
+    try:
+        assert entered.wait(2)
+        a.vpip_total = 2
+        model.save_async(path, player_names=["uid:1"])
+        b.vpip_positive = 3
+        b.preflop[9].br = 7
+        model.save_async(path, player_names=["uid:2"])
+        # A later mutation must not leak into the accepted snapshot.
+        a.vpip_total = 999
+        assert len(writes) == 1
+    finally:
+        release.set()
+        model.close_writer()
+    loaded = G5ActionModel.load(path)
+    assert len(writes) == 2
+    assert loaded.players["uid:1"].vpip_total == 2
+    assert loaded.players["uid:2"].vpip_positive == 3
+    assert loaded.players["uid:2"].preflop[9].br == 7
+
+
+def test_background_update_does_not_reserialize_unchanged_players(tmp_path, monkeypatch):
+    path = tmp_path / "g5.json"
+    original = G5ActionModel()
+    original.get_or_create("uid:1").vpip_total = 20
+    original.get_or_create("uid:2").vpip_total = 40
+    original.save(path)
+    loaded = G5ActionModel.load(path, prepare_save_cache=True)
+    def unexpected():
+        raise AssertionError("unchanged historical player serialized in live handler")
+    monkeypatch.setattr(loaded.players["uid:2"], "to_json", unexpected)
+    loaded.players["uid:1"].vpip_total = 21
+    loaded.save_async(path, player_names=["uid:1"])
+    loaded.close_writer()
+    saved = G5ActionModel.load(path)
+    assert saved.players["uid:1"].vpip_total == 21
+    assert saved.players["uid:2"].vpip_total == 40
+
+
+def test_background_checkpoint_failure_keeps_previous_file(tmp_path, monkeypatch):
+    path = tmp_path / "g5.json"
+    model = G5ActionModel()
+    model.get_or_create("uid:1").vpip_total = 20
+    model.save(path)
+    before = path.read_bytes()
+    def fail(*args):
+        raise OSError("test disk failure")
+    errors = []
+    monkeypatch.setattr(model, "_write_checkpoint", fail)
+    model.save_async(path, on_saved=lambda error, ms: errors.append(error))
+    model.close_writer()
+    assert errors == ["test disk failure"]
+    assert path.read_bytes() == before
 
 
 def _players():

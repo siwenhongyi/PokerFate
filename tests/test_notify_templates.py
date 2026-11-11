@@ -1,6 +1,15 @@
 from pf_notify.templates import format_bark_message, format_bark_options
 
 
+def test_gamedata_messages_separate_auth_failure_from_empty_history():
+    title, body, _ = format_bark_message("gamedata_auth_failed", {})
+    assert "登录态失效" in title and "code=-2" in body
+    title, body, _ = format_bark_message("gamedata_no_history", {"name": "Villain"})
+    assert title == "玩家 · 暂无历史统计"
+    assert "查询成功" in body and "Villain" in body
+    assert "code=-2" not in body and "小号" not in body and "激进" not in body
+
+
 def test_hand_swing_includes_start_chips_bb_note() -> None:
     title, body, _ = format_bark_message(
         "hand_swing",

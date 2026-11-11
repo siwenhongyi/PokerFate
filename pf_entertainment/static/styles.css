@@ -62,6 +62,16 @@
       margin-bottom: 16px;
     }
     .status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted); }
+    .viewer-login { max-width: 420px; margin: 10vh auto 0; }
+    .viewer-login section { padding: 24px; }
+    .viewer-login form { grid-template-columns: 1fr; gap: 16px; margin-top: 24px; }
+    .viewer-login input:not([type="checkbox"]) { width: 100%; height: 44px; font-size: 16px; }
+    .viewer-login button { height: 44px; }
+    .viewer-login [role="alert"] { margin: 0; color: var(--danger); }
+    .viewer-remember { display: flex; align-items: center; gap: 8px; }
+    .viewer-remember input { margin: 0; }
+    .status form { display: block; }
+    .status .viewer-logout { color: var(--muted); background: transparent; padding: 0 6px; }
     .dot { width: 9px; height: 9px; border-radius: 50%; background: #a0a7b4; display: inline-block; }
     .dot.on { background: var(--ok); }
     .dot.run { background: var(--brand); }
@@ -320,6 +330,7 @@
     .live-seat.me { border-color: #ffd166; box-shadow: 0 0 0 2px rgba(255,209,102,.5); }
     .live-seat.acting { box-shadow: 0 0 0 3px #46c7ff, 0 0 16px rgba(70,199,255,.6); }
     .live-seat.folded { opacity: .42; }
+    .live-seat.revealed { border-color: #ffe1a3; }
     .live-seat .s-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .live-seat .s-stack { color: #9fe0b8; font-variant-numeric: tabular-nums; }
     .live-seat .s-tags { display: flex; gap: 5px; align-items: center; margin-top: 2px; flex-wrap: wrap; }
@@ -338,6 +349,34 @@
     .live-feed ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
     .live-feed li { font-size: 12px; padding: 3px 6px; border-radius: 6px; background: #f4f6f9; color: #2b3542; }
     .live-feed li.win { background: #fff6df; color: #8a5a00; font-weight: 600; }
+    .live-feed { grid-column: 2; grid-row: 1 / span 2; }
+    .live-settlement { grid-column: 1; grid-row: 2; min-width: 0; border: 1px solid #e4d5ad;
+      border-radius: 12px; padding: 14px; background: #fffcf3; }
+    .live-settlement[hidden] { display: none; }
+    .showdown-heading { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .showdown-heading strong { font-size: 15px; }
+    .showdown-heading > span { font-size: 12px; color: #826523; }
+    .showdown-board, .showdown-hole { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px; color: #67707b; }
+    .showdown-board { margin-bottom: 10px; }
+    .showdown-board .card, .showdown-hole .card { font-size: 12px; min-width: 22px; height: 27px; padding: 0 3px; }
+    .showdown-row { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 8px; padding: 12px 0; border-top: 1px solid #e9dfc8; }
+    .showdown-label { font-size: 14px; font-weight: 700; color: #8a6421; padding-top: 2px; }
+    .showdown-player + .showdown-player { margin-top: 14px; }
+    .showdown-player-name { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; margin-bottom: 7px; }
+    .showdown-player-name b { font-size: 17px; color: #293c48; }
+    .showdown-best { display: flex; gap: 7px; margin: 6px 0 10px; align-items: center; min-height: 48px; }
+    .showdown-best .card { min-width: 34px; height: 48px; padding: 0 5px; font-size: 21px; box-shadow: 0 2px 4px #18232814; }
+    .showdown-card.from-hole .card { border: 2px solid #c49727; background: #fff5ce; }
+    .showdown-folded { border-radius: 5px; background: #eceef1; color: #5f6872; padding: 2px 6px; margin-left: 4px; }
+    .showdown-note { font-size: 11px; color: #757b82; margin-top: 7px; line-height: 1.5; }
+    .showdown-reveals { display: flex; flex-wrap: wrap; gap: 14px 20px; padding: 8px 0; }
+    .showdown-reveal { font-size: 12px; min-width: 84px; }
+    .showdown-reveal > span { display: block; margin-bottom: 5px; }
+    .showdown-reveal > div { display: flex; gap: 4px; }
+    .showdown-reveal .card { font-size: 19px; min-width: 30px; height: 42px; }
+    .showdown-reveals.small { border-top: 1px solid #e9dfc8; margin-top: 6px; }
+    .showdown-reveals.small .card { font-size: 12px; min-width: 22px; height: 27px; padding: 0 3px; }
+    .card.unknown { color: #8294b0; background: #e9eef5; }
     /* compact (narrow / phone) table: smaller seat boxes so names stay visible */
     .live-felt.compact .live-seat { padding: 5px 6px; font-size: 11px; border-radius: 8px; }
     .live-felt.compact .live-seat .s-name { font-size: 11px; }
@@ -352,9 +391,14 @@
       .live-wrap { grid-template-columns: 1fr; }
       .live-felt { min-height: 520px; border-radius: 120px; border-width: 8px; }
       .live-feed { max-height: 180px; }
+      .live-feed { grid-column: 1; grid-row: 3; }
     }
     @media (max-width: 480px) {
       .live-felt { min-height: 500px; border-radius: 90px; }
       .live-head { gap: 10px 14px; font-size: 12px; }
+      .live-settlement { padding: 10px; }
+      .showdown-row { grid-template-columns: 30px minmax(0, 1fr); gap: 4px; }
+      .showdown-best { gap: 4px; }
+      .showdown-best .card { min-width: 28px; height: 44px; padding: 0 3px; font-size: 18px; }
     }
   

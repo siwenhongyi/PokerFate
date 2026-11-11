@@ -11,16 +11,6 @@ from pokerfate.strategy.range_v2.hero_eq_calibrator import (
 )
 
 
-@pytest.fixture(autouse=True)
-def _disable_runtime_models(monkeypatch):
-    monkeypatch.setattr(heq, "_load_runtime_equity_params", lambda: None)
-    monkeypatch.setattr(
-        heq,
-        "calibrate_equity",
-        lambda raw_eq, **_kwargs: (raw_eq, {"mode": "off", "used": False}),
-    )
-
-
 def _shrunk_shift(raw_bias: float, n: int) -> float:
     clamped = max(-0.25, min(0.25, raw_bias))
     return clamped * n / (n + _BIAS_SHRINK_K)
@@ -89,22 +79,6 @@ class TestHeroEquityCalibrator:
         assert cal.calibrate(0.50, 'strong', 'flop', 2) == 0.50
         # Matching key — shifts up
         assert cal.calibrate(0.50, 'medium', 'flop', 2) > 0.50
-
-    def test_runtime_params_prefer_exact_num_opponent_key(self, monkeypatch):
-        monkeypatch.setattr(
-            heq,
-            '_load_runtime_equity_params',
-            lambda: {
-                'turn|medium|3+|passive': {'type': 'bias', 'bias': 0.03},
-                'turn|medium|4|*': {'type': 'bias', 'bias': 0.06},
-                'turn|medium|4|passive': {'type': 'bias', 'bias': 0.08},
-            },
-        )
-        cal = HeroEquityCalibrator()
-        assert cal.calibrate(0.50, 'medium', 'turn', 4, action_ctx='passive') == 0.58
-        assert cal.calibrate(0.50, 'medium', 'turn', 4, action_ctx='raise') == 0.56
-        assert cal.calibrate(0.50, 'medium', 'turn', 5, action_ctx='passive') == 0.53
-
 
     def test_invalid_input_ignored(self):
         cal = HeroEquityCalibrator()

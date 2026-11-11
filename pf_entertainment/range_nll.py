@@ -7,10 +7,6 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
-from pokerfate.strategy.range_v2.cec_calibration import (
-    calibrate_bucket_dist,
-    row_context,
-)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,7 +25,6 @@ def range_nll_payload(
     by_bucket: dict[str, dict[str, Any]] = {}
     by_player: dict[str, dict[str, Any]] = {}
     bucket_cal = _new_bucket_calibration()
-    cec_integration = _new_cec_integration()
     improved_examples: list[dict[str, Any]] = []
     worse_examples: list[dict[str, Any]] = []
 
@@ -51,7 +46,6 @@ def range_nll_payload(
                     continue
                 rows += 1
                 _add_bucket_calibration(bucket_cal, row)
-                _add_cec_integration(cec_integration, row, runtime_root=root)
                 item = _nll_item(row, path=path, line_no=line_no)
                 if item is None:
                     skipped += 1
@@ -100,7 +94,6 @@ def range_nll_payload(
         "by_category": _finalized_table(by_bucket, min_count=1, limit=18),
         "by_player": _finalized_table(by_player, min_count=2, limit=18),
         "calibration": calibration,
-        "cec_integration": _finalize_cec_integration(cec_integration),
         "examples": {
             "improved": sorted(
                 improved_examples, key=lambda x: x["delta_nll"], reverse=True,
@@ -546,289 +539,6 @@ def _bias_label(value: float | None) -> str:
     if value < -0.03:
         return "underconfident"
     return "ok"
-
-
-def _new_cec_integration() -> dict[str, Any]:
-    return {
-        "overall": _new_cec_acc(),
-        "groups": {
-            "by_street": {},
-            "by_action": {},
-            "by_size": {},
-            "by_line": {},
-        },
-        "improved_examples": [],
-        "worse_examples": [],
-    }
-
-
-def _new_cec_acc() -> dict[str, Any]:
-    return {
-        "count": 0,
-        "improved": 0,
-        "worse": 0,
-        "tie": 0,
-        "raw_prob_sum": 0.0,
-        "cec_prob_sum": 0.0,
-        "raw_nll_sum": 0.0,
-        "cec_nll_sum": 0.0,
-        "raw_brier_sum": 0.0,
-        "cec_brier_sum": 0.0,
-        "raw_top_hits": 0,
-        "cec_top_hits": 0,
-        "reliability_sum": 0.0,
-        "raw_cal": _new_cal_acc(),
-        "cec_cal": _new_cal_acc(),
-    }
-
-
-def _add_cec_integration(
-    acc: dict[str, Any],
-    row: dict[str, Any],
-    *,
-    runtime_root: Path,
-) -> None:
-    trigger = str(row.get("trigger") or "")
-    if trigger == "reset":
-        return
-    actual = str(row.get("actual_bucket") or "")
-    raw = _normalize_dist(row.get("bucket_dist"))
-    if actual not in BUCKET_ORDER or not raw:
-        return
-    cec, diag = calibrate_bucket_dist(
-        raw,
-        context=row_context(row),
-        runtime_root=runtime_root,
-    )
-    if not cec:
-        return
-
-    targets = [acc["overall"]]
-    keys = _calibration_group_keys(row)
-    groups = acc.get("groups") if isinstance(acc.get("groups"), dict) else {}
-    for group_name, key in keys.items():
-        if group_name not in groups:
-            continue
-        targets.append(groups[group_name].setdefault(key, _new_cec_acc()))
-    for target in targets:
-        _add_cec_acc_row(target, raw, cec, actual, diag)
-
-    item = {
-        "hand_id": str(row.get("hand") or row.get("hand_id") or ""),
-        "street": str(row.get("street") or ""),
-        "trigger": trigger,
-        "player": str(row.get("player_name") or row.get("player_uid") or ""),
-        "actual_bucket": actual,
-        "raw_prob": float(raw.get(actual, 0.0)),
-        "cec_prob": float(cec.get(actual, 0.0)),
-        "delta_prob": float(cec.get(actual, 0.0)) - float(raw.get(actual, 0.0)),
-        "cec": {
-            "level": diag.get("level"),
-            "key": diag.get("key"),
-            "rows": diag.get("rows"),
-            "ece": diag.get("ece"),
-            "raw_reliability": diag.get("raw_reliability"),
-        },
-    }
-    if item["delta_prob"] > 0:
-        _push_cec_example(acc["improved_examples"], item, reverse=True)
-    elif item["delta_prob"] < 0:
-        _push_cec_example(acc["worse_examples"], item, reverse=False)
-
-
-def _add_cec_acc_row(
-    acc: dict[str, Any],
-    raw: dict[str, float],
-    cec: dict[str, float],
-    actual: str,
-    diag: dict[str, Any],
-) -> None:
-    raw_prob = max(float(raw.get(actual, 0.0)), 1e-12)
-    cec_prob = max(float(cec.get(actual, 0.0)), 1e-12)
-    acc["count"] += 1
-    if cec_prob > raw_prob + 1e-12:
-        acc["improved"] += 1
-    elif cec_prob < raw_prob - 1e-12:
-        acc["worse"] += 1
-    else:
-        acc["tie"] += 1
-    acc["raw_prob_sum"] += raw_prob
-    acc["cec_prob_sum"] += cec_prob
-    acc["raw_nll_sum"] += -math.log(raw_prob)
-    acc["cec_nll_sum"] += -math.log(cec_prob)
-    acc["raw_brier_sum"] += _brier(raw, actual)
-    acc["cec_brier_sum"] += _brier(cec, actual)
-    if max(raw.items(), key=lambda item: item[1])[0] == actual:
-        acc["raw_top_hits"] += 1
-    if max(cec.items(), key=lambda item: item[1])[0] == actual:
-        acc["cec_top_hits"] += 1
-    acc["reliability_sum"] += _float(diag.get("raw_reliability"), DEFAULT_CEC_RELIABILITY)
-    _add_cal_top(acc["raw_cal"], max(raw.items(), key=lambda item: item[1])[0] == actual)
-    _add_cal_top(acc["cec_cal"], max(cec.items(), key=lambda item: item[1])[0] == actual)
-    for bucket in BUCKET_ORDER:
-        target = 1.0 if bucket == actual else 0.0
-        _add_cal_point(acc["raw_cal"], float(raw.get(bucket, 0.0)), target)
-        _add_cal_point(acc["cec_cal"], float(cec.get(bucket, 0.0)), target)
-
-
-DEFAULT_CEC_RELIABILITY = 0.85
-
-
-def _finalize_cec_integration(acc: dict[str, Any]) -> dict[str, Any]:
-    groups = acc.get("groups") if isinstance(acc.get("groups"), dict) else {}
-    by_street = _finalize_cec_group(groups.get("by_street") or {}, limit=12)
-    by_action = _finalize_cec_group(groups.get("by_action") or {}, limit=12)
-    by_size = _finalize_cec_group(groups.get("by_size") or {}, limit=12)
-    by_line = _finalize_cec_group(groups.get("by_line") or {}, limit=24)
-    return {
-        "overall": _finalize_cec_acc(acc.get("overall") or {}),
-        "by_street": by_street,
-        "by_action": by_action,
-        "by_size": by_size,
-        "by_line": by_line,
-        "hotspots": sorted(
-            [
-                {**item, "source": source}
-                for source, rows in (
-                    ("street", by_street),
-                    ("action", by_action),
-                    ("size", by_size),
-                    ("line", by_line),
-                )
-                for item in rows
-            ],
-            key=lambda item: (
-                int(item.get("count") or 0) >= 30,
-                abs(float(item.get("nll_gain") or 0.0)),
-                abs(float(item.get("ece_gain") or 0.0)),
-                int(item.get("count") or 0),
-            ),
-            reverse=True,
-        )[:24],
-        "examples": {
-            "improved": sorted(
-                acc.get("improved_examples") or [],
-                key=lambda item: item["delta_prob"],
-                reverse=True,
-            )[:10],
-            "worse": sorted(
-                acc.get("worse_examples") or [],
-                key=lambda item: item["delta_prob"],
-            )[:10],
-        },
-    }
-
-
-def _finalize_cec_group(groups: dict[str, dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for key, raw in groups.items():
-        item = _finalize_cec_acc(raw)
-        if int(item.get("count") or 0) <= 0:
-            continue
-        item["key"] = str(key)
-        rows.append(item)
-    rows.sort(
-        key=lambda item: (
-            int(item.get("count") or 0),
-            abs(float(item.get("nll_gain") or 0.0)),
-            abs(float(item.get("ece_gain") or 0.0)),
-        ),
-        reverse=True,
-    )
-    return rows[:limit]
-
-
-def _finalize_cec_acc(acc: dict[str, Any]) -> dict[str, Any]:
-    count = int(acc.get("count", 0) or 0)
-    if count <= 0:
-        return {
-            "count": 0,
-            "improved": 0,
-            "worse": 0,
-            "tie": 0,
-            "avg_raw_prob": None,
-            "avg_cec_prob": None,
-            "avg_prob_delta": None,
-            "raw_nll": None,
-            "cec_nll": None,
-            "nll_gain": None,
-            "raw_ece": None,
-            "cec_ece": None,
-            "ece_gain": None,
-            "raw_top1": None,
-            "cec_top1": None,
-            "avg_reliability": None,
-            "winner": "none",
-        }
-    raw_cal = _finalize_cal_acc(acc.get("raw_cal") or {})
-    cec_cal = _finalize_cal_acc(acc.get("cec_cal") or {})
-    raw_nll = float(acc["raw_nll_sum"]) / count
-    cec_nll = float(acc["cec_nll_sum"]) / count
-    nll_gain = raw_nll - cec_nll
-    raw_ece = raw_cal.get("ece")
-    cec_ece = cec_cal.get("ece")
-    ece_gain = (
-        float(raw_ece) - float(cec_ece)
-        if raw_ece is not None and cec_ece is not None
-        else None
-    )
-    if nll_gain > 0.005:
-        winner = "cec"
-    elif nll_gain < -0.005:
-        winner = "raw"
-    else:
-        winner = "tie"
-    return {
-        "count": count,
-        "improved": int(acc["improved"]),
-        "worse": int(acc["worse"]),
-        "tie": int(acc["tie"]),
-        "avg_raw_prob": float(acc["raw_prob_sum"]) / count,
-        "avg_cec_prob": float(acc["cec_prob_sum"]) / count,
-        "avg_prob_delta": (float(acc["cec_prob_sum"]) - float(acc["raw_prob_sum"])) / count,
-        "raw_nll": raw_nll,
-        "cec_nll": cec_nll,
-        "nll_gain": nll_gain,
-        "raw_brier": float(acc["raw_brier_sum"]) / count,
-        "cec_brier": float(acc["cec_brier_sum"]) / count,
-        "raw_ece": raw_ece,
-        "cec_ece": cec_ece,
-        "ece_gain": ece_gain,
-        "raw_top1": float(acc["raw_top_hits"]) / count,
-        "cec_top1": float(acc["cec_top_hits"]) / count,
-        "avg_reliability": float(acc["reliability_sum"]) / count,
-        "positive_rate": float(acc["improved"]) / count,
-        "winner": winner,
-    }
-
-
-def _push_cec_example(
-    examples: list[dict[str, Any]],
-    item: dict[str, Any],
-    *,
-    reverse: bool,
-) -> None:
-    examples.append(item)
-    if len(examples) > 200:
-        examples.sort(key=lambda x: x["delta_prob"], reverse=reverse)
-        del examples[80:]
-
-
-def _brier(probs: dict[str, float], actual: str) -> float:
-    return sum(
-        (float(probs.get(bucket, 0.0)) - (1.0 if bucket == actual else 0.0)) ** 2
-        for bucket in BUCKET_ORDER
-    )
-
-
-def _normalize_dist(raw: Any) -> dict[str, float]:
-    if not isinstance(raw, dict):
-        return {}
-    out = {bucket: max(0.0, _float(raw.get(bucket), 0.0)) for bucket in BUCKET_ORDER}
-    total = sum(out.values())
-    if total <= 1e-12:
-        return {}
-    return {bucket: value / total for bucket, value in out.items()}
 
 
 def _conclusion(summary: dict[str, Any]) -> list[str]:

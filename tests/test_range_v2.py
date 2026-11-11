@@ -12,6 +12,7 @@ import itertools
 import math
 
 import numpy as np
+import pytest
 from pokerfate.api import ActionEvent, PlayerInfo, PokerFateAPI
 from pokerfate.core.card import Card
 from pokerfate.strategy.range_v2 import hand_categorizer as hcat
@@ -32,6 +33,17 @@ from pokerfate.strategy.range_v2.hand_combo_map import (
     STRENGTH_PCT,
     _CLASS_PCT,
 )
+
+
+@pytest.fixture(autouse=True)
+def _bucket_ml_off(monkeypatch):
+    """These tests pin down the formula tracker layers (prior, likelihood,
+    sequence corrections, runtime bucket params). The LightGBM bucket layer is
+    on by default since 2026-11-11 and has its own tests, so it is switched off
+    here to keep the expected numbers independent of the model file."""
+    from pokerfate.strategy.range_v2 import bucket_ml_calibration as bml
+    monkeypatch.setenv('PF_BUCKET_ML', 'off')
+    bml._CACHE.clear()
 
 
 def _h(*pairs):
@@ -267,42 +279,15 @@ class TestReweightForBoard:
         tracker.reset_hand(1, 'UTG', prof)
         return tracker
 
-    def test_paired_board_boosts_trips_combos(self):
-        """74o on 7h 7d 2c flop makes trips (nuts). A 7x combo that had
-        weight 0.03 preflop (outside UTG's tight VPIP) must be significantly
-        boosted — the whole point of reweight_for_board is that board-
-        relevant hands don't stay invisible just because the preflop prior
-        underweighted them.
-        """
+    def test_new_board_does_not_reweight_combos(self):
+        """2026-11-09: the nuts/strong weight floor was removed (it inflated
+        strong-hand mass on every street against revealed showdowns), so new
+        community cards leave the weight vector untouched."""
         tracker = self._make_tracker()
         board = self._cards('7h', '7d', '2c')
         before = tracker.get_distribution(1).copy()
         tracker.reweight_for_board(board)
-        after = tracker.get_distribution(1)
-
-        # 7s 4s: trips sevens — outside UTG open range, preflop weight 0.03.
-        seven_s = hcm.card_to_int(Card.from_str('7s'))
-        four_s = hcm.card_to_int(Card.from_str('4s'))
-        trips_idx = next(
-            i for i in range(1326)
-            if {hcm.ALL_COMBOS[i][0], hcm.ALL_COMBOS[i][1]} == {seven_s, four_s}
-        )
-        # Key invariant: the trips combo's weight grew SUBSTANTIALLY
-        # (at least 5× its preflop value) so it's no longer invisible.
-        assert after[trips_idx] > before[trips_idx] * 5.0, (
-            f"7s4s trips should be boosted, got {after[trips_idx]} "
-            f"from {before[trips_idx]} (ratio {after[trips_idx]/before[trips_idx]:.1f})"
-        )
-        # And its post-reweight weight should be meaningfully above the
-        # population average. Issue D/E: the floor multiplier scales from
-        # 1.5× (fish, wide reach) to ~2.85× (nit, narrow reach) — looser
-        # than the old flat 3× but still visible. Allow ≥ 1.1× avg after
-        # renormalization (boost sum widens the denominator slightly).
-        n_active = int((after > 1e-10).sum())
-        avg_w = 1.0 / max(1, n_active)
-        assert after[trips_idx] >= avg_w * 1.1, (
-            f"boosted trips should be above avg, got {after[trips_idx]} vs avg {avg_w}"
-        )
+        np.testing.assert_allclose(tracker.get_distribution(1), before)
 
     def test_reweight_preserves_distribution_sum(self):
         """After reweight the distribution must still sum to 1.0 (renorm)."""
@@ -675,78 +660,6 @@ class TestIsRaiseOverFirstBet:
         )
 
 
-class TestHighSignalBayesUpdate:
-    """方案 A: 河牌极强信号 (raise / >=0.75x 池) 时跳过 tempering + floor。
-
-    数据背景: 两个 console log 共 633 手，河牌跟注 24 手 -5.27M（avg -219k/手）；
-    其中 villain 坚果 35%+ 的 6 手 -2.41M、9/9 输时 eq>po 仍然亏。根因是
-    tempered α=0.3 + probability floor 让 "villain 绝不会这么下的空气 combo"
-    永远不真正归零，hero 对这些空气 eq ≈ 100%，被拉高 10-20 个百分点。
-    """
-
-    def _setup(self):
-        tracker = BayesianRangeTracker(ActionModel())
-        prof = PlayerProfile(hands_seen=50, vpip=0.30, pfr=0.20)
-        tracker.reset_hand(1, 'BTN', prof)
-        return tracker, prof
-
-    def test_high_signal_collapses_weaker_combos_more(self):
-        """相同输入下，high_signal=True 产生的后验熵应 <= high_signal=False。"""
-        board = [Card.from_str(c) for c in ['As', 'Kd', '7c', '2h', '3d']]
-        prof = PlayerProfile(hands_seen=50, vpip=0.30, pfr=0.20)
-        ctx = ActionContext(
-            position='BTN', board=board, street='river',
-            facing_action='raise', facing_cbet=False,
-            bet_ratio=1.5, is_raise_over=True,
-        )
-        tracker_lo = BayesianRangeTracker(ActionModel())
-        tracker_hi = BayesianRangeTracker(ActionModel())
-        tracker_lo.reset_hand(1, 'BTN', prof)
-        tracker_hi.reset_hand(1, 'BTN', prof)
-        tracker_lo.observe_action(1, 'raise', 'river', ctx, prof, board,
-                                   high_signal=False)
-        tracker_hi.observe_action(1, 'raise', 'river', ctx, prof, board,
-                                   high_signal=True)
-        ent_lo = tracker_lo.get_entropy(1)
-        ent_hi = tracker_hi.get_entropy(1)
-        assert ent_hi < ent_lo, (
-            f"high_signal 应让 range 更集中：tempered {ent_lo:.2f} vs "
-            f"standard {ent_hi:.2f}"
-        )
-
-    def test_high_signal_skips_probability_floor(self):
-        """high_signal=True 时，权重分布应更偏向头部（头 10% combo 占更高比例）。
-
-        floor 的效果：把极弱 combo 从 "几乎归零" 抬回 `1e-4/n_active`，让
-        非 0 权重有下限。high_signal 跳过 floor → 头部和底部差距拉大。
-        """
-        board = [Card.from_str(c) for c in ['As', 'Kd', '7c', '2h', '3d']]
-        prof = PlayerProfile(hands_seen=50, vpip=0.30, pfr=0.20)
-        ctx = ActionContext(
-            position='BTN', board=board, street='river',
-            facing_action='raise', facing_cbet=False,
-            bet_ratio=1.5, is_raise_over=True,
-        )
-        tracker_lo = BayesianRangeTracker(ActionModel())
-        tracker_hi = BayesianRangeTracker(ActionModel())
-        tracker_lo.reset_hand(1, 'BTN', prof)
-        tracker_hi.reset_hand(1, 'BTN', prof)
-        tracker_lo.observe_action(1, 'raise', 'river', ctx, prof, board,
-                                   high_signal=False)
-        tracker_hi.observe_action(1, 'raise', 'river', ctx, prof, board,
-                                   high_signal=True)
-        w_lo = tracker_lo.get_distribution(1)
-        w_hi = tracker_hi.get_distribution(1)
-        # Top-10% 组合占总权重的比例。high_signal 下头部应更突出。
-        n = len(w_lo)
-        top_k = max(n // 10, 1)
-        top_mass_lo = float(np.sort(w_lo)[::-1][:top_k].sum())
-        top_mass_hi = float(np.sort(w_hi)[::-1][:top_k].sum())
-        assert top_mass_hi > top_mass_lo, (
-            f"high_signal 下头部 combo 应占更大权重: "
-            f"tempered_top10%={top_mass_lo:.3f} vs standard_top10%={top_mass_hi:.3f}"
-        )
-
 class TestMultiwayEquity:
     """方案 D: 多人底池用 weighted_equity_multi（每对手自己 range）。
 
@@ -1018,263 +931,6 @@ class TestCallFlattenByMetrics:
         assert ratio < 5.0, (
             f"3 次 call 后 nuts/air 权重比应 < 5（修前~30×），实际 {ratio:.2f}"
         )
-
-
-class TestShowdownLearnerShrinkage:
-    """2026-04-23：showdown_learner 的 50/50 固定混合改为按样本量 shrinkage。
-
-    公式 `blend = n / (n + 50)`，保留 MIN_SAMPLES=8 作为最低门槛：
-    - n=8（门槛）：blend=14%，小样本噪声被压到最小
-    - n=50：blend=50%，中等样本权重相当于旧版固定 50%
-    - n=500：blend=91%，大样本时 learned_freq 主导
-    """
-
-    def _setup(self, cat_count_nuts: int, cat_count_air: int):
-        """Build a showdown learner with specific per-cat counts, plus a
-        matching opponent profile that has some hands observed."""
-        from pokerfate.strategy.range_v2.showdown_learner import ShowdownLearner
-        learner = ShowdownLearner()
-        # Directly seed the internal dict so we can control exact sample counts.
-        # Format: _freq[name][(street, action)][cat] = count
-        learner._freq['TestPlayer'] = {
-            ('flop', 'call'): {'nuts': cat_count_nuts, 'air': cat_count_air},
-        }
-        model = ActionModel(showdown_learner=learner)
-        prof = PlayerProfile(
-            name='TestPlayer', hands_seen=80,
-            vpip=0.30, pfr=0.20, af=2.0, wtsd=0.25,
-        )
-        board = [Card.from_str(c) for c in ['5h', '8d', 'Kc']]
-        ctx = ActionContext(
-            position='CO', board=board, street='flop', facing_action='bet',
-        )
-        return model, prof, ctx, board
-
-    def _get_sample_nuts_likelihood(self, model, prof, ctx, board):
-        """Return mean likelihood for nuts-bucket combos via batch_likelihood."""
-        like = model.batch_likelihood('call', 'flop', ctx, prof, board)
-        cats = model._categorize_all(board)
-        nuts_idx = [i for i in range(1326) if cats[i] == 'nuts']
-        return float(like[nuts_idx].mean())
-
-    def test_learner_below_min_samples_not_applied(self):
-        """n<8（_MIN_SAMPLES）时 get_learned_freq 返回 None，blend 跳过，
-        结果完全等于不用 learner。"""
-        from pokerfate.strategy.range_v2.showdown_learner import ShowdownLearner
-        model_with_learner, prof, ctx, board = self._setup(
-            cat_count_nuts=3, cat_count_air=2   # total n=5 < 8
-        )
-        like_with = self._get_sample_nuts_likelihood(model_with_learner, prof, ctx, board)
-
-        # Reference model with no learner at all
-        model_no_learner = ActionModel(showdown_learner=None)
-        like_no = self._get_sample_nuts_likelihood(model_no_learner, prof, ctx, board)
-
-        assert abs(like_with - like_no) < 1e-6, (
-            f"n<8 应完全不生效，with={like_with} no={like_no}"
-        )
-
-    def test_learner_low_samples_small_weight(self):
-        """n=8（刚过门槛）时 blend≈14%，learned_freq 对结果影响应很小。"""
-        # 学习器记的是 nuts 100%（8 次 call 全是 nuts）——极端值，考验 blend 压制
-        model_learner, prof, ctx, board = self._setup(
-            cat_count_nuts=8, cat_count_air=0
-        )
-        model_no = ActionModel(showdown_learner=None)
-        like_learner = self._get_sample_nuts_likelihood(model_learner, prof, ctx, board)
-        like_no = self._get_sample_nuts_likelihood(model_no, prof, ctx, board)
-        # 极端 learned_freq[nuts]=1.0 clip→0.99；blend=8/58≈0.138
-        # 如果旧版 0.5 固定，like_learner 会被拉到接近 0.5 * 0.99 + 0.5 * like_no
-        # 新版应只被拉到 0.138 * 0.99 + 0.862 * like_no
-        pulled_old = 0.5 * 0.99 + 0.5 * like_no
-        pulled_new = 0.138 * 0.99 + 0.862 * like_no
-        # 实际值应接近 pulled_new，远离 pulled_old
-        assert abs(like_learner - pulled_new) < 0.02, (
-            f"n=8 应用新 shrinkage 权重 0.14，预期接近 {pulled_new:.3f}，实际 {like_learner:.3f}"
-        )
-        # 对比之下旧版 0.5 固定会差得多
-        assert abs(like_learner - pulled_old) > 0.1, (
-            f"新版不应靠近旧版 0.5 固定的结果 {pulled_old:.3f}，实际 {like_learner:.3f}"
-        )
-
-    def test_learner_large_samples_high_weight(self):
-        """n=500 时 blend≈91%，learned_freq 应主导结果。"""
-        model_learner, prof, ctx, board = self._setup(
-            cat_count_nuts=500, cat_count_air=0
-        )
-        model_no = ActionModel(showdown_learner=None)
-        like_learner = self._get_sample_nuts_likelihood(model_learner, prof, ctx, board)
-        like_no = self._get_sample_nuts_likelihood(model_no, prof, ctx, board)
-        # blend = 500/550 ≈ 0.909
-        # learned_freq[nuts] = 500/500 = 1.0 → clip 0.99
-        pulled_new = 0.909 * 0.99 + 0.091 * like_no
-        assert abs(like_learner - pulled_new) < 0.02, (
-            f"n=500 应用权重 0.91，预期 {pulled_new:.3f}，实际 {like_learner:.3f}"
-        )
-
-    def test_blend_monotonic_with_samples(self):
-        """样本数越多，learned_freq 权重越大（极端 learned_freq 与 baseline 的
-        拉开幅度随 n 单调增加）。"""
-        model_no = ActionModel(showdown_learner=None)
-        board = [Card.from_str(c) for c in ['5h', '8d', 'Kc']]
-        prof = PlayerProfile(
-            name='P', hands_seen=80,
-            vpip=0.30, pfr=0.20, af=2.0, wtsd=0.25,
-        )
-        ctx = ActionContext(
-            position='CO', board=board, street='flop', facing_action='bet',
-        )
-        like_no = self._get_sample_nuts_likelihood(model_no, prof, ctx, board)
-
-        distances = []
-        for n in (10, 50, 200, 1000):
-            model_l, prof_l, ctx_l, board_l = self._setup(
-                cat_count_nuts=n, cat_count_air=0
-            )
-            like = self._get_sample_nuts_likelihood(model_l, prof_l, ctx_l, board_l)
-            distances.append((n, abs(like - like_no)))
-
-        # 距离单调递增：样本越多，离 baseline 越远
-        for i in range(len(distances) - 1):
-            assert distances[i][1] < distances[i+1][1], (
-                f"样本量 {distances[i][0]}→{distances[i+1][0]} 时距离应递增，"
-                f"实际 {distances[i][1]:.4f} → {distances[i+1][1]:.4f}"
-            )
-
-
-class TestShowdownLearnerBayesDirection:
-    """2026-04-23：验证 get_learned_freq 返回的是 P(action | cat) 而非 P(cat | action)。
-
-    这两个条件概率通过贝叶斯公式联系：
-        P(action | cat) = P(cat | action) × P(action) / P(cat)
-    数值**不相等**，是两个不同的分布。旧版返回后者（按 cat 归一化，同 action
-    下各 cat 值加和为 1），新版返回前者（按 action 归一化，同 cat 下各 action
-    值加和为 1）。
-
-    用多动作多桶的 setup（单一动作下两种语义数值恰好相同，测不出区别）。
-    """
-
-    def test_returns_p_action_given_cat(self):
-        """验证 P(action | cat) 计算正确。
-
-        场景：Bob 在 flop 摊牌记录：
-          - call with nuts: 8 次
-          - raise with nuts: 2 次     → nuts 总计 10 次
-          - call with air:  3 次
-          - raise with air: 7 次      → air 总计 10 次
-
-        P(call | nuts) = 8 / 10 = 0.80
-        P(call | air)  = 3 / 10 = 0.30
-        """
-        from pokerfate.strategy.range_v2.showdown_learner import ShowdownLearner
-        learner = ShowdownLearner()
-        learner._freq['Bob'] = {
-            ('flop', 'call'):  {'nuts': 8, 'air': 3},
-            ('flop', 'raise'): {'nuts': 2, 'air': 7},
-        }
-        freq = learner.get_learned_freq('Bob', 'flop', 'call')
-        assert freq is not None
-        assert abs(freq['nuts'] - 0.80) < 1e-6, f"P(call|nuts) expected 0.80, got {freq['nuts']}"
-        assert abs(freq['air']  - 0.30) < 1e-6, f"P(call|air)  expected 0.30, got {freq['air']}"
-
-    def test_returns_raise_distribution_from_same_data(self):
-        """同一份数据查 'raise' 应得 P(raise | cat)：nuts 2/10=0.20, air 7/10=0.70."""
-        from pokerfate.strategy.range_v2.showdown_learner import ShowdownLearner
-        learner = ShowdownLearner()
-        learner._freq['Bob'] = {
-            ('flop', 'call'):  {'nuts': 8, 'air': 3},
-            ('flop', 'raise'): {'nuts': 2, 'air': 7},
-        }
-        freq = learner.get_learned_freq('Bob', 'flop', 'raise')
-        assert freq is not None
-        assert abs(freq['nuts'] - 0.20) < 1e-6, f"P(raise|nuts) expected 0.20, got {freq['nuts']}"
-        assert abs(freq['air']  - 0.70) < 1e-6, f"P(raise|air)  expected 0.70, got {freq['air']}"
-
-    def test_per_cat_sums_to_1_across_actions(self):
-        """同一个 cat 对所有 action 的 P(action|cat) 加和 = 1（因为条件在 cat 上）。"""
-        from pokerfate.strategy.range_v2.showdown_learner import ShowdownLearner
-        learner = ShowdownLearner()
-        learner._freq['Bob'] = {
-            ('flop', 'call'):  {'nuts': 8, 'air': 3},
-            ('flop', 'raise'): {'nuts': 2, 'air': 7},
-            ('flop', 'check'): {'nuts': 0, 'air': 0},  # 0 counts still represented
-        }
-        f_call  = learner.get_learned_freq('Bob', 'flop', 'call')
-        f_raise = learner.get_learned_freq('Bob', 'flop', 'raise')
-        # 分桶求和：同 cat 上各 action 概率加起来 = 1
-        for cat in ('nuts', 'air'):
-            total = f_call[cat] + f_raise[cat]
-            assert abs(total - 1.0) < 1e-6, (
-                f"P(call|{cat}) + P(raise|{cat}) = {total}, 应为 1"
-            )
-
-    def test_differs_from_old_p_cat_given_action(self):
-        """反向验证：新语义数值和旧 P(cat|action) 的数值明显不同。
-
-        旧语义 P(cat | call) 下：
-          P(nuts | call) = 8 / (8+3) = 0.727
-          P(air  | call) = 3 / (8+3) = 0.273
-        新语义 P(call | cat) 下：
-          P(call | nuts) = 8 / 10 = 0.80
-          P(call | air)  = 3 / 10 = 0.30
-        两者数值在同一数据上差异明显。
-        """
-        from pokerfate.strategy.range_v2.showdown_learner import ShowdownLearner
-        learner = ShowdownLearner()
-        learner._freq['Bob'] = {
-            ('flop', 'call'):  {'nuts': 8, 'air': 3},
-            ('flop', 'raise'): {'nuts': 2, 'air': 7},
-        }
-        freq = learner.get_learned_freq('Bob', 'flop', 'call')
-        # 旧语义下 nuts=0.727，新语义 0.80；差 0.07 足以区分
-        assert freq['nuts'] > 0.75, f"新语义 P(call|nuts) 应 > 0.75（旧 P(nuts|call)=0.727）"
-        # 新语义下 nuts+air 不加起来为 1（那是旧语义）
-        assert abs(freq['nuts'] + freq['air'] - 1.0) > 0.1, (
-            "新语义 P(action|cat) 的 nuts+air 不应加和为 1（那是旧 P(cat|action) 的性质）"
-        )
-
-    def test_missing_cat_not_in_result(self):
-        """某 cat 没样本时，不出现在返回 dict 里。调用方用 .get(cat, fallback)。"""
-        from pokerfate.strategy.range_v2.showdown_learner import ShowdownLearner
-        learner = ShowdownLearner()
-        learner._freq['Bob'] = {
-            ('flop', 'call'): {'nuts': 8},   # 只有 nuts 有数据
-        }
-        freq = learner.get_learned_freq('Bob', 'flop', 'call')
-        assert freq is not None
-        assert 'nuts' in freq
-        assert 'air' not in freq, "无样本的 cat 不应出现在 result"
-        # P(call | nuts) = 8/8 = 1.0（nuts 只被 call 消耗过）
-        assert abs(freq['nuts'] - 1.0) < 1e-6
-
-    def test_min_samples_gate_unchanged(self):
-        """门槛仍按 (street, action) 总观察数，和旧版兼容（让 shrinkage 计算不受影响）。"""
-        from pokerfate.strategy.range_v2.showdown_learner import ShowdownLearner
-        learner = ShowdownLearner()
-        # (flop, call) 总样本 < 8，即使别的 action 样本多，这里也返回 None
-        learner._freq['Bob'] = {
-            ('flop', 'call'):  {'nuts': 3},      # 总计 3 < 8
-            ('flop', 'raise'): {'nuts': 100},    # 其他 action 很多也没用
-        }
-        assert learner.get_learned_freq('Bob', 'flop', 'call') is None
-        # 反过来：query raise 时 (flop, raise) 有 100 样本，返回 dict
-        assert learner.get_learned_freq('Bob', 'flop', 'raise') is not None
-
-    def test_sample_count_unchanged(self):
-        """sample_count 语义保持：query (street, action) 的总观察数（跨 cat 求和）。
-
-        poker_bot.py:484 的 use_calibration 判据依赖这个语义。
-        """
-        from pokerfate.strategy.range_v2.showdown_learner import ShowdownLearner
-        learner = ShowdownLearner()
-        learner._freq['Bob'] = {
-            ('flop', 'call'):  {'nuts': 8, 'air': 3},
-            ('flop', 'raise'): {'nuts': 2, 'air': 7},
-        }
-        assert learner.sample_count('Bob', 'flop', 'call') == 11
-        assert learner.sample_count('Bob', 'flop', 'raise') == 9
-        assert learner.sample_count('Bob', 'flop', 'fold') == 0   # never recorded
-        assert learner.sample_count('Unknown', 'flop', 'call') == 0
 
 
 class TestAntiConcentrationRegularization:
@@ -1659,30 +1315,6 @@ class TestBucketPosteriorCalibration:
         w /= w.sum()
         tracker._weights[player_id] = w
 
-    def test_flop_raise_over_calibration_moves_strong_up_air_down(self, monkeypatch):
-        # Exercise the built-in table, not the retrained runtime params on disk.
-        monkeypatch.setattr(
-            "pokerfate.strategy.range_v2.bayesian_range_tracker._load_runtime_bucket_calibration",
-            lambda: None,
-        )
-        tracker = BayesianRangeTracker(ActionModel())
-        board = [Card.from_str(c) for c in ['Qh', 'Jd', '7c']]
-        self._seed_bucket_weights(
-            tracker, 1, board,
-            {
-                'nuts': 0.08, 'strong': 0.12, 'medium': 0.25,
-                'draw': 0.12, 'weak_draw': 0.08, 'air': 0.35,
-            },
-        )
-        before = tracker.get_bucket_distribution(1, board)
-        tracker._apply_bucket_calibration(1, 'flop', board, 'action:raise_over')
-        after = tracker.get_bucket_distribution(1, board)
-
-        assert after['strong'] > before['strong']
-        assert after['medium'] > before['medium']
-        assert after['air'] < before['air']
-        assert abs(sum(after.values()) - 1.0) < 1e-9
-
     def test_fold_other_has_no_bucket_side_effect(self):
         tracker = BayesianRangeTracker(ActionModel())
         board = [Card.from_str(c) for c in ['Qh', 'Jd', '7c']]
@@ -1733,3 +1365,85 @@ def test_board_full_house_quads_straight_flush_not_nuts():
     assert categorize_cards(_cards('As', '2d'), _cards('3s', '6s', '7s', 'Ts', 'Js')) == 'nuts'
     # Board quads: kicker only.
     assert categorize_cards(_cards('Kh', '2d'), _cards('6d', '6c', '6h', '6s', 'Jc')) == 'air'
+
+
+def test_fast_categorizer_matches_reference_evaluator():
+    """eval7-backed _score must reproduce the evaluate()-based categories."""
+    import random
+    from pokerfate.core.card import Card
+    from pokerfate.core.hand_evaluator import HandEvaluator, HandRank
+    from pokerfate.strategy.range_v2 import hand_categorizer as hc
+
+    def reference(hole, board):
+        # The pre-2026-11-09 scorer: full tuple from HandEvaluator.evaluate.
+        sc = HandEvaluator.evaluate(list(hole) + list(board))
+        hand_rank = HandRank(sc[0])
+        r1 = sc[1] if len(sc) > 1 else 0
+        r2 = sc[2] if len(sc) > 2 else 0
+        return hand_rank, r1, r2
+
+    rng = random.Random(7)
+    deck = [Card.from_str(r + s) for r in '23456789TJQKA' for s in 'cdhs']
+    mismatches = 0
+    for _ in range(4000):
+        rng.shuffle(deck)
+        n = rng.choice([3, 4, 5])
+        hole, board = deck[:2], deck[2:2 + n]
+        fast = hc._score(hole + board)[:3]
+        ref = reference(hole, board)
+        if fast[0] != ref[0] or (fast[0] in (HandRank.ONE_PAIR, HandRank.TWO_PAIR, HandRank.THREE_OF_A_KIND, HandRank.FULL_HOUSE, HandRank.FOUR_OF_A_KIND) and (int(fast[1]) != int(ref[1]) or (fast[0] in (HandRank.TWO_PAIR, HandRank.FULL_HOUSE) and int(fast[2]) != int(ref[2])))):
+            mismatches += 1
+    assert mismatches == 0
+
+
+def test_categorize_all_is_shared_and_marks_blocked_combos_air():
+    from pokerfate.core.card import Card
+    from pokerfate.strategy.range_v2 import hand_categorizer as hc
+    from pokerfate.strategy.range_v2 import hand_combo_map as hcm
+    board = [Card.from_str(c) for c in ('Ah', 'Kd', '7c')]
+    cats = hc.categorize_all(board)
+    assert len(cats) == 1326
+    assert hc.categorize_all(list(reversed(board))) is cats  # same board, same object
+    for idx in range(1326):
+        c1, c2 = hcm.cards_of(idx)
+        if c1 in board or c2 in board:
+            assert cats[idx] == 'air'
+        else:
+            assert cats[idx] == hc.categorize_cards([c1, c2], board)
+
+
+def test_vectorised_knn_matches_scalar_reference():
+    import random
+    from pokerfate.strategy.range_v2 import empirical_model as em
+
+    index = em._numeric_index()
+    if not index.rows:
+        import pytest
+        pytest.skip("no empirical numeric index available")
+    rng = random.Random(3)
+
+    class P:
+        pass
+
+    for trial in range(12):
+        p = P()
+        hands = rng.choice([0, 5, 30, 120, 400])
+        p.hands_seen = hands
+        p.vpip = rng.uniform(0.1, 0.7); p.pfr = rng.uniform(0.0, p.vpip)
+        p.af = rng.uniform(0.3, 4.0); p.wtsd = rng.uniform(0.15, 0.5); p.wmsd = rng.uniform(0.3, 0.7)
+        for k in ('flop_afq', 'turn_afq', 'river_afq', 'river_bet_freq', 'bluff_win_rate', 'fold_to_cbet', 'river_fold_rate', 'three_bet_pct', 'fold_to_3bet'):
+            setattr(p, k, rng.uniform(0.0, 0.8))
+        for k in ('flop_action_count', 'turn_action_count', 'river_action_count', 'river_bet_count', 'river_check_count', 'bet_win_count', 'fold_to_cbet_opps', 'river_facing_bet_opps'):
+            setattr(p, k, rng.choice([0, 3, 15, 60]))
+        p.server_af_prior = rng.choice([0.0, 2.0]); p.server_wtsd_prior = rng.choice([0.0, 0.3])
+        em._KNN_CACHE.clear()
+        fast, conf_fast = em._knn_scores(p, index)
+        ref, conf_ref = em._knn_scores_reference(p, index)
+        assert conf_fast == conf_ref
+        assert bool(fast) == bool(ref)
+        assert len(fast) == len(ref)
+        if ref:
+            assert fast[0][0] == ref[0][0] and fast[:3] == ref[:3]
+        fast = list(fast)
+        assert [r.uid for _, r in fast] == [r.uid for _, r in ref]
+        assert [sc for sc, _ in fast] == [sc for sc, _ in ref]

@@ -21,6 +21,7 @@ import asyncio
 import logging
 import ssl
 import time
+from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -31,6 +32,8 @@ import websockets
 from pf_intercept import config
 from pf_intercept.bot import BotBridge
 from pf_intercept.headless.login import LoginResult, ServerEntry
+from pf_intercept.headless.network import configure_server_proxy_bypass
+from pf_intercept.headless.rewards import RewardService
 from pf_intercept.wire import codec
 from pf_intercept.wire.framing import FrameBuffer, encode_frame
 
@@ -42,13 +45,20 @@ LOGIN_RSP_TIMEOUT_SEC = 15.0
 LOGIN_QUEUE_CODE = 1002               # LOGIN_ERR_ENTER_QUEUE
 LOBBY_HOLDEM_GAME_TYPE = 10010101     # GAME_GAME_TYPE.LOBBY_HOLDEM_GAME
 _INJECT_TTL_SEC = 20.0
+STATE_TIMEOUT_SEC = 15.0
+ROOM_SYNC_TIMEOUT_SEC = 45.0
 
 # S2C frames the session itself reacts to, on top of the bridge's WATCH_S2C.
-_SESSION_TYPES = frozenset({"pb.UserLoginRSP", "pb.HeartBeatRSP", "pb.QuickStartRSP"})
+_SESSION_TYPES = frozenset({"pb.UserLoginRSP", "pb.HeartBeatRSP", "pb.QuickStartRSP", "pb.NoticeBRC",
+                            "pb.UserLocationRSP", "pb.UserLogoutRSP", "pb.ServerStopBRC"})
 
 
 class SessionClosed(RuntimeError):
     pass
+
+
+class LoginRejected(SessionClosed):
+    """Explicit server rejection; retrying the same credentials won't help."""
 
 
 @dataclass
@@ -81,7 +91,7 @@ def _split_wss(url: str) -> tuple[str, int]:
 
 
 class HeadlessSession:
-    """One WSS connection driving one BotBridge."""
+    """One bot run, retaining its bridge across successive WSS connections."""
 
     def __init__(
         self,
@@ -91,6 +101,8 @@ class HeadlessSession:
         chnl: int = int(config.GAMEDATA_CHNL),
         client_version: str = str(config.GAME_HTTP_VERSION),
         max_auto_rebuy: int = 1,
+        auto_rewards: bool = True,
+        reconnect_enabled: bool = False,
         on_frame: Callable[[str, dict], Awaitable[None] | None] | None = None,
     ) -> None:
         self.login = login
@@ -105,13 +117,33 @@ class HeadlessSession:
         self._login_code: int | None = None
         self._queue_pos: int | None = None
         self._closed = asyncio.Event()
+        self._close_done = asyncio.Event()
         self._bridge_lock = asyncio.Lock()
         # Frames for the bot are queued and handled by a dedicated worker, so a
         # slow handler never blocks the receive loop (and with it HeartBeatRSP).
         self._bridge_queue: asyncio.Queue = asyncio.Queue()
         self._pending_hb = 0
         self._tasks: list[asyncio.Task] = []
+        self._auto_rewards = auto_rewards
+        self._rewards: RewardService | None = None
+        self._bankroll_ready = asyncio.Event()
+        self._reward_chips = 0
+        self._wallet_requests: deque[tuple[int, int]] = deque()
         self._bankroll_snapshot: dict = {}
+        self._stopping = False
+        self._wire_turn = 0
+        self._wire_room_id: int | None = None
+        self.reconnect_enabled = reconnect_enabled
+        self.disconnect_reason = ""
+        self.fatal_error: str | None = None
+        self._finalized = False
+        self._generation = 0
+        self._inject_tasks: set[asyncio.Task] = set()
+        self._location_done = asyncio.Event()
+        self._location: dict | None = None
+        self._room_ready = asyncio.Event()
+        self._room_code: int | None = None
+        self._restoring = False
         self._refresh_bankroll_snapshot()
 
     def bankroll_dashboard(self) -> dict:
@@ -129,6 +161,19 @@ class HeadlessSession:
             # A display failure must not discard an action returned by handle().
             log.exception("[BOT] bankroll snapshot failed")
 
+    async def _on_reward_credit(self, chips: int, uncertain: bool) -> None:
+        async with self._bridge_lock:
+            self._reward_chips += chips
+            self.bridge.record_reward_credit(chips, uncertain)
+            self._refresh_bankroll_snapshot()
+        if self.connected:
+            await self.send("pb.UserValueREQ", {"type": int(config.PROFIT_LOCK_FALLBACK_LOBBY_COIN)})
+
+    async def _on_reward_claim_state(self, in_flight: bool) -> None:
+        async with self._bridge_lock:
+            self.bridge.set_reward_claim_inflight(in_flight)
+            self._refresh_bankroll_snapshot()
+
     # ── lifecycle ─────────────────────────────────────────────────────────
 
     @property
@@ -137,14 +182,53 @@ class HeadlessSession:
 
     @property
     def logged_in(self) -> bool:
-        return self._login_done.is_set() and self._login_code == 0
+        return self.connected and self._login_done.is_set() and self._login_code == 0
 
     async def connect(self, server_index: int = 0) -> None:
         """Open the socket and complete pb.UserLoginREQ; raises on failure."""
+        if self._stopping or self._finalized:
+            raise SessionClosed("会话正在停止")
+        if self.fatal_error:
+            raise LoginRejected(self.fatal_error)
+        self._generation += 1
+        self._pending_hb = 0
+        self._closed.clear()
+        self._close_done.clear()
+        self._login_done.clear()
+        self._login_code = None
+        self._location_done.clear()
+        self._location = None
+        self._room_ready.clear()
+        self._room_code = None
+        self._restoring = self.reconnect_enabled
+        self._wire_room_id = None
+        self._wallet_requests.clear()
+        self._bridge_queue = asyncio.Queue()
         servers = self.login.servers
         if not servers:
             raise SessionClosed("登录结果里没有服务器")
+        # Also cover callers that construct HeadlessSession without the CLI,
+        # and a refreshed server list on a later connection attempt.
+        configure_server_proxy_bypass(servers, http_fallback=config.GAMEDATA_HTTP_HOST)
         self._server = servers[server_index % len(servers)]
+        http_base = self._server.http_host or f"https://{config.GAMEDATA_HTTP_HOST}"
+        bind_gamedata = getattr(self.bridge, "set_gamedata_session", None)
+        if callable(bind_gamedata):
+            bind_gamedata(authorization=self.login.authorization, http_base=http_base,
+                          chnl=self.chnl, version=self.client_version)
+        bind_uid = getattr(self.bridge, "set_session_uid", None)
+        if callable(bind_uid):
+            bind_uid(self.login.uid)
+        if self._auto_rewards and self._rewards is None:
+            self._rewards = RewardService(
+                uid=self.login.uid, authorization=self.login.authorization,
+                http_base=http_base,
+                chnl=self.chnl, version=self.client_version,
+                on_credit=self._on_reward_credit, ready=self._bankroll_ready,
+                on_claim_state=self._on_reward_claim_state,
+            )
+        elif self._rewards is not None:
+            self._rewards.set_http_base(http_base)
         host, port = _split_wss(self._server.server_host)
         log.info("[WSS] connecting %s:%d", host, port)
         self._ws = await websockets.connect(
@@ -157,10 +241,6 @@ class HeadlessSession:
             close_timeout=2,
             max_size=8 * 1024 * 1024,
         )
-        self._closed.clear()
-        self._login_done.clear()
-        self._login_code = None
-        self._bridge_queue = asyncio.Queue()
         self._tasks = [
             asyncio.create_task(self._recv_loop(), name="headless-recv"),
             asyncio.create_task(self._heartbeat_loop(), name="headless-heartbeat"),
@@ -176,6 +256,8 @@ class HeadlessSession:
         # Same bootstrap the client does in net_game.UserLoginRSP (bot subset).
         await self.send("pb.SelfUserInfoREQ", {})
         await self.send("pb.UserValueREQ", {"type": int(config.PROFIT_LOCK_FALLBACK_LOBBY_COIN)})
+        if self._rewards is not None:
+            self._rewards.start()
 
     async def _wait_login(self) -> None:
         deadline = time.monotonic() + LOGIN_RSP_TIMEOUT_SEC
@@ -187,6 +269,8 @@ class HeadlessSession:
                 await asyncio.wait_for(self._login_done.wait(), timeout=remaining)
             except asyncio.TimeoutError:
                 continue
+            if self.fatal_error:
+                raise LoginRejected(self.fatal_error)
             if self._login_code == 0:
                 return
             if self._login_code == LOGIN_QUEUE_CODE:
@@ -196,27 +280,118 @@ class HeadlessSession:
                 self._login_done.clear()
                 deadline = time.monotonic() + 600
                 continue
+            if self.connected and self._login_code is not None:
+                self.fatal_error = f"UserLoginRSP code={self._login_code}，停止自动重连，请检查登录态"
+                raise LoginRejected(self.fatal_error)
             raise SessionClosed(f"UserLoginRSP code={self._login_code}")
 
     async def close(self, reason: str = "") -> None:
-        if self._closed.is_set():
+        if self._finalized:
             return
-        self._closed.set()
-        for t in self._tasks:
-            t.cancel()
-        self._tasks = []
+        self.begin_shutdown()
+        await self.disconnect(reason)
+        await self._close_done.wait()
+        if self._rewards is not None:
+            await self._rewards.close()
         close_bridge = getattr(self.bridge, "close", None)
         if callable(close_bridge):
             await asyncio.to_thread(close_bridge)
-        if self._ws is not None:
-            try:
-                await self._ws.close(code=1000, reason=reason[:100])
-            except Exception:
-                pass
-        log.info("[WSS] closed (%s) %s", reason or "-", self.stats)
+        self._finalized = True
+
+    async def _connection_lost(self, reason: str) -> None:
+        if self._closed.is_set():
+            return
+        if self.reconnect_enabled:
+            await self.disconnect(reason)
+        else:
+            await self.close(reason)
+
+    async def disconnect(self, reason: str = "") -> None:
+        """Close this transport, retaining models, bankroll, budgets and rewards."""
+        if self._closed.is_set():
+            return
+        self.disconnect_reason = reason
+        self._closed.set()
+        self._wire_turn += 1
+        self._generation += 1
+        self._bankroll_ready.clear()
+        try:
+            tasks = [t for t in [*self._tasks, *self._inject_tasks] if t is not asyncio.current_task()]
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            self._tasks = []
+            self._inject_tasks.clear()
+            if not self._login_done.is_set():
+                self._login_code = -1
+                self._login_done.set()
+            prepare = getattr(self.bridge, "prepare_transport_reconnect", None)
+            if callable(prepare) and not self._stopping:
+                async with self._bridge_lock:
+                    await asyncio.to_thread(prepare)
+                    self._refresh_bankroll_snapshot()
+        finally:
+            if self._ws is not None:
+                try:
+                    await self._ws.close(code=1000, reason=reason[:100])
+                except Exception:
+                    pass
+            self._ws = None
+            self._close_done.set()
+            log.info("[WSS] closed (%s) %s", reason or "-", self.stats)
 
     async def wait_closed(self) -> None:
-        await self._closed.wait()
+        await self._close_done.wait()
+
+    async def _wait_state(self, event: asyncio.Event, name: str, timeout: float | None = None) -> None:
+        ready = asyncio.create_task(event.wait())
+        closed = asyncio.create_task(self._close_done.wait())
+        try:
+            await asyncio.wait({ready, closed}, timeout=STATE_TIMEOUT_SEC if timeout is None else timeout,
+                               return_when=asyncio.FIRST_COMPLETED)
+            if not self.connected:
+                raise SessionClosed(self.disconnect_reason)
+            if not event.is_set():
+                raise SessionClosed(f"等待 {name} 超时，保持未知位置，不盲目买入")
+        finally:
+            ready.cancel()
+            closed.cancel()
+            await asyncio.gather(ready, closed, return_exceptions=True)
+
+    async def restore_or_start(self, *, big_blind: int, buyin_bb: int = 100) -> None:
+        """Follow the client's UserLocationRSP -> EnterRoomREQ recovery flow."""
+        await self._wait_state(self._location_done, "UserLocationRSP")
+        if big_blind > 0:
+            self._match_fields(big_blind=big_blind, buyin_bb=buyin_bb)
+        location = self._location or {}
+        room_id = int(location.get("roomid", 0) or 0)
+        if room_id > 0:
+            self._room_ready.clear()
+            # No byin_chips: restore existing seat, never make a second buy-in.
+            fields = {"roomid": room_id}
+            if not await self.send("pb.EnterRoomREQ", fields, room_id=0):
+                raise SessionClosed("恢复牌桌请求未送达")
+            await self._wait_state(self._room_ready, "EnterRoomRSP", ROOM_SYNC_TIMEOUT_SEC)
+            if self._room_code != 0:
+                raise SessionClosed(f"恢复牌桌失败 code={self._room_code}")
+            log.info("[RECONNECT] 已恢复原牌桌 room=%d，未请求额外买入", room_id)
+        else:
+            async with self._bridge_lock:
+                lobby = getattr(self.bridge, "restore_lobby_after_disconnect", None)
+                can_match = await asyncio.to_thread(lobby) if callable(lobby) else True
+                self._refresh_bankroll_snapshot()
+            if big_blind > 0 and can_match and not self._stopping:
+                self._room_ready.clear()
+                if not await self.quick_start(big_blind=big_blind, buyin_bb=buyin_bb):
+                    raise SessionClosed("重新匹配请求未送达")
+                await self._wait_state(self._room_ready, "匹配后的 EnterRoomRSP", ROOM_SYNC_TIMEOUT_SEC)
+                if self._room_code != 0:
+                    self.fatal_error = f"匹配被拒绝 code={self._room_code}，停止重试"
+                    raise SessionClosed(self.fatal_error)
+            else:
+                log.info("[RECONNECT] 已回大厅，保留原停止/破产限制，不自动买入")
+        self._restoring = False
+        await self.send("pb.UserValueREQ", {"type": int(config.PROFIT_LOCK_FALLBACK_LOBBY_COIN)}, room_id=0)
 
     # ── sending ───────────────────────────────────────────────────────────
 
@@ -233,37 +408,60 @@ class HeadlessSession:
         if type_name != "pb.HeartBeatREQ":
             log.info("[C→S] %s room_id=%s %s", type_name, rid, fields)
         try:
+            if type_name == "pb.UserValueREQ":
+                self._wallet_requests.append((int(fields.get("type", 0)), self._reward_chips))
             await self._ws.send(encode_frame(type_name, rid, body))
         except Exception as exc:
             log.warning("[C→S] send failed %s: %s", type_name, exc)
-            await self.close(f"send failed: {exc}")
+            await self._connection_lost(f"send failed: {exc}")
             return False
         return True
 
     async def quick_start(self, *, big_blind: int, buyin_bb: int = 100, wait_blind: bool = False) -> bool:
         """Ask the lobby for a cash table (LobbyByinDialog StartButton)."""
-        return await self.send("pb.QuickStartREQ", {
+        fields = self._match_fields(big_blind=big_blind, buyin_bb=buyin_bb, wait_blind=wait_blind)
+        return await self.send("pb.QuickStartREQ", fields, room_id=0)
+
+    def _match_fields(self, *, big_blind: int, buyin_bb: int, wait_blind: bool = False) -> dict:
+        fields = {
             "boot": int(big_blind),
             "game_type": LOBBY_HOLDEM_GAME_TYPE,
             "lobby_coin": int(config.PROFIT_LOCK_FALLBACK_LOBBY_COIN),
             "byin_chips": int(big_blind) * int(buyin_bb),
             "wait_blind": bool(wait_blind),
             "ip": self.login.login_ip or "",
-        }, room_id=0)
+        }
+        configure = getattr(self.bridge, "configure_auto_rejoin", None)
+        if callable(configure):
+            configure(fields)
+        return fields
+
+    def begin_shutdown(self) -> None:
+        self._stopping = True
+        stop_rejoin = getattr(self.bridge, "stop_auto_rejoin", None)
+        if callable(stop_rejoin):
+            stop_rejoin()
+
+    def current_room_id(self) -> int:
+        if self._wire_room_id is not None:
+            return self._wire_room_id
+        return self.bridge.room_id_for_c2s(0)
 
     # ── receiving ─────────────────────────────────────────────────────────
 
     async def _recv_loop(self) -> None:
         buf = FrameBuffer()
+        ws = self._ws
         try:
-            async for raw in self._ws:
+            async for raw in ws:
                 if isinstance(raw, str):
                     raw = raw.encode("utf-8")
                 for frame in buf.feed(raw):
                     self.stats.frames_in += 1
                     self.stats.last_rx_at = time.monotonic()
-                    self.bridge.note_seen_room_id(frame.room_id)
                     await self._on_s2c(frame.type_name, frame.room_id, frame.pb_body)
+                    if self._closed.is_set():
+                        return
         except asyncio.CancelledError:
             raise
         except websockets.ConnectionClosed as exc:
@@ -271,14 +469,19 @@ class HeadlessSession:
         except Exception:
             log.exception("[WSS] recv loop error")
         finally:
-            if not self._login_done.is_set():
-                self._login_code = self._login_code or -1
-                self._login_done.set()
-            await self.close("recv loop ended")
+            if self._ws is ws:
+                if not self._login_done.is_set():
+                    self._login_code = self._login_code or -1
+                    self._login_done.set()
+                await self._connection_lost("recv loop ended")
 
     async def _on_s2c(self, type_name: str, room_id: int, pb_body: bytes) -> None:
         if type_name == "pb.HeartBeatRSP":
             self._pending_hb = 0
+            if self._rewards is not None:
+                msg = codec.decode(type_name, pb_body)
+                if msg is not None:
+                    self._rewards.observe_server_time(msg.get("server_timestamp"))
             return
         if type_name not in _SESSION_TYPES and type_name not in config.WATCH_S2C:
             return
@@ -287,15 +490,43 @@ class HeadlessSession:
             log.warning("[S→C] %s decode failed (%d bytes)", type_name, len(pb_body))
             return
         log.info("[S→C] %s %s", type_name, msg)
+        if type_name in {"pb.UserLogoutRSP", "pb.ServerStopBRC"}:
+            self.fatal_error = f"{type_name} code={msg.get('code', 0)}，服务器要求退出，停止自动重连"
+            log.error("[RECONNECT] %s", self.fatal_error)
+            await self._connection_lost(self.fatal_error)
+            return
+        received_at = time.monotonic()
+        if type_name in {"pb.ActionNotifyBRC", "pb.ActionBRC", "pb.DealerInfoRSP",
+                         "pb.RoundStartBRC", "pb.WinnerRSP", "pb.EnterRoomRSP", "pb.LeaveRoomRSP"}:
+            # Advance on receipt, not when a potentially backlogged bridge
+            # finally processes the frame. A system fold must cancel old bets.
+            self._wire_turn += 1
+        if type_name == "pb.EnterRoomRSP" and int(msg.get("code", 0) or 0) == 0:
+            self._wire_room_id = int(msg.get("roomid", room_id) or room_id)
+        elif type_name == "pb.LeaveRoomRSP" and int(msg.get("code", 0) or 0) in (0, 2, 3):
+            self._wire_room_id = 0
 
         if type_name == "pb.UserLoginRSP":
             self._login_code = int(msg.get("code", 0) or 0)
+            if self._login_code not in (0, LOGIN_QUEUE_CODE):
+                self.fatal_error = f"UserLoginRSP code={self._login_code}，停止自动重连，请检查登录态"
             self._queue_pos = msg.get("pos")
             self._login_done.set()
+            if self._rewards is not None:
+                self._rewards.observe_server_time(msg.get("server_timestamp"))
+        elif type_name == "pb.UserLocationRSP":
+            self._location = dict(msg)
+            self._wire_room_id = int(msg.get("roomid", 0) or 0)
+            self._location_done.set()
+        elif type_name == "pb.NoticeBRC":
+            if self._rewards is not None:
+                self._rewards.notify(int(msg.get("type", 0)))
         elif type_name == "pb.QuickStartRSP":
             code = int(msg.get("code", 0) or 0)
             if code != 0:
                 log.warning("[WSS] QuickStartRSP code=%s（进桌失败）", code)
+                self._room_code = code
+                self._room_ready.set()
 
         if self.on_frame is not None:
             out = self.on_frame(type_name, msg)
@@ -304,23 +535,64 @@ class HeadlessSession:
 
         if type_name not in config.WATCH_S2C:
             return
+        if type_name == "pb.UserValueRSP":
+            prop_type = int(msg.get("type", config.PROFIT_LOCK_FALLBACK_LOBBY_COIN))
+            # Replies on this socket correspond to requests in order per coin.
+            # Preserve the watermark of older requests crossing a reward claim.
+            for pending in self._wallet_requests:
+                if pending[0] == prop_type:
+                    msg = dict(msg, _reward_chips_at_request=pending[1])
+                    self._wallet_requests.remove(pending)
+                    break
+            if self._restoring:
+                # Wallet + stale table chips is not a valid bankroll sample.
+                # Query again after the authoritative location/table snapshot.
+                return
         self.stats.frames_bot += 1
         # Hand off to the bridge worker: handlers (CFR / equity, and the post-
         # showdown learning after WinnerRSP, which took 10s+ live) can be slow,
         # and the receive loop must keep reading so HeartBeatRSP is consumed.
-        self._bridge_queue.put_nowait((type_name, msg, room_id))
+        self._bridge_queue.put_nowait((type_name, msg, room_id, received_at, self._wire_turn))
 
     async def _bridge_worker(self) -> None:
         """Process bot-bound frames one at a time, in arrival order."""
         try:
             while True:
-                type_name, msg, room_id = await self._bridge_queue.get()
+                type_name, msg, room_id, received_at, wire_turn = await self._bridge_queue.get()
                 try:
                     async with self._bridge_lock:
-                        result = await asyncio.to_thread(self.bridge.handle, type_name, msg)
+                        if type_name == "pb.ActionNotifyBRC" and wire_turn != self._wire_turn:
+                            log.warning("[BOT] 丢弃过期行动通知：服务器已进入后续行动，排队 %.0fms",
+                                        (time.monotonic() - received_at) * 1000)
+                            self.stats.injects_dropped += 1
+                            continue
+                        started = time.monotonic()
+                        self.bridge.note_seen_room_id(room_id)
+                        handler = asyncio.create_task(asyncio.to_thread(self.bridge.handle, type_name, msg))
+                        try:
+                            result = await asyncio.shield(handler)
+                        except asyncio.CancelledError:
+                            # Cancelling to_thread does not stop its thread.
+                            # Finish it before close() flushes model writers.
+                            await handler
+                            raise
+                        elapsed = time.monotonic() - started
+                        queued = started - received_at
+                        if elapsed > 0.5 or queued > 0.5:
+                            log.warning("[BOT] handler=%s queue_ms=%.0f handle_ms=%.0f backlog=%d",
+                                        type_name, queued * 1000, elapsed * 1000, self._bridge_queue.qsize())
                         self._refresh_bankroll_snapshot()
+                        if self._bankroll_snapshot.get("base_total_chips") is not None:
+                            if not self._restoring and (not self.reconnect_enabled or type_name == "pb.UserValueRSP"):
+                                self._bankroll_ready.set()
+                        if type_name == "pb.EnterRoomRSP":
+                            self._room_code = int(msg.get("code", 0) or 0)
+                            self._room_ready.set()
                     for inject in _iter_injects(result):
-                        asyncio.create_task(self._inject(inject, room_id), name="headless-inject")
+                        task = asyncio.create_task(self._inject(inject, room_id, received_at=received_at,
+                                                   wire_turn=wire_turn, generation=self._generation), name="headless-inject")
+                        self._inject_tasks.add(task)
+                        task.add_done_callback(self._inject_tasks.discard)
                 except asyncio.CancelledError:
                     raise
                 except Exception:
@@ -328,7 +600,7 @@ class HeadlessSession:
         except asyncio.CancelledError:
             raise
 
-    async def _inject(self, inject: tuple, frame_room_id: int) -> None:
+    async def _inject(self, inject: tuple, frame_room_id: int, *, received_at=None, wire_turn=None, generation=None) -> None:
         type_name = str(inject[0])
         fields = dict(inject[1] or {}) if len(inject) >= 2 else {}
         delay = float(inject[2] or 0.0) if len(inject) >= 3 else 0.0
@@ -336,13 +608,27 @@ class HeadlessSession:
         created = time.monotonic()
         if delay > 0:
             await asyncio.sleep(delay)
+        if generation is not None and generation != self._generation:
+            self.stats.injects_dropped += 1
+            return
+        if self._stopping and type_name in {"pb.QuickStartREQ", "pb.EnterRoomREQ", "pb.RebyREQ", "pb.SitDownREQ"}:
+            self.stats.injects_dropped += 1
+            return
+        if type_name == "pb.ActionREQ" and (
+            (wire_turn is not None and wire_turn != self._wire_turn)
+            or (received_at is not None and time.monotonic() - received_at > _INJECT_TTL_SEC)
+        ):
+            self.stats.injects_dropped += 1
+            log.warning("[BOT] 丢弃过期 ActionREQ：轮次已变化或通知已超时")
+            return
         if self._closed.is_set() or (time.monotonic() - created) > delay + _INJECT_TTL_SEC:
             self.stats.injects_dropped += 1
             return
         if guard is not None and not self.bridge.injection_guard_is_current(guard):
             self.stats.injects_dropped += 1
             return
-        ok = await self.send(type_name, fields, room_id=self.bridge.room_id_for_c2s(frame_room_id))
+        rid = 0 if type_name == "pb.QuickStartREQ" else self.bridge.room_id_for_c2s(frame_room_id)
+        ok = await self.send(type_name, fields, room_id=rid)
         if ok:
             self.stats.injects_sent += 1
         else:
@@ -357,8 +643,9 @@ class HeadlessSession:
                 await asyncio.sleep(HEARTBEAT_INTERVAL_SEC)
                 if self._pending_hb >= HEARTBEAT_MISS_LIMIT:
                     self.stats.heartbeats_missed += 1
-                    log.warning("[WSS] heartbeat lost x%d, closing", self._pending_hb)
-                    await self.close("heartbeat lost")
+                    log.warning("[WSS] heartbeat lost x%d, last_rx_age=%.1fs, disconnecting", self._pending_hb,
+                                time.monotonic() - self.stats.last_rx_at)
+                    await self._connection_lost("heartbeat lost")
                     return
                 self._pending_hb += 1
                 self.stats.heartbeats_sent += 1

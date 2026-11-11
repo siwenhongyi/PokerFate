@@ -15,9 +15,6 @@ from pokerfate.calibration.spool_showdown_calibration import (
 )
 from pokerfate.core.card import Card
 from pokerfate.strategy.range_v2.hero_eq_calibrator import HeroEquityCalibrator
-from pokerfate.strategy.range_v2.river_relative_calibrator import (
-    RiverRelativeCalibrator,
-)
 
 
 def test_file_spool_worker_consumes_job_and_applies_updates(tmp_path):
@@ -75,10 +72,7 @@ def test_file_spool_worker_consumes_job_and_applies_updates(tmp_path):
 
     result_files = list((spool_dir / "results").glob("*.pkl"))
     assert result_files
-    applied = cal.apply_pending_updates(
-        HeroEquityCalibrator(),
-        RiverRelativeCalibrator(),
-    )
+    applied = cal.apply_pending_updates(HeroEquityCalibrator())
     assert applied >= 1
     assert list((spool_dir / "results").glob("*.pkl")) == []
 

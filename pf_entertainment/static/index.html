@@ -44,6 +44,7 @@
           </div>
           <div class="live-empty" id="live-empty">等待对局…（headless 开打后自动显示）</div>
         </div>
+        <div class="live-settlement" id="live-settlement" aria-live="polite" hidden></div>
         <aside class="live-feed">
           <h3>关键动作</h3>
           <ul id="live-feed"><li class="muted">暂无</li></ul>
@@ -147,7 +148,8 @@
           <div class="metric"><span>当前总筹码</span><b id="bank-total">-</b></div>
           <div class="metric"><span>钱包余额</span><b id="bank-wallet">-</b></div>
           <div class="metric"><span>桌上筹码</span><b id="bank-table">-</b></div>
-          <div class="metric"><span>本次启动盈亏</span><b id="bank-delta">-</b></div>
+          <div class="metric"><span>本次对局盈亏（扣除奖励）</span><b id="bank-delta">-</b></div>
+          <div class="metric"><span>本次领取奖励筹码</span><b id="bank-rewards">0</b></div>
           <div class="metric"><span>最近采样</span><b id="bank-last">-</b></div>
         </div>
       </section>
@@ -218,8 +220,6 @@
           <div class="metric"><span>Bayes 变差</span><b id="range-g5-better">0</b></div>
           <div class="metric"><span>Bucket ECE</span><b id="range-ece">-</b></div>
           <div class="metric"><span>Top Bucket</span><b id="range-top-acc">-</b></div>
-          <div class="metric"><span>CEC NLL Gain</span><b id="range-cec-nll-gain">-</b></div>
-          <div class="metric"><span>CEC ECE Gain</span><b id="range-cec-ece-gain">-</b></div>
           <div class="metric"><span>结论</span><b id="range-winner">-</b></div>
         </div>
       </section>
@@ -288,46 +288,6 @@
                 </tr>
               </thead>
               <tbody id="range-ece-hotspot-body">
-                <tr><td colspan="6" class="muted">暂无分析</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <section class="range-table">
-          <h2>CEC 接入效果</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>维度</th>
-                  <th>样本</th>
-                  <th>真实 Bucket 概率</th>
-                  <th>NLL</th>
-                  <th>ECE</th>
-                  <th>Top1</th>
-                </tr>
-              </thead>
-              <tbody id="range-cec-overall-body">
-                <tr><td colspan="6" class="muted">暂无分析</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <section class="range-table">
-          <h2>CEC 接入热点</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>场景</th>
-                  <th>样本</th>
-                  <th>真实 Bucket 概率</th>
-                  <th>NLL Gain</th>
-                  <th>ECE Gain</th>
-                  <th>结论</th>
-                </tr>
-              </thead>
-              <tbody id="range-cec-hotspot-body">
                 <tr><td colspan="6" class="muted">暂无分析</td></tr>
               </tbody>
             </table>
@@ -513,6 +473,7 @@
     </div>
   </main>
 
+  <script src="/static/live-table.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>
