@@ -1725,6 +1725,55 @@ class TestFoldToCbetAnyFirstFlopBet:
         assert api._bot.opponent_model.get(1).fold_to_cbet_opps == before
 
 
+def _pool_3bet_hand(hole, *, opener_stack=200, robot=False):
+    """Hero on the button, 100bb deep, on a six-handed table (big blind 2)."""
+    api = PokerFateAPI(my_player_id=0, big_blind=2, small_blind=1, equity_iterations=10,
+                       decision_engine="cfr", decision_seed=7, enable_showdown_calibration=False)
+    api.new_hand(players=[
+        PlayerInfo(0, "Hero", 200, "BTN"), PlayerInfo(1, "UTG", 200, "UTG", is_robot=robot),
+        PlayerInfo(2, "MP", opener_stack, "MP"), PlayerInfo(3, "CO", opener_stack, "CO"),
+        PlayerInfo(4, "SB", 200, "SB"), PlayerInfo(5, "BB", 200, "BB"),
+    ], dealer_id=0)
+    api.deal_hole_cards(hole)
+    return api
+
+
+@pytest.mark.parametrize("hole,category", [
+    (["9s", "9d"], "99"), (["8s", "8d"], "88"), (["Ad", "Js"], "AJo"), (["Ad", "Td"], "ATs"),
+])
+def test_pool_value_3bet_answers_a_clean_human_open(hole, category):
+    api = _pool_3bet_hand(hole)
+    for seat in (1, 2):
+        api.notify_action(ActionEvent(seat, "fold", 0, "preflop"))
+    api.notify_action(ActionEvent(3, "raise", 6, "preflop"))
+    decision = api.request_action("preflop", pot=9, current_bet=6, to_call=6, my_stack=200)
+    assert decision.action == "raise"
+    assert decision.amount == api._bot.preflop.three_bet_size(6, True, 2, "CO", "BTN")
+    assert api._bot.preflop.last_expand_reason == f"pool_value_3bet:BTN-vs-open-CO {category}"
+    assert "3bet价值" in api._bot.last_reasoning
+
+
+@pytest.mark.parametrize("scenario", ["disabled", "robot", "squeeze", "limp", "short_opener", "3bet"])
+def test_pool_value_3bet_needs_the_measured_spot(monkeypatch, scenario):
+    from pokerfate.strategy import preflop
+    monkeypatch.setattr(preflop, "_POOL_VALUE_3BET_ENABLED", scenario != "disabled")
+    api = _pool_3bet_hand(["9c", "9d"], opener_stack=50 if scenario == "short_opener" else 200,
+                          robot=scenario == "robot")
+    api.notify_action(ActionEvent(1, "call" if scenario == "limp" else "fold", 2 if scenario == "limp" else 0, "preflop"))
+    pot, price = 3 + (2 if scenario == "limp" else 0), 6
+    if scenario in ("squeeze", "3bet"):
+        api.notify_action(ActionEvent(2, "raise", 6, "preflop"))
+        pot += 6
+        price = 6 if scenario == "squeeze" else 20
+        api.notify_action(ActionEvent(3, "call" if scenario == "squeeze" else "raise", price, "preflop"))
+    else:
+        api.notify_action(ActionEvent(2, "fold", 0, "preflop"))
+        api.notify_action(ActionEvent(3, "raise", 6, "preflop"))
+    pot += price
+    api.request_action("preflop", pot=pot, current_bet=price, to_call=price, my_stack=200)
+    assert not api._bot.preflop.last_expand_reason.startswith("pool_value_3bet:")
+
+
 def test_session_config_event_is_logged(monkeypatch):
     monkeypatch.setenv("PF_V3_EV_VETO", "1")
     events = []

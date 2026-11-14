@@ -30,15 +30,19 @@ stage (RoundStartBRC):
 from __future__ import annotations
 import asyncio
 import functools
+import json
 import logging
 import random
 import threading
 import time
+from pathlib import Path
 from typing import TypeAlias
 
 from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
 from pokerfate.calibration.spool_showdown_calibration import spool_backpressure_status
+from pokerfate.core.robots import RoomRobotTracker, default_registry
 from pf_intercept import config
+from pf_intercept.table_policy import Step, TablePolicy, TablePolicyConfig
 from pf_intercept.game_api.collcard import _sync_collect_game
 from pf_intercept.game_api.gamedata import GameDataHTTPContext, _sync_fetch, seed_from_server
 from pf_intercept.game_api.http import load_auth_token
@@ -64,7 +68,9 @@ _BANKROLL_REASONS: dict[str, str] = {
     "auto_rebuy": "破产买入前",
     "room_escape": "连续破产换桌",
     "profit_lock": "盈利锁仓离桌",
+    "table_switch": "选桌换桌",
 }
+_TABLE_LOG_PATH = Path(__file__).resolve().parents[1] / "logs" / "table_select.jsonl"
 
 
 def _inject_delay_before_action(
@@ -455,6 +461,15 @@ class BotBridge:
         self._room_escape_reenter: dict[str, object] | None = None  # {"quickstart": True, ...}
         self._calibration_backpressure_leaving: bool = False
 
+        # 人机识别：服务端 rb_num 计数 → 逐账号标签（pokerfate/core/robots.py）。
+        # 选桌：桌上没有真人、或真人少于人机时离桌换桌 / 换场（table_policy.py）。
+        # 策略只在 headless 显式 configure_table_policy 后生效；识别始终运行。
+        self._robots = default_registry()
+        self._room_tracker = RoomRobotTracker(self._robots, None, on_label=self._on_robot_label)
+        self._table_policy: TablePolicy | None = None
+        self._table_switch: dict | None = None      # 选桌发起的离桌，等待 LeaveRoomRSP
+        self._table_log_path: Path | None = _TABLE_LOG_PATH
+
     # ── Public ────────────────────────────────────────────────────────────────
 
     def runtime_settings(self) -> dict:
@@ -618,6 +633,7 @@ class BotBridge:
         # Login supplies identity before a possibly delayed SelfUserInfoRSP;
         # an early room snapshot must still identify our seat correctly.
         self._my_uid = str(uid)
+        self._room_tracker.set_my_uid(uid)
 
     def stop_auto_rejoin(self) -> None:
         self._shutdown_requested = True
@@ -629,10 +645,15 @@ class BotBridge:
             self._transport_can_match = (
                 (self._my_seat is None or self._current_table_chips() > 0
                  or pending_kind in {"unexpected_leave", "profit_lock", "room_escape"}
-                 or self._bankroll_pending_buyin_reason in {"unexpected_leave", "profit_lock", "room_escape"})
+                 or self._bankroll_pending_buyin_reason in {"unexpected_leave", "profit_lock", "room_escape",
+                                                            "table_switch"})
                 and not self._shutdown_requested and not self._is_friend_room
                 and not self._tournament_passthrough and not self._calibration_backpressure_leaving
+                and not (self._table_policy is not None and self._table_policy.stopped)
             )
+        self._table_switch = None
+        if self._table_policy is not None:
+            self._table_policy.on_transport_reset()
         self._pending_injects.clear()
         self._pending_hero_wire_action = None
         self._last_hero_action_notify_sig = None
@@ -655,6 +676,7 @@ class BotBridge:
         self._reset_hand_local_state(stage=0)
         return bool(allowed and not self._shutdown_requested
                     and not self._is_friend_room and not self._tournament_passthrough
+                    and not (self._table_policy is not None and self._table_policy.stopped)
                     and self._runtime_calibration_should_pause_play() is None)
 
     def room_id_for_c2s(self, frame_room_id: int) -> int:
@@ -689,6 +711,171 @@ class BotBridge:
             )
             self._bankroll_pending_action = None
             self._bankroll_pending_reason = ""
+
+    # ── 人机识别 / 选桌 ───────────────────────────────────────────────────────
+
+    def configure_table_policy(self, cfg: TablePolicyConfig | None) -> None:
+        """Enable table selection (headless cash play). ``None`` turns it off."""
+        self._table_policy = TablePolicy(cfg) if cfg is not None else None
+        self._table_switch = None
+        if cfg is not None:
+            log.warning(
+                "[BOT] 选桌已启用：没有真人或真人少于人机即换桌；场次顺序 %s，每场最多 %d 次，"
+                "等大盲入座=%s",
+                list(cfg.ladder), cfg.tries_per_stake, cfg.wait_blind,
+            )
+
+    def wants_tick(self) -> bool:
+        return self._table_policy is not None
+
+    def table_select_status(self) -> dict:
+        comp = self._table_composition()
+        out = {"enabled": self._table_policy is not None, **comp, "registry": self._robots.counts()}
+        if self._table_policy is not None:
+            out.update(self._table_policy.snapshot())
+        return out
+
+    def adjust_match_fields(self, fields: dict) -> dict:
+        """Let the table policy pick stake / buy-in / wait-for-blind of a QuickStart."""
+        if self._table_policy is None:
+            return dict(fields)
+        return self._table_policy.match_fields(fields)
+
+    def note_match_sent(self) -> None:
+        if self._table_policy is not None:
+            self._table_policy.on_match_sent(time.time())
+
+    def _on_robot_label(self, uid: str, label: str, how: str) -> None:
+        log.info("[BOT] 人机识别：uid=%s → %s（%s）名单 %s", uid, label, how, self._robots.counts())
+
+    def _table_composition(self) -> dict:
+        return self._room_tracker.composition(self._room_tracker.members)
+
+    def _table_policy_blocked(self) -> bool:
+        """Other leave / re-enter flows own the table right now, or we must not act."""
+        return (
+            self._table_policy is None
+            or self._shutdown_requested
+            or self._tournament_passthrough
+            or self._is_friend_room
+            or self._profit_lock_reenter is not None
+            or self._profit_lock_deferred is not None
+            or self._room_escape_reenter is not None
+            or self._calibration_backpressure_leaving
+        )
+
+    def _table_log(self, event: str, **fields) -> None:
+        comp = self._table_composition()
+        rec = {
+            "ts": round(time.time(), 3), "event": event,
+            "room": _chip_int(self._table_room_id, 0), "bb": int(self._bb or 0),
+            "humans": comp["humans"], "robots": comp["robots"], "source": comp["source"],
+            "unproven": comp["unproven"],
+            "seated": {u: self._robots.status(u) for u in sorted(self._room_tracker.members)},
+            **fields,
+        }
+        log.warning("[BOT] 选桌 %s：room=%s bb=%s 真人=%d 人机=%d（%s）%s", event, rec["room"], rec["bb"],
+                    rec["humans"], rec["robots"], rec["source"],
+                    {k: v for k, v in fields.items() if k != "info"})
+        if self._table_log_path is None:
+            return
+        try:
+            self._table_log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._table_log_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        except OSError:
+            log.debug("[BOT] 选桌日志写入失败", exc_info=True)
+
+    def _table_step(self, step: Step) -> WireInject | None:
+        """Turn a policy step into the wire request that carries it out."""
+        if not step:
+            return None
+        if step.kind == "leave":
+            self._table_switch = {"mode": "delay" if step.delayed else "leave", "reason": step.reason,
+                                  "at": time.time()}
+            self._table_log("leave", reason=step.reason, delayed=bool(step.delayed))
+            if self._api:
+                self._api._log.note(f"[选桌] 离桌换桌：{step.reason}")
+            if step.delayed:
+                return "pb.DelayLeaveRoomREQ", {"flag": True}, 0.0
+            return "pb.LeaveRoomREQ", {"seat_reserve": False, "is_switch_room": True}, 0.0
+        if step.kind == "match":
+            pause = self._runtime_calibration_should_pause_play()
+            if pause is not None or self._shutdown_requested:
+                log.warning("[BOT] 选桌：暂不匹配（%s）", "校准队列积压" if pause is not None else "正在停止")
+                return None
+            fields = self._table_match_fields(int(step.bb))
+            if fields is None:
+                return None
+            self._bankroll_pending_buyin_reason = "table_switch"
+            self._auto_rejoin_fields = dict(fields)
+            self._table_log("match", stake=int(step.bb), byin=int(fields.get("byin_chips", 0)))
+            return "pb.QuickStartREQ", fields, 0.0
+        if step.kind == "stop":
+            self._table_log("stop", reason=step.reason)
+            policy = self._table_policy
+            self._notify(
+                "codex_done",
+                title="选桌 · 找不到有真人的牌桌，已停止",
+                body=(f"场次 {list(policy.cfg.ladder) if policy else []} 每个都连续 "
+                      f"{policy.cfg.max_fail_rounds if policy else 0} 轮没有合格的牌桌，"
+                      "已停在大厅，不再匹配。重启后恢复。"),
+            )
+        return None
+
+    def _table_match_fields(self, bb: int) -> dict | None:
+        if bb <= 0 or self._table_policy is None:
+            return None
+        base = dict(self._auto_rejoin_fields or {})
+        fields = {
+            "boot": int(bb),
+            "game_type": _chip_int(base.get("game_type"), 0) or self._session_game_type
+            or int(config.PROFIT_LOCK_FALLBACK_GAME_TYPE),
+            "lobby_coin": _chip_int(base.get("lobby_coin"), 0) or self._session_lobby_coin
+            or int(config.PROFIT_LOCK_FALLBACK_LOBBY_COIN),
+            "byin_chips": int(bb) * int(self._table_policy.cfg.buyin_bb),
+            "wait_blind": bool(self._table_policy.cfg.wait_blind),
+            "ip": str(base.get("ip", "") or ""),
+        }
+        return fields
+
+    def _table_event(self, kind: str) -> WireInject | None:
+        """Composition may have changed: ask the policy what to do."""
+        if self._table_policy_blocked() or self._table_switch is not None:
+            return None
+        comp = self._table_composition()
+        now = time.time()
+        if kind == "hand_end":
+            step = self._table_policy.on_hand_end(comp["humans"], comp["robots"], now)
+        else:
+            step = self._table_policy.on_seats_changed(comp["humans"], comp["robots"], now)
+        return self._table_step(step)
+
+    def _on_tick(self, msg: dict) -> WireInject | None:
+        if self._table_policy is None or self._shutdown_requested:
+            return None
+        self._robots.save()
+        if self._table_policy_blocked():
+            return None
+        now = float(msg.get("now") or time.time())
+        comp = self._table_composition()
+        return self._table_step(self._table_policy.on_tick(now, comp["humans"], comp["robots"]))
+
+    def _on_quick_start_rsp(self, msg: dict) -> WireInject | None:
+        code = _s2c_rsp_code(msg, 0)
+        if code == 0 or self._table_policy is None:
+            return None
+        log.warning("[BOT] 选桌：QuickStartRSP code=%s，该场次本次运行不再尝试。", code)
+        return self._table_step(self._table_policy.on_match_failed(code, time.time()))
+
+    def _on_other_enter_room_brc(self, msg: dict) -> WireInject | None:
+        """Somebody entered the room; the server tells us the new robot count."""
+        user = msg.get("user") or {}
+        uid = user.get("uid")
+        if uid is None or (self._my_uid is not None and str(uid) == str(self._my_uid)):
+            return None
+        self._room_tracker.entered(uid, msg.get("num", 0), msg.get("rb_num", 0))
+        return self._table_event("seats")
 
     def _profit_lock_cancel_reenter(self) -> None:
         self._profit_lock_deferred = None
@@ -876,7 +1063,7 @@ class BotBridge:
             self._bankroll_pending_buyin_reason = "unexpected_leave"
             log.warning("[BOT] 异常离桌：余额已刷新，重新匹配；续入次数保持 %d/%d。",
                         self._auto_rebuy_done, self._max_auto_rebuy)
-            return "pb.QuickStartREQ", dict(action["quickstart_fields"]), 0.0
+            return "pb.QuickStartREQ", self.adjust_match_fields(dict(action["quickstart_fields"])), 0.0
         if kind == "auto_rebuy":
             rebuy_chips = _chip_int(action.get("rebuy_chips", 0), 0)
             self._bankroll_pending_buyin_reason = "auto_rebuy"
@@ -1106,7 +1293,10 @@ class BotBridge:
         elif type_name == "pb.SelfUserInfoRSP": self._on_self_user_info(msg)
         elif type_name == "pb.UserValueRSP":    return self._on_user_value_rsp(msg)
         elif type_name == "pb.SitDownRSP":      self._on_sit_down(msg)
-        elif type_name == "pb.SitDownBRC":       self._on_sit_down_brc(msg)
+        elif type_name == "pb.SitDownBRC":       return self._on_sit_down_brc(msg)
+        elif type_name == "pb.OtherEnterRoomBRC": return self._on_other_enter_room_brc(msg)
+        elif type_name == "pb.QuickStartRSP":    return self._on_quick_start_rsp(msg)
+        elif type_name == "pf.Tick":             return self._on_tick(msg)
         elif type_name == "pb.StandUpRSP":      return self._on_stand_up_rsp(msg)
         elif type_name == "pb.StandUpBRC":      return self._on_stand_up_brc(msg)
         elif type_name == "pb.OtherLeaveRoomBRC":
@@ -1170,6 +1360,7 @@ class BotBridge:
         uid = brief.get("uid")
         if uid:
             self._my_uid = str(uid)
+            self._room_tracker.set_my_uid(uid)
             log.info("[BOT] My uid detected: %s", self._my_uid)
 
     def _on_user_value_rsp(self, msg: dict) -> WireInject | None:
@@ -1309,7 +1500,7 @@ class BotBridge:
             self._clear_room_escape_stats_for_rematch()
             if self._bankroll_pending_buyin_reason == "unexpected_leave":
                 self._bankroll_pending_buyin_reason = ""
-            if self._bankroll_pending_buyin_reason in {"profit_lock", "room_escape"}:
+            if self._bankroll_pending_buyin_reason in {"profit_lock", "room_escape", "table_switch"}:
                 self._note_bankroll_buyin(self._bankroll_pending_buyin_reason)
         fallback_inject: tuple[str, dict, float] | None = None
         if self._profit_lock_award_rebuy_after_enter:
@@ -1416,11 +1607,34 @@ class BotBridge:
         else:
             restored_action = None
 
-        if fallback_inject and restored_action:
-            if isinstance(restored_action, list):
-                return [fallback_inject, *restored_action]
-            return [fallback_inject, restored_action]
-        return restored_action or fallback_inject
+        policy_inject = self._table_on_enter_room(table_status, code)
+        injects: list = []
+        for item in (fallback_inject, restored_action, policy_inject):
+            if not item:
+                continue
+            if isinstance(item, list):
+                injects.extend(item)
+            else:
+                injects.append(item)
+        if not injects:
+            return None
+        return injects[0] if len(injects) == 1 else injects
+
+    def _table_on_enter_room(self, table_status: dict, code: int) -> WireInject | None:
+        """Room snapshot: restart the robot count for this room and judge the table."""
+        if code != 0:
+            return None
+        seats = [(ss.get("player") or {}).get("uid") for ss in table_status.get("seat", [])]
+        self._room_tracker.reset([u for u in seats if u is not None])
+        self._table_switch = None
+        if self._table_policy is None or self._is_friend_room or self._shutdown_requested:
+            return None
+        comp = self._table_composition()
+        dealt = self._hole_cards_count >= 2
+        step = self._table_policy.on_enter(int(self._bb or 0), comp["humans"], comp["robots"],
+                                           time.time(), dealt=dealt)
+        self._table_log("enter", decision=step.kind if step else self._table_policy.state, dealt=dealt)
+        return self._table_step(step)
 
     def _profit_lock_quick_start_fallback(
         self,
@@ -1453,6 +1667,7 @@ class BotBridge:
             "wait_blind": False,
             "ip": "",
         }
+        fields = self.adjust_match_fields(fields)
         log.warning(
             "[BOT] %s：%.1fs 后发送 QuickStartREQ（随机桌，同盲注/100BB）: %s",
             context,
@@ -1461,11 +1676,16 @@ class BotBridge:
         )
         return "pb.QuickStartREQ", fields, delay
 
-    def _on_sit_down_brc(self, msg: dict) -> None:
+    def _on_sit_down_brc(self, msg: dict) -> WireInject | None:
         """A player sat down — update name map from SitDownBRC.status."""
         seat_status = msg.get("status") or {}
         self._extract_seat_name(seat_status)
         self._trigger_gamedata_fetch(seat_status)
+        uid = (seat_status.get("player") or {}).get("uid")
+        if uid is None or (self._my_uid is not None and str(uid) == str(self._my_uid)):
+            return None
+        self._room_tracker.sat_down(uid)
+        return self._table_event("seats")
 
     def _on_stand_up_rsp(self, msg: dict) -> WireInject | None:
         code = _s2c_rsp_code(msg, 0)
@@ -1483,8 +1703,12 @@ class BotBridge:
     def _on_other_leave_room_brc(self, msg: dict) -> WireInject | None:
         """A user left the room; clear stale table chips when the leaver is hero."""
         uid = msg.get("uid")
-        if self._my_uid is None or uid is None or str(uid) != str(self._my_uid):
+        if uid is None:
             return None
+        if self._my_uid is None or str(uid) != str(self._my_uid):
+            # rb_num 是服务端给出的房内机器人数：据此逐账号判定人机，并重新评估牌桌。
+            self._room_tracker.left(uid, msg.get("num", 0), msg.get("rb_num", 0))
+            return self._table_event("seats")
         return self._mark_my_left_table("leave_room")
 
     def _extract_seat_name(self, seat_status: dict) -> None:
@@ -2185,6 +2409,8 @@ class BotBridge:
                 stack=chips,
                 position=position,
                 seat_index=seat,
+                # 人机（已证实或位于人机号段内）：策略层据此把它排除在采集 / 学习之外。
+                is_robot=(seat != self._my_seat and player_id > 0 and self._robots.is_robot(player_id)),
             ))
 
         # 应用 API 创建前已缓冲的 server stats：
@@ -2238,6 +2464,8 @@ class BotBridge:
         cards = [c for c in cards if c is not None]
         self._hole_cards_count = len(cards)
         if len(cards) >= 2:
+            if self._table_policy is not None:
+                self._table_policy.on_dealt()
             self._api.deal_hole_cards(cards)
         elif cards:
             log.warning("[BOT] Incomplete hole cards (%d): %s", len(cards), cards)
@@ -2656,7 +2884,11 @@ class BotBridge:
         reasons = self._api.last_auto_collect_reasons()
         self._maybe_auto_collect_current_hand(reasons)
 
-        return self._maybe_profit_lock_leave_reenter(final_stacks)
+        inject = self._maybe_profit_lock_leave_reenter(final_stacks)
+        if inject is not None:
+            return inject
+        # 选桌：每手结束时按桌上真人 / 人机数决定去留（打法本身不变）。
+        return self._table_event("hand_end")
 
     def _maybe_auto_collect_current_hand(self, reasons: list[str]) -> bool:
         if not getattr(config, "AUTO_COLLECT_SPECIAL_HANDS_ENABLED", True):
@@ -2753,6 +2985,7 @@ class BotBridge:
             self._my_seat is None
             or self._profit_lock_reenter is not None
             or self._profit_lock_deferred is not None
+            or self._table_switch is not None
         ):
             return None
         bb = float(self._bb or 0.0)
@@ -2846,6 +3079,31 @@ class BotBridge:
             else:
                 log.warning("[BOT] 校准队列积压：LeaveRoomRSP code=%s，未确认离桌成功。", code)
             return None
+
+        switch = self._table_switch
+        if switch is not None:
+            if code in (0, 2, 3):
+                self._table_switch = None
+                self._room_tracker.reset()
+                step = (self._table_policy.on_left(time.time(), ours=True)
+                        if self._table_policy is not None else None)
+                self._bankroll_pending_buyin_reason = "table_switch"
+                log.warning("[BOT] 选桌：已离桌（%s），%s", switch.get("reason"),
+                            "停止匹配" if step else "稍后重新匹配")
+                if step:
+                    self._table_step(step)
+                return self._mark_my_left_table("leave_room")
+            if switch.get("mode") == "leave":
+                # 牌局进行中不能直接离桌（121）：改为本手结束后离桌。
+                switch["mode"] = "delay"
+                log.warning("[BOT] 选桌：LeaveRoomRSP code=%s，改用本手结束后离桌。", code)
+                return "pb.DelayLeaveRoomREQ", {"flag": True}, 0.0
+            log.warning("[BOT] 选桌：LeaveRoomRSP code=%s，等待重试。", code)
+            return None
+        if code in (0, 2, 3):
+            self._room_tracker.reset()
+            if self._table_policy is not None:
+                self._table_policy.on_left(time.time(), ours=False)
 
         esc = self._room_escape_reenter
         if esc is not None and esc.get("quickstart"):

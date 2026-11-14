@@ -104,9 +104,14 @@ class HeadlessSession:
         auto_rewards: bool = True,
         reconnect_enabled: bool = False,
         on_frame: Callable[[str, dict], Awaitable[None] | None] | None = None,
+        table_policy=None,
     ) -> None:
         self.login = login
         self.bridge = bridge if bridge is not None else BotBridge(max_auto_rebuy=max_auto_rebuy)
+        if table_policy is not None:
+            configure_policy = getattr(self.bridge, "configure_table_policy", None)
+            if callable(configure_policy):
+                configure_policy(table_policy)
         self.chnl = int(chnl)
         self.client_version = str(client_version)
         self.stats = SessionStats()
@@ -145,6 +150,11 @@ class HeadlessSession:
         self._room_code: int | None = None
         self._restoring = False
         self._refresh_bankroll_snapshot()
+
+    def live_reward_totals(self) -> tuple[int, bool]:
+        """Only confirmed reward chips and any unresolved claim go to the public viewer."""
+        rewards = self._rewards
+        return (rewards.confirmed_chips, rewards.uncertain) if rewards else (0, False)
 
     def bankroll_dashboard(self) -> dict:
         """Read the last completed bridge snapshot without waiting for the bot.
@@ -420,7 +430,11 @@ class HeadlessSession:
     async def quick_start(self, *, big_blind: int, buyin_bb: int = 100, wait_blind: bool = False) -> bool:
         """Ask the lobby for a cash table (LobbyByinDialog StartButton)."""
         fields = self._match_fields(big_blind=big_blind, buyin_bb=buyin_bb, wait_blind=wait_blind)
-        return await self.send("pb.QuickStartREQ", fields, room_id=0)
+        ok = await self.send("pb.QuickStartREQ", fields, room_id=0)
+        note = getattr(self.bridge, "note_match_sent", None)
+        if ok and callable(note):
+            note()
+        return ok
 
     def _match_fields(self, *, big_blind: int, buyin_bb: int, wait_blind: bool = False) -> dict:
         fields = {
@@ -431,6 +445,10 @@ class HeadlessSession:
             "wait_blind": bool(wait_blind),
             "ip": self.login.login_ip or "",
         }
+        # Table selection may move us to another stake and makes us wait for the big blind.
+        adjust = getattr(self.bridge, "adjust_match_fields", None)
+        if callable(adjust):
+            fields = adjust(fields)
         configure = getattr(self.bridge, "configure_auto_rejoin", None)
         if callable(configure):
             configure(fields)
@@ -650,6 +668,12 @@ class HeadlessSession:
                 self._pending_hb += 1
                 self.stats.heartbeats_sent += 1
                 await self.send("pb.HeartBeatREQ", {}, room_id=0)
+                # Clock for the table policy (timed re-match, empty-table grace, leave retry).
+                # It goes through the bridge queue so it is serialised with real frames.
+                wants_tick = getattr(self.bridge, "wants_tick", None)
+                if callable(wants_tick) and wants_tick() and self.logged_in and not self._stopping:
+                    self._bridge_queue.put_nowait(
+                        ("pf.Tick", {"now": time.time()}, 0, time.monotonic(), self._wire_turn))
         except asyncio.CancelledError:
             raise
 

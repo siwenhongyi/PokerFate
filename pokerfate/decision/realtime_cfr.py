@@ -65,6 +65,51 @@ MIXED_SAMPLE_EPS_BB = 0.15
 MIXED_SAMPLE_EPS_POT = 0.01
 _ACTION_RE = re.compile(r"^(Check|Call|Fold|Bet|Raise|AllIn)(?:\((\d+)\))?$")
 
+# ── River value-bet floor (2026-11-12) ───────────────────────────────────────
+# Logs 2026-11-09..12: on first-in river decisions the exploit blend + safety
+# discounts turned a solver-majority bet into a check 74 times and the reverse
+# 12 times (made hands, n=320). Scored against revealed villain hands, the
+# river checks with solver bet frequency >= 0.5 and tracker showdown value
+# >= 0.55..0.75 would each have gained +4..+7 bb as a half-pot bet (n=21..32,
+# every threshold in that band has a 95% interval above zero), while the same
+# checks with showdown value < 0.5 lose money as bets. The floor therefore only
+# restores the solver's own mix for hands the tracker rates as value. With the
+# solver's own sizes (mostly <= 40% pot) the estimate is smaller and its
+# interval touches zero: +3.3 +/- 3.4 bb per trigger, 28 triggers in 4976 hands
+# (analysis/guard_diff.py).
+#   PF_CFR_VALUE_BET_FLOOR=0 switches it off (old behaviour).
+VALUE_BET_FLOOR_MIN_BET_FREQ = 0.50
+VALUE_BET_FLOOR_MIN_SHOWDOWN_VALUE = 0.66
+VALUE_BET_FLOOR_MAX_POT_RATIO = 1.0
+# ── Cheap river call backed by the tracker (2026-11-12) ──────────────────────
+# Facing a river bet/raise at pot odds <= 25%, the solver's EV(call) assumes an
+# equilibrium (value-heavy) raising range; pool river raises are 20% air and
+# 31% one pair (n=273). When the tracker puts hero's showdown value at
+# >= CHEAP_CALL_MIN_SHOWDOWN_VALUE (the band where it is calibrated: 0.51
+# predicted vs 0.53 realised, n=19) the guard tolerates a solver EV gap of up
+# to CHEAP_CALL_POT_TOLERANCE x pot instead of ~2 bb. Small sample (2 logged
+# folds would flip in 9000 hands) - set either value to 0 to restore old
+# behaviour.
+CHEAP_CALL_POT_TOLERANCE = 0.06
+CHEAP_CALL_MIN_SHOWDOWN_VALUE = 0.45
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return bool(default)
+    return str(raw).strip().lower() not in {"0", "false", "off", "no"}
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return float(default)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+
 
 @dataclass
 class RealtimeCFROptions:
@@ -77,6 +122,36 @@ class RealtimeCFROptions:
     min_combo_weight: float = 1e-12
     exploit_enabled: bool = True
     max_exploit_confidence: float = 0.45
+    # Environment overrides are read when the options object is built (process
+    # start for the live bot); explicit constructor arguments always win.
+    value_bet_floor_enabled: bool = field(
+        default_factory=lambda: _env_flag("PF_CFR_VALUE_BET_FLOOR", True)
+    )
+    value_bet_floor_min_bet_freq: float = field(
+        default_factory=lambda: _env_float(
+            "PF_CFR_VALUE_BET_FLOOR_MIN_BET_FREQ", VALUE_BET_FLOOR_MIN_BET_FREQ,
+        )
+    )
+    value_bet_floor_min_showdown_value: float = field(
+        default_factory=lambda: _env_float(
+            "PF_CFR_VALUE_BET_FLOOR_MIN_SHOWDOWN", VALUE_BET_FLOOR_MIN_SHOWDOWN_VALUE,
+        )
+    )
+    value_bet_floor_max_pot_ratio: float = field(
+        default_factory=lambda: _env_float(
+            "PF_CFR_VALUE_BET_FLOOR_MAX_POT_RATIO", VALUE_BET_FLOOR_MAX_POT_RATIO,
+        )
+    )
+    cheap_call_pot_tolerance: float = field(
+        default_factory=lambda: _env_float(
+            "PF_CFR_CHEAP_CALL_POT_TOLERANCE", CHEAP_CALL_POT_TOLERANCE,
+        )
+    )
+    cheap_call_min_showdown_value: float = field(
+        default_factory=lambda: _env_float(
+            "PF_CFR_CHEAP_CALL_MIN_SHOWDOWN", CHEAP_CALL_MIN_SHOWDOWN_VALUE,
+        )
+    )
 
 
 @dataclass
@@ -231,6 +306,7 @@ class RealtimeCFRDecisionEngine:
             hero_made_rank=meta.get("hero_made_rank"),
             line_context=line_context,
             decision_seed=ctx.decision_seed,
+            options=self.options,
         )
         exploit_detail["select_action_ms"] = round((time.perf_counter() - select_t0) * 1000.0, 1)
         timing["exploit_select_ms"] = round((time.perf_counter() - exploit_t0) * 1000.0, 1)
@@ -862,7 +938,9 @@ def _select_exploit_action(
     hero_made_rank: Any = None,
     line_context: Optional[dict[str, Any]] = None,
     decision_seed: Optional[int] = None,
+    options: Optional[RealtimeCFROptions] = None,
 ) -> dict[str, Any]:
+    guard_options = options if options is not None else RealtimeCFROptions()
     gto_label, gto_prob = _select_strategy_action(gto_strategy)
     out: dict[str, Any] = {
         "selected_label": gto_label,
@@ -1122,11 +1200,28 @@ def _select_exploit_action(
         hero_made_rank=hero_made_rank,
         confidence=confidence,
         safety=safety,
+        pot_tolerance=guard_options.cheap_call_pot_tolerance,
+        min_showdown_value=guard_options.cheap_call_min_showdown_value,
+    )
+    selected_label, value_floor_applied = _apply_value_bet_floor(
+        selected_label,
+        final,
+        gto_strategy,
+        street=street,
+        line_context=line_context,
+        safety=safety,
+        rng=rng,
+        enabled=guard_options.value_bet_floor_enabled,
+        min_bet_freq=guard_options.value_bet_floor_min_bet_freq,
+        min_showdown_value=guard_options.value_bet_floor_min_showdown_value,
+        max_pot_ratio=guard_options.value_bet_floor_max_pot_ratio,
     )
     final_probs = _softmax_from_evs(final)
     blocked = _safety_discounted_actions(safety) | set(_safety_hard_blocked_actions(safety)) | set(leashed)
     mixable = {k: v for k, v in final.items() if k not in blocked}
-    if selected_label in mixable:
+    # The value-bet floor already drew from the solver's own mix; a second
+    # near-EV draw would hand part of the restored bet frequency back to Check.
+    if selected_label in mixable and not value_floor_applied:
         mixed_label, _p, mixed = _sample_near_ev(
             mixable, gto_strategy, gto_evs, pot_bb=pot_bb, rng=rng, anchor=selected_label,
         )
@@ -1299,7 +1394,21 @@ def _apply_overvalue_cheap_call_guard(
     hero_made_rank: Any,
     confidence: float,
     safety: dict[str, Any],
+    pot_tolerance: float = 0.0,
+    min_showdown_value: float = 0.0,
 ) -> str:
+    """Turn a cheap river fold of a made hand into a call when there is evidence
+    that the bettor is weaker than the solver's equilibrium range.
+
+    Two kinds of evidence are accepted:
+      * the opponent prior says this villain over-values (original rule; the
+        solver EV gap must stay inside a ~2 bb tolerance);
+      * the range tracker puts hero's showdown value at ``min_showdown_value``
+        or more (2026-11-12). Here two independent estimators disagree and the
+        price is at most 25% pot odds, so the solver gap may be as large as
+        ``pot_tolerance`` x pot. ``pot_tolerance`` or ``min_showdown_value``
+        of 0 disables this path.
+    """
     if str(street).lower() != "river" or selected_label != "Fold":
         return selected_label
     if "Call" not in final_evs or "Call" not in gto_evs or "Fold" not in gto_evs:
@@ -1319,13 +1428,26 @@ def _apply_overvalue_cheap_call_guard(
 
     overvalue = float(prior.overvalue_score)
     nut_heavy = float(prior.nut_heavy_score)
-    if overvalue <= max(0.35, nut_heavy + 0.08):
+    overvalue_supported = overvalue > max(0.35, nut_heavy + 0.08)
+    showdown_value = _tracker_showdown_value(line_context)
+    tracker_supported = bool(
+        float(pot_tolerance or 0.0) > 0.0
+        and float(min_showdown_value or 0.0) > 0.0
+        and showdown_value is not None
+        and showdown_value >= float(min_showdown_value)
+    )
+    if not overvalue_supported and not tracker_supported:
         return selected_label
 
     fold_gto = float(gto_evs["Fold"])
     call_gto = float(gto_evs["Call"])
     fold_final = float(final_evs.get("Fold", fold_gto))
     call_final = float(final_evs.get("Call", call_gto))
+    pot_scaled = (
+        float(pot_tolerance) * max(0.0, float((line_context or {}).get("current_pot_bb") or 0.0))
+        if tracker_supported
+        else 0.0
+    )
 
     gto_tolerance = (
         0.25
@@ -1334,7 +1456,8 @@ def _apply_overvalue_cheap_call_guard(
         + 0.65 * overvalue
         - 0.75 * nut_heavy
     )
-    if call_gto < fold_gto - max(0.20, gto_tolerance):
+    gto_tolerance = max(0.20, gto_tolerance, pot_scaled)
+    if call_gto < fold_gto - gto_tolerance:
         return selected_label
 
     final_tolerance = (
@@ -1345,24 +1468,143 @@ def _apply_overvalue_cheap_call_guard(
         + 0.25 * max(0.0, float(confidence or 0.0))
         - 0.70 * nut_heavy
     )
+    final_tolerance = max(0.12, final_tolerance, pot_scaled)
     ev_gap = fold_final - call_final
-    if ev_gap > max(0.12, final_tolerance):
+    if ev_gap > final_tolerance:
         return selected_label
 
+    # The decision log keeps the first eight keys of a guard record, so the
+    # ones needed to audit a flip come first.
     safety["overvalue_cheap_call_guard"] = {
         "from": "Fold",
         "to": "Call",
+        "evidence": (
+            "overvalue+tracker" if overvalue_supported and tracker_supported
+            else ("tracker" if tracker_supported else "overvalue")
+        ),
         "pot_odds": round(pot_odds, 4),
+        "showdown_value": round(showdown_value, 4) if showdown_value is not None else None,
+        "overvalue": round(overvalue, 4),
+        "gto_gap_bb": round(fold_gto - call_gto, 4),
+        "gto_tolerance_bb": round(gto_tolerance, 4),
+        "nut_heavy": round(nut_heavy, 4),
         "cheapness": round(cheapness, 4),
         "made_strength": round(made_strength, 4),
-        "overvalue": round(overvalue, 4),
-        "nut_heavy": round(nut_heavy, 4),
-        "gto_gap_bb": round(fold_gto - call_gto, 4),
         "final_gap_bb": round(ev_gap, 4),
-        "gto_tolerance_bb": round(max(0.20, gto_tolerance), 4),
-        "final_tolerance_bb": round(max(0.12, final_tolerance), 4),
+        "final_tolerance_bb": round(final_tolerance, 4),
     }
     return "Call"
+
+
+def _tracker_showdown_value(line_context: Optional[dict[str, Any]]) -> Optional[float]:
+    """Hero's river showdown value against the tracker's current villain range
+    (win + half of ties), or ``None`` when the tracker supplied no comparison
+    (every street before the river)."""
+    f = _range_v2_features(line_context)
+    if not f:
+        return None
+    total = f.get("hero_win", 0.0) + f.get("hero_tie", 0.0) + f.get("hero_loss", 0.0)
+    if total <= 1e-9:
+        return None
+    return _clamp(f.get("hero_win", 0.0) + 0.50 * f.get("hero_tie", 0.0), 0.0, 1.0)
+
+
+def _apply_value_bet_floor(
+    selected_label: str,
+    final_evs: dict[str, float],
+    gto_strategy: dict[str, float],
+    *,
+    street: str,
+    line_context: dict[str, Any],
+    safety: dict[str, Any],
+    rng: Optional[random.Random],
+    enabled: bool,
+    min_bet_freq: float,
+    min_showdown_value: float,
+    max_pot_ratio: float,
+) -> tuple[str, bool]:
+    """Do not let exploit/safety adjustments turn a solver value bet into a check.
+
+    Mixed actions have equal EV at equilibrium, so the small one-sided
+    adjustments of the exploit layer (response frequencies are rescaled but the
+    equilibrium calling range is kept, which makes a "sticky" villain lower the
+    EV of a value bet) decide the argmax and made hands end up checking far
+    more often than the solver does. When
+
+      * it is the river and the selection is ``Check``,
+      * the solver bets this exact combo at least ``min_bet_freq`` of the time,
+      * the tracker rates the hand as value (showdown value >=
+        ``min_showdown_value`` against villain's current range),
+
+    the action is redrawn from the solver's own mix: ``Check`` keeps its
+    equilibrium frequency and the bet frequency is spread over the solver's
+    sizes. Sizes above ``max_pot_ratio`` x pot or hard-blocked by a safety gate
+    are not used; their share goes to the largest remaining size. Without an
+    rng the most likely action is returned.
+
+    Returns ``(label, applied)``; ``applied`` is True whenever the redraw
+    happened, even if it landed on ``Check``.
+    """
+    if not enabled or str(street).lower() != "river":
+        return selected_label, False
+    if _action_kind(selected_label) != "Check":
+        return selected_label, False
+    showdown_value = _tracker_showdown_value(line_context)
+    if showdown_value is None or showdown_value < float(min_showdown_value):
+        return selected_label, False
+
+    bet_labels = [
+        label for label in gto_strategy
+        if _action_kind(label) in {"Bet", "AllIn"}
+    ]
+    bet_freq = sum(max(0.0, float(gto_strategy.get(label, 0.0))) for label in bet_labels)
+    if bet_freq < float(min_bet_freq):
+        return selected_label, False
+
+    hard_blocked = set(_safety_hard_blocked_actions(safety))
+    eligible: list[tuple[float, str]] = []
+    for label in bet_labels:
+        if label not in final_evs or label in hard_blocked:
+            continue
+        candidate = _candidate_action_context(label, line_context or {})
+        if float(candidate.get("pot_ratio") or 0.0) > float(max_pot_ratio) + 1e-9:
+            continue
+        eligible.append((float(candidate.get("risk_bb") or 0.0), label))
+    if not eligible:
+        return selected_label, False
+    eligible.sort()
+
+    weights: dict[str, float] = {
+        selected_label: max(0.0, float(gto_strategy.get(selected_label, 0.0))),
+    }
+    for _risk, label in eligible:
+        weights[label] = max(0.0, float(gto_strategy.get(label, 0.0)))
+    largest = eligible[-1][1]
+    weights[largest] += max(0.0, bet_freq - sum(weights[label] for _risk, label in eligible))
+    total = sum(weights.values())
+    if total <= 1e-12:
+        return selected_label, False
+
+    if rng is None:
+        chosen = max(weights.items(), key=lambda item: item[1])[0]
+    else:
+        draw = rng.random() * total
+        acc = 0.0
+        chosen = largest
+        for label, weight in weights.items():
+            acc += weight
+            if draw <= acc:
+                chosen = label
+                break
+    safety["value_bet_floor"] = {
+        "applied": True,
+        "from": selected_label,
+        "to": chosen,
+        "solver_bet_freq": round(bet_freq, 4),
+        "showdown_value": round(showdown_value, 4),
+        "candidates": {label: round(weight / total, 4) for label, weight in weights.items()},
+    }
+    return chosen, True
 
 
 def _call_price_features(line_context: dict[str, Any]) -> dict[str, float]:

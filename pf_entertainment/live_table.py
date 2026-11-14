@@ -62,11 +62,57 @@ def _chip(v: Any, default: int = 0) -> int:
             return default
 
 
+def seat_positions(seats, dealer: int, small_blind: int | None = None,
+                   big_blind: int | None = None) -> dict[int, str]:
+    """Seat -> position label for the players dealt into a hand.
+
+    Same convention the strategy uses: BTN / SB / BB, then counting back from the button
+    CO, MP and UTG for every earlier seat.  Heads-up the button also posts the small blind
+    ("BTN/SB").  With a dead button (dealer seat not dealt in) nobody is labelled BTN.
+    """
+    ordered = sorted({int(x) for x in seats})
+    n = len(ordered)
+    if n == 0:
+        return {}
+    if n == 1:
+        return {ordered[0]: "BTN"}
+    d_idx = ordered.index(int(dealer)) if int(dealer) in ordered else None
+    out: dict[int, str] = {}
+    if n == 2:
+        if d_idx is None:
+            d_idx = ordered.index(int(small_blind)) if small_blind in ordered else 0
+        out[ordered[d_idx]] = "BTN/SB"
+        out[ordered[1 - d_idx]] = "BB"
+        return out
+    sb = int(small_blind) if small_blind is not None and int(small_blind) in ordered else (
+        ordered[(d_idx + 1) % n] if d_idx is not None else None)
+    bb = int(big_blind) if big_blind is not None and int(big_blind) in ordered else (
+        ordered[(d_idx + 2) % n] if d_idx is not None else None)
+    if d_idx is not None:
+        out[ordered[d_idx]] = "BTN"
+    if sb is not None:
+        out[sb] = "BTN/SB" if out.get(sb) == "BTN" else "SB"
+    if bb is not None and bb not in out:
+        out[bb] = "BB"
+    anchor = d_idx if d_idx is not None else (ordered.index(sb) if sb in ordered else 0)
+    back = ["CO", "MP"]
+    for step in range(1, n):
+        seat = ordered[(anchor - step) % n]
+        if seat in out:
+            continue
+        out[seat] = back.pop(0) if back else "UTG"
+    return out
+
+
 class LiveTableObserver:
     """Maintains a thread-safe render snapshot of the live table."""
 
-    def __init__(self, *, my_uid: int | str | None = None, log_size: int = 14) -> None:
+    def __init__(self, *, my_uid: int | str | None = None, log_size: int = 14,
+                 reward_source: Callable[[], tuple[int, bool]] | None = None) -> None:
         self.my_uid = str(my_uid) if my_uid is not None else None
+        self._reward_source = reward_source
+        self._session_pnl_chips = 0
+        self._settled_games: set[str] = set()
         self._lock = threading.Lock()
         self._feed: deque[str] = deque(maxlen=log_size)
         self._seats: dict[int, dict] = {}
@@ -133,16 +179,35 @@ class LiveTableObserver:
             s["last"] = ""
             s["cards"] = []
             s["revealed"] = False
+            s["pos"] = ""
 
     def _seat(self, seatid: int) -> dict:
         s = self._seats.get(seatid)
         if s is None:
             s = {
                 "seatid": seatid, "name": "", "uid": "", "stack": 0, "bet": 0,
-                "folded": False, "allin": False, "cards": [], "last": "", "empty": True,
+                "folded": False, "allin": False, "cards": [], "last": "", "empty": True, "pos": "",
             }
             self._seats[seatid] = s
         return s
+
+    def _set_positions(self, seats, dealer, small_blind, big_blind) -> None:
+        for s in self._seats.values():
+            s["pos"] = ""
+        for seatid, label in seat_positions(seats, dealer, small_blind, big_blind).items():
+            self._seat(seatid)["pos"] = label
+
+    def _player_kind(self, uid: str) -> str:
+        """robot (proven by the server's counter) / suspect (inside a robot UID block) /
+        human (proven) / "" (nothing known yet)."""
+        if not uid or uid == self.my_uid:
+            return ""
+        try:
+            from pokerfate.core.robots import UNKNOWN, default_registry
+            status = default_registry().status(uid)
+            return "" if status == UNKNOWN else status
+        except Exception:
+            return ""
 
     # ── message intake ───────────────────────────────────────────────────────
     def observe(self, type_name: str, msg: dict) -> None:
@@ -199,6 +264,12 @@ class LiveTableObserver:
                 s["cards"] = cards
                 s["revealed"] = True
                 self._public_holes[seatid] = cards
+        if ts.get("is_playing"):
+            dealt = [_chip(e.get("seatid"), 0) for e in ts.get("seat") or []
+                     if isinstance(e, dict) and e.get("has_card")]
+            if len(dealt) >= 2:
+                self._set_positions(dealt, _chip(ts.get("d_idx"), 0),
+                                    _chip(ts.get("sb_idx"), 0), _chip(ts.get("bb_idx"), 0))
         board = [c for c in (_card_str(x) for x in ts.get("board") or []) if c]
         if board:
             self._board = board
@@ -271,7 +342,7 @@ class LiveTableObserver:
         if seatid >= 0 and seatid in self._seats:
             self._seats[seatid] = {
                 "seatid": seatid, "name": "", "uid": "", "stack": 0, "bet": 0,
-                "folded": False, "allin": False, "cards": [], "last": "", "empty": True,
+                "folded": False, "allin": False, "cards": [], "last": "", "empty": True, "pos": "",
             }
 
     def _h_hand_card(self, msg: dict) -> None:
@@ -288,6 +359,7 @@ class LiveTableObserver:
         self._game_id = str(msg.get("gameid") or "")
         self._hand_no += 1
         self._result = ""
+        dealt: list[int] = []
         for entry in msg.get("start_info") or []:
             if not isinstance(entry, dict):
                 continue
@@ -298,6 +370,15 @@ class LiveTableObserver:
             s["stack"] = _chip(entry.get("chips"), 0)
             if s["uid"]:
                 self._hand_start_stacks[s["uid"]] = s["stack"]
+            dealt.append(seatid)
+        # Protobuf drops zero-valued fields: a missing dealer / blind is seat 0, unless the
+        # message names no blind at all (then they follow from the button).
+        has_blinds = "small_blind" in msg or "big_blind" in msg
+        self._set_positions(
+            dealt, _chip(msg.get("dealer"), 0),
+            _chip(msg.get("small_blind"), 0) if has_blinds else None,
+            _chip(msg.get("big_blind"), 0) if has_blinds else None,
+        )
 
     def _h_round_start(self, msg: dict) -> None:
         stage = _chip(msg.get("stage"), 0)
@@ -337,6 +418,8 @@ class LiveTableObserver:
         if chips > 0:
             self._pot += chips
         who = (s["name"] if s and s["name"] else (f"座位{seatid}" if seatid >= 0 else "?"))
+        if s and self._player_kind(s["uid"]) in ("robot", "suspect"):
+            who += "〔人机〕"
         if label and at not in _BLIND_ACTIONS:
             amt = f" {chips}" if chips > 0 and at not in _FOLD_ACTIONS else ""
             self._feed.append(f"{who} {label}{amt}")
@@ -472,6 +555,12 @@ class LiveTableObserver:
         tail = ""
         if mine is not None:
             d = _chip(mine.get("chips"), 0)
+            # Replayed settlements (including after a room snapshot) count once.
+            # Neither leaving the room nor buying in starts a new bot session.
+            game = self._game_id or self._hand_token
+            if game not in self._settled_games:
+                self._settled_games.add(game)
+                self._session_pnl_chips += d
             tail = f"  本手 {'+' if d >= 0 else ''}{d}"
         self._result = ("  |  ".join(names) + tail).strip()
         if self._result:
@@ -481,6 +570,7 @@ class LiveTableObserver:
 
     # ── snapshot for the web ─────────────────────────────────────────────────
     def snapshot(self) -> dict:
+        rewards, uncertain = self._reward_source() if self._reward_source else (None, False)
         with self._lock:
             seats = []
             for i in range(max(self._seat_num, (max(self._seats) + 1) if self._seats else 0)):
@@ -502,8 +592,17 @@ class LiveTableObserver:
                     "is_me": (i == self._my_seat),
                     "acting": (i == self._action_seat),
                     "revealed": bool(s.get("revealed")),
+                    "pos": s.get("pos", ""),
+                    "kind": "" if s["empty"] or i == self._my_seat else self._player_kind(s["uid"]),
                 })
+            others = [x for x in seats if not x.get("empty") and not x.get("is_me")]
+            robots = sum(1 for x in others if x.get("kind") in ("robot", "suspect"))
             return {
+                "session_pnl_chips": self._session_pnl_chips,
+                "session_reward_chips": rewards,
+                "session_rewards_uncertain": uncertain,
+                "humans": len(others) - robots,
+                "robots": robots,
                 "updated": self._updated,
                 "connected": self._connected,
                 "connection_status": self._connection_status,

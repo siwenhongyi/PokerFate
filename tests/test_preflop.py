@@ -1751,3 +1751,82 @@ def test_count_limpers_before_raise_excludes_those_who_acted():
     gs.action_history.append((2, Action(ActionType.CALL, 3.0), 'preflop'))   # L1 already called the raise
     assert bot._count_limpers_before_raise(gs, hero) == 1
 
+
+
+# ── Thin value 3-bets against the human pool ────────────────────────────────
+# An opener the bluff logic never attacks: sticky and does not fold to 3-bets.
+_POOL_SPOT = dict(
+    position='BTN', facing_action='open', villain_position='CO', open_raise=30.0, is_ip=True,
+    big_blind=10.0, stack=1000.0, pot=45.0, to_call=30.0, stack_bb=100.0, equity=0.30,
+    sticky_density=0.8, villain_hands_seen=60, villain_vpip=0.50, villain_pfr=0.16,
+    villain_fold_to_3bet=0.10, villain_fold_to_3bet_opps=20,
+)
+
+
+def _pool_strat():
+    strat = PreflopStrategy()
+    strat._rng.random = lambda: 0.99          # every dampened roll comes out "do not raise"
+    return strat
+
+
+@pytest.mark.parametrize('hole,cat', [
+    (('9s', '9d'), '99'), (('8s', '8d'), '88'), (('Ad', 'Js'), 'AJo'), (('Ad', 'Td'), 'ATs'),
+])
+def test_pool_value_3bet_takes_the_chart_raise_at_full_frequency(hole, cat):
+    strat = _pool_strat()
+    action, amount = strat.decide(hole_cards=cards(*hole), human_open_effective_bb=100.0, **_POOL_SPOT)
+    assert action == 'raise'
+    assert amount == strat.three_bet_size(30.0, True, 10.0, 'CO', 'BTN')
+    assert strat.last_expand_reason == f'pool_value_3bet:BTN-vs-open-CO {cat}'
+    # Outside the measured spot the same chart raise is still scaled down like a bluff.
+    action, _ = strat.decide(hole_cards=cards(*hole), **_POOL_SPOT)
+    assert action != 'raise'
+    assert 'exploit_raise=100%' in strat.last_expand_reason
+
+
+def test_pool_value_3bet_from_the_big_blind_against_a_late_open():
+    strat = _pool_strat()
+    spot = dict(_POOL_SPOT, position='BB', villain_position='BTN', is_ip=False, to_call=20.0)
+    action, amount = strat.decide(hole_cards=cards('8s', '8d'), human_open_effective_bb=80.0, **spot)
+    assert action == 'raise'
+    assert amount == strat.three_bet_size(30.0, False, 10.0, 'BTN', 'BB')
+    assert strat.last_expand_reason == 'pool_value_3bet:BB-vs-open-BTN 88'
+
+
+@pytest.mark.parametrize('name,hole,change', [
+    ('below_the_bar_kqo', ('Kc', 'Qd'), {}),
+    ('below_the_bar_kjs', ('Ks', 'Js'), {}),
+    ('next_pair_down', ('7s', '7d'), {}),
+    ('effective_stack_under_50bb', ('9s', '9d'), {'human_open_effective_bb': 49.0}),
+    ('open_larger_than_4bb', ('9s', '9d'), {'open_raise': 45.0, 'to_call': 45.0}),
+    ('big_blind_chart_call_vs_utg', ('9s', '9d'), {'position': 'BB', 'villain_position': 'UTG', 'is_ip': False}),
+    ('button_chart_fold_vs_utg', ('Ad', 'Js'), {'villain_position': 'UTG'}),
+    ('seat_without_a_chart', ('9s', '9d'), {'position': 'CO', 'villain_position': 'MP'}),
+])
+def test_pool_value_3bet_leaves_other_spots_alone(name, hole, change):
+    spot = dict(_POOL_SPOT, human_open_effective_bb=100.0)
+    spot.update(change)
+    widened, baseline = _pool_strat(), _pool_strat()
+    got = widened.decide(hole_cards=cards(*hole), **spot)
+    spot['human_open_effective_bb'] = 0.0
+    assert got == baseline.decide(hole_cards=cards(*hole), **spot), name
+    assert widened.last_expand_reason == baseline.last_expand_reason
+    assert 'pool_value_3bet' not in widened.last_expand_reason
+
+
+def test_pool_value_3bet_switch_restores_the_old_behaviour(monkeypatch):
+    monkeypatch.setattr(preflop_module, '_POOL_VALUE_3BET_ENABLED', False)
+    strat = _pool_strat()
+    action, _ = strat.decide(hole_cards=cards('9s', '9d'), human_open_effective_bb=100.0, **_POOL_SPOT)
+    assert action != 'raise'
+    assert 'pool_value_3bet' not in strat.last_expand_reason
+
+
+def test_pool_value_3bet_folds_to_a_4bet_jam():
+    strat = _pool_strat()
+    action, _ = strat.decide(
+        hole_cards=cards('9s', '9d'), position='BTN', facing_action='4bet', villain_position='CO',
+        open_raise=1000.0, is_ip=True, big_blind=10.0, stack=904.0, current_bet=96.0, pot=1111.0,
+        to_call=904.0, stack_bb=90.4, equity=0.40,
+    )
+    assert action == 'fold'

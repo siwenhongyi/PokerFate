@@ -1669,3 +1669,274 @@ def test_response_evs_ignored_when_hero_combo_never_takes_action():
         street="turn", hero_action_label="Raise(264)", line_context={"current_pot_bb": 36.5},
     )
     assert detail is not None
+
+
+# ---------------------------------------------------------------------------
+# River value-bet floor and tracker-backed cheap call (2026-11-12).
+# Inputs are the solver outputs logged for real hands in pokerfate.log
+# (session 2026-11-11T18:03Z); node EVs are in tenths of a big blind.
+# ---------------------------------------------------------------------------
+from pokerfate.decision.realtime_cfr import (  # noqa: E402
+    _apply_value_bet_floor,
+    _safety_hard_blocked_actions,
+)
+
+_STICKY_PROFILE = dict(
+    name="sticky", hands_seen=600, flop_seen_count=200, vpip=0.55, pfr=0.10, af=0.9,
+    fold_to_cbet=0.25, fold_to_cbet_opps=120, wtsd=0.45, turn_action_count=150,
+    river_action_count=90, river_bet_freq=0.55, river_afq=0.50,
+)
+
+
+def _hand_1260_selection(options, *, win=0.936, seed=None):
+    """Hand #1260: hero 8h9s on 9dJcKc9h2h, first to act on the river, pot 16.5bb.
+
+    Strategy and EVs at hero's node are the logged solver output; the sticky
+    profile stands in for the live villain.
+    """
+    actions = ["Check", "Bet(54)", "Bet(109)", "Bet(165)", "Bet(248)"]
+    strategy = [0.1664, 0.0183, 0.2285, 0.1883, 0.3985]
+    evs = [174.755, 166.274, 171.013, 173.719, 176.174]
+    result = {
+        "node": {"path": "r", "player": 0, "actions": actions, "num_hands": 1,
+                 "strategy": strategy, "evs": evs},
+        "nodes": [],
+        "oop_hands": ["8h9s"],
+        "ip_hands": ["8dTs"],
+    }
+    return _select_exploit_action(
+        result,
+        hero_combo="8h9s",
+        hero_side="oop",
+        street="river",
+        gto_strategy=dict(zip(actions, strategy)),
+        profile=PlayerProfile(**_STICKY_PROFILE),
+        adjustments={"bluff_ag_scale": 0.6, "value_ag_scale": 1.1},
+        max_confidence=0.45,
+        enabled=True,
+        hero_made_rank="three_of_a_kind",
+        decision_seed=seed,
+        options=options,
+        line_context={
+            "street": "river",
+            "board": ["9d", "Jc", "Kc", "9h", "2h"],
+            "hero_combo": "8h9s",
+            "current_pot_bb": 16.5,
+            "current_to_call_bb": 0.0,
+            "hero_current_bet_bb": 0.0,
+            "effective_stack_bb": 95.0,
+            "range_v2": {
+                "bucket_dist": {"air": 0.45, "strong": 0.25, "medium": 0.22, "nuts": 0.08},
+                "vs_hero": {"win": win, "tie": 0.0, "loss": 1.0 - win},
+            },
+        },
+    )
+
+
+def test_value_bet_floor_restores_solver_bet_against_sticky_villain():
+    old = _hand_1260_selection(RealtimeCFROptions(value_bet_floor_enabled=False))
+    # Against a sticky villain every bet's exploit EV drops below Check, so a
+    # combo the solver bets 83% of the time is checked (what the live bot did).
+    assert old["selected_label"] == "Check"
+    assert "value_bet_floor" not in old["exploit"]["safety"]
+
+    new = _hand_1260_selection(RealtimeCFROptions())
+    floor = new["exploit"]["safety"]["value_bet_floor"]
+    assert new["selected_label"] == "Bet(165)"
+    assert floor["from"] == "Check" and floor["to"] == "Bet(165)"
+    assert floor["solver_bet_freq"] == pytest.approx(0.8336, abs=1e-3)
+    # The 150%-pot size is above the cap; its 40% share moves to the pot-size bet.
+    assert "Bet(248)" not in floor["candidates"]
+    assert floor["candidates"]["Bet(165)"] == pytest.approx(0.5868, abs=1e-3)
+    assert floor["candidates"]["Check"] == pytest.approx(0.1664, abs=1e-3)
+
+
+def test_value_bet_floor_keeps_the_solver_mix():
+    labels = [
+        _hand_1260_selection(RealtimeCFROptions(), seed=seed)["selected_label"]
+        for seed in range(400)
+    ]
+    check_share = labels.count("Check") / len(labels)
+    # Solver checks this combo 16.6% of the time; the floor must not turn the
+    # hand into a pure bet and must never use the excluded overbet.
+    assert 0.10 <= check_share <= 0.24
+    assert labels.count("Bet(165)") > labels.count("Bet(109)") > 0
+    assert "Bet(248)" not in labels
+
+
+def test_value_bet_floor_leaves_low_showdown_value_hands_checked():
+    # Same solver output, but the tracker says hero is behind most of the time:
+    # this is a bluff, which the exploit layer is right to suppress.
+    selection = _hand_1260_selection(RealtimeCFROptions(), win=0.40)
+    assert selection["selected_label"] == "Check"
+    assert "value_bet_floor" not in selection["exploit"]["safety"]
+
+
+def test_value_bet_floor_on_logged_final_evs_of_hand_264():
+    # Hand #264: 7c2c on 2s2d5hJh4h, pot 31.8bb. Logged exploit-adjusted EVs
+    # put Check on top (26.21 vs 25.94) although the solver bets 86%.
+    strategy = {"Check": 0.1427, "Bet(105)": 0.6786, "Bet(210)": 0.1659,
+                "Bet(318)": 0.0038, "Bet(477)": 0.0089}
+    final = {"Check": 26.2121, "Bet(105)": 25.9427, "Bet(210)": 25.4991,
+             "Bet(318)": 24.7401, "Bet(477)": 23.8952}
+    assert max(final, key=final.get) == "Check"
+    context = {
+        "street": "river", "current_pot_bb": 31.8, "hero_current_bet_bb": 0.0,
+        "effective_stack_bb": 103.2,
+        "range_v2": {"vs_hero": {"win": 0.89, "tie": 0.0, "loss": 0.11}},
+    }
+    import random as _random
+
+    drawn = []
+    for seed in range(600):
+        safety = {}
+        label, applied = _apply_value_bet_floor(
+            "Check", final, strategy, street="river", line_context=context, safety=safety,
+            rng=_random.Random(seed), enabled=True, min_bet_freq=0.50,
+            min_showdown_value=0.66, max_pot_ratio=1.0,
+        )
+        assert applied and safety["value_bet_floor"]["to"] == label
+        drawn.append(label)
+    assert 0.10 <= drawn.count("Check") / len(drawn) <= 0.19
+    assert 0.62 <= drawn.count("Bet(105)") / len(drawn) <= 0.74
+    assert "Bet(477)" not in drawn  # 150% pot
+
+
+def _floor_call(strategy, final_evs, *, street="river", win=0.80, pot=10.5, safety=None,
+                min_bet_freq=0.50, max_pot_ratio=1.0, enabled=True):
+    safety = {} if safety is None else safety
+    context = {"street": street, "current_pot_bb": pot, "hero_current_bet_bb": 0.0,
+               "effective_stack_bb": 100.0}
+    if win is not None:
+        context["range_v2"] = {"vs_hero": {"win": win, "tie": 0.0, "loss": 1.0 - win}}
+    label, applied = _apply_value_bet_floor(
+        "Check", final_evs, strategy, street=street, line_context=context, safety=safety,
+        rng=None, enabled=enabled, min_bet_freq=min_bet_freq, min_showdown_value=0.66,
+        max_pot_ratio=max_pot_ratio,
+    )
+    return label, applied, safety
+
+
+def test_value_bet_floor_needs_a_solver_majority_bet():
+    # Hand #783: T8 on TsKd2sTd5d, solver checks 64% - the check stands.
+    strategy = {"Check": 0.6382, "Bet(35)": 0.3618, "Bet(69)": 0.0, "Bet(105)": 0.0}
+    final = {"Check": 7.9146, "Bet(35)": 7.6704, "Bet(69)": 7.5826, "Bet(105)": 2.4731}
+    label, applied, safety = _floor_call(strategy, final)
+    assert (label, applied) == ("Check", False)
+    assert safety == {}
+
+
+def test_value_bet_floor_is_river_only_and_switchable():
+    strategy = {"Check": 0.05, "Bet(105)": 0.95}
+    final = {"Check": 31.6, "Bet(105)": 31.0}
+    assert _floor_call(strategy, final, street="turn", pot=31.8)[:2] == ("Check", False)
+    # No hero-vs-range comparison from the tracker (as on the turn): no opinion.
+    assert _floor_call(strategy, final, win=None, pot=31.8)[:2] == ("Check", False)
+    assert _floor_call(strategy, final, enabled=False, pot=31.8)[:2] == ("Check", False)
+    assert _floor_call(strategy, final, pot=31.8)[:2] == ("Bet(105)", True)
+
+
+def test_value_bet_floor_skips_capped_and_hard_blocked_sizes():
+    # Hand #1260: 98 on 9dJcKc9h2h, pot 16.5bb. Solver: 40% on the 150% overbet.
+    strategy = {"Check": 0.1664, "Bet(54)": 0.0183, "Bet(109)": 0.2285,
+                "Bet(165)": 0.1883, "Bet(248)": 0.3985}
+    final = {"Check": 17.4085, "Bet(54)": 16.5252, "Bet(109)": 16.7905,
+             "Bet(165)": 11.5705, "Bet(248)": 8.4564}
+    label, applied, safety = _floor_call(strategy, final, win=0.936, pot=16.5)
+    assert (label, applied) == ("Bet(165)", True)
+    assert safety["value_bet_floor"]["candidates"]["Bet(165)"] == pytest.approx(0.5868, abs=1e-3)
+
+    blocked = {"large_size_support": [{"action": "Bet(165)", "blocked": True, "penalty_bb": 1.0}]}
+    assert "Bet(165)" in _safety_hard_blocked_actions(blocked)
+    label, applied, safety = _floor_call(strategy, final, win=0.936, pot=16.5, safety=blocked)
+    assert (label, applied) == ("Bet(109)", True)
+    assert "Bet(165)" not in safety["value_bet_floor"]["candidates"]
+
+    # Every bet size excluded: nothing to restore.
+    only_overbet = {"Check": 0.2, "Bet(248)": 0.8}
+    label, applied, _ = _floor_call(only_overbet, {"Check": 17.4, "Bet(248)": 8.4}, win=0.936, pot=16.5)
+    assert (label, applied) == ("Check", False)
+
+
+def _river_facing_selection(options, *, pot, to_call, call_ev_bb, win, rank="two_pair",
+                            hero_bet=0.0, strategy=(0.5, 0.5), path="r:Bet(100)"):
+    actions = ["Fold", "Call"]
+    result = {
+        "node": {"path": path, "player": 1, "actions": actions, "num_hands": 1,
+                 "strategy": list(strategy), "evs": [0.0, call_ev_bb * 10.0]},
+        "nodes": [],
+        "oop_hands": ["KhJh"],
+        "ip_hands": ["AsQs"],
+    }
+    return _select_exploit_action(
+        result,
+        hero_combo="AsQs",
+        hero_side="ip",
+        street="river",
+        gto_strategy=dict(zip(actions, strategy)),
+        profile=None,
+        adjustments={},
+        max_confidence=0.45,
+        enabled=True,
+        hero_made_rank=rank,
+        options=options,
+        line_context={
+            "street": "river",
+            "board": ["4c", "4d", "Td", "6h", "Ad"],
+            "hero_combo": "AsQs",
+            "current_pot_bb": pot,
+            "current_to_call_bb": to_call,
+            "hero_current_bet_bb": hero_bet,
+            "effective_stack_bb": 37.44,
+            "range_v2": {
+                "bucket_dist": {"nuts": 0.45, "strong": 0.40, "air": 0.15},
+                "vs_hero": {"win": win, "tie": 0.0, "loss": 1.0 - win},
+                "action_context": {"action": "raise", "bet_ratio": 0.16, "is_raise_over": True},
+            },
+        },
+    )
+
+
+def _hand_383(options, **overrides):
+    """Hand #383: AsQs bets the river, villain shoves for 13.1bb more into 96.7bb."""
+    params = dict(pot=96.7, to_call=13.1, call_ev_bb=-4.9637, win=0.53, hero_bet=23.8,
+                  strategy=(0.2344, 0.7656), path="r:Check:Bet(238):AllIn(374)")
+    params.update(overrides)
+    return _river_facing_selection(options, **params)
+
+
+def test_cheap_call_guard_accepts_tracker_evidence_with_pot_scaled_tolerance():
+    # Old behaviour: solver EV(call) = -4.96bb, the leash caps Call under Fold.
+    for old_options in (
+        RealtimeCFROptions(cheap_call_pot_tolerance=0.0),
+        RealtimeCFROptions(cheap_call_min_showdown_value=0.0),
+    ):
+        old = _hand_383(old_options)
+        assert old["selected_label"] == "Fold"
+        assert "overvalue_cheap_call_guard" not in old["exploit"]["safety"]
+
+    new = _hand_383(RealtimeCFROptions())
+    assert new["selected_label"] == "Call"
+    guard = new["exploit"]["safety"]["overvalue_cheap_call_guard"]
+    assert "tracker" in guard["evidence"]
+    assert guard["pot_odds"] == pytest.approx(13.1 / (96.7 + 13.1), abs=1e-3)
+    assert guard["showdown_value"] == pytest.approx(0.53)
+    # 6% of the 96.7bb pot replaces the ~2bb absolute tolerance.
+    assert guard["gto_tolerance_bb"] == pytest.approx(0.06 * 96.7, abs=1e-3)
+    assert guard["gto_gap_bb"] < guard["gto_tolerance_bb"]
+
+
+def test_cheap_call_guard_tracker_path_keeps_its_limits():
+    options = RealtimeCFROptions()
+    # Solver gap beyond 6% of the pot.
+    assert _hand_383(options, call_ev_bb=-8.0)["selected_label"] == "Fold"
+    # Tracker itself rates the hand below the calibrated band.
+    assert _hand_383(options, win=0.30)["selected_label"] == "Fold"
+    # Made-hand gate of the guard is unchanged.
+    assert _hand_383(options, rank="one_pair")["selected_label"] == "Fold"
+    # Hand #419: J6 two pair facing a pot-size bet (33% pot odds) - not cheap.
+    not_cheap = _river_facing_selection(
+        options, pot=61.7, to_call=30.8, call_ev_bb=-6.5591, win=0.61,
+        strategy=(0.455, 0.545), path="r:Bet(308)",
+    )
+    assert not_cheap["selected_label"] == "Fold"

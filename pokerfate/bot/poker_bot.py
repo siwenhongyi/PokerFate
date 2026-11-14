@@ -269,6 +269,10 @@ class PokerBot:
             villain_fold_to_3bet=preflop_villain_stats.fold_to_3bet if preflop_villain_stats else 0.55,
             villain_fold_to_3bet_opps=preflop_villain_stats.fold_to_3bet_opps if preflop_villain_stats else 0,
             limpers_behind=limpers_behind,
+            human_open_effective_bb=(
+                self._human_open_effective_bb(gs, player, preflop_aggressor_id)
+                if facing_action == 'open' else 0.0
+            ),
         )
 
         self._last_reasoning = self._preflop_reasoning(
@@ -361,6 +365,29 @@ class PokerBot:
         if total_raise_count == 2:
             return '3bet', opp_raises[-1][1].amount
         return '4bet', opp_raises[-1][1].amount
+
+    def _human_open_effective_bb(self, gs: GameState, hero: Player, opener_id: int | None) -> float:
+        """Effective depth (bb) against the opener in the spot the pool's 3-bet
+        response was measured in, else 0.
+
+        The spot: a robot-free table, one first-in raise, nobody else in the
+        pot, and hero has not acted yet.
+        """
+        if gs.has_robot_opponent or opener_id is None or gs.big_blind <= 0:
+            return 0.0
+        opener = self._find_player(gs, opener_id)
+        if opener is None or not opener.can_act() or opener.stack <= 0 or gs.current_bet != opener.current_bet:
+            return 0.0
+        # Blinds are not in action_history. Any call (a limper, a cold caller,
+        # hero's own limp) or second raise takes the hand out of the spot.
+        voluntary = [
+            (item[0], item[1].action_type) for item in gs.action_history
+            if (len(item) < 3 or str(item[2]).lower() == 'preflop')
+            and item[1].action_type in (ActionType.CALL, ActionType.RAISE)
+        ]
+        if voluntary != [(opener_id, ActionType.RAISE)]:
+            return 0.0
+        return min(hero.stack + hero.current_bet, opener.stack + opener.current_bet) / gs.big_blind
 
     def _count_limpers(self, gs: GameState, player: Player) -> int:
         """Count opponents who called (limped) preflop without raising."""
@@ -1272,7 +1299,8 @@ class PokerBot:
                     return f"{tag} {cat} {position} {num_limpers}人limp→iso {eq} | {meta}"
                 return f"{tag} {cat} {position} {facing}→开加 {eq} | {meta}"
             elif facing_action == "open":
-                kind = "3bet价值" if cat in _3BET_VALUE else "3bet诈唬"
+                is_value = cat in _3BET_VALUE or self.preflop.last_expand_reason.startswith('pool_value_3bet:')
+                kind = "3bet价值" if is_value else "3bet诈唬"
                 return f"{tag} {cat} {facing}→{kind} {eq} | {meta}"
             elif facing_action == "3bet":
                 return f"{tag} {cat} {facing}→4bet价值 {eq} | {meta}"

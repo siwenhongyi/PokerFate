@@ -22,3 +22,15 @@ def _isolate_g5_shadow_worker(monkeypatch):
     from pf_intercept import config
     monkeypatch.setenv("PF_G5_SHADOW_ENABLED", "0")
     monkeypatch.setattr(config, "PF_G5_SHADOW_ENABLED", False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_robot_registry(tmp_path_factory, monkeypatch):
+    """Tests must neither read nor grow the real robot registry / table-selection log."""
+    import pokerfate.core.robots as robots
+    import pf_intercept.bot as bridge_mod
+
+    root = tmp_path_factory.mktemp("robots")
+    monkeypatch.delenv("PF_ROBOT_REGISTRY", raising=False)
+    monkeypatch.setattr(robots, "_default", robots.RobotRegistry(root / "robots.json", autosave=False))
+    monkeypatch.setattr(bridge_mod, "_TABLE_LOG_PATH", root / "table_select.jsonl")

@@ -8,6 +8,7 @@ logic in the caller.
 from __future__ import annotations
 
 import json
+import os
 import math
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -107,7 +108,9 @@ class _NumericIndex:
 
 
 def empirical_model_path() -> Path:
-    return MODEL_FILE
+    """Deployed model file; ``PF_EMPIRICAL_MODEL_PATH`` points evaluations at a candidate build."""
+    override = os.environ.get("PF_EMPIRICAL_MODEL_PATH", "").strip()
+    return Path(override) if override else MODEL_FILE
 
 
 @lru_cache(maxsize=1)

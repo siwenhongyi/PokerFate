@@ -367,13 +367,28 @@ def _build_model(
     since_ts: float = 0.0,
     until_ts: float = 0.0,
     max_blend: float = 0.055,
+    exclude_robots: bool = True,
+    robot_registry_path: Path | None = None,
 ) -> dict[str, Any]:
     rows = _load_rows(row_paths, since_ts=since_ts, until_ts=until_ts)
     console_rows = []
     for path in console_logs:
         console_rows.extend(_rows_from_console(path))
-    all_rows = rows + console_rows
     opponents = _load_opponent_stats(opponents_path)
+    robots_dropped = {"excluded": bool(exclude_robots), "rows": 0, "opponents": 0}
+    if exclude_robots:
+        # House robots act without regard to their cards: a pool table or a neighbour prior
+        # built from them describes nobody we want to model.
+        from pokerfate.core.robots import RobotRegistry
+        from scripts.range_calibration_meta import drop_robot_rows
+
+        registry = RobotRegistry(robot_registry_path, autosave=False)
+        rows, robots_dropped["rows"] = drop_robot_rows(rows, registry)
+        human_opponents = {uid: st for uid, st in opponents.items() if not registry.is_robot(uid)}
+        robots_dropped["opponents"] = len(opponents) - len(human_opponents)
+        robots_dropped["registry"] = registry.counts()
+        opponents = human_opponents
+    all_rows = rows + console_rows
     player_action_counts = _build_player_action_counts(rows, opponents)
     player_preflop_counts = _build_player_preflop_counts(rows, opponents)
     numeric_profile_priors = build_numeric_profile_payload(
@@ -395,6 +410,7 @@ def _build_model(
             "structured_rows": len(rows),
             "console_rows": len(console_rows),
             "opponents_players": len(opponents),
+            "robots_dropped": robots_dropped,
             "numeric_action_players": len(player_action_counts),
             "numeric_preflop_players": len(player_preflop_counts),
         },
@@ -419,6 +435,7 @@ def _build_model(
         "rows": len(rows),
         "console_rows": len(console_rows),
         "opponents": len(opponents),
+        "robots_dropped": robots_dropped,
         "population_rates": model["population_rates"],
         "numeric_profile_priors": numeric_profile_priors.get("counts", {}),
         "preflop_prior_keys": len(model["preflop_bucket_priors"]),
@@ -467,6 +484,10 @@ def main() -> None:
     ap.add_argument("--until", default="",
                     help="only rows recorded before this UTC time (ISO 8601 or epoch); "
                          "use for temporal hold-out builds")
+    ap.add_argument("--keep-robots", action="store_true",
+                    help="do NOT drop house robots from rows / opponent stats (default: drop them)")
+    ap.add_argument("--robot-registry", type=Path, default=None,
+                    help="robot registry file (default pokerfate/data/local_models/robots.json)")
     args = ap.parse_args()
 
     summary = _build_model(
@@ -480,6 +501,8 @@ def main() -> None:
         since_ts=_parse_ts(args.since),
         until_ts=_parse_ts(args.until),
         max_blend=args.max_blend,
+        exclude_robots=not args.keep_robots,
+        robot_registry_path=args.robot_registry,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
 

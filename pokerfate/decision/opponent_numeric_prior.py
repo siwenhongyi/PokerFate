@@ -353,10 +353,14 @@ def _load_model() -> _NumericModel:
     if not isinstance(players, dict):
         return _empty_model()
 
+    # House robots are left out of the pool rates and of the neighbour library: their stats
+    # describe accounts that act without regard to their cards, so they must not stand in
+    # for a human we know little about.  A robot we actually face still uses its own stats.
+    is_robot = _robot_filter()
     stats_list = [
         entry.get("stats", {})
-        for entry in players.values()
-        if isinstance(entry, dict) and isinstance(entry.get("stats"), dict)
+        for uid, entry in players.items()
+        if isinstance(entry, dict) and isinstance(entry.get("stats"), dict) and not is_robot(uid)
     ]
     if not stats_list:
         return _empty_model()
@@ -374,6 +378,17 @@ def _load_model() -> _NumericModel:
         for row in rows
     ]
     return _NumericModel(pool=pool, scales=scales, rows=rows, player_count=len(rows))
+
+
+def _robot_filter():
+    """uid -> bool, from the robot registry; never fails the model load."""
+    try:
+        from pokerfate.core.robots import default_registry
+
+        registry = default_registry()
+        return lambda uid: registry.is_robot(uid)
+    except Exception:
+        return lambda uid: False
 
 
 def _empty_model() -> _NumericModel:

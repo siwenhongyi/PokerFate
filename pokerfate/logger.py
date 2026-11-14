@@ -292,6 +292,8 @@ class PokerLogger:
         bb = max(big_blind, 1.0)
         def _seat_str(p: dict) -> str:
             text = f"{p['name']} {p['stack'] / bb:.0f}bb [{_pos(p.get('pos', ''))}]"
+            if p.get("robot"):
+                text += "(人机)"
             if self._color and hero_id is not None and p.get("id") == hero_id:
                 return f"{_C.YELLOW}{text}{_C.RESET}{_C.BOLD}"
             return text

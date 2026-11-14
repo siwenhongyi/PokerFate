@@ -155,6 +155,33 @@ def test_claim_timeout_requeries_instead_of_replaying_and_flags_unknown_profit(t
     asyncio.run(run())
 
 
+def test_challenge_and_chest_credit_confirmed_chips_only(tmp_path):
+    async def run():
+        pending = task_list(challenge_list=[
+            {"id": 91, "task_id": 7, "status": 2},
+            {"id": 92, "status": 2, "monthly_card_task": True},
+            {"id": 93, "status": 1},
+        ])
+        chest = task_list(point_data={"challenge_point": 20, "challenge_reward_id_list": [1]},
+                          challenge_point_conf_list=[{"id": 1, "reward_point": 10},
+                                                     {"id": 2, "reward_point": 20}])
+        http = ScriptedHTTP([
+            ("/task/list", pending), ("/player/payInfo", {"code": 0, "data": {"monthly_card_exp": 0}}),
+            ("/task/recReward", {"code": 0, "reward_chips": 120, "reward_point": 20}),
+            ("/task/list", chest),
+            ("/task/recPointReward", {"code": 0, "item_list": [{"item_id": rw.GOLD, "num": 250},
+                                                               {"item_id": 99, "num": 10}]}),
+            ("/task/list", task_list()),
+        ])
+        s, _, credits = service(tmp_path, http)
+        await s.check_tasks()
+        assert http.calls[2][1] == {"task_cate": 6, "id_arr": [91], "all": False}
+        assert http.calls[4][1] == {"task_cate": 6, "id": 2}
+        assert credits == [(120, False), (250, False)] and s.confirmed_chips == 370
+        assert not http.replies
+    asyncio.run(run())
+
+
 def test_auth_failure_pauses_http_until_new_session(tmp_path):
     async def run():
         http = ScriptedHTTP([("/activity/rebateStatus", {"code": -2})])

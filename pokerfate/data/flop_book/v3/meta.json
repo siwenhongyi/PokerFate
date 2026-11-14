@@ -1,0 +1,213 @@
+{
+  "book_version": "v3",
+  "schema_version": 3,
+  "complete": true,
+  "identity": {
+    "config_hash": "2909a1e850e874478541f1a185d1835d4bdb6990903ae6386382879f6e2c0163",
+    "range_hash": "a78ce639014bfc8416c0bc95170da00d1a6916b43495634d6475d3e2f3b16f30",
+    "cluster_hash": "48f9085a47f0d8cd8b140d93ee4dd760300a3a66f4ceb49a0551395377e816da",
+    "solver_hash": "283296e2cc8516ef8bbc8af1e76408b9ede86a63e887802b93c4dfb11c38ff6f",
+    "pipeline_hash": "efe6ec48a4c38f006094c2038162da7c7f64f4588228ee4f0b587ebb1e2d47a9"
+  },
+  "tree": {
+    "flop_bet_sizes": [
+      33,
+      50,
+      67,
+      100
+    ],
+    "flop_raise_sizes": [
+      2.0,
+      4.0
+    ],
+    "turn_bet_sizes": [
+      75
+    ],
+    "turn_raise_sizes": [
+      2.7
+    ],
+    "river_bet_sizes": [
+      75
+    ],
+    "river_raise_sizes": [
+      2.7
+    ],
+    "add_allin_threshold": 1.5,
+    "force_allin_threshold": 0.15,
+    "merging_threshold": 0.1
+  },
+  "open_sizes_bb": {
+    "UTG": 4.0,
+    "MP": 4.0,
+    "CO": 3.5,
+    "BTN": 3.5,
+    "SB": 4.0
+  },
+  "allow_unconverged": false,
+  "solver": "postflop-solver@9d1509f",
+  "abstraction_hash": "2909a1e850e874478541f1a185d1835d4bdb6990903ae6386382879f6e2c0163",
+  "range_hash": "a78ce639014bfc8416c0bc95170da00d1a6916b43495634d6475d3e2f3b16f30",
+  "ranges_id": "runtime_preflop_v3",
+  "canonical_algo": "suit-canonical-v1",
+  "cluster": {
+    "algo": "feature-kmedoids-v1",
+    "k": 200
+  },
+  "target_exploitability_pct": 0.5,
+  "rake": {
+    "rate": 0.09,
+    "cap_bb": null
+  },
+  "scenarios": [
+    {
+      "id": "UTGvBB_srp50",
+      "oop": "BB",
+      "ip": "UTG",
+      "pot": 8.5,
+      "effective_stack": 46,
+      "flop_count": 200,
+      "depth_bb": 50,
+      "opener": "UTG",
+      "exploitability_pct": {
+        "p50": 0.467,
+        "p95": 0.496,
+        "max": 0.5
+      }
+    },
+    {
+      "id": "MPvBB_srp50",
+      "oop": "BB",
+      "ip": "MP",
+      "pot": 8.5,
+      "effective_stack": 46,
+      "flop_count": 200,
+      "depth_bb": 50,
+      "opener": "MP",
+      "exploitability_pct": {
+        "p50": 0.467,
+        "p95": 0.497,
+        "max": 0.5
+      }
+    },
+    {
+      "id": "COvBB_srp50",
+      "oop": "BB",
+      "ip": "CO",
+      "pot": 7.5,
+      "effective_stack": 46.5,
+      "flop_count": 200,
+      "depth_bb": 50,
+      "opener": "CO",
+      "exploitability_pct": {
+        "p50": 0.469,
+        "p95": 0.498,
+        "max": 0.5
+      }
+    },
+    {
+      "id": "BTNvBB_srp50",
+      "oop": "BB",
+      "ip": "BTN",
+      "pot": 7.5,
+      "effective_stack": 46.5,
+      "flop_count": 200,
+      "depth_bb": 50,
+      "opener": "BTN",
+      "exploitability_pct": {
+        "p50": 0.468,
+        "p95": 0.496,
+        "max": 0.498
+      }
+    },
+    {
+      "id": "SBvBB_srp50",
+      "oop": "SB",
+      "ip": "BB",
+      "pot": 8,
+      "effective_stack": 46,
+      "flop_count": 200,
+      "depth_bb": 50,
+      "opener": "SB",
+      "exploitability_pct": {
+        "p50": 0.464,
+        "p95": 0.497,
+        "max": 0.499
+      }
+    },
+    {
+      "id": "UTGvBB_srp100",
+      "oop": "BB",
+      "ip": "UTG",
+      "pot": 8.5,
+      "effective_stack": 96,
+      "flop_count": 200,
+      "depth_bb": 100,
+      "opener": "UTG",
+      "exploitability_pct": {
+        "p50": 0.476,
+        "p95": 0.497,
+        "max": 0.5
+      }
+    },
+    {
+      "id": "MPvBB_srp100",
+      "oop": "BB",
+      "ip": "MP",
+      "pot": 8.5,
+      "effective_stack": 96,
+      "flop_count": 200,
+      "depth_bb": 100,
+      "opener": "MP",
+      "exploitability_pct": {
+        "p50": 0.471,
+        "p95": 0.497,
+        "max": 0.5
+      }
+    },
+    {
+      "id": "COvBB_srp100",
+      "oop": "BB",
+      "ip": "CO",
+      "pot": 7.5,
+      "effective_stack": 96.5,
+      "flop_count": 200,
+      "depth_bb": 100,
+      "opener": "CO",
+      "exploitability_pct": {
+        "p50": 0.469,
+        "p95": 0.496,
+        "max": 0.5
+      }
+    },
+    {
+      "id": "BTNvBB_srp100",
+      "oop": "BB",
+      "ip": "BTN",
+      "pot": 7.5,
+      "effective_stack": 96.5,
+      "flop_count": 200,
+      "depth_bb": 100,
+      "opener": "BTN",
+      "exploitability_pct": {
+        "p50": 0.475,
+        "p95": 0.498,
+        "max": 0.5
+      }
+    },
+    {
+      "id": "SBvBB_srp100",
+      "oop": "SB",
+      "ip": "BB",
+      "pot": 8,
+      "effective_stack": 96,
+      "flop_count": 200,
+      "depth_bb": 100,
+      "opener": "SB",
+      "exploitability_pct": {
+        "p50": 0.473,
+        "p95": 0.496,
+        "max": 0.5
+      }
+    }
+  ]
+}

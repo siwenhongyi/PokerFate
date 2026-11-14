@@ -303,6 +303,10 @@
       .hand-detail-section { position: static; }
     }
     /* ── live table ─────────────────────────────────────────────── */
+    .live-totals { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px;
+      align-items: baseline; margin: 0 0 12px; font-size: 14px; }
+    .live-totals dt { color: var(--muted); }
+    .live-totals dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
     .live-head { display: flex; flex-wrap: wrap; gap: 18px; align-items: center;
       font-size: 13px; color: var(--muted); margin-bottom: 12px; }
     .live-head b { color: #111; font-variant-numeric: tabular-nums; }
@@ -331,7 +335,17 @@
     .live-seat.acting { box-shadow: 0 0 0 3px #46c7ff, 0 0 16px rgba(70,199,255,.6); }
     .live-seat.folded { opacity: .42; }
     .live-seat.revealed { border-color: #ffe1a3; }
-    .live-seat .s-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .live-seat .s-head { display: flex; align-items: center; gap: 5px; min-width: 0; }
+    .live-seat .s-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    .live-seat .s-pos { flex: none; font-size: 10px; font-weight: 700; line-height: 15px; padding: 0 5px; border-radius: 5px;
+      background: rgba(255,255,255,.16); color: #fff; letter-spacing: .2px; }
+    .live-seat .s-pos.btn { background: #fff; color: #111; }
+    .live-seat .s-pos.sb { background: #3d7bd9; }
+    .live-seat .s-pos.bb { background: #d98a2b; }
+    /* 人机：紫色虚线框 + 标签，和真人一眼分开 */
+    .live-seat.robot { border: 1px dashed #b79cff; background: rgba(46,30,84,.88); }
+    .live-seat .pill.robot { background: #7a4de0; color: #fff; font-weight: 700; }
+    .live-seat .pill.robot.suspect { background: transparent; color: #d7c8ff; border: 1px dashed #b79cff; }
     .live-seat .s-stack { color: #9fe0b8; font-variant-numeric: tabular-nums; }
     .live-seat .s-tags { display: flex; gap: 5px; align-items: center; margin-top: 2px; flex-wrap: wrap; }
     .live-seat .s-cards { display: flex; gap: 3px; margin-top: 4px; }
@@ -380,6 +394,7 @@
     /* compact (narrow / phone) table: smaller seat boxes so names stay visible */
     .live-felt.compact .live-seat { padding: 5px 6px; font-size: 11px; border-radius: 8px; }
     .live-felt.compact .live-seat .s-name { font-size: 11px; }
+    .live-felt.compact .live-seat .s-pos { font-size: 9px; line-height: 13px; padding: 0 4px; }
     .live-felt.compact .live-seat .s-cards .card { height: 20px; min-width: 15px; font-size: 10px; padding: 0 2px; }
     .live-felt.compact .live-seat .s-cards .back { width: 15px; height: 20px; }
     .live-felt.compact .live-seat .s-last { font-size: 10px; min-height: 12px; }

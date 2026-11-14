@@ -1,8 +1,10 @@
 """Offline flop CFR book adapter for PokerFate decisions.
 
-The book is copied into this repository under ``pokerfate/data/flop_book``.
-Runtime lookup is deliberately narrow: only heads-up SRP spots covered by the
-book are accepted. Everything else returns a structured fallback reason.
+The book (v3: 50bb and 100bb preflop depths, 9% uncapped rake, 3.5/4bb opens)
+is copied into this repository under ``pokerfate/data/flop_book/v3``; no other
+book format is supported. Runtime lookup is deliberately narrow: only heads-up
+SRP spots covered by the book are accepted. Everything else returns a
+structured fallback reason.
 """
 
 from __future__ import annotations
@@ -29,7 +31,8 @@ from pokerfate.decision.opponent_numeric_prior import (
 
 RANKS = "23456789TJQKA"
 SUITS = "cdhs"
-DEFAULT_BOOK_DIR = Path(__file__).resolve().parents[1] / "data" / "flop_book" / "v2"
+DEFAULT_BOOK_DIR = Path(__file__).resolve().parents[1] / "data" / "flop_book" / "v3"
+BOOK_SCHEMA_VERSION = 3
 
 
 class BookMiss(Exception):
@@ -78,12 +81,17 @@ def _combo_rows(board: str) -> dict[frozenset[int], int]:
 
 
 class FlopBook:
-    """Reader for packed v2/v3 flop book sqlite shards."""
+    """Reader for packed v3 flop book sqlite shards (one db per scenario and depth)."""
 
     def __init__(self, book_dir: Path | str = DEFAULT_BOOK_DIR):
         self.dir = Path(book_dir)
         self.meta = json.loads((self.dir / "meta.json").read_text())
-        if self.meta.get("schema_version", 2) >= 3 and not self.meta.get("complete"):
+        schema = self.meta.get("schema_version")
+        if schema != BOOK_SCHEMA_VERSION:
+            # Older books (single 100bb depth, rake-free, 2.5/3bb opens) are
+            # archived outside the project and must not be loaded by this code.
+            raise BookMiss(f"book_schema_unsupported:{schema}")
+        if not self.meta.get("complete"):
             raise BookMiss("book_not_complete")
         self.iso = json.loads((self.dir / "flop_iso_map.json").read_text())
         self.clusters = json.loads((self.dir / "flop_clusters.json").read_text())["mapping"]
@@ -329,7 +337,7 @@ class FlopBook:
             multiple = size_bb / previous_bet_bb
             best = min(candidates, key=lambda a: abs(math.log(float(a[1:-1]) / multiple)))
             # Do not silently map a far off-tree raise (or an all-in) to the
-            # smallest size. This also works for the legacy single-size book.
+            # nearest size.
             relative_error = abs(float(best[1:-1]) - multiple) / multiple
             return best if relative_error <= 0.50 else None
 
@@ -539,13 +547,12 @@ class FlopBookDecisionEngine:
             )
             return None
 
-        if self.book.meta.get("schema_version", 2) >= 3:
-            expected_stack = float(scenario["effective_stack_bb"])
-            stack_delta = abs(effective_stack_bb - expected_stack) / max(expected_stack, 1e-9)
-            if stack_delta > self.options.max_stack_ratio_delta:
-                self._fallback("book_stack_mismatch", effective_stack_bb=effective_stack_bb,
-                               expected_stack_bb=expected_stack, stack_ratio_delta=stack_delta)
-                return None
+        expected_stack = float(scenario["effective_stack_bb"])
+        stack_delta = abs(effective_stack_bb - expected_stack) / max(expected_stack, 1e-9)
+        if stack_delta > self.options.max_stack_ratio_delta:
+            self._fallback("book_stack_mismatch", effective_stack_bb=effective_stack_bb,
+                           expected_stack_bb=expected_stack, stack_ratio_delta=stack_delta)
+            return None
 
         board = "".join(str(card) for card in gs.board)
         hero_combo = f"{hero.hole_cards[0]}{hero.hole_cards[1]}"
@@ -931,6 +938,16 @@ def _select_book_action(
 
 
 def _select_strategy_action(strategy: dict[str, float]) -> tuple[str, float]:
+    """Most likely action of a book strategy, decided on the action kind first.
+
+    The book has no EVs, so the bot plays the most likely action. The v3 menu
+    has four bet sizes and two raise sizes; taking the single most likely label
+    would compare ``x`` against each size separately and check a combo the book
+    bets 60% of the time (x 0.40 / b33 0.28 / b50 0.20 / b67 0.06 / b100 0.06).
+    Fold, check and call are compared with the total bet+raise+all-in mass, and
+    only then is the most likely size picked. Returns the label and its own
+    probability.
+    """
     order = {"f": 0, "x": 1, "c": 2, "b": 3, "r": 4, "ai": 5}
 
     def key(item: tuple[str, float]) -> tuple[float, int]:
@@ -938,7 +955,22 @@ def _select_strategy_action(strategy: dict[str, float]) -> tuple[str, float]:
         prefix = "ai" if str(label) == "ai" else str(label)[:1]
         return float(prob), order.get(prefix, 0)
 
-    return max(strategy.items(), key=key)
+    aggressive = {
+        label: prob for label, prob in strategy.items()
+        if _book_action_kind(label) in {"Bet", "Raise", "AllIn"}
+    }
+    passive = {label: prob for label, prob in strategy.items() if label not in aggressive}
+    if not aggressive:
+        return max(strategy.items(), key=key)
+    best_aggressive = max(aggressive.items(), key=key)
+    if not passive:
+        return best_aggressive
+    best_passive = max(passive.items(), key=key)
+    aggressive_mass = sum(max(0.0, float(prob or 0.0)) for prob in aggressive.values())
+    # A tie keeps the old order: aggression ranks above the passive actions.
+    if aggressive_mass >= float(best_passive[1] or 0.0):
+        return best_aggressive
+    return best_passive
 
 
 def _response_biases(

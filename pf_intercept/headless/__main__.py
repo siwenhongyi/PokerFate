@@ -72,9 +72,12 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--buyin-bb", type=int, default=100, help="买入多少个大盲，默认 100")
     p.add_argument("--max-auto-rebuy", type=int, default=1, help="破产自动续入上限，0=破产即停")
     p.add_argument("--profit-lock-bb", type=int, default=None, metavar="BB", help="盈利锁仓阈值（大盲数）")
+    p.add_argument("--stakes", default="", metavar="BB,BB,...",
+                   help="选桌换场的偏好顺序，如 10000,5000,20000；默认从 --bb 起由近到远、同距离先高后低，范围 1000..20000。"
+                        "选桌本身没有开关：桌上没有真人或真人少于人机就换桌，连续不合格则换场")
     p.add_argument("--hold", type=float, default=30.0, help="不进桌时登录后保持连接的秒数，默认 30")
     p.add_argument("--no-notify", action="store_true", help="不发 Bark 通知（默认启用，读 data/bark_key.txt）")
-    p.add_argument("--no-auto-rewards", action="store_true", help="关闭基金、每日/每周任务和活跃度奖励自动领取（默认开启）")
+    p.add_argument("--no-auto-rewards", action="store_true", help="关闭基金、每日/每周/挑战任务和活跃度奖励自动领取（默认开启）")
     p.add_argument("--no-web", action="store_true", help="不启动实时对局 Web（默认启动）")
     p.add_argument("--no-remote-live", action="store_true", help="关闭远程直播上传（默认开启；读取 data/remote_live.json，失败自动跳过）")
     p.add_argument("--web-host", default="0.0.0.0", help="Web 绑定地址，默认 0.0.0.0（允许局域网/手机访问）")
@@ -123,6 +126,38 @@ async def _order_servers_by_latency(servers):
         note = "（入口网关·兜底）" if ":443" in servers[i].server_host else ""
         print(f"[headless]   线路 {servers[i].server_host}  延迟={tag}{note}")
     return [servers[i] for i in order]
+
+
+def _table_policy_config(args: argparse.Namespace):
+    """Table selection settings from the CLI; None only when we are not joining a table.
+
+    There is deliberately no off switch: the bot never stays at a table without humans.  A
+    home stake outside the allowed fallback stakes still gets table selection, with a
+    one-stake ladder unless ``--stakes`` names fallbacks.
+    """
+    from pf_intercept.table_policy import TablePolicyConfig, parse_ladder
+
+    bb = int(getattr(args, "bb", 0) or 0)
+    if bb <= 0:
+        return None
+    try:
+        ladder = parse_ladder(getattr(args, "stakes", ""), bb)
+    except ValueError as exc:
+        raise ResumeError(f"--stakes 无效: {exc}")
+    if ladder[0] != bb:
+        ladder = (bb,) + tuple(s for s in ladder if s != bb)
+    return TablePolicyConfig(
+        home_bb=bb, buyin_bb=int(args.buyin_bb), ladder=ladder,
+        tries_per_stake=int(config.TABLE_SELECT_TRIES_PER_STAKE),
+        hop_delay=tuple(config.TABLE_SELECT_HOP_DELAY_SEC),
+        stake_retry=tuple(config.TABLE_SELECT_STAKE_RETRY_SEC),
+        max_fail_rounds=int(config.TABLE_SELECT_MAX_FAIL_ROUNDS),
+        probe_tries=int(config.TABLE_SELECT_PROBE_TRIES),
+        probe_batch_sec=float(config.TABLE_SELECT_PROBE_BATCH_SEC),
+        mixed_confirm_hands=int(config.TABLE_SELECT_MIXED_CONFIRM_HANDS),
+        empty_grace_sec=float(config.TABLE_SELECT_EMPTY_GRACE_SEC),
+        wait_blind=bool(config.TABLE_SELECT_WAIT_BLIND),
+    )
 
 
 async def _graceful_leave(session, leave_done: asyncio.Event, *, timeout: float = 45.0) -> None:
@@ -190,7 +225,8 @@ async def _run(args: argparse.Namespace, stop: asyncio.Event | None = None) -> i
     remote_live_enabled = not getattr(args, "no_remote_live", False)
     if not args.no_web or remote_live_enabled:
         from pf_entertainment.live_table import LiveTableObserver, start_live_web
-        observer = LiveTableObserver(my_uid=result.uid)
+        # Initial login may switch lines and replace session before the first hand.
+        observer = LiveTableObserver(my_uid=result.uid, reward_source=lambda: session.live_reward_totals())
 
     # Frame hook: feed the live observer and notice LeaveRoomRSP for graceful exit.
     leave_done = asyncio.Event()
@@ -201,11 +237,14 @@ async def _run(args: argparse.Namespace, stop: asyncio.Event | None = None) -> i
         if type_name == "pb.LeaveRoomRSP" and int(msg.get("code", 0) or 0) in (0, 2, 3):
             leave_done.set()
 
+    table_policy = _table_policy_config(args)
+
     def _mk_session():
         return HeadlessSession(result, chnl=chnl, client_version=client_version,
                                max_auto_rebuy=args.max_auto_rebuy, on_frame=on_frame,
                                auto_rewards=not getattr(args, "no_auto_rewards", False),
-                               reconnect_enabled=getattr(args, "bb", 0) > 0)
+                               reconnect_enabled=getattr(args, "bb", 0) > 0,
+                               table_policy=table_policy)
 
     # Connect, trying each server in turn (the :443 entry is WAF-blocked).
     session = _mk_session()

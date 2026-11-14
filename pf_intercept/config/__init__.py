@@ -134,6 +134,20 @@ PROFIT_LOCK_QUICKSTART_DELAY_SEC = 0.5
 # 房间逃离：连续破产达次数后离桌并以 QuickStart 随机换桌（逻辑类似盈利锁仓后的兜底）。
 # 中间若出现盈利锁仓会清零破产计数。发起 QuickStart 前会清零本策略统计，避免池子小回到同房时立刻再次逃离。
 ROOM_ESCAPE_ENABLED = True
+
+# 选桌（headless 现金桌）：桌上没有真人、或真人少于人机就换桌；同一场次连续不合格则换场。
+# 打法不受影响。没有开关（headless 进桌即生效）；--stakes 指定场次顺序。
+TABLE_SELECT_TRIES_PER_STAKE = 3            # 同一场次连续多少张不合格的桌后换场
+TABLE_SELECT_HOP_DELAY_SEC = (5.0, 10.0)    # 两次匹配之间随机停顿
+# 场次是"偏好顺序"，不是单向阶梯：某场次一轮不合格后进入冷却（首次 15 分钟，逐次翻倍，最长 60 分钟），
+# 冷却结束就回探——哪怕此刻正在备选场次的好桌上打牌。
+TABLE_SELECT_STAKE_RETRY_SEC = (900.0, 3600.0)
+TABLE_SELECT_MAX_FAIL_ROUNDS = 3            # 每个可用场次都连续失败这么多轮后停止并通知
+TABLE_SELECT_PROBE_TRIES = 2                # 从备选场次的好桌回探更优场次时，每个场次试几张桌
+TABLE_SELECT_PROBE_BATCH_SEC = 600.0        # 一次回探顺带探完这么多秒内也会到期的更优场次
+TABLE_SELECT_MIXED_CONFIRM_HANDS = 2        # 真人少于人机需连续多少手成立才离桌
+TABLE_SELECT_EMPTY_GRACE_SEC = 60.0         # 空桌等多久没人来就走
+TABLE_SELECT_WAIT_BLIND = True              # 进桌等大盲再入局（先看桌，不白付盲注）
 ROOM_ESCAPE_CONSECUTIVE_BUSTS = 2
 
 # 自动收藏牌局：WinnerRSP 结算后，仅对我方获胜的特殊牌型调用 /collCard/update。
@@ -160,7 +174,9 @@ WATCH_S2C = {
     "pb.EnterRoomRSP",
     "pb.SitDownRSP",
     "pb.SitDownBRC",    # player name updates when someone sits down
-    "pb.OtherLeaveRoomBRC",  # someone left the room (seat bookkeeping)
+    "pb.OtherLeaveRoomBRC",  # someone left the room (seat bookkeeping + rb_num robot count)
+    "pb.OtherEnterRoomBRC",  # someone entered the room (rb_num robot count, when the server sends it)
+    "pb.QuickStartRSP",  # table selection: a refused match moves on to the next stake
     # Hand lifecycle
     "pb.DealerInfoRSP",
     "pb.HandCardRSP",

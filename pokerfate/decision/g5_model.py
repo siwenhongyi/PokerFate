@@ -313,7 +313,10 @@ class G5ActionModel:
         action_history: Sequence[tuple[Any, Action, str]],
         big_blind: float,
         small_blind: float,
+        skip_names: Sequence[str] = (),
     ) -> bool:
+        """Update per-player stats from one hand; ``skip_names`` (house robots) take part in
+        the action sequence but are not profiled themselves."""
         if not players or not action_history:
             return False
         hand_order = _g5_hand_order(players, dealer_id)
@@ -326,7 +329,10 @@ class G5ActionModel:
             small_blind=small_blind,
         )
         changed = False
+        skipped = set(skip_names or ())
         for player in hand_order:
+            if player["name"] in skipped:
+                continue
             stats = self.get_or_create(player["name"], display_name=player.get("display_name", ""))
             _increment_player_stats(stats, hand_order, actions, table_type=self.table_type)
             changed = True

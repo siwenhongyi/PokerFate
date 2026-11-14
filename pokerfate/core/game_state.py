@@ -77,6 +77,7 @@ class GameState:
     # preflop ranges; they need not describe the clockwise action order.
     player_seats: Dict[int, int] = field(default_factory=dict)
     dealer_seat: Optional[int] = None
+    has_robot_opponent: bool = False
 
     def last_aggressor_id(self, my_player_id: int, street: Optional[str] = None) -> Optional[int]:
         """Last opponent to bet or raise (RAISE includes first bet), optionally on one street."""

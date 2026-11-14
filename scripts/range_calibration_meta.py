@@ -95,3 +95,23 @@ def meta_summary(rows: list[dict[str, Any]], *, max_flags: int = 12) -> dict[str
             for key in selected
         },
     }
+
+
+def drop_robot_rows(rows: list[dict[str, Any]], registry=None) -> tuple[list[dict[str, Any]], int]:
+    """Remove rows whose subject is a house robot (proven, or inside a robot UID block).
+
+    Robots' actions carry no hand-strength information, so their showdowns would teach the
+    models noise.  Returns ``(kept_rows, dropped_count)``.
+    """
+    if registry is None:
+        from pokerfate.core.robots import RobotRegistry
+        registry = RobotRegistry(autosave=False)
+    cache: dict[str, bool] = {}
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        uid = str(row.get("player_uid") or "")
+        if uid not in cache:
+            cache[uid] = bool(uid) and registry.is_robot(uid)
+        if not cache[uid]:
+            kept.append(row)
+    return kept, len(rows) - len(kept)

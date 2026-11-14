@@ -22,6 +22,7 @@ log = logging.getLogger("pf_rewards")
 GAME_REBATE_SETTLE = 10082
 TASK_REFRESH = 10030
 GOLD = 10100001
+TASK_CATEGORIES = ((1, "daily"), (2, "weekly"), (6, "challenge"))
 POLL_SEC = 300.0
 RETRY_SEC = 30.0
 HTTP_TIMEOUT_SEC = 8.0
@@ -259,7 +260,7 @@ class RewardService:
 
     async def check_tasks(self) -> None:
         data = await self._request("/task/list", {})
-        rows = (data.get("daily_list") or []) + (data.get("weekly_list") or [])
+        rows = (row for _, name in TASK_CATEGORIES for row in data.get(name + "_list") or [])
         needs_card = any(row.get("monthly_card_task") and _int(row.get("status")) == 2 for row in rows)
         monthly_card = False
         if needs_card:
@@ -270,7 +271,7 @@ class RewardService:
                 # Unknown eligibility must not prevent ordinary task claims.
                 if self._auth_failed or self._stopping:
                     raise
-        for category, name in ((1, "daily"), (2, "weekly")):
+        for category, name in TASK_CATEGORIES:
             ids = sorted({_int(row.get("id")) for row in data.get(name + "_list") or []
                           if _int(row.get("status")) == 2 and _int(row.get("id")) > 0
                           and (not row.get("monthly_card_task") or monthly_card)})
@@ -302,7 +303,7 @@ class RewardService:
         await self._ready.wait()
         if self._stopping:
             return
-        self._record("started", fund=True, daily=True, weekly=True, poll_sec=POLL_SEC)
+        self._record("started", fund=True, daily=True, weekly=True, challenge=True, poll_sec=POLL_SEC)
         while not self._stopping and not self._auth_failed:
             await self._ready.wait()
             if self._stopping:

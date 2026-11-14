@@ -30,6 +30,7 @@ from lightgbm import LGBMClassifier
 from sklearn.feature_extraction import DictVectorizer
 
 from scripts.range_calibration_meta import (
+    drop_robot_rows,
     filter_rows_by_meta,
     limit_rows,
     meta_summary,
@@ -296,10 +297,21 @@ def main() -> None:
     ap.add_argument("--val-strategy-version")
     ap.add_argument("--train-experiment-flag", action="append", default=[])
     ap.add_argument("--val-experiment-flag", action="append", default=[])
+    ap.add_argument("--keep-robots", action="store_true",
+                    help="do NOT drop rows about house robots (default: drop them, using the robot registry)")
+    ap.add_argument("--robot-registry", type=Path, default=None,
+                    help="robot registry file (default pokerfate/data/local_models/robots.json)")
     args = ap.parse_args()
 
     raw_train_rows = _load_rows(args.train_rows)
     raw_val_rows = _load_rows(args.val_rows)
+    robot_rows = {"train": 0, "val": 0, "excluded": not args.keep_robots}
+    if not args.keep_robots:
+        from pokerfate.core.robots import RobotRegistry
+        registry = RobotRegistry(args.robot_registry, autosave=False)
+        raw_train_rows, robot_rows["train"] = drop_robot_rows(raw_train_rows, registry)
+        raw_val_rows, robot_rows["val"] = drop_robot_rows(raw_val_rows, registry)
+        robot_rows["registry"] = registry.counts()
     train_flag_filter = parse_flag_filters(args.train_experiment_flag)
     val_flag_filter = parse_flag_filters(args.val_experiment_flag)
     train_rows = limit_rows(filter_rows_by_meta(raw_train_rows, strategy_version=args.train_strategy_version,
@@ -319,6 +331,7 @@ def main() -> None:
                 "val_experiment_flags": val_flag_filter,
             },
             "bucket_rows": {"train": len(tr), "val": len(va)},
+            "robot_rows_dropped": robot_rows,
         }
     }
     if not tr or not va:

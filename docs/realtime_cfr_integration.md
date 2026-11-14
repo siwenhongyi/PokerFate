@@ -49,29 +49,30 @@ cargo build --release
 
 ## 离线翻牌书
 
-v3 正式升级约定：外部目录仅用于试运行，验证通过后将两档新书实体文件导入项目，并完整替换旧翻牌书逻辑。旧书移至 `/Users/zhangmingli/dev-tool/pf_offline_book/archive/`，PokerFate 内只保留 v3；同时删除旧书专用兼容分支，清除启动配置中的旧书／外部路径。回退时从归档恢复对应的代码与书，不在运行项目内常驻两套版本。完整发布步骤见 [离线工程运行手册](/Users/zhangmingli/dev-tool/pf_offline_book/docs/RUN.md)。以下 v2 说明记录升级前状态，正式发布时应更新为 v3 的实际配置。
-
-注意：v2 书是按 97bb、无抽水（meta `rake.cap=0`）、2.5/3bb 开池解的；现场是 9% 不封顶抽水、hero 多为 40–60bb、开池 3.5/4bb。书未重算，命中窗口（`FlopBookOptions`）保持原样，底池偏离 >35% 或后手不在 40–170bb 时回退本地。sqlite 连接以 `check_same_thread=False` 打开，因为决策跑在 asyncio 线程池里，否则第二个线程查书会直接报错回退。
-
-`pf_offline_book` 的 v2 离线翻牌书已复制进本项目：
+翻牌书为 v3（2026-11-12 接入），由 `/Users/zhangmingli/dev-tool/pf_offline_book` 离线计算、严格校验（2000/2000 任务，可剥削度 ≤ 0.5% 起始底池）并打包，实体文件复制在本项目内：
 
 ```text
-pokerfate/data/flop_book/v2/
-  meta.json
+pokerfate/data/flop_book/v3/
+  meta.json            # book_version=v3, schema_version=3, complete=true
   flop_iso_map.json
   flop_clusters.json
-  BTNvBB_srp100.db
-  COvBB_srp100.db
-  MPvBB_srp100.db
-  SBvBB_srp100.db
-  UTGvBB_srp100.db
+  {UTG,MP,CO,BTN,SB}vBB_srp50.db
+  {UTG,MP,CO,BTN,SB}vBB_srp100.db
 ```
 
-运行时由 `pokerfate/decision/flop_book.py` 读取本项目内的数据，不引用外部目录。读取路径保持简单：`sqlite3` 查节点、`zlib` 解压、`numpy.frombuffer(dtype="<u2")` 还原 `1176 x action_count` 策略矩阵。
+求解条件：9% 不封顶抽水；UTG/MP/SB 开池 4bb、CO/BTN 开池 3.5bb；翻牌起始底池 8.5 / 7.5 / 8bb；50bb 与 100bb 两档翻前有效筹码（翻牌剩余 46/46.5 与 96/96.5bb）；翻牌下注 33/50/67/100%，加注 2x/4x；范围取自当时的翻前策略（`runtime_preflop_v3`）。
 
-当前翻牌书覆盖 v2 的 heads-up single-raised-pot 100bb 场景：`UTGvBB_srp100`、`MPvBB_srp100`、`COvBB_srp100`、`BTNvBB_srp100`、`SBvBB_srp100`。
+运行时由 `pokerfate/decision/flop_book.py` 读取本项目内的数据，不引用外部目录；`PF_FLOP_BOOK_DIR` 只用于离线试验另一份同格式的书。读取器只接受 `schema_version == 3` 且 `complete` 的书，其他格式（包括已归档的 v2）直接报 `book_schema_unsupported`，初始化失败时整个 `cfr` 模式回落 `local`。读取路径保持简单：`sqlite3` 查节点、`zlib` 解压、`numpy.frombuffer(dtype="<u2")` 还原 `1176 x action_count` 策略矩阵。sqlite 连接以 `check_same_thread=False` 打开，因为决策跑在 asyncio 线程池里。
 
-查表前会校验本项目能还原的条件：flop、3 张公共牌、HU active、单次翻前 raise、defender call、位置组合匹配、底池接近书的标准底池、有效后手在 `40bb..170bb`。动作前缀按 OOP/IP 还原，真实 flop 尺寸只在足够接近书菜单时映射到 `b33/b100/r2.7x/ai`；偏离过大直接 book miss 回退本地。
+覆盖范围仍是 heads-up single-raised-pot：UTG/MP/CO/BTN/SB 开池对 BB 防守。多人、limp 底池、3-bet 底池和其他位置组合不查书。
+
+选档：同一位置场景内按翻牌开始时的剩余有效筹码 `E = min(双方剩余筹码 + 本街已投入) / bb` 对两档书的相对误差取最小的一档；`E` 须在 `40bb..170bb` 内，且相对所选书的偏差 ≤ 35%，否则 `book_stack_out_of_range` / `book_stack_mismatch`。底池与书的标准底池偏差 > 35% 时 `book_pot_mismatch`（例如对手最小加注开池的 4.5bb 底池）。
+
+选动作：书没有 EV，取最可能的动作，但先比动作类别再选尺度（`_select_strategy_action`）——弃牌、过牌、跟注各自与“下注+加注+全下”的合计频率比较，进攻类胜出后再取其中频率最高的尺度。v3 有四个下注尺度，若直接取单个最大标签，书下注 60% 但分散在四个尺度上的手牌会被打成过牌；2026-11-12 日志回放里 v3 命中的 64 个决策，书的平均进攻频率 0.44，单标签取最大只有 0.36。画像微调仍先作用在各标签概率上。
+
+升级与回退流程见 [离线工程运行手册](/Users/zhangmingli/dev-tool/pf_offline_book/docs/RUN.md)：旧 v2 书归档在 `pf_offline_book/archive/`，本项目内不保留旧书或旧格式兼容分支。`analysis/flop_book_replay.py` 可把日志里的翻牌决策点按任意一份书重放（不跑求解器），用于比较命中率和回退原因。
+
+查表前会校验本项目能还原的条件：flop、3 张公共牌、HU active、单次翻前 raise、defender call、位置组合匹配、底池接近书的标准底池、有效后手与所选档位匹配。动作前缀按 OOP/IP 还原：真实下注额除以书中对应节点底池后取最近的 `b33/b50/b67/b100`（差值 ≤ 50 个百分点且相对误差 ≤ 60%），真实加注倍数按对数距离取最近的 `r2.0x/r4.0x`（相对误差 ≤ 50%），全下映射到 `ai`；偏离过大直接 book miss 回退本地。
 
 ## 决策链路
 
@@ -110,7 +111,7 @@ Rust 绑定现在支持 `include_evs=true`，默认开启。除当前节点策�
 
 ## 剥削层
 
-动作选择：没有 EV 的翻牌书取当前 combo 策略概率最高的动作；有 EV 的 turn/river 先取当前 combo 的 action EV，经剥削层重算/约束后，在“最终 EV 与最优差距 ≤ max(0.15bb, 1% 底池)”的动作集合里按均衡频率抽样（`_sample_near_ev`，随机数来自 `api._next_decision_seed` 的可复现种子；无种子时取 EV 最高）。这样 EV 几乎相等的动作不会永远只出一个，诊断里的 `mixed_sample` 记录候选与概率。`selected_prob` 仍是该动作在基线策略里的频率。
+动作选择：没有 EV 的翻牌书取当前 combo 最可能的动作（先比动作类别、再选尺度，见上文“离线翻牌书”）；有 EV 的 turn/river 先取当前 combo 的 action EV，经剥削层重算/约束后，在“最终 EV 与最优差距 ≤ max(0.15bb, 1% 底池)”的动作集合里按均衡频率抽样（`_sample_near_ev`，随机数来自 `api._next_decision_seed` 的可复现种子；无种子时取 EV 最高）。这样 EV 几乎相等的动作不会永远只出一个，诊断里的 `mixed_sample` 记录候选与概率。`selected_prob` 仍是该动作在基线策略里的频率。
 
 realtime CFR 仍以均衡策略为锚点，不直接用画像替代 solver：
 
@@ -121,6 +122,10 @@ realtime CFR 仍以均衡策略为锚点，不直接用画像替代 solver：
 5. 最终 action EV = `(1 - confidence) * GTO_EV + confidence * exploit_EV`。GTO leash：GTO EV 低于最优超过 `(0.6 + 2×confidence) × max(1, pot/20)` bb 的动作直接从候选集中剔除（旧版只是把它夹到“略低于最优”，后续 tie-break 仍可能选中它，回放里出现过 solver 100% 弃牌却选了 raise 的案例）。
 6. 安全阀：没有真实偏置信号时不启用剥削；候选动作的 GTO EV 低于最优 GTO EV 太多时触发 `gto_ev_floor`；river 大注/all-in 会额外检查 adjusted fold equity 和 risk margin。旧的逐 combo `defense_mdf` 阀已删除：MDF 是范围层面的性质，solver 均衡本身已满足，按单个 combo 再套 MDF 概念上不成立。
 7. 没有 response EV 的动作走 `_direct_exploit_delta`，其常数按 `pot/10`（限 0.5–4）缩放，保证 3bb 和 60bb 底池里的修正量级都合理。
+8. 河牌价值下注下限 `value_bet_floor`（2026-11-12）。第 4 步只缩放 response 频率、不改变均衡的跟注范围，所以“对手更黏”会降低价值下注的 EV；均衡里混合动作 EV 相等，这类单向小修正就决定了 argmax。2026-11-09..12 日志里成手牌 solver 下注 51%、实际 32%，多数下注→过牌 74 次、反向 12 次。当同时满足 ①河牌、选中动作是 Check；②solver 对这手牌的下注频率 ≥ `PF_CFR_VALUE_BET_FLOOR_MIN_BET_FREQ`（0.50）；③tracker 的摊牌价值（`range_v2.vs_hero` 的 win + tie/2）≥ `PF_CFR_VALUE_BET_FLOOR_MIN_SHOWDOWN`（0.66）时，改为按 solver 自己的混合重新抽样：Check 保留均衡频率，下注频率分给 solver 的各尺度；超过 `PF_CFR_VALUE_BET_FLOOR_MAX_POT_RATIO`（1.0）倍底池或被安全阀硬拦截的尺度不用，其份额并入剩余的最大尺度。抽样后不再做 `_sample_near_ev`。转牌没有 `vs_hero`，此规则不生效。`PF_CFR_VALUE_BET_FLOOR=0` 关闭。依据与敏感性见 `analysis/guard_diff.py`、`analysis/value_audit.py`。
+9. 便宜跟注守卫的 tracker 证据路径（2026-11-12）。`overvalue_cheap_call_guard` 原本只在对手先验判定“高估牌力”且 solver 的 EV 差在约 2bb 内时把河牌弃牌改成跟注。现在当 tracker 摊牌价值 ≥ `PF_CFR_CHEAP_CALL_MIN_SHOWDOWN`（0.45）时也算证据，并把容差放宽到 `PF_CFR_CHEAP_CALL_POT_TOLERANCE`（0.06）× 底池；其余门槛不变（河牌、底池赔率 ≤ 25%、绝对牌型两对以上、Call 未被安全阀折扣）。任一参数设 0 即恢复旧行为。样本很小（9000 手里 2 次翻转），按日志继续观察。
+
+上述六个值在 `RealtimeCFROptions` 构造时读取环境变量，生效值记录在 `session_config.resolved`。
 
 画像来源是 `PokerBot._build_player_profile()`，也就是既有的 OpponentModel + Range V2 统计：VPIP/PFR/AF、fold to cbet、WTSD、street AFq、river fold/bet 等。连续剥削信号来自 `OpponentModel.exploit_adjustments()`：`value_ag_scale`、`bluff_ag_scale`、`river_bluff_likely`、`river_bet_rare` 等。
 
@@ -136,7 +141,7 @@ realtime CFR 仍以均衡策略为锚点，不直接用画像替代 solver：
 - 如果没有画像但有当前手强线路证据，例如 villain flop/turn 连续 call 后到 river，线路先验会立刻生效，不需要等新增样本收集。
 - 因此小样本只会轻微影响 response 频率和最终 EV，不会把一个 solver 均衡高 EV 动作硬改成画像动作。
 
-翻牌离线书的剥削层更保守：v2 book 只存当前 combo 的策略矩阵，不存 action EV 或下一层对手 response EV。因此 flop book 命中时不能像 turn/river 那样做 EV 重算，只能在 GTO 概率上做数值先验概率偏置，诊断字段为 `probability_bias_no_evs`。如果没有实际画像/群体先验信号，即使有默认置信度也不标记为已剥削。要让翻牌也走 EV 级剥削，需要未来离线书额外导出 action EV / response EV。
+翻牌离线书的剥削层更保守：书只存当前 combo 的策略矩阵，不存 action EV 或下一层对手 response EV。因此 flop book 命中时不能像 turn/river 那样做 EV 重算，只能在 GTO 概率上做数值先验概率偏置，诊断字段为 `probability_bias_no_evs`。如果没有实际画像/群体先验信号，即使有默认置信度也不标记为已剥削。要让翻牌也走 EV 级剥削，需要未来离线书额外导出 action EV / response EV。
 
 ## fallback 条件
 
@@ -168,6 +173,8 @@ realtime CFR 仍以均衡策略为锚点，不直接用画像替代 solver：
 - `exploit.numeric_prior`
 - `exploit.line_context`
 - `exploit.safety.river_aggression_risk`
+- `exploit.safety.value_bet_floor`（`from` / `to` / `solver_bet_freq` / `showdown_value` / `candidates`）
+- `exploit.safety.overvalue_cheap_call_guard`（含 `evidence`：`overvalue` / `tracker` / `overvalue+tracker`）
 - `exploitability_pct`
 - `node_path`
 - `range_counts`

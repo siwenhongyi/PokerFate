@@ -251,6 +251,34 @@ _POSITION_RANGES = {
 # slightly vs UTG opens — acceptable trade for covering wide-opener spots.
 _3BET_VALUE = _expand_range('TT+, AKs, AKo, AQs, AQo, AJs, KQs')
 
+# ── Thin value 3-bets against the human pool (2026-11-13) ────────────────────
+# The chart already 3-bets these hands from the button and the blinds. The
+# exploit layer then treated them as bluffs and scaled the raise by how often
+# the opener folds: 1–19% in the logs, the rest folded or called. Against a pool
+# that continues too wide that is the wrong sign for a hand that is ahead of
+# the continuing range, so in the measured spot the chart raise is taken at
+# full frequency.
+#
+# Which hands: with 9% rake the money a caller matches only earns above
+# 1/(2*0.91) = 54.9% equity. Measured on human tables (6,600 hands,
+# analysis/three_bet_value.py): openers facing a clean 3-bet fold 30% / call
+# 56% / 4-bet 14% (n=252), and against the hands they showed after calling
+# (n=74) the all-in equity is 99 59%, 88 56%, AJo 56%, ATs 55%. The next hands
+# down are below the line and need folds, so they stay with the bluff logic:
+# 77 53%, ATo 53%, KJs 52%, KQo 50%.
+#
+# Not widened: spots the chart does not 3-bet (the big blind closing the action
+# against an early open calls; AJo on the button folds to a UTG open), seats
+# without a chart (MP / CO), squeezes, opens outside the measured sizes, stacks
+# where a 3-bet is a commitment decision, and tables with a house robot.
+#
+# Size of the change: the spot comes up about once per 1,000 hands, so it will
+# not show in results; the script above tracks it and states the stopping rule.
+_POOL_VALUE_3BET_HANDS = _expand_range('99, 88, AJo, ATs')
+_POOL_VALUE_3BET_ENABLED = os.environ.get('PF_3BET_VALUE_EXPAND', '1') != '0'
+_POOL_VALUE_3BET_MIN_EFFECTIVE_BB = 50.0
+_POOL_VALUE_3BET_MAX_OPEN_BB = 4.0   # 93% of the pool's opens
+
 # 3-Bet semi-bluff pool (blockers + suited playability). Actual fire rate
 # is pool × _BLUFF_3BET_FREQ_BY_VS_POS[opener] — wider pool here lets the
 # per-opener freq scale match solver totals (vs UTG ~6%, vs BTN ~9%).
@@ -686,6 +714,29 @@ class PreflopStrategy:
         if self._chart_has_action(action, 'fold'):
             return 'fold', f"{source}:{chart_key} {cat} -> fold"
         return '', f"{source}:{chart_key} {cat} -> {raw}"
+
+    def _is_pool_value_3bet(
+        self,
+        cat: str,
+        chart_key: str,
+        open_raise: float,
+        big_blind: float,
+        human_open_effective_bb: float,
+    ) -> bool:
+        """A chart 3-bet with a thin-value hand in the spot the pool data covers.
+
+        ``human_open_effective_bb`` is the effective depth against the opener
+        when hero answers a single first-in open with nobody else in the pot on
+        a robot-free table, else 0 (see ``PokerBot._human_open_effective_bb``).
+        """
+        if not _POOL_VALUE_3BET_ENABLED or cat not in _POOL_VALUE_3BET_HANDS or not chart_key:
+            return False
+        if big_blind <= 0 or human_open_effective_bb < _POOL_VALUE_3BET_MIN_EFFECTIVE_BB:
+            return False
+        if not big_blind < open_raise <= _POOL_VALUE_3BET_MAX_OPEN_BB * big_blind:
+            return False
+        action, _source = self._primary_chart_action(lookup_gto(chart_key, cat))
+        return action == 'raise'
 
     def _greenline_vs_open_action(
         self,
@@ -1837,10 +1888,14 @@ class PreflopStrategy:
         sticky_pool_adjust: Optional[bool] = None,
         current_bet: float = 0.0,
         limpers_behind: int = 0,
+        human_open_effective_bb: float = 0.0,
     ) -> Tuple[str, float]:
         """Return (action, amount); raises are street totals, calls increments.
 
         ``stack`` is the remaining stack; ``current_bet`` is already invested.
+        ``human_open_effective_bb`` is non-zero only when hero answers a single
+        first-in open, nobody else in the pot, on a robot-free table: the
+        effective depth against the opener in big blinds.
         """
         self.last_expand_reason = ''
         max_raise_to = max(0.0, current_bet) + max(0.0, stack)
@@ -1968,6 +2023,14 @@ class PreflopStrategy:
             hero_norm = _normalize_position(position)
             villain_norm = _normalize_position(villain_position)
             chart_key = f"{hero_norm}-vs-open-{villain_norm}" if hero_norm and villain_norm else ''
+            if to_call > 0 and self._is_pool_value_3bet(
+                cat, chart_key, open_raise, big_blind, human_open_effective_bb,
+            ):
+                self.last_expand_reason = f"pool_value_3bet:{chart_key} {cat}"
+                size = self.three_bet_size(
+                    open_raise, is_ip, big_blind, open_pos=villain_position, three_bet_pos=position,
+                )
+                return ('raise', min(size, max_raise_to))
             chart_action, chart_reason = (
                 self._greenline_vs_open_action(
                     chart_key,

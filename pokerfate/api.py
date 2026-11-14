@@ -157,6 +157,9 @@ class PlayerInfo:
     stack: Optional[float] = None   # None = unknown / use session default
     position: str = ""              # e.g. "BTN", "BB", "UTG"
     seat_index: Optional[int] = None  # physical table seat, when known
+    # House robot (proven by the server's rb_num counter, or inside a robot UID block).
+    # Robots are played against as usual but kept out of every learning / collection path.
+    is_robot: bool = False
 
 
 @dataclass
@@ -408,6 +411,9 @@ class PokerFateAPI:
 
         # Hand state: rebuilt each hand
         self._players: List[Player] = []
+        # House robots dealt into the current hand (PlayerInfo.is_robot). They are played
+        # against as usual; every learning / collection path below leaves them out.
+        self._hand_robot_ids: set = set()
         self._hand_seat_indices: Dict[int, int] = {}
         self._dealer_seat_index: Optional[int] = None
         self._hole_cards: List[Card] = []
@@ -447,6 +453,10 @@ class PokerFateAPI:
                 # 不记录 hero 自己的 calibration 预测；只看对手
                 pid = kwargs.get("player_id")
                 if pid == self.my_player_id:
+                    return
+                # 人机的行动不携带牌力信息（且会看真人底牌）：不为它记录校准预测，
+                # 也就不会产生训练行、不会更新 hero 胜率自校准器。
+                if pid in self._hand_robot_ids:
                     return
                 # tracker._weights 里包括 hero 自己，active_weights 把 hero
                 # 也塞进去会让"多人池 hero eq"错误地把 hero 当成对手，并且
@@ -545,6 +555,7 @@ class PokerFateAPI:
                 "PF_V3_VOTE_LEVERAGE_DETERMINISTIC": bool(getattr(_eng, "_VOTE_LEVERAGE_DETERMINISTIC", True)),
                 "PREFLOP_STICKY_POOL_ADJUST": bool(getattr(_pf, "_PREFLOP_STICKY_POOL_ADJUST_DEFAULT", True)),
                 "PF_LIMP_BEHIND_ENABLED": bool(getattr(_pf, "_LIMP_BEHIND_ENABLED", True)),
+                "PF_3BET_VALUE_EXPAND": _pf._POOL_VALUE_3BET_ENABLED,
                 "PF_PURE_BLUFF_ENABLED": bool(getattr(_pa, "_PURE_BLUFF_ENABLED", True)),
                 "PF_POSTFLOP_PROFIT_EXPAND_V1": bool(getattr(_pa, "_PROFIT_EXPAND_V1", True)),
             }
@@ -555,6 +566,14 @@ class PokerFateAPI:
             if self._external_decision_engine_name != "local" else "local"
         )
         resolved["PF_CFR_FLOP_BOOK_ENABLED"] = self._flop_book_requested
+        cfr_options = getattr(self._realtime_cfr_engine, "options", None)
+        if cfr_options is not None:
+            resolved["PF_CFR_VALUE_BET_FLOOR"] = bool(cfr_options.value_bet_floor_enabled)
+            resolved["PF_CFR_VALUE_BET_FLOOR_MIN_BET_FREQ"] = float(cfr_options.value_bet_floor_min_bet_freq)
+            resolved["PF_CFR_VALUE_BET_FLOOR_MIN_SHOWDOWN"] = float(cfr_options.value_bet_floor_min_showdown_value)
+            resolved["PF_CFR_VALUE_BET_FLOOR_MAX_POT_RATIO"] = float(cfr_options.value_bet_floor_max_pot_ratio)
+            resolved["PF_CFR_CHEAP_CALL_POT_TOLERANCE"] = float(cfr_options.cheap_call_pot_tolerance)
+            resolved["PF_CFR_CHEAP_CALL_MIN_SHOWDOWN"] = float(cfr_options.cheap_call_min_showdown_value)
         resolved["PF_G5_SHADOW_ENABLED"] = self._g5_observer_enabled
         resolved["G5_SHADOW_MODE"] = "real_history_v1"
         resolved["G5_SHADOW_ACTIVE"] = (
@@ -1018,16 +1037,19 @@ class PokerFateAPI:
         if self._g5_action_model is None or not self._g5_model_path:
             return
         try:
+            skip = {stable_player_name(pid) for pid in self._hand_robot_ids}
             changed = self._g5_action_model.record_hand(
                 players=self._g5_hand_start_players,
                 dealer_id=self._dealer_id,
                 action_history=self._action_history,
                 big_blind=self.big_blind,
                 small_blind=self.small_blind,
+                skip_names=skip,
             )
             if changed:
                 self._save_g5_action_model([
                     stable_player_name(p["player_id"]) for p in self._g5_hand_start_players
+                    if p["player_id"] not in self._hand_robot_ids
                 ])
         except Exception as exc:
             self._log.raw({
@@ -1792,6 +1814,8 @@ class PokerFateAPI:
         for player in gs.active_players:
             if player.player_id == self.my_player_id:
                 continue
+            if player.player_id in self._hand_robot_ids:
+                continue
             pf_range = self._pf_range_169_for_player(player.player_id)
             g5_range = g5_ranges.get(str(player.player_id), {})
             if not pf_range or not g5_range:
@@ -1928,6 +1952,7 @@ class PokerFateAPI:
             "calloff_risk": "calloff",
             "sticky_aggression": "sticky",
             "overvalue_cheap_call_guard": "overvalue-call",
+            "value_bet_floor": "value-floor",
             "gto_ev_floor": "gto-floor",
             "defense_mdf": "mdf",
         }
@@ -2098,6 +2123,10 @@ class PokerFateAPI:
         self._hand_seat_indices = {}
         self._dealer_seat_index = None
         self._players = []
+        self._hand_robot_ids = {
+            int(p.player_id) for p in players
+            if getattr(p, "is_robot", False) and p.player_id != self.my_player_id
+        }
         for p in players:
             # Resolve stack: explicit > session history > default
             stack = p.stack
@@ -2205,6 +2234,7 @@ class PokerFateAPI:
                 {
                     "id": p.player_id, "name": p.name, "stack": p.stack,
                     "pos": self._hand_positions.get(p.player_id, ''),
+                    **({"robot": True} if p.player_id in self._hand_robot_ids else {}),
                     **(
                         {"pos_raw": self._hand_positions_raw.get(p.player_id, '')}
                         if self._hand_positions_raw.get(p.player_id, '')
@@ -3054,6 +3084,13 @@ class PokerFateAPI:
             return
 
         primary_opp_id = int(diag.get("primary_opp_id") or -1)
+        # 这份数据学的是"真人怎样应对河牌价值下注"；只要还有人机没弃牌就不记。
+        if any(
+            p.player_id in self._hand_robot_ids
+            for p in self._players
+            if p.player_id != self.my_player_id and not p.is_folded
+        ):
+            return
         row = {
             "street": "river",
             "decision_index": int(self._decision_index or 0),
@@ -3606,6 +3643,9 @@ class PokerFateAPI:
                             rec.predicted_hero_eq_multi is not None
                             and r.actual_hero_eq_street_multi is not None
                             and rec.hero_bucket
+                            # 池里有人机时，hero 的"实际胜率"由人机的随机牌决定，不拿来校准。
+                            and not any(int(a) in self._hand_robot_ids
+                                        for a in (rec.active_player_ids or []))
                         ):
                             self._bot._hero_eq_calibrator.record(
                                 bucket=rec.hero_bucket,
@@ -4016,6 +4056,7 @@ class PokerFateAPI:
             players=players,
             dealer_pos=dealer_pos,
             street=street_enum,
+            has_robot_opponent=bool(self._hand_robot_ids),
             board=list(self._board),
             pot=pot,
             current_bet=current_bet,
