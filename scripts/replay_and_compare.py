@@ -37,6 +37,7 @@ from typing import Optional
 from pokerfate.api import ActionEvent, PlayerInfo, PokerFateAPI
 from pokerfate.core.config import RAKE_KEEP
 from pokerfate.core.game_state import Action, ActionType
+from pokerfate.core.robots import default_registry
 from scripts.hero_name import HeroNames, load_hero_names
 
 # Windows 编码兜底：强制 stdout/stderr 用 UTF-8（避免 cmd cp936 print 中文/花色崩）
@@ -85,6 +86,9 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
             name=p.get("name", str(p["id"])),
             stack=float(p.get("stack") or 0),
             position=p.get("pos") or "",
+            # Same flag as the live bridge sets, so a replay learns from exactly the hands
+            # and players that live play would (PokerFateAPI._hand_skip_learning).
+            is_robot=p["id"] != hero_id and default_registry().is_robot(p["id"]),
         )
         for p in players
     ]
@@ -181,6 +185,13 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
                 # without it every BB spot saw to_call = bb and folded free
                 # checks / mispriced defends.
                 posted = max(0.0, max(street_max_bet, bb) - to_call)
+                if posted > bb + 1e-6:
+                    # More than a blind: hero cannot cover the bet and the log's
+                    # to_call is hero's remaining stack, not bet - post. Read the
+                    # post off the stack instead. Without this the difference
+                    # became a phantom bet and came off the stack a second time
+                    # (69bb stack facing a 111bb shove was replayed as 25bb).
+                    posted = max(0.0, min(bb, hero_stack - to_call))
                 if posted > 0.0:
                     my_current_bet_this_street = posted
                     street_bets[hero_id] = posted

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pokerfate.core.config import RAKE_KEEP
 from pokerfate.strategy.v3 import exploit, hero_range
 from pokerfate.strategy.v3.context import DecisionCtx
 
@@ -30,18 +29,6 @@ class AlphaCheckResult:
     direction: str = 'ok'        # 'ok' | 'over_bluff' | 'under_bluff'
     target: float = 0.0
     hero_bluff_share: float = 0.0
-
-
-def alpha_from_frac(frac: float, rake_keep: float = RAKE_KEEP) -> float:
-    """Break-even fold frequency for a pure bluff.
-
-    A fold wins ``pot × keep``; a call loses ``bet``.  With ``frac = bet/pot``
-    the bluff breaks even at ``frac / (keep + frac)``; with no rake this is the
-    textbook ``bet / (pot + bet)``.
-    """
-    if frac <= 0:
-        return 0.0
-    return frac / (max(1e-9, rake_keep) + frac)
 
 
 def balanced_bluff_share_from_frac(frac: float) -> float:

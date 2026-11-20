@@ -49,12 +49,3 @@ def _sync_collect_game(
     else:
         log.warning("[collcard] collect rejected gameid=%s reason=%s resp=%s", gid, reason, data)
     return data
-
-
-def _sync_recently_cards(*, skip: int = 0, lang: str = "en") -> Optional[dict]:
-    """POST /collCard/recentlyCardList for manual smoke checks."""
-    return signed_post_json(
-        "/collCard/recentlyCardList",
-        {"skip": int(skip), "lang": lang},
-        timeout=8,
-    )

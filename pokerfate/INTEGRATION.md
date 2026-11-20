@@ -298,38 +298,6 @@ api.notify_player_joined(player_id=2, name="GPT-4o", stack=300.0)
 
 ---
 
-### `notify_player_left(player_id)`
-
-玩家离桌时调用。清除该 seat 的筹码/名称缓存，确保下一个占用该座位的新玩家不会继承旧数据。
-
-```python
-api.notify_player_left(player_id=2)
-```
-
----
-
-### `notify_stack_update(player_id, new_stack)`
-
-在手牌进行中同步某玩家的筹码（如旁池结算后）。
-
-```python
-api.notify_stack_update(player_id=1, new_stack=150.0)
-```
-
----
-
-### `opponent_summary() → str`
-
-返回所有已知对手的统计摘要（可打印调试）。
-
-```python
-print(api.opponent_summary())
-# Opponent Database:
-#   [GPT-4o] OpponentStats(type=fish, VPIP=45%, PFR=12%, AF=0.8, fold_cbet=62%, hands=87)
-```
-
----
-
 ## 筹码追踪
 
 ### 推荐方式：`hand_over` + `final_stacks`

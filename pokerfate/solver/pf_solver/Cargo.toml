@@ -12,10 +12,15 @@ pyo3 = { version = "0.23", features = ["extension-module"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # default-features 关掉 bincode（上游 2023 年冻结，与 bincode 2.0.1 不兼容；序列化存盘我们用不到）
-postflop-solver = { git = "https://github.com/b-inary/postflop-solver", default-features = false, features = ["rayon"] }
+# 本地副本 = 上游 b-inary/postflop-solver 提交 9d1509f 加一处改动（见 postflop-solver/POKERFATE_PATCH.md）：
+# 手牌的 EV 不再依赖自己的到达权重，走不到当前节点的手牌也有真实 EV。
+postflop-solver = { path = "postflop-solver", default-features = false, features = ["rayon"] }
 
 [build-dependencies]
 pyo3-build-config = "0.23"
 
 [profile.release]
 lto = "thin"
+# rustc 1.96's Mach-O stripping can misalign LINKEDIT on macOS 27.
+# Keep the linker's layout (rust-lang/rust#157750).
+strip = "none"

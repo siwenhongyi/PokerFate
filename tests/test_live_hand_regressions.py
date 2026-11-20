@@ -3,6 +3,7 @@
 import pytest
 
 from pf_intercept.bot import BotBridge
+from pokerfate.core.seating import derive_seating
 from pokerfate.api import PokerFateAPI, PlayerInfo, BotDecision
 from pokerfate.bot.poker_bot import PokerBot
 from pokerfate.core.card import Card
@@ -256,8 +257,8 @@ def test_bet_floor_is_applied_before_recording_and_sending(monkeypatch, source, 
     assert recorded[-1]["amount"] == expected
 
 
-@pytest.mark.parametrize("scenario", ["short_topup", "allin"])
-def test_live_preflop_request_history_stack_and_wire_agree(scenario):
+@pytest.mark.parametrize("scenario", ["short_topup", "allin_raise", "allin_call"])
+def test_live_preflop_request_history_stack_and_wire_agree(monkeypatch, scenario):
     api = _live_api()
     if scenario == "short_topup":
         posted, stack, call_need = 40000, 20879, 1000
@@ -267,7 +268,7 @@ def test_live_preflop_request_history_stack_and_wire_agree(scenario):
         ]
         expected_action, expected_added, wire_type = ActionType.CALL, 1000, 3
     else:
-        # Hand 368: the additional all-in must be all 520550 remaining chips.
+        # Hand 368: AKo, 17.6bb in, the villain shoves 51.2bb, hero has 52.1bb behind.
         api.deal_hole_cards(["Ad", "Kc"])
         posted, stack, call_need = 176000, 520550, 336200
         api._action_history = [
@@ -275,7 +276,14 @@ def test_live_preflop_request_history_stack_and_wire_agree(scenario):
             (1, Action(ActionType.RAISE, 176000), "preflop"),
             (2, Action(ActionType.RAISE, 512200), "preflop"),
         ]
-        expected_action, expected_added, wire_type = ActionType.RAISE, stack, 4
+        if scenario == "allin_raise":
+            # An all-in raise must go out as all 520550 remaining chips.
+            monkeypatch.setattr(api._bot, "decide", lambda *args, **kwargs: Action(ActionType.RAISE, posted + stack))
+            expected_action, expected_added, wire_type = ActionType.RAISE, stack, 4
+        else:
+            # The bot's own choice: the villain is all-in and nobody is left to act, so the
+            # hand is priced and called - a raise would shut nobody out.
+            expected_action, expected_added, wire_type = ActionType.CALL, call_need, 3
     villain = api._get_player(2)
     villain.current_bet = posted + call_need
     villain.stack = 0
@@ -287,7 +295,7 @@ def test_live_preflop_request_history_stack_and_wire_agree(scenario):
     bridge._all_seats = [1, 2]
     bridge._hole_cards_count = 2
     bridge._bb = 10000
-    bridge._pot = 693200 if scenario == "allin" else 96000
+    bridge._pot = 96000 if scenario == "short_topup" else 693200
     bridge._my_chips = stack
     bridge._my_bet = posted
     bridge._street_bets = {1: posted, 2: posted + call_need}
@@ -312,13 +320,38 @@ def test_unseated_button_keeps_physical_order():
         autosave_path=None, log_file=None, g5_model_path=None,
         enable_showdown_calibration=False, decision_engine="local",
     )
+    # The bridge now labels by action order: hero acts first on every street, so
+    # this is a blind battle (SB vs BB), not a button hand.
+    labels = derive_seating([1, 2], dealer=3, big_blind=2).labels
+    assert labels == {1: "SB", 2: "BB"}
     api.new_hand([
-        PlayerInfo(10262053, "Hero", 805780, "BTN", seat_index=1),
-        PlayerInfo(10332601, "Villain", 510235, "BB", seat_index=2),
+        PlayerInfo(10262053, "Hero", 805780, labels[1], seat_index=1),
+        PlayerInfo(10332601, "Villain", 510235, labels[2], seat_index=2),
     ], dealer_id=-4)
     assert api._dealer_seat_index == 3
+    assert api._hand_positions == {10262053: "SB", 10332601: "BB"}
     assert not api._is_player_ip(10262053)
     assert api._is_player_ip(10332601)
+
+
+def test_api_without_labels_derives_them_from_seats_and_dealer_seat():
+    """A caller that sends seats but no labels gets the same derivation as the bridge:
+    the dealer chip on empty seat 3 makes seat 2 the button, not the lowest seat."""
+    api = PokerFateAPI(
+        my_player_id=10262053, big_blind=10000, small_blind=5000,
+        autosave_path=None, log_file=None, g5_model_path=None,
+        enable_showdown_calibration=False, decision_engine="local",
+    )
+    api.new_hand([
+        PlayerInfo(10262053, "Hero", 1000000, seat_index=0),
+        PlayerInfo(2, "A", 1000000, seat_index=1),
+        PlayerInfo(3, "B", 1000000, seat_index=2),
+        PlayerInfo(4, "C", 1000000, seat_index=4),
+        PlayerInfo(5, "D", 1000000, seat_index=5),
+    ], dealer_id=-4)
+    assert api._hand_positions == {10262053: "MP", 2: "CO", 3: "BTN", 4: "SB", 5: "BB"}
+    assert api._is_player_ip(3)
+    assert not api._is_player_ip(10262053)
 
 
 def test_bb_behind_limpers_checks_instead_of_recording_a_call():

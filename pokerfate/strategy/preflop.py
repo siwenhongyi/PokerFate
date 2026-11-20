@@ -9,9 +9,10 @@ Ranges are defined as sets of hand categories (strings):
 from __future__ import annotations
 import os
 import random
-from typing import List, Optional, Set, Tuple
+from dataclasses import dataclass
+from typing import List, Optional, Sequence, Set, Tuple
 from pokerfate.core.card import Card
-from pokerfate.core.config import required_equity
+from pokerfate.core.config import rake_keep, required_equity
 from pokerfate.core.position import (
     normalize_position as _normalize_position,
 )
@@ -348,6 +349,127 @@ _RANK_VALUE = {
 _PRESSURE_PREMIUM_CONTINUE = _expand_range('QQ+, AKs, AKo')
 _PRESSURE_STRONG_CONTINUE = _expand_range('TT+, AQs, AQo, AJs, KQs')
 
+# ── Calls that end the betting ───────────────────────────────────────────────
+# When a call leaves hero (almost) nothing to bet against the players already
+# in for the raise, the hand goes to showdown against them as it stands:
+# charts, ranges and implied odds have nothing to say, only the price has.
+# Those calls are priced by ``showdown_call_ev``.  The numbers below are
+# measured; ``python -m analysis.preflop_allin`` measures them again.
+#
+# "Almost nothing": at most a quarter of the pot left to bet after the call.
+SHOWDOWN_MAX_DEPTH_TO_POT = 0.25
+# The tracker's range for a shover against the cards shoves were shown with
+# (a called shove is shown whatever it is): a caller's equity is overstated by
+# about 3 points out of sample (44 shoves the fit had not seen: +2.8; all 130
+# in the logs: +0.2; by hand −3 for middle pairs to +7 for big aces).
+SHOWDOWN_EQUITY_MARGIN = 0.03
+# A player still to act on the raise comes along at a rate set by how big the
+# raise is and by what he has already done in this hand - not by one number.
+# Share that called or re-raised, of 26,298 such decisions in 16,610 hands:
+#                        raised before     called / limped    nothing yet
+#   raise to under 8bb    81% (237/294)    75% (3210/4289)    43% (7770/17947)
+#   8bb to under 20bb     74% (532/722)    45% (300/674)      19% (200/1066)
+#   20bb and more         69% (291/421)    28% (117/416)      13% (61/469)
+# Whether the raise is all-in makes no difference (20bb+: 71 / 27 / 13 all-in,
+# 67 / 29 / 13 not).  A caller in front does: with one, players who had called
+# come along more often (+0.39 log-odds) and so, a little, do players who had
+# not acted (+0.16).  The price is always taken with hero's call in front, so
+# the table holds the rates with a caller in front, from one fit over all the
+# decisions (section 2 of ``analysis.preflop_allin``).  Scored on the days left
+# out of the fit, decisions with a caller in front: log loss 0.696 with the two
+# flat rates used before (30% / 49%), 0.641 with the table above, 0.638 with
+# this one.  He comes along with the top of his range.
+SHOWDOWN_RAISE_SIZE_BB = (8.0, 20.0)
+SHOWDOWN_CONTINUE_RATE = {
+    'small': {'raised': 0.81, 'called': 0.79, 'none': 0.46},
+    'medium': {'raised': 0.74, 'called': 0.51, 'none': 0.21},
+    'big': {'raised': 0.69, 'called': 0.35, 'none': 0.15},
+}
+# Ways the players still to act can split that are rarer than this are left out.
+SHOWDOWN_MIN_OUTCOME_PROBABILITY = 0.005
+
+
+def showdown_continue_rate(raise_to_bb: float, earlier: str) -> float:
+    """How often a player still to act on a raise to ``raise_to_bb`` comes along.
+
+    ``earlier`` is what he did before in this hand: 'raised', 'called' (a limp
+    counts) or 'none' (not acted yet, or only posted a blind).
+    """
+    small, big = SHOWDOWN_RAISE_SIZE_BB
+    size = 'big' if raise_to_bb >= big else 'medium' if raise_to_bb >= small else 'small'
+    return SHOWDOWN_CONTINUE_RATE[size][earlier if earlier in ('raised', 'called') else 'none']
+
+
+def continue_outcomes(
+    rates: Sequence[float], min_probability: float = SHOWDOWN_MIN_OUTCOME_PROBABILITY,
+) -> List[Tuple[float, Tuple[int, ...]]]:
+    """Every way the players still to act can split into coming along and folding.
+
+    Each player decides on his own rate.  Returns ``(probability, who)`` with
+    ``who`` the indices into ``rates`` of the players that come along; splits
+    rarer than ``min_probability`` are dropped (``showdown_call_ev`` rescales).
+    """
+    outcomes = []
+    for mask in range(1 << len(rates)):
+        who = tuple(i for i in range(len(rates)) if mask >> i & 1)
+        probability = 1.0
+        for i, rate in enumerate(rates):
+            probability *= rate if i in who else 1.0 - rate
+        if probability >= min_probability:
+            outcomes.append((probability, who))
+    return outcomes
+
+
+@dataclass(frozen=True)
+class ShowdownPrice:
+    """A preflop call after which nothing is left to bet against the players in for the raise."""
+
+    ev: float                 # chips, equity margin applied; folding is 0
+    call: float               # chips hero adds
+    equity: float             # against the players already in for the raise
+    need: float               # raked break-even equity against them
+    pending: int = 0          # players still to act on the raise
+    big_blind: float = 0.0
+
+    def describe(self, verdict: str) -> str:
+        bb = self.big_blind if self.big_blind > 0 else 1.0
+        return (
+            f"showdown_price:{verdict} call={self.call / bb:.1f}bb eq={self.equity:.0%} "
+            f"need={self.need:.0%} ev={self.ev / bb:+.1f}bb"
+            + (f" pending={self.pending}" if self.pending else "")
+        )
+
+
+def showdown_call_ev(
+    *,
+    call: float,
+    pot: float,
+    equity: float,
+    outcomes: Sequence[Tuple[float, float, float]] = (),
+    margin: float = SHOWDOWN_EQUITY_MARGIN,
+) -> float:
+    """Chips won on average by a call that ends the betting; folding is 0.
+
+    ``pot`` is what hero can win before the call (chips above hero's all-in
+    left out) and ``equity`` hero's showdown equity against the players already
+    in for the raise.  With players still to act, ``outcomes`` lists what they
+    may do as ``(probability, equity, chips)``: how likely that split is, hero's
+    equity against the players already in plus those who come along, and the
+    chips they add to the pot hero can win.  The split where nobody comes along
+    is one of them; the probabilities need not sum to 1.
+    """
+    keep = rake_keep()
+
+    def value(eq: float, total: float) -> float:
+        return max(0.0, eq - margin) * keep * total - call
+
+    weight = sum(probability for probability, _eq, _chips in outcomes)
+    if weight <= 0.0:
+        return value(equity, pot + call)
+    return sum(
+        probability * value(eq, pot + call + chips) for probability, eq, chips in outcomes
+    ) / weight
+
 # Opponent-aware range expansions.  These only add continues against opponents
 # whose observed preflop aggression is materially wider than baseline.
 _WIDE_OPEN_3BET_EXPAND = _expand_range('99, 88, ATs, KQo, KJs, QJs')
@@ -456,8 +578,6 @@ _LIMP_BEHIND_MAX_CALL_BB = 1.25
 _LIMP_BEHIND_MIN_STACK_BB = 0.0
 _LIMP_BEHIND_MIN_IMPLIED = 25.0
 _LIMP_BEHIND_MIN_LIMPERS = 1
-_LIMP_BEHIND_STICKY_DENSITY = 0.35
-_LIMP_BEHIND_LOOSE_LIMPERS = 3
 _LIMP_BEHIND_SMALL_PAIRS = _expand_range('22, 33, 44, 55, 66')
 _LIMP_BEHIND_SUITED_CONNECTORS = _expand_range('54s, 65s, 76s, 87s, 98s, T9s, JTs')
 _LIMP_BEHIND_SUITED_ONE_GAPPERS = _expand_range('64s, 75s, 86s, 97s, T8s, J9s, QTs')
@@ -1403,7 +1523,38 @@ class PreflopStrategy:
         ):
             return True
         if cat in call_range:
+            return self._static_call_stands(
+                cat, '3bet', stack, pot, to_call, open_raise, big_blind, equity,
+            )
+        return False
+
+    def _static_call_stands(
+        self,
+        cat: str,
+        context: str,
+        stack: float,
+        pot: float,
+        to_call: float,
+        open_raise: float,
+        big_blind: float,
+        equity: float,
+    ) -> bool:
+        """A call taken from a static range, checked against the size of the raise.
+
+        The static ranges answer re-raises that leave room to play.  A call
+        that puts a third or more of the remaining stack in leaves little to
+        play for, so the range cannot carry it below its showdown price.
+        (Calls of big raises for a smaller part of the stack are left to the
+        range: the 16 such calls in the logs up to 2026-11-15, all below the
+        price on paper, won 216bb between them.)
+        """
+        _, pot_odds, stack_commit, _ = self._pressure_inputs(stack, pot, to_call, open_raise, big_blind)
+        if stack_commit < _HEAVY_PRESSURE_MIN_STACK_COMMIT or equity >= pot_odds:
             return True
+        self.last_expand_reason = (
+            f"static_block:{context}_below_price {cat} eq={equity:.0%} "
+            f"po={pot_odds:.0%} commit={stack_commit:.0%}"
+        )
         return False
 
     def _chart_call_pressure_allows(
@@ -1857,7 +2008,29 @@ class PreflopStrategy:
             mul = _4BET_SIZE_FALLBACK_IP if is_ip else _4BET_SIZE_FALLBACK_OOP
         return last_raise_to * mul
 
-    def decide(
+    def decide(self, *args, showdown_price: Optional[ShowdownPrice] = None, **kwargs) -> Tuple[str, float]:
+        """Return (action, amount); raises are street totals, calls increments.
+
+        Takes the arguments of ``chart_decision``.  ``showdown_price`` is set
+        when calling the raise hero faces leaves nothing to bet against the
+        players in for it.  The price then decides between calling and
+        folding; the charts only add the raise, and only while a player still
+        to act can be shut out by it.
+        """
+        action, amount = self.chart_decision(*args, **kwargs)
+        if showdown_price is None:
+            return action, amount
+        charts = self.last_expand_reason
+        if showdown_price.ev <= 0.0:
+            verdict, action, amount = 'fold', 'fold', 0.0
+        elif action == 'raise' and showdown_price.pending > 0:
+            verdict = 'raise'
+        else:
+            verdict, action, amount = 'call', 'call', showdown_price.call
+        self.last_expand_reason = showdown_price.describe(verdict) + (f" | {charts}" if charts else "")
+        return action, amount
+
+    def chart_decision(
         self,
         hole_cards: List[Card],
         position: str,
@@ -2333,7 +2506,9 @@ class PreflopStrategy:
                 return ('call', min(to_call or open_raise, stack))
             if cat in _VS_4BET_FALLBACK_JAM:
                 return ('raise', max_raise_to)  # 5-bet shove
-            if cat in _VS_4BET_FALLBACK_CALL:
+            if cat in _VS_4BET_FALLBACK_CALL and self._static_call_stands(
+                cat, '4bet', stack, pot, to_call, open_raise, big_blind, equity,
+            ):
                 return ('call', min(to_call or open_raise, stack))
             return _fold_fallback()
 

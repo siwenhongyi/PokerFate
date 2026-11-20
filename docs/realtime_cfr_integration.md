@@ -113,19 +113,21 @@ Rust 绑定现在支持 `include_evs=true`，默认开启。除当前节点策�
 
 动作选择：没有 EV 的翻牌书取当前 combo 最可能的动作（先比动作类别、再选尺度，见上文“离线翻牌书”）；有 EV 的 turn/river 先取当前 combo 的 action EV，经剥削层重算/约束后，在“最终 EV 与最优差距 ≤ max(0.15bb, 1% 底池)”的动作集合里按均衡频率抽样（`_sample_near_ev`，随机数来自 `api._next_decision_seed` 的可复现种子；无种子时取 EV 最高）。这样 EV 几乎相等的动作不会永远只出一个，诊断里的 `mixed_sample` 记录候选与概率。`selected_prob` 仍是该动作在基线策略里的频率。
 
+实战注意：线上 bridge 创建 `PokerFateAPI` 时不传 `decision_seed`，`_next_decision_seed` 返回空，所以实战里 `_sample_near_ev` 恒取 EV 最高、不做混合（2026-11-09..18 日志里 2,889 个 solver 决策没有一条 `mixed_sample`）；只有传了种子的回放才会抽样。
+
 realtime CFR 仍以均衡策略为锚点，不直接用画像替代 solver：
 
 1. 先取当前节点 hero combo 的 GTO action EV。
-2. 对 hero 每个 action，找到下一层 villain 节点，读取 villain `Fold/Call/Raise/...` 每个 response 后 hero combo 的 EV。
+2. 对 hero 每个 action，找到下一层 villain 节点，读取 villain `Fold/Call/Raise/...` 每个 response 后 hero combo 的值。solver 报的这个值仍把 hero 这次新投入的筹码算作他的（下注后对手弃牌 = 底池 + 这笔下注），而动作本身的 EV 是扣掉这笔投入的净值，所以要先减去新投入再用。2026-11-19 之前两者被直接相比，所有下注和加注都过不了一致性检查，实战里只有过牌的 response 被重算过，下注一直走的是第 7 步的手写修正。
 3. 用 villain 节点的 `weights + strategy` 聚合出均衡 response 频率。
-4. 用项目内画像和当前手线路证据修正 response 频率，再重算该 hero action 的 exploit EV。
+4. 对手实际会怎么回应，用拟合的回应模型（`pokerfate/decision/response_model.py`，2026-11-19）：按回应类别（面对下注：弃 / 跟 / 加注；hero 过牌后：过牌 / 下注）给出频率，特征是下注尺度、对手自己这手牌的线路、玩家特征（范围层的 known / tight / aggressive）和范围层给他的牌力分布；类别内部各尺度的比例沿用 solver。该动作的 exploit EV = GTO EV + Σ(拟合频率 − 均衡频率) × 该 response 后的值。河牌上“对手跟注”后的值还要按新的跟注范围重算：跟注变少时先去掉他最弱的跟注牌，变多时先加入他弃牌里最强的牌（`shifted_call_win_share`，用 solver 自己的逐手策略和权重精确算；重建的均衡胜率与 solver 的值相差超过 0.05 时不改）。人机、没有模型的街、范围层没给分布时不做调整，沿用均衡频率。模型由 `scripts/fit_response_model.py` 从决策日志拟合（单挑、转牌和河牌、真人），特征只在 `response_features` 一处计算，拟合和实战共用；`PF_RESPONSE_MODEL_PATH` 可指向候选文件，`off` 关闭。原来手写的回应系数（画像偏置、线路乘子、范围乘子）已删除。
 5. 最终 action EV = `(1 - confidence) * GTO_EV + confidence * exploit_EV`。GTO leash：GTO EV 低于最优超过 `(0.6 + 2×confidence) × max(1, pot/20)` bb 的动作直接从候选集中剔除（旧版只是把它夹到“略低于最优”，后续 tie-break 仍可能选中它，回放里出现过 solver 100% 弃牌却选了 raise 的案例）。
 6. 安全阀：没有真实偏置信号时不启用剥削；候选动作的 GTO EV 低于最优 GTO EV 太多时触发 `gto_ev_floor`；river 大注/all-in 会额外检查 adjusted fold equity 和 risk margin。旧的逐 combo `defense_mdf` 阀已删除：MDF 是范围层面的性质，solver 均衡本身已满足，按单个 combo 再套 MDF 概念上不成立。
-7. 没有 response EV 的动作走 `_direct_exploit_delta`，其常数按 `pot/10`（限 0.5–4）缩放，保证 3bb 和 60bb 底池里的修正量级都合理。
-8. 河牌价值下注下限 `value_bet_floor`（2026-11-12）。第 4 步只缩放 response 频率、不改变均衡的跟注范围，所以“对手更黏”会降低价值下注的 EV；均衡里混合动作 EV 相等，这类单向小修正就决定了 argmax。2026-11-09..12 日志里成手牌 solver 下注 51%、实际 32%，多数下注→过牌 74 次、反向 12 次。当同时满足 ①河牌、选中动作是 Check；②solver 对这手牌的下注频率 ≥ `PF_CFR_VALUE_BET_FLOOR_MIN_BET_FREQ`（0.50）；③tracker 的摊牌价值（`range_v2.vs_hero` 的 win + tie/2）≥ `PF_CFR_VALUE_BET_FLOOR_MIN_SHOWDOWN`（0.66）时，改为按 solver 自己的混合重新抽样：Check 保留均衡频率，下注频率分给 solver 的各尺度；超过 `PF_CFR_VALUE_BET_FLOOR_MAX_POT_RATIO`（1.0）倍底池或被安全阀硬拦截的尺度不用，其份额并入剩余的最大尺度。抽样后不再做 `_sample_near_ev`。转牌没有 `vs_hero`，此规则不生效。`PF_CFR_VALUE_BET_FLOOR=0` 关闭。依据与敏感性见 `analysis/guard_diff.py`、`analysis/value_audit.py`。
+7. 跟注和弃牌后面没有对手决策，走 `_direct_exploit_delta`（常数按 `pot/10`、限 0.5–4 缩放）。下注、加注、过牌如果没有可用的 response 值，保持 solver 的 EV，不做修正。风险守卫（第 6 步）目前不读对手的 response，和它们一直以来在实战里的状态一致，等单独评估后再定。
+8. （2026-11-18 已删除）河牌价值下注下限 `value_bet_floor`。2026-11-12 上线，用来把“solver 多数下注、剥削层选了过牌”的河牌成手牌改回 solver 的下注（条件：河牌、选中 Check、solver 对这手牌下注 ≥ 0.50、tracker 摊牌价值 ≥ 0.66，尺度 ≤ 1 倍底池）。上线后 12,371 手里实际触发 77 次：改成的下注在河牌这条街比直接摊牌 −2.3 ± 4.4bb/次（68 次），同条件过牌 −0.8 ± 2.4bb/次（39 次），折合 −0.8 ± 2.7 bb/100（上线时的估计是 +1.9 ± 1.9），每次决定的标准差 18.4bb 对 7.6bb。按上线时定的停止规则（下注线不再胜过过牌线就关）删除，`PF_CFR_VALUE_BET_FLOOR*` 四个环境变量不再读取。评估脚本、说明和回滚补丁见 `docs/candidates/value_bet_floor_removal_2026-11-18/`。
 9. 便宜跟注守卫的 tracker 证据路径（2026-11-12）。`overvalue_cheap_call_guard` 原本只在对手先验判定“高估牌力”且 solver 的 EV 差在约 2bb 内时把河牌弃牌改成跟注。现在当 tracker 摊牌价值 ≥ `PF_CFR_CHEAP_CALL_MIN_SHOWDOWN`（0.45）时也算证据，并把容差放宽到 `PF_CFR_CHEAP_CALL_POT_TOLERANCE`（0.06）× 底池；其余门槛不变（河牌、底池赔率 ≤ 25%、绝对牌型两对以上、Call 未被安全阀折扣）。任一参数设 0 即恢复旧行为。样本很小（9000 手里 2 次翻转），按日志继续观察。
 
-上述六个值在 `RealtimeCFROptions` 构造时读取环境变量，生效值记录在 `session_config.resolved`。
+上述两个值（`PF_CFR_CHEAP_CALL_*`）在 `RealtimeCFROptions` 构造时读取环境变量，生效值记录在 `session_config.resolved`。
 
 画像来源是 `PokerBot._build_player_profile()`，也就是既有的 OpponentModel + Range V2 统计：VPIP/PFR/AF、fold to cbet、WTSD、street AFq、river fold/bet 等。连续剥削信号来自 `OpponentModel.exploit_adjustments()`：`value_ag_scale`、`bluff_ag_scale`、`river_bluff_likely`、`river_bet_rare` 等。
 
@@ -169,11 +171,10 @@ realtime CFR 仍以均衡策略为锚点，不直接用画像替代 solver：
 - `exploit.gto_action_evs_bb`
 - `exploit.adjusted_action_evs_bb`
 - `exploit.final_action_evs_bb`
-- `exploit.response_summaries`
+- `exploit.response_summaries`（每个动作：`eq` / `adj` 逐 response 频率，`response` 里是按类别的均衡频率、拟合频率或未用模型的原因，河牌下注另有 `call_range`）；决策日志里压缩为 `realtime_cfr.responses`：`eq` / `fit`（或 `why`）/ `size` / `call_range`，配合对手随后的实际动作用来校验回应模型
 - `exploit.numeric_prior`
 - `exploit.line_context`
 - `exploit.safety.river_aggression_risk`
-- `exploit.safety.value_bet_floor`（`from` / `to` / `solver_bet_freq` / `showdown_value` / `candidates`）
 - `exploit.safety.overvalue_cheap_call_guard`（含 `evidence`：`overvalue` / `tracker` / `overvalue+tracker`）
 - `exploitability_pct`
 - `node_path`

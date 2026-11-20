@@ -1,6 +1,7 @@
 """Headless lobby rewards, following DevelopmentFund.lua and TaskModel.lua.
 
-Only claims existing entitlements: no task/report, purchases, or AFK dispatch.
+The excursion worker also completes low-cost event tasks, and the dispatch
+worker sends players on assignments and collects what they earn.
 One background worker serializes all HTTP calls. Every retry re-reads server
 state; an ambiguous claim response is journalled, never blindly replayed.
 """
@@ -21,10 +22,12 @@ from pf_intercept.game_api.http import signed_post_json
 log = logging.getLogger("pf_rewards")
 GAME_REBATE_SETTLE = 10082
 TASK_REFRESH = 10030
+DISPATCH_TASK_REFRESH = 10037
 GOLD = 10100001
 TASK_CATEGORIES = ((1, "daily"), (2, "weekly"), (6, "challenge"))
 POLL_SEC = 300.0
 RETRY_SEC = 30.0
+RETRY_MAX_SEC = 1800.0     # a check that keeps failing backs off to this
 HTTP_TIMEOUT_SEC = 8.0
 UTC8 = timezone(timedelta(hours=8))
 JOURNAL_PATH = Path(__file__).resolve().parents[1] / "logs" / "rewards.jsonl"
@@ -92,7 +95,6 @@ class RewardService:
         chnl: int, version: str,
         on_credit: Callable[[int, bool], Awaitable[None]],
         ready: asyncio.Event,
-        on_claim_state: Callable[[bool], Awaitable[None]] | None = None,
         journal_path: Path = JOURNAL_PATH,
         post: Callable = signed_post_json,
     ) -> None:
@@ -103,7 +105,6 @@ class RewardService:
         self._version = version
         self._post = post
         self._on_credit = on_credit
-        self._on_claim_state = on_claim_state
         self._ready = ready
         self._journal_path = journal_path
         self._run_id = uuid.uuid4().hex[:12]
@@ -113,8 +114,13 @@ class RewardService:
         self._server_time: tuple[float, float] | None = None
         self._fund_due = 0.0
         self._tasks_due = 0.0
+        self._excursion_due = 0.0
+        self.excursion = None
+        self._dispatch_due = 0.0
+        self.dispatch = None
         self._boundary = 0.0
         self._settling_until = 0.0
+        self._failures: dict[str, int] = {}   # consecutive failed passes per check
         self._auth_failed = False
         self.confirmed_chips = 0
         self.claims = 0
@@ -145,6 +151,11 @@ class RewardService:
         if notice_type == GAME_REBATE_SETTLE:
             self._fund_due = 0.0
             self._settling_until = max(self._settling_until, self.now() + 600)
+        elif notice_type in (10038, 10084) and self.excursion is not None:
+            self.wake_excursion(1)
+        elif notice_type == DISPATCH_TASK_REFRESH and self.dispatch is not None:
+            self.dispatch.tasks_due = True
+            self.wake_dispatch(1)
         elif notice_type == TASK_REFRESH:
             # Coalesce bursts without postponing an already scheduled refresh.
             self._tasks_due = min(self._tasks_due, self.now() + 0.5)
@@ -176,7 +187,7 @@ class RewardService:
         log.info("[REWARDS] stopped claims=%d chips=%d uncertain=%s",
                  self.claims, self.confirmed_chips, self.uncertain)
 
-    def _record(self, event: str, **fields) -> None:
+    def _record(self, event: str, *, required=False, **fields) -> None:
         record = {"ts": time.time(), "server_ts": self.now(), "run_id": self._run_id,
                   "uid": self.uid, "event": event, **fields}
         line = json.dumps(record, ensure_ascii=False)
@@ -187,6 +198,8 @@ class RewardService:
                 fh.write(line + "\n")
         except OSError:
             log.exception("[REWARDS] journal write failed")
+            if required:
+                raise RewardAPIError("reward journal", "write failed")
 
     async def _request(self, endpoint: str, payload: dict) -> dict:
         if self._stopping or self._auth_failed:
@@ -201,8 +214,9 @@ class RewardService:
                 token=self._authorization, chnl=self._chnl, timeout=HTTP_TIMEOUT_SEC,
                 extra_headers={"Version": self._version, "Lang": "en"},
             )
-        except Exception:
+        except Exception as exc:
             # Do not log request payloads or credentials.
+            log.warning("[REWARDS] %s request error: %s", endpoint, type(exc).__name__)
             data = None
         code = data.get("code") if isinstance(data, dict) else None
         if code == -2:
@@ -213,16 +227,33 @@ class RewardService:
             raise RewardAPIError(endpoint, code)
         return data
 
-    async def _claim(self, endpoint: str, payload: dict, kind: str) -> dict:
-        if self._on_claim_state is not None:
-            await self._on_claim_state(True)
-        try:
-            return await self._claim_and_record(endpoint, payload, kind)
-        finally:
-            if self._on_claim_state is not None:
-                await self._on_claim_state(False)
+    def _retry_delay(self, kind: str) -> float:
+        """30s after the first failure, doubling while the same check keeps failing."""
+        failures = self._failures[kind] = self._failures.get(kind, 0) + 1
+        return min(RETRY_SEC * 2 ** (failures - 1), RETRY_MAX_SEC)
 
-    async def _claim_and_record(self, endpoint: str, payload: dict, kind: str) -> dict:
+    def wake_excursion(self, delay):
+        self._excursion_due = min(self._excursion_due, self.now() + delay)
+        self._wake.set()
+
+    def wake_dispatch(self, delay):
+        self._dispatch_due = min(self._dispatch_due, self.now() + delay)
+        self._wake.set()
+
+    async def activity_uncertain(self, kind, **details):
+        self.uncertain = True
+        self._record("claim_uncertain", kind=kind, **details)
+        await self._on_credit(0, True)
+
+    async def activity_payout(self, kind, chips, **details):
+        self.confirmed_chips += chips
+        self.claims += int(chips > 0)
+        self._record("claimed" if chips else "activity_result", kind=kind,
+                     chips=chips, total_chips=self.confirmed_chips, **details)
+        if chips:
+            await self._on_credit(chips, False)
+
+    async def _claim(self, endpoint: str, payload: dict, kind: str) -> dict:
         try:
             data = await self._request(endpoint, payload)
             try:
@@ -314,7 +345,12 @@ class RewardService:
                 self._boundary = next_fund_boundary(now)
                 self._settling_until = now + 600
                 self._fund_due = 0
-            for kind in ("fund", "tasks"):
+            checks = {"fund": self.check_fund, "tasks": self.check_tasks}
+            if self.excursion is not None:
+                checks["excursion"] = self.excursion.check
+            if self.dispatch is not None:
+                checks["dispatch"] = self.dispatch.check
+            for kind, check in checks.items():
                 if self._stopping or self._auth_failed:
                     break
                 attr = "_" + kind + "_due"
@@ -324,17 +360,21 @@ class RewardService:
                 # Set before awaiting so a push during an HTTP call is retained.
                 setattr(self, attr, self.now() + interval)
                 try:
-                    await (self.check_fund() if kind == "fund" else self.check_tasks())
+                    await check()
+                    self._failures.pop(kind, None)
                 except RewardAPIError as exc:
                     if exc.code != "stopped":
                         self._record("check_failed", kind=kind, endpoint=exc.endpoint, code=exc.code)
-                        setattr(self, attr, self.now() + RETRY_SEC)
-                except Exception:
+                        setattr(self, attr, self.now() + self._retry_delay(kind))
+                except Exception as exc:
                     log.exception("[REWARDS] %s check failed", kind)
-                    setattr(self, attr, self.now() + RETRY_SEC)
+                    self._record("check_failed", kind=kind, error=type(exc).__name__)
+                    setattr(self, attr, self.now() + self._retry_delay(kind))
             if self._stopping or self._auth_failed:
                 break
-            delay = max(0.01, min(self._fund_due, self._tasks_due, self._boundary) - self.now())
+            delay = max(0.01, min(self._fund_due, self._tasks_due, self._boundary,
+                                  self._excursion_due if self.excursion else float("inf"),
+                                  self._dispatch_due if self.dispatch else float("inf")) - self.now())
             try:
                 await asyncio.wait_for(self._wake.wait(), timeout=delay)
             except asyncio.TimeoutError:

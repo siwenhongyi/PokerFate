@@ -248,6 +248,22 @@ def test_session_heartbeat_and_quick_start(monkeypatch):
     asyncio.run(run())
 
 
+def test_quick_start_sends_the_buy_in_the_loss_cap_allows_and_nothing_when_none_fits(monkeypatch):
+    async def run():
+        bridge = _RecordingBridge()
+        sess, ws = await _connect_with_fake(monkeypatch, bridge)
+        try:
+            bridge.cap_match_buyin = lambda fields: {**fields, "byin_chips": 50000}
+            assert await sess.quick_start(big_blind=1000, buyin_bb=100)
+            assert [s[2]["byin_chips"] for s in ws.sent if s[0] == "pb.QuickStartREQ"] == ["50000"]
+            bridge.cap_match_buyin = lambda fields: {**fields, "byin_chips": 0}
+            assert not await sess.quick_start(big_blind=1000, buyin_bb=100)
+            assert len([s for s in ws.sent if s[0] == "pb.QuickStartREQ"]) == 1
+        finally:
+            await sess.close()
+    asyncio.run(run())
+
+
 def test_session_closes_after_missed_heartbeats(monkeypatch):
     async def run():
         bridge = _RecordingBridge()
@@ -503,7 +519,6 @@ def test_rewards_http_does_not_block_heartbeats_or_actions_and_notice_wakes_work
         bridge = _RecordingBridge()
         bridge.bankroll_dashboard = lambda: {"base_total_chips": 1000}
         bridge.record_reward_credit = lambda chips, uncertain: credits.append((chips, uncertain))
-        bridge.set_reward_claim_inflight = lambda in_flight: None
         bridge.injects["pb.ActionNotifyBRC"] = ("pb.ActionREQ", {"action_type": 3, "chips": 50}, 0.0)
 
         def post(url, payload, **kwargs):
@@ -542,7 +557,7 @@ def test_rewards_http_does_not_block_heartbeats_or_actions_and_notice_wakes_work
     asyncio.run(run())
 
 
-def test_reward_wallet_refresh_matches_post_claim_request(monkeypatch):
+def test_a_reward_or_an_unknown_side_game_result_never_touches_poker_pnl(monkeypatch):
     from pf_intercept.bot import BotBridge
     from tests.test_headless_rewards import eventually
 
@@ -550,24 +565,63 @@ def test_reward_wallet_refresh_matches_post_claim_request(monkeypatch):
         bridge = BotBridge()
         sess, ws = await _connect_with_fake(monkeypatch, bridge)
         try:
-            await eventually(lambda: len(sess._wallet_requests) == 2)
-            for _ in range(2):
-                ws.push('pb.UserValueRSP', {'type': 10100001, 'value': 1000})
-            await eventually(lambda: sess.bankroll_dashboard()['base_total_chips'] == 1000 and not sess._wallet_requests)
-            await sess.send('pb.UserValueREQ', {'type': 10100001})
-            await sess._on_reward_claim_state(True)
-            # This wallet update can beat the HTTP success response. The claim
-            # guard must hide apparent winnings before its amount is known.
+            ws.push('pb.UserValueRSP', {'type': 10100001, 'value': 1000})
+            await eventually(lambda: sess.bankroll_dashboard()['base_total_chips'] == 1000)
+            # The wallet can move before the claim's HTTP reply says by how much.
             ws.push('pb.UserValueRSP', {'type': 10100001, 'value': 1100})
             await eventually(lambda: sess.bankroll_dashboard()['wallet_chips'] == 1100)
-            assert sess.bankroll_dashboard()['session_delta_chips'] is None
+            assert sess.bankroll_dashboard()['session_delta_chips'] == 0
             await sess._on_reward_credit(100, False)
-            await sess._on_reward_claim_state(False)
-            assert sess.bankroll_dashboard()['session_delta_chips'] is None
-            ws.push('pb.UserValueRSP', {'type': 10100001, 'value': 1130})
-            await eventually(lambda: sess.bankroll_dashboard()['session_delta_chips'] == 30)
-            assert sess.bankroll_dashboard()['reward_chips'] == 100
-            assert not sess.bankroll_dashboard()['rewards_pending']
+            await sess.on_sidegame_result(-30)
+            await sess._on_reward_credit(0, True)             # a round whose result never arrived
+            d = sess.bankroll_dashboard()
+            assert d['session_delta_chips'] == 0
+            assert (d['reward_chips'], d['sidegame_net_chips'], d['rewards_uncertain']) == (100, -30, True)
+        finally:
+            await sess.close()
+
+    asyncio.run(run())
+
+
+def test_activity_request_reserves_a_timed_out_reply_type_for_a_bounded_time(monkeypatch):
+    from pf_intercept.headless.rewards import RewardAPIError
+    from tests.test_headless_rewards import eventually
+
+    async def run():
+        monkeypatch.setattr(hs, "_ACTIVITY_REPLY_TIMEOUT_SEC", 0.05)
+        monkeypatch.setattr(hs, "_ACTIVITY_LATE_REPLY_SEC", 0.2)
+        sess, ws = await _connect_with_fake(monkeypatch, _RecordingBridge())
+        sess._bankroll_ready.set()
+        sent = lambda name: ws.sent_types().count(f"pb.{name}REQ")
+        try:
+            # No reply: the outcome is unknown and the reply type stays reserved.
+            with pytest.raises(RewardAPIError) as lost:
+                await sess.activity_request("ThrowDice", {"multiple": 1})
+            assert lost.value.code is None
+            with pytest.raises(RewardAPIError) as busy:
+                await sess.activity_request("ThrowDice", {"multiple": 1})
+            assert busy.value.code == "waiting for late response"
+            assert sent("ThrowDice") == 1
+            # The late reply is dropped, never handed to the next request, and frees the type.
+            ws.push("pb.ThrowDiceRSP", {"index": 3, "all_cost_num": 1})
+            await eventually(lambda: "pb.ThrowDiceRSP" not in sess._activity_pending)
+            task = asyncio.create_task(sess.activity_request("ThrowDice", {"multiple": 1}))
+            await eventually(lambda: sent("ThrowDice") == 2)
+            ws.push("pb.ThrowDiceRSP", {"index": 5, "all_cost_num": 2})
+            assert (await task)["index"] == 5
+            # A reply that never comes stops blocking once the window is over.
+            with pytest.raises(RewardAPIError):
+                await sess.activity_request("GetProgressReward", {})
+            await asyncio.sleep(0.25)
+            task = asyncio.create_task(sess.activity_request("GetProgressReward", {}))
+            await eventually(lambda: sent("GetProgressReward") == 2)
+            ws.push("pb.GetProgressRewardRSP", {"progress": 2})
+            assert (await task)["progress"] == 2
+            # A request that cannot be encoded was never sent: a definite failure, nothing reserved.
+            with pytest.raises(RewardAPIError) as bad:
+                await sess.activity_request("NoSuchMessage", {})
+            assert bad.value.code == "encode failed"
+            assert not sess._activity_pending and not sess._activity_late
         finally:
             await sess.close()
 

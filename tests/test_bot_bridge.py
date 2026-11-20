@@ -1,4 +1,4 @@
-"""pf_intercept BotBridge: profit-lock leave / re-enter and auto-rebuy cap."""
+"""pf_intercept BotBridge: profit-lock leave / re-enter, bust rebuys and the net-loss cap."""
 
 import threading
 
@@ -457,6 +457,7 @@ class TestBotBridgeReconnectRestore:
         b, fake = self._bridge()
         b._current_gameid = "old-hand"
         b._hole_cards_count = 2
+        b._robots.confirm("100", "robot", "test")
 
         out = b.handle(
             "pb.EnterRoomRSP",
@@ -507,6 +508,8 @@ class TestBotBridgeReconnectRestore:
         assert out[0] == "pb.ActionREQ"
         assert fake.hands
         assert len(fake.hands[0]["players"]) == 2
+        # a hand joined in the middle marks house robots like one seen from the deal
+        assert [p.is_robot for p in fake.hands[0]["players"]] == [False, True]
         assert fake.hole_cards == [["Ah", "Ks"]]
         assert fake.requests[0]["to_call"] == 10
 
@@ -603,14 +606,91 @@ def test_dealer_info_uses_server_blind_seats_for_positions(monkeypatch) -> None:
     assert positions[10671762] == "BTN"
     assert positions[10754527] == "SB"
     assert positions[10473646] == "BB"
-    assert positions[10523070] == "UTG"
-    assert positions[10262053] == "UTG+1"
+    # seat 0 has four seats behind it before the flop; hero in seat 2 sits
+    # between the dealer and the small blind (he posted to play at once)
+    assert positions[10523070] == "MP"
+    assert positions[10262053] == "CO"
     assert seat_indices[10523070] == 0
     assert seat_indices[10671762] == 1
     assert seat_indices[10262053] == 2
     assert seat_indices[10754527] == 3
     assert seat_indices[10473646] == 4
     assert not getattr(b._api, "disabled_reason", "")
+
+
+def test_dealer_info_empty_dealer_seat_labels_by_action_order(monkeypatch) -> None:
+    """2026-11-18 hand 343: the dealer chip was on empty seat 3 and hero, first to
+    act in seat 0, was labelled BTN (lowest seat number) and opened A7o."""
+    calls = []
+
+    class FakeAPI:
+        def new_hand(self, **kwargs):
+            calls.append(kwargs)
+
+        def invalidate_g5_shadow(self, reason):
+            self.invalidated = reason
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._my_seat = 0
+    b._seat_uids = {0: "10262053", 1: "10201582", 2: "10637554", 3: "10999999", 4: "10547857", 5: "10583348"}
+    monkeypatch.setattr(b, "_ensure_api", lambda: True)
+
+    b._on_dealer_info(
+        {
+            "dealer": 3,
+            "small_blind": 4,
+            "big_blind": 5,
+            "start_info": [
+                {"seatid": 4, "chips": 7379096},
+                {"seatid": 5, "chips": 4447200},
+                {"chips": 1592723},
+                {"seatid": 1, "chips": 797300},
+                {"seatid": 2, "chips": 3149111},
+            ],
+            "gameid": "dead-button",
+        }
+    )
+
+    positions = {p.player_id: p.position for p in calls[0]["players"]}
+    assert positions == {
+        10262053: "MP",
+        10201582: "CO",
+        10637554: "BTN",
+        10547857: "SB",
+        10583348: "BB",
+    }
+    assert calls[0]["dealer_id"] == -4          # the physical dealer seat still reaches the API
+    assert b._api.invalidated == "nonstandard_blind_layout"
+
+
+def test_dealer_info_heads_up_empty_dealer_seat_uses_the_named_blinds(monkeypatch) -> None:
+    calls = []
+
+    class FakeAPI:
+        def new_hand(self, **kwargs):
+            calls.append(kwargs)
+
+        def invalidate_g5_shadow(self, reason):
+            pass
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._my_seat = 1
+    b._seat_uids = {1: "10262053", 4: "10332601"}
+    monkeypatch.setattr(b, "_ensure_api", lambda: True)
+
+    # dealer chip on empty seat 0 (dropped from the message as a zero field);
+    # hero in seat 1 is the big blind, seat 4 posts the small blind and acts last after the flop
+    b._on_dealer_info(
+        {
+            "small_blind": 4,
+            "big_blind": 1,
+            "start_info": [{"seatid": 4, "chips": 1000000}, {"seatid": 1, "chips": 1000000}],
+            "gameid": "hu-dead-button",
+        }
+    )
+    assert {p.player_id: p.position for p in calls[0]["players"]} == {10262053: "BB", 10332601: "BTN"}
 
 
 def test_force_big_blind_keeps_external_engine_available_for_current_hand() -> None:
@@ -816,70 +896,10 @@ def test_hand_card_rsp_does_not_auto_show_hero_cards() -> None:
     assert out is None
 
 
-def test_show_my_hole_cards_queues_two_requests_for_next_handle() -> None:
-    b = BotBridge()
-    b._current_gameid = "game-1"
-
-    assert b.show_my_hole_cards() == 2
-
-    assert b.handle("pb.RoundOverBRC", {}) == [
-        ("pb.ShowMyCardREQ", {"gameid": "game-1", "pos": 1, "flag": 1}, 0.0),
-        ("pb.ShowMyCardREQ", {"gameid": "game-1", "pos": 2, "flag": 1}, 0.05),
-    ]
-
-
 def test_show_my_card_brc_is_not_watched_but_showdown_messages_are() -> None:
     assert "pb.ShowMyCardBRC" not in config.WATCH_S2C
     assert "pb.ShowHandRSP" in config.WATCH_S2C
     assert "pb.WinnerRSP" in config.WATCH_S2C
-
-
-def test_pure_bluff_river_does_not_show_hole_cards_before_action_req() -> None:
-    class FakeAPI:
-        def request_action(self, **kwargs):
-            return BotDecision(action="raise", amount=120.0)
-
-        def last_decision_diagnostics(self):
-            return {"final_purpose": "pure_bluff_river"}
-
-    b = BotBridge()
-    b._api = FakeAPI()
-    b._my_seat = 0
-    b._current_gameid = "game-1"
-    b._hole_cards_count = 2
-    b._stage = 4
-    b._pot = 100
-    b._my_chips = 1000
-    b._all_seats = [0, 1]
-
-    out = b.handle("pb.ActionNotifyBRC", {"seatid": 0, "call_need_chips": 0})
-
-    assert out[0] == "pb.ActionREQ"
-    assert out[1] == {"action_type": 4, "chips": 120}
-
-
-def test_non_pure_bluff_raise_does_not_show_hole_cards() -> None:
-    class FakeAPI:
-        def request_action(self, **kwargs):
-            return BotDecision(action="raise", amount=120.0)
-
-        def last_decision_diagnostics(self):
-            return {"final_purpose": "thick_value_bet"}
-
-    b = BotBridge()
-    b._api = FakeAPI()
-    b._my_seat = 0
-    b._current_gameid = "game-1"
-    b._hole_cards_count = 2
-    b._stage = 4
-    b._pot = 100
-    b._my_chips = 1000
-    b._all_seats = [0, 1]
-
-    out = b.handle("pb.ActionNotifyBRC", {"seatid": 0, "call_need_chips": 0})
-
-    assert out[0] == "pb.ActionREQ"
-    assert out[1] == {"action_type": 4, "chips": 120}
 
 
 class TestBotBridgeProfitLock:
@@ -951,9 +971,9 @@ class TestBotBridgeProfitLock:
         )
         assert out is None
         assert b._profit_lock_reenter is None
-        assert not b._profit_lock_award_rebuy_after_enter
+        assert not b._profit_lock_awaiting_enter
 
-    def test_winner_triggers_leave_then_enter_then_award(self) -> None:
+    def test_winner_triggers_leave_then_enter_and_the_loss_cap_stays(self) -> None:
         b = BotBridge(max_auto_rebuy=3)
         b._my_uid = "99"
         rid = 20242379
@@ -978,14 +998,14 @@ class TestBotBridgeProfitLock:
         assert b._profit_lock_reenter is not None
         assert b._profit_lock_reenter["roomid"] == rid
         assert b._profit_lock_reenter["byin_chips"] == int(100 * bb)
-        assert not b._profit_lock_award_rebuy_after_enter
+        assert not b._profit_lock_awaiting_enter
 
         out_delay = b.handle("pb.DelayLeaveRoomRSP", {"code": 0, "flag": True})
         assert out_delay is None
         assert b._profit_lock_deferred is not None
         assert b._profit_lock_reenter is not None
         assert b._profit_lock_reenter["delay_leave_confirmed"] is True
-        assert not b._profit_lock_award_rebuy_after_enter
+        assert not b._profit_lock_awaiting_enter
 
         out2 = b.handle("pb.LeaveRoomRSP", {"code": 0})
         assert out2[0] == "pb.UserValueREQ"
@@ -1001,7 +1021,7 @@ class TestBotBridgeProfitLock:
         exp_delay = max(0.0, min(60.0, float(getattr(config, "PROFIT_LOCK_REENTER_DELAY_SEC", 2.0))))
         assert out3[2] == exp_delay
         assert b._profit_lock_reenter is None
-        assert b._profit_lock_award_rebuy_after_enter
+        assert b._profit_lock_awaiting_enter
 
         enter_out = b.handle(
             "pb.EnterRoomRSP",
@@ -1014,8 +1034,8 @@ class TestBotBridgeProfitLock:
             },
         )
         assert enter_out is None
-        assert b._max_auto_rebuy == 4
-        assert not b._profit_lock_award_rebuy_after_enter
+        assert b._max_auto_rebuy == 3          # a lock no longer widens the loss cap
+        assert not b._profit_lock_awaiting_enter
 
     def test_leave_room_rsp_omitted_code_means_success(self) -> None:
         """MessageToDict 常省略 code=0，须仍能重进房。"""
@@ -1056,7 +1076,7 @@ class TestBotBridgeProfitLock:
         out = b.handle("pb.LeaveRoomRSP", {"code": -1})
         assert out is None
         assert b._profit_lock_reenter is None
-        assert not b._profit_lock_award_rebuy_after_enter
+        assert not b._profit_lock_awaiting_enter
         assert b._max_auto_rebuy == 3
         assert b._bankroll_samples == []
 
@@ -1085,7 +1105,7 @@ class TestBotBridgeProfitLock:
         assert out is None
         assert b._max_auto_rebuy == 3
         assert b._bankroll_samples == []
-        assert not b._profit_lock_award_rebuy_after_enter
+        assert not b._profit_lock_awaiting_enter
 
     def test_enter_room_fail_no_award(self) -> None:
         b = BotBridge(max_auto_rebuy=3)
@@ -1110,7 +1130,7 @@ class TestBotBridgeProfitLock:
         assert qs[1]["lobby_coin"] == 10100001
         assert qs[1]["byin_chips"] == 200
         assert b._max_auto_rebuy == 3
-        assert not b._profit_lock_award_rebuy_after_enter
+        assert not b._profit_lock_awaiting_enter
 
     def test_delay_leave_fail_cancels(self) -> None:
         b = BotBridge(max_auto_rebuy=3)
@@ -1147,9 +1167,9 @@ class TestBotBridgeProfitLock:
 
 
 class TestBankrollSampling:
-    """Session bankroll display comes from UserValueRSP wallet samples.
-    The profit-lock trigger condition is still on-table chips (my_final), not
-    bankroll delta.
+    """Wallet samples show the balances; the session's poker PnL is the sum of
+    settled hands. The profit-lock trigger condition is on-table chips
+    (my_final), not that PnL.
     """
 
     def _setup(self, bb: float = 2.0, room_id: int = 20242379):
@@ -1294,7 +1314,7 @@ class TestBankrollSampling:
         assert enter[0] == "pb.EnterRoomREQ"
         assert b._bankroll_profit_lock_count == 1
         assert b.bankroll_dashboard()["current_total_chips"] == 60_000
-        # EnterRoomRSP success still awards one extra auto-rebuy allowance.
+        # A successful re-entry leaves the loss cap where it was: the winnings are in the net result.
         b.handle(
             "pb.EnterRoomRSP",
             {
@@ -1303,7 +1323,7 @@ class TestBankrollSampling:
                 "table_status": {"seat": []},
             },
         )
-        assert b._max_auto_rebuy == 6
+        assert b._max_auto_rebuy == 5
 
     def test_trigger_uses_on_table_not_bankroll_sample(self):
         """Regression: even if no bankroll baseline exists, on-table
@@ -1323,13 +1343,13 @@ class TestBankrollSampling:
             "(dead-lock regression: trigger that gated on PnL was unreachable)"
         )
 
-    def test_trigger_ignores_negative_bankroll_history(self):
-        """Even if sampled bankroll delta is negative, on-table threshold fires."""
+    def test_trigger_ignores_negative_session_pnl(self):
+        """Even if the session's poker PnL is negative, on-table threshold fires."""
         b = self._setup()
         bb = 2.0
         thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)
         b.handle("pb.UserValueRSP", {"type": 10100001, "value": 100_000})
-        b.handle("pb.UserValueRSP", {"type": 10100001, "value": 90_000})
+        b._session_poker_pnl = -10_000          # earlier tables in this run
         assert b.bankroll_dashboard()["session_delta_chips"] < 0
         # But hero's on-table chips just crossed threshold.
         out = b.handle(
@@ -1338,8 +1358,215 @@ class TestBankrollSampling:
         )
         assert out == ("pb.DelayLeaveRoomREQ", {"flag": True}, 0.0)
         assert b._profit_lock_deferred is not None, (
-            "bankroll display is separate — trigger must still fire on on-table chips"
+            "session PnL is separate — trigger must still fire on on-table chips"
         )
+
+
+class TestTableTopup:
+    """A short stack is topped up at the table (pb.SetRebyREQ) before the next deal.
+
+    Table of the profit-lock tests: big blind 2, hero in seat 0 with 200 chips (100BB).
+    The top-up starts below 70BB (140 chips) and aims at 100BB (200 chips); the amounts the
+    client offers are 20–30BB in steps of 1BB, then 40, 50 … 200BB.
+    """
+
+    def _setup(self, max_auto_rebuy: int = 5):
+        b = BotBridge(max_auto_rebuy=max_auto_rebuy)
+        b._my_uid = "99"
+        TestBotBridgeProfitLock()._bootstrap_table(b)
+        b._uid_to_seat["99"] = 0
+        return b
+
+    @staticmethod
+    def _lose(b, chips: int):
+        return b.handle("pb.WinnerRSP", {"winner": [], "profit": [{"uid": "99", "chips": -chips}]})
+
+    @staticmethod
+    def _deal(b, hero_chips: int, gameid: str):
+        return b.handle("pb.DealerInfoRSP", {
+            "dealer": 0, "small_blind": 1, "big_blind": 0, "gameid": gameid,
+            "start_info": [{"seatid": 0, "chips": hero_chips}, {"seatid": 1, "chips": 200}]})
+
+    def test_short_stack_asks_for_chips_and_reports_when_they_arrive(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr("pf_intercept.bot.notify", lambda event, **f: event == "topup" and sent.append((event, f)))
+        b = self._setup()
+        # 200 → 130 chips (65BB): 70 short of 100BB, the largest amount on offer below that is 30BB
+        assert self._lose(b, 70) == ("pb.SetRebyREQ", {"reby_chips": 60}, 0.0)
+        assert b.handle("pb.SetRebyRSP", {"reby_chips": 60}) is None
+        assert sent == []                                   # nothing until the chips are on the table
+        # the server credits the amount it was asked for, right before the next deal
+        out = b.handle("pb.RebyBRC", {"chips": 60, "type": "topup"})
+        assert out == [("pb.UserValueREQ", {"type": 10100001}, 0.0)]      # wallet figure refreshed
+        assert b._my_chips == b._current_table_chips() == 190
+        assert sent == [("topup", {"added_chips": 60, "stack_chips": 190, "big_blind": 2, "nth": 1,
+                                   "session_delta_chips": -70})]
+        dash = b.bankroll_dashboard()
+        assert (dash["topup_count"], dash["topup_chips"], dash["session_delta_chips"]) == (1, 60, -70)
+        # the top-up is a buy-in, not a result: the next hand starts a new segment and the PnL is untouched
+        self._deal(b, 190, "t2")
+        assert self._lose(b, 10) is None and b._session_poker_pnl == -80
+
+    def test_no_top_up_at_70bb_or_when_broke(self):
+        b = self._setup()
+        assert self._lose(b, 60) is None                    # exactly 70BB left
+        b = self._setup()
+        assert self._lose(b, 200) is None                   # nothing left: the rebuy path handles it
+
+    def test_deeper_holes_get_the_largest_amount_that_stays_within_100bb(self):
+        b = self._setup()
+        assert self._lose(b, 110) == ("pb.SetRebyREQ", {"reby_chips": 100}, 0.0)   # 45BB + 50BB
+        b = self._setup()
+        assert self._lose(b, 61) == ("pb.SetRebyREQ", {"reby_chips": 60}, 0.0)     # 69.5BB + 30BB
+
+    def test_one_request_at_a_time_then_given_up_after_two_hands(self):
+        b = self._setup()
+        assert self._lose(b, 70) is not None
+        self._deal(b, 130, "t2")                            # the chips did not come
+        assert self._lose(b, 2) is None                     # still waiting: no second request
+        self._deal(b, 128, "t3")
+        assert self._lose(b, 2) is None and b._topup_pending is None      # given up
+        for i in range(29):                                 # and left alone for 30 hands
+            self._deal(b, 126, f"w{i}")
+            assert self._lose(b, 0) is None
+        self._deal(b, 126, "t34")
+        assert self._lose(b, 0) == ("pb.SetRebyREQ", {"reby_chips": 60}, 0.0)
+
+    def test_a_refusal_backs_off(self):
+        b = self._setup()
+        assert self._lose(b, 70) is not None
+        b.handle("pb.SetRebyRSP", {"code": 7})
+        assert b._topup_pending is None
+        self._deal(b, 130, "t2")
+        assert self._lose(b, 2) is None
+
+    def test_top_ups_stop_at_the_loss_limit_of_the_start(self):
+        # limit = (1 + 5 rebuys) × 100BB = 1200 chips for lost + on the table + added
+        b = self._setup()
+        b._session_poker_pnl = -900
+        assert self._lose(b, 70) == ("pb.SetRebyREQ", {"reby_chips": 60}, 0.0)     # 970 + 130 + 60 fits
+        b = self._setup()
+        b._session_poker_pnl = -960
+        assert self._lose(b, 70) == ("pb.SetRebyREQ", {"reby_chips": 40}, 0.0)     # only 40 left of it
+        b = self._setup()
+        b._session_poker_pnl = -1000
+        assert self._lose(b, 70) is None
+        assert self._lose(self._setup(max_auto_rebuy=0), 70) is None               # no rebuys, no top-ups
+
+    def test_no_top_up_while_leaving_stopping_or_switched_off(self, monkeypatch):
+        b = self._setup()
+        b._table_switch = {"mode": "leave"}
+        assert self._lose(b, 70) is None
+        b = self._setup()
+        b.stop_auto_rejoin()
+        assert self._lose(b, 70) is None
+        b = self._setup()
+        monkeypatch.setattr(config, "TOPUP_BELOW_BB", 0)
+        assert self._lose(b, 70) is None
+
+    def test_another_players_top_up_only_moves_his_stack(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr("pf_intercept.bot.notify", lambda event, **f: event == "topup" and sent.append((event, f)))
+        b = self._setup()
+        assert b.handle("pb.RebyBRC", {"seatid": 1, "chips": 100, "type": "topup"}) is None
+        assert b._seat_chips[1] == 300 and b._my_chips == 200 and sent == [] and b._topup_count == 0
+
+
+class TestNetLossCap:
+    """One number ends a start: its net loss may not pass (1 + N) buy-ins of 100BB.
+
+    Same table as the top-up tests: big blind 2, so a buy-in is 200 chips and N = 1 caps the
+    start at 400.  Everything that brings chips to a table must fit: lost + on the table + brought.
+    """
+
+    @staticmethod
+    def _setup(max_auto_rebuy: int = 1, monkeypatch=None):
+        b = TestTableTopup()._setup(max_auto_rebuy)
+        if monkeypatch is not None:
+            sent = []
+            monkeypatch.setattr("pf_intercept.bot.notify", lambda event, **f: sent.append((event, f)))
+            monkeypatch.setattr(config, "ROOM_ESCAPE_ENABLED", False)
+            return b, sent
+        return b
+
+    @staticmethod
+    def _bust(b, net: int):
+        """Hero has no chips left and the start stands at ``net``; returns the rebuy request, if any."""
+        b._session_poker_pnl = net
+        b._seat_chips[0] = b._my_chips = 0
+        if b.handle("pb.NoticeRebyRSP", {"seatid": 0, "reby_left_time": 30}) is None:
+            return None
+        return b.handle("pb.UserValueRSP", {"type": 10100001, "value": 50_000})
+
+    def test_a_bust_buys_100bb_while_that_fits_and_ends_the_start_when_nothing_does(self, monkeypatch):
+        b, sent = self._setup(1, monkeypatch)
+        assert self._bust(b, -200) == ("pb.RebyREQ", {"is_reby": True, "chips": 200}, 0.0)
+        b.handle("pb.RebyBRC", {"chips": 200, "type": "reby"})
+        assert self._bust(b, -400) is None                  # two buy-ins lost: the cap
+        assert b._loss_stop and b._auto_rebuy_done == 1
+        stops = [f for e, f in sent if e == "loss_stop"]
+        assert stops == [{"what": "破产买入", "session_delta_chips": -400, "loss_cap_chips": 400, "buyins": 2}]
+        assert self._bust(b, -400) is None and len([e for e, _ in sent if e == "loss_stop"]) == 1
+        dash = b.bankroll_dashboard()
+        assert (dash["loss_cap_chips"], dash["loss_stop"], dash["auto_rebuy_count"]) == (400, True, 1)
+
+    def test_a_bust_with_less_room_than_100bb_buys_what_fits(self, monkeypatch):
+        b, _ = self._setup(1, monkeypatch)
+        assert self._bust(b, -300) == ("pb.RebyREQ", {"is_reby": True, "chips": 100}, 0.0)   # 50BB left of it
+        b, _ = self._setup(1, monkeypatch)
+        assert self._bust(b, -345) == ("pb.RebyREQ", {"is_reby": True, "chips": 54}, 0.0)    # 27.5BB → 27BB
+        b, _ = self._setup(1, monkeypatch)
+        assert self._bust(b, -370) is None and b._loss_stop                                  # 15BB: below the smallest buy-in
+
+    def test_rebuys_are_not_counted_only_the_net_result_is(self, monkeypatch):
+        b, _ = self._setup(0, monkeypatch)                  # cap: one buy-in
+        for nth in (1, 2, 3):                               # busting while the start is still ahead
+            assert self._bust(b, +50) == ("pb.RebyREQ", {"is_reby": True, "chips": 200}, 0.0)
+            assert b._auto_rebuy_done == nth
+        assert self._bust(b, -1) == ("pb.RebyREQ", {"is_reby": True, "chips": 180}, 0.0)     # 99.5BB of room → 90BB
+        assert self._bust(b, -200) is None and b._loss_stop
+
+    def test_no_top_up_once_the_start_is_over(self, monkeypatch):
+        b, _ = self._setup(5, monkeypatch)
+        b._loss_stop = True
+        assert TestTableTopup._lose(b, 70) is None
+
+    def test_rejoin_after_an_unexpected_leave_brings_no_more_than_the_cap_allows(self, monkeypatch):
+        sent = []
+        monkeypatch.setattr("pf_intercept.bot.notify", lambda event, **f: sent.append((event, f)))
+        # 10000 blind, N = 5: the cap is 6,000,000
+        b = _recoverable_bridge()
+        monkeypatch.setattr(b, "_runtime_calibration_should_pause_play", lambda: None)
+        b._session_poker_pnl = -5_500_000
+        b.handle("pb.LeaveRoomRSP", {"roomid": 21205174})
+        rejoin = b.handle("pb.UserValueRSP", {"type": 10100001, "value": "105363439"})
+        assert rejoin[0] == "pb.QuickStartREQ" and rejoin[1]["byin_chips"] == 500_000        # 50BB of room
+        assert b._auto_rejoin_fields["byin_chips"] == 1_000_000                               # the plan is unchanged
+
+        b = _recoverable_bridge()
+        monkeypatch.setattr(b, "_runtime_calibration_should_pause_play", lambda: None)
+        b._session_poker_pnl = -5_950_000
+        b.handle("pb.LeaveRoomRSP", {"roomid": 21205174})
+        assert b.handle("pb.UserValueRSP", {"type": 10100001, "value": "105363439"}) is None
+        assert b._loss_stop and [e for e, _ in sent] == ["loss_stop"]
+        assert sent[0][1]["what"] == "重新买入"
+        # nothing revives it: not a later leave, not a reconnect
+        b.prepare_transport_reconnect()
+        assert b.restore_lobby_after_disconnect() is False
+
+    def test_back_in_the_lobby_after_a_disconnect_checks_the_cap_before_matching(self, monkeypatch):
+        monkeypatch.setattr("pf_intercept.bot.notify", lambda event, **f: None)
+        b = _recoverable_bridge()
+        monkeypatch.setattr(b, "_runtime_calibration_should_pause_play", lambda: None)
+        b._session_poker_pnl = -5_000_000
+        b.prepare_transport_reconnect()
+        assert b.restore_lobby_after_disconnect() is True
+        assert b.cap_match_buyin(b._auto_rejoin_fields)["byin_chips"] == 1_000_000
+        b = _recoverable_bridge()
+        monkeypatch.setattr(b, "_runtime_calibration_should_pause_play", lambda: None)
+        b._session_poker_pnl = -5_990_000
+        b.prepare_transport_reconnect()
+        assert b.restore_lobby_after_disconnect() is False and b._loss_stop
 
 
 def test_enter_room_syncs_current_and_start_chips_from_table() -> None:
@@ -1460,7 +1687,7 @@ def test_tournament_drops_pending_cash_actions() -> None:
     b._seat_chips[2] = 4000
     b._profit_lock_reenter = {"quickstart": True}
     b._profit_lock_deferred = {"pending": True}
-    b._profit_lock_award_rebuy_after_enter = True
+    b._profit_lock_awaiting_enter = True
     b._room_escape_reenter = {"quickstart": True}
     b._bankroll_pending_action = {"kind": "auto_rebuy"}
     b._bankroll_pending_reason = "auto_rebuy"
@@ -1470,7 +1697,7 @@ def test_tournament_drops_pending_cash_actions() -> None:
 
     assert b._profit_lock_reenter is None
     assert b._profit_lock_deferred is None
-    assert b._profit_lock_award_rebuy_after_enter is False
+    assert b._profit_lock_awaiting_enter is False
     assert b._room_escape_reenter is None
     assert b._bankroll_pending_action is None
     assert b._bankroll_pending_reason == ""
@@ -1771,89 +1998,6 @@ def test_profit_lock_threshold_in_config() -> None:
     assert config.PROFIT_LOCK_BB_THRESHOLD >= 1
 
 
-def test_runtime_settings_update_profit_lock_and_decision_engine(monkeypatch) -> None:
-    monkeypatch.setattr(config, "PROFIT_LOCK_BB_THRESHOLD", 400)
-    monkeypatch.setattr(config, "DECISION_ENGINE", "local")
-    monkeypatch.setattr(config, "PREFLOP_STICKY_POOL_ADJUST", True)
-    b = BotBridge(max_auto_rebuy=3)
-    b._bb = 10000.0
-
-    settings = b.update_runtime_settings(
-        profit_lock_bb=250,
-        decision_engine="g5_all",
-        preflop_sticky_pool_adjust=False,
-    )
-
-    assert b._max_auto_rebuy == 3
-    assert config.PROFIT_LOCK_BB_THRESHOLD == 250
-    assert config.DECISION_ENGINE == "g5_all"
-    assert config.PREFLOP_STICKY_POOL_ADJUST is False
-    assert settings["profit_lock_bb"] == 250
-    assert settings["decision_engine"] == "g5_all"
-    assert settings["preflop_sticky_pool_adjust"] is False
-    assert settings["profit_lock_chips"] == 2_500_000
-
-
-def test_runtime_settings_applies_decision_engine_to_existing_api(monkeypatch) -> None:
-    monkeypatch.setattr(config, "DECISION_ENGINE", "local")
-    b = BotBridge(max_auto_rebuy=3)
-
-    class Api:
-        def __init__(self) -> None:
-            self.values: list[str] = []
-
-        def set_decision_engine(self, value: str) -> dict:
-            self.values.append(value)
-            return {"requested": value}
-
-        def decision_engine_status(self) -> dict:
-            return {"requested": self.values[-1] if self.values else "local"}
-
-    api = Api()
-    b._api = api  # type: ignore[assignment]
-
-    settings = b.update_runtime_settings(decision_engine="g5")
-
-    assert api.values == ["g5"]
-    assert settings["decision_engine"] == "g5"
-    assert settings["decision_engine_status"] == {"requested": "g5"}
-
-
-def test_runtime_settings_applies_preflop_sticky_switch_to_existing_api(monkeypatch) -> None:
-    monkeypatch.setattr(config, "PREFLOP_STICKY_POOL_ADJUST", True)
-    b = BotBridge(max_auto_rebuy=3)
-
-    class Preflop:
-        sticky_pool_adjust = True
-
-    class Bot:
-        preflop = Preflop()
-
-    class Api:
-        _bot = Bot()
-
-        def decision_engine_status(self) -> dict:
-            return {}
-
-    b._api = Api()  # type: ignore[assignment]
-
-    settings = b.update_runtime_settings(preflop_sticky_pool_adjust=False)
-
-    assert config.PREFLOP_STICKY_POOL_ADJUST is False
-    assert b._api._bot.preflop.sticky_pool_adjust is False  # type: ignore[union-attr]
-    assert settings["preflop_sticky_pool_adjust"] is False
-
-
-def test_runtime_settings_accepts_cfr_decision_engine(monkeypatch) -> None:
-    monkeypatch.setattr(config, "DECISION_ENGINE", "local")
-    b = BotBridge(max_auto_rebuy=3)
-
-    settings = b.update_runtime_settings(decision_engine="cfr")
-
-    assert config.DECISION_ENGINE == "cfr"
-    assert settings["decision_engine"] == "cfr"
-
-
 def test_room_escape_two_busts_then_quickstart(monkeypatch) -> None:
     """连续破产 2 次（仍可自动续入）：第二弹离桌并以 QuickStart 换桌。"""
     import pf_intercept.bot as bot_mod
@@ -1867,10 +2011,14 @@ def test_room_escape_two_busts_then_quickstart(monkeypatch) -> None:
 
     b = BotBridge(max_auto_rebuy=5)
     b._my_seat = 0
+    b._my_uid = "7"
     b._bb = 1000.0
     b._table_room_id = 42
     b._session_game_type = 10010101
     b._session_lobby_coin = 10100001
+    # The hand that busted us. A side-game round of unknown result must not hide it.
+    b.handle("pb.WinnerRSP", {"winner": [], "profit": [{"uid": "7", "chips": "-100000"}]})
+    b.record_reward_credit(0, uncertain=True)
     r1 = b.handle("pb.NoticeRebyRSP", {"seatid": 0, "reby_left_time": 30})
     assert r1 is not None
     assert r1[0] == "pb.UserValueREQ"

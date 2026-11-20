@@ -1071,12 +1071,6 @@ def spool_backpressure_status(
     return data
 
 
-def spool_backpressure_active(
-    spool_dir: Optional[Path | str] = None,
-) -> bool:
-    return bool(spool_backpressure_status(spool_dir).get("active"))
-
-
 def _write_backpressure_status(
     *,
     dirs: dict[str, Path],

@@ -1,13 +1,12 @@
-"""River hero-relative strength calibration.
+"""Helpers for the river-only hero-relative strength signal.
 
-This calibrates the river-only ``villain_vs_hero_dist`` signal:
+The signal is ``villain_vs_hero_dist``:
 
     {'win': hero beats villain, 'tie': split, 'loss': villain beats hero}
 
-Unlike bucket/equity calibration, this layer does not try to learn "nuts" or
-general equity.  It learns whether the current river relative showdown equity
-is systematically high/low for a structural context, then shifts win/loss
-mass while preserving the tie mass.
+The learned calibration layer that used to live here was removed on
+2026-11-11; what remains are the relation helpers, exact win/tie/loss bounds
+for locked hands, and the board-texture key used by the showdown recorder.
 """
 
 from __future__ import annotations
@@ -17,13 +16,6 @@ from typing import Any, Dict, Iterable, List, Tuple
 from pokerfate.core.card import Card
 from pokerfate.core.hand_evaluator import HandEvaluator
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
-
-
-_MIN_SAMPLES_EXACT = 8
-_MIN_SAMPLES_FALLBACK = 20
-# 每个 key 只保留最近 N 条样本（同 hero_eq_calibrator._MAX_SAMPLES_PER_KEY 的理由）：
-# 2026-11-09 前瞻检验，各 key 最后 25% 样本上 raw+bias 的 MSE：全量均值 +0.3%
-# （比不校准还差），窗口 100/200/300/500 分别 -1.6/-1.3/-1.2/-1.2%。
 
 
 def relation_eq(dist: Dict[str, float] | None) -> float:
@@ -54,36 +46,6 @@ def relation_from_actual_eq(actual_eq: float | None) -> str:
     if actual <= 0.001:
         return 'loss'
     return 'tie'
-
-
-def action_ctx_from_trigger(trigger: str) -> str:
-    if trigger in {'action:raise', 'action:raise_over'}:
-        return 'raise'
-    if trigger == 'action:bet':
-        return 'bet'
-    return 'passive'
-
-
-def action_ctx_from_decision(
-    *,
-    facing_bet: bool,
-    to_call: float,
-    pot: float,
-    observed_action: str = '',
-) -> str:
-    """Classify the villain pressure that produced the current decision.
-
-    Prefer the tracked observed action.  Bet-size-only classification misses
-    small raises over hero bets, which are still semantically raises.
-    """
-    if not facing_bet:
-        return 'passive'
-    if observed_action in {'raise', 'raise_over'}:
-        return 'raise'
-    if to_call <= 0:
-        return 'passive'
-    pot_before = max(1e-9, pot - to_call)
-    return 'raise' if (to_call / pot_before) >= 1.0 else 'bet'
 
 
 def board_texture_key(board: Iterable[Card] | None) -> str:

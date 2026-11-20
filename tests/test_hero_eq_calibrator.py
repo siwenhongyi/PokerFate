@@ -117,15 +117,6 @@ class TestHeroEquityCalibrator:
         assert HeroEquityCalibrator.from_dict(None).sample_count('a', 'b', 1) == 0
         assert HeroEquityCalibrator.from_dict({}).sample_count('a', 'b', 1) == 0
 
-    def test_bias_for_diagnostics(self):
-        cal = HeroEquityCalibrator()
-        # bias ≈ +15% raw
-        for _ in range(10):
-            cal.record('medium', 'flop', 2, 0.50, 0.65)
-        assert abs(cal.bias_for('medium', 'flop', 2) - 0.15) < 0.01
-        # bias_for returns 0 when below threshold
-        assert cal.bias_for('nuts', 'flop', 2) == 0.0
-
 
 class TestActionCtxSplit:
     """action_ctx 三档分桶：passive / bet / raise（避免 bet/raise 场景 bias
@@ -166,10 +157,6 @@ class TestActionCtxSplit:
         for _ in range(10):
             cal.record('medium', 'turn', 3, 0.50, 0.52, action_ctx='passive')
 
-        # raise 桶 bias 大
-        assert abs(cal.bias_for('medium', 'turn', 3, 'raise') - 0.20) < 0.01
-        # passive 桶 bias 小
-        assert abs(cal.bias_for('medium', 'turn', 3, 'passive') - 0.02) < 0.01
         # 两个桶独立，不会混
         raw = 0.30
         raise_expected = raw + _shrunk_shift(0.20, 10)
@@ -311,3 +298,33 @@ class TestMultiwayActualRandomFill:
                 )
         assert cal._actual_eq_cache_hits > 0
         assert cal._actual_eq_cache_misses > 0
+
+
+def _window_bias(cal, *key):
+    """Mean (actual - predicted) over the samples kept for one key."""
+    samples = cal._samples[heq._make_key(*key)]
+    return sum(a - p for p, a in samples) / len(samples)
+
+
+class TestRecentWindow:
+    """Online calibrators keep only the most recent samples per key.
+
+    The bias they learn is "current tracker vs current pool"; samples drift with
+    code versions and the player pool, so an all-time mean goes stale.
+    """
+
+    def test_hero_eq_record_keeps_only_recent_window(self):
+        cal = HeroEquityCalibrator()
+        n = heq._MAX_SAMPLES_PER_KEY
+        for i in range(n + 50):
+            cal.record('medium', 'river', 1, 0.5, 1.0 if i >= 50 else 0.0)
+        assert cal.sample_count('medium', 'river', 1) == n
+        # The 50 oldest (actual=0) samples fell out of the window.
+        assert _window_bias(cal, 'medium', 'river', 1) == 0.5
+
+    def test_hero_eq_from_dict_trims_to_window(self):
+        n = heq._MAX_SAMPLES_PER_KEY
+        pairs = [[0.5, 0.0]] * 200 + [[0.5, 1.0]] * n
+        cal = HeroEquityCalibrator.from_dict({'strong|river|1|bet': pairs})
+        assert cal.sample_count('strong', 'river', 1, 'bet') == n
+        assert _window_bias(cal, 'strong', 'river', 1, 'bet') == 0.5

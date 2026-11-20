@@ -247,11 +247,14 @@ class ShowdownCalibrator:
         is_raise_over: bool = False,
         action_sequence: str = '',
         player_profile: Optional[Dict[str, float]] = None,
+        hero_eq_sample: bool = True,
     ) -> None:
         """每次 tracker 的 _weights[player_id] 更新后调用。
 
         active_weights：tracker 当前所有未弃牌对手的权重 {pid: w}。若提供，
         计算 hero 赢过所有这些对手的多人池胜率（决策层同口径）。
+        hero_eq_sample=False：池里有人机，不算多人池胜率，这条也就不会成为
+        hero 胜率自校准的样本；其余字段照常。
         """
         total = float(weights.sum())
         if total < 1e-15:
@@ -292,9 +295,10 @@ class ShowdownCalibrator:
                     opp_ranges.append(aw / s)
                     ordered_ids.append(pid)
                 if opp_ranges:
-                    predicted_hero_eq_multi = self._compute_hero_eq_multi(
-                        hero_cards, board, opp_ranges,
-                    )
+                    if hero_eq_sample:
+                        predicted_hero_eq_multi = self._compute_hero_eq_multi(
+                            hero_cards, board, opp_ranges,
+                        )
                     active_player_ids = ordered_ids
 
         # Hero 自己在这个板面的桶（meta-calibration 键的一部分）

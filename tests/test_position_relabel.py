@@ -6,6 +6,7 @@ range tables are keyed on 6-max positions counted backwards from the BTN, so
 """
 
 from pokerfate.api import PlayerInfo, PokerFateAPI
+from pokerfate.core.card import Card
 from pokerfate.core.position import relabel_positions_by_button
 from pokerfate.data import lookup_gto
 from pokerfate.strategy.preflop import _hand_category
@@ -75,7 +76,7 @@ def test_four_handed_hero_utg_label_uses_co_chart(tmp_path):
     # Pick a hand the CO-RFI chart opens but the UTG-RFI chart folds, so the
     # test asserts the chart actually consulted rather than a hard-coded hand.
     cards = ["Th", "8h"]
-    cat = _hand_category(PokerFateAPI.parse_cards(cards))
+    cat = _hand_category([Card.from_str(c) for c in cards])
     co_primary = lookup_gto("CO-RFI", cat).get("primary")
     utg_primary = lookup_gto("UTG-RFI", cat).get("primary")
     assert co_primary is not None and utg_primary is not None

@@ -151,15 +151,6 @@ class HeroEquityCalibrator:
         return len(self._samples.get(
             _make_key(bucket, street, num_opp, action_ctx), []))
 
-    def bias_for(self, bucket: str, street: str, num_opp: int,
-                 action_ctx: str = 'passive') -> float:
-        """Return raw bias (not clamped) for diagnostics. 0 if insufficient."""
-        samples = self._samples.get(
-            _make_key(bucket, street, num_opp, action_ctx), [])
-        if len(samples) < _MIN_SAMPLES:
-            return 0.0
-        return sum(a - p for p, a in samples) / len(samples)
-
     # -------- persistence --------
 
     def to_dict(self) -> dict:

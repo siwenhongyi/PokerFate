@@ -1,5 +1,4 @@
     const $ = (id) => document.getElementById(id);
-    const colorName = (item) => item && item.name ? item.name : "-";
     const signed = (n) => {
       const v = Number(n || 0);
       return `${v > 0 ? "+" : ""}${v.toLocaleString()}`;
@@ -22,7 +21,6 @@
     };
     const moneyClass = (n) => Number(n || 0) >= 0 ? "pos" : "neg";
     const handMoneyClass = (n) => Number(n || 0) > 0 ? "pos" : (Number(n || 0) < 0 ? "neg" : "zero");
-    const swatch = (item) => `<span class="swatch"><i class="ball c${item.id}"></i>${colorName(item)}</span>`;
     let activeTab = "live";
     let selectedHandId = null;
     let handFilterOptionsReady = false;
@@ -70,32 +68,6 @@
       });
     }
 
-    function formPayload() {
-      const payload = {};
-      new FormData($("run-form")).forEach((value, key) => {
-        payload[key] = value;
-      });
-      return payload;
-    }
-
-    function pickScopeText(scope) {
-      return {
-        cycle: "循环",
-        bet: "每次",
-        random_each: "每次",
-        recent3_most: "每次",
-      }[scope] || scope || "";
-    }
-
-    function pickReasonText(reason) {
-      return {
-        random: "随机",
-        least_seen: "少见优先",
-        random_each: "随机",
-        recent3_most_seen: "近3次最多",
-      }[reason] || reason || "";
-    }
-
     async function api(path, options = {}) {
       const res = await fetch(path, options);
       const data = await res.json();
@@ -109,10 +81,6 @@
       return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
-    function currentRecord(status) {
-      return status.job.current || status.job.last || null;
-    }
-
     function setNotice(message, tone = "error") {
       const el = $("notice");
       if (!message) {
@@ -124,73 +92,25 @@
       el.className = `notice show ${tone}`;
     }
 
-    function setBotNotice(message, tone = "error") {
-      const el = $("bot-notice");
-      if (!message) {
-        el.textContent = "";
-        el.className = "notice";
-        return;
-      }
-      el.textContent = message;
-      el.className = `notice show ${tone}`;
-    }
-
-    function setInputIfFree(id, value) {
-      const el = $(id);
-      if (document.activeElement !== el) {
-        el.value = value ?? "";
-      }
-    }
-
-    function renderBotSettings(settings) {
-      const available = !!settings;
-      $("bot-save-btn").disabled = !available;
-      $("bot-refresh-btn").disabled = !available;
-      if (!available) {
-        setBotNotice("Bot 运行参数暂不可用。", "warn");
-        return;
-      }
-      setBotNotice("");
-      setInputIfFree("bot-profit-lock-bb", settings.profit_lock_bb);
-      if (document.activeElement !== $("bot-decision-engine")) {
-        const engineValue = String(settings.decision_engine || "local").replace(/-/g, "_");
-        $("bot-decision-engine").value =
-          ["local", "g5", "g5_all", "cfr"].includes(engineValue)
-            ? engineValue
-            : "local";
-      }
-      const stickyToggle = $("bot-preflop-sticky-pool-adjust");
-      if (document.activeElement !== stickyToggle) {
-        stickyToggle.checked = settings.preflop_sticky_pool_adjust !== false;
-      }
-      $("bot-lock-bb").textContent = `${Number(settings.profit_lock_bb || 0).toLocaleString()}BB`;
-      $("bot-lock-chips").textContent = settings.profit_lock_chips == null
-        ? "-"
-        : Number(settings.profit_lock_chips || 0).toLocaleString();
-      $("bot-lock-state").textContent = settings.profit_lock_enabled
-        ? "启用"
-        : `禁用 ${settings.profit_lock_skip_reason || ""}`.trim();
-      const engineStatus = settings.decision_engine_status || {};
-      const engineMode = engineStatus.enabled
-        ? `${engineStatus.engine || "g5"}:${engineStatus.mode || "-"}`
-        : "local";
-      $("bot-engine-state").textContent = `${settings.decision_engine || "local"} / ${engineMode}`;
-      $("bot-preflop-sticky-state").textContent =
-        settings.preflop_sticky_pool_adjust !== false ? "启用" : "关闭";
-    }
-
     function renderDashboard(data) {
       const d = data || {};
       $("bank-total").textContent = chipsMaybe(d.current_total_chips);
       $("bank-wallet").textContent = chipsMaybe(d.wallet_chips);
       $("bank-table").textContent = chipsMaybe(d.table_chips);
-      $("bank-delta").textContent = d.rewards_uncertain ? "奖励待核对"
-        : d.rewards_pending ? "余额刷新中" : signedMaybe(d.session_delta_chips);
+      // Three separate ledgers: settled hands, claimed rewards, side-game rounds.
+      const unknown = d.rewards_uncertain ? "（另有待确认）" : "";
+      $("bank-delta").textContent = signedMaybe(d.session_delta_chips);
       $("bank-delta").className = handMoneyClass(d.session_delta_chips);
-      $("bank-rewards").textContent = chipsMaybe(d.reward_chips || 0);
+      $("bank-rewards").textContent = chipsMaybe(d.reward_chips || 0) + unknown;
+      $("bank-sidegame").textContent = signedMaybe(d.sidegame_net_chips || 0) + unknown;
+      $("bank-sidegame").className = handMoneyClass(d.sidegame_net_chips || 0);
       $("bank-last").textContent = timeMaybe(d.last_sample_at);
       $("bank-locks").textContent = Number(d.profit_lock_count || 0).toLocaleString();
-      $("bank-rebuys").textContent = `${Number(d.auto_rebuy_count || 0).toLocaleString()} / ${Number(d.max_auto_rebuy || 0).toLocaleString()}`;
+      $("bank-rebuys").textContent = `${Number(d.auto_rebuy_count || 0).toLocaleString()} 次`;
+      // One number ends a start: its net loss may not pass this (bust rebuys, top-ups and
+      // table-switch buy-ins are all checked against it).
+      $("bank-losscap").textContent = d.loss_cap_chips
+        ? `-${Number(d.loss_cap_chips).toLocaleString()}${d.loss_stop ? "（已停止）" : ""}` : "-";
       $("bank-escapes").textContent = Number(d.room_escape_count || 0).toLocaleString();
       $("bank-bb").textContent = d.big_blind ? Number(d.big_blind).toLocaleString() : "-";
       const handPoints = Array.isArray(d.hand_points) ? d.hand_points : [];
@@ -208,7 +128,6 @@
     }
 
     function renderBankChart(points, perHand = false) {
-      points = points.filter((s) => !s.rewards_uncertain && !s.rewards_pending);
       const box = $("bank-chart");
       if (!points.length) {
         box.className = "chart-box";
@@ -278,7 +197,7 @@
             ${title}<br>
             <span class="muted">${sub}</span>
           </div>
-          <div class="${deltaCls}">${s.rewards_uncertain ? "奖励待核对" : s.rewards_pending ? "余额刷新中" : signedMaybe(s.delta_chips)}<br><span class="muted">${s.rewards_uncertain || s.rewards_pending ? "-" : bbMaybe(s.delta_bb)}</span></div>
+          <div class="${deltaCls}">${signedMaybe(s.delta_chips)}<br><span class="muted">${bbMaybe(s.delta_bb)}</span></div>
         </div>`;
       }).join("");
     }
@@ -304,136 +223,115 @@
       return Number(n).toFixed(4);
     }
 
-    function rangeWinnerText(winner) {
-      if (winner === "bayes") return "Bayes";
-      if (winner === "static") return "静态";
-      if (winner === "tie") return "接近";
-      if (winner === "none") return "无样本";
-      return "-";
+    // Signed difference in percentage points.
+    function pointsMaybe(n) {
+      if (n === null || n === undefined || Number.isNaN(Number(n))) return "-";
+      const value = Number(n) * 100;
+      return `${value >= 0 ? "+" : ""}${value.toFixed(1)}`;
     }
 
-    function renderRangeTable(bodyId, rows) {
-      const body = $(bodyId);
-      if (!rows || !rows.length) {
-        body.innerHTML = '<tr><td colspan="6" class="muted">暂无足够样本</td></tr>';
-        return;
-      }
-      body.innerHTML = rows.map((row) => {
-        const delta = Number(row.avg_delta_nll || 0);
-        const deltaCls = delta > 0 ? "pos" : (delta < 0 ? "neg" : "zero");
-        return `<tr>
-          <td>${escapeHtml(row.key || "-")}<br><span class="muted">${rangeWinnerText(row.winner)} 更优</span></td>
-          <td>${Number(row.count || 0).toLocaleString()}</td>
-          <td>${Number(row.improved || 0).toLocaleString()} / ${Number(row.worse || 0).toLocaleString()}<br><span class="muted">${pctMaybe(row.positive_rate)} 改善</span></td>
-          <td>Bayes ${probMaybe(row.avg_bayes_prob)}<br><span class="muted">静态 ${probMaybe(row.avg_static_prob)}</span></td>
-          <td>Bayes ${probMaybe(row.avg_bayes_nll)}<br><span class="muted">静态 ${probMaybe(row.avg_static_nll)}</span></td>
-          <td class="${deltaCls}">${delta > 0 ? "+" : ""}${delta.toFixed(4)}<br><span class="muted">中位 ${probMaybe(row.median_delta_nll)}</span></td>
-        </tr>`;
-      }).join("");
-    }
+    const RANGE_ACTION_TEXT = {
+      bet: "下注", raise: "加注", call: "跟注", check: "过牌", board: "发牌后", fold: "弃牌", other: "其他",
+    };
+    const RANGE_BUCKET_TEXT = {
+      nuts: "坚果", strong: "强牌", medium: "中等牌", draw: "听牌", weak_draw: "弱听牌", air: "空气",
+    };
 
-    function eceBiasText(label) {
+    function rangeBiasText(label) {
       if (label === "overconfident") return "预测过高";
       if (label === "underconfident") return "预测过低";
       if (label === "ok") return "接近";
       return "-";
     }
 
-    function eceBiasClass(value) {
-      const n = Number(value || 0);
-      if (n > 0.03) return "neg";
-      if (n < -0.03) return "warn";
-      return "zero";
+    function rangeBiasClass(label) {
+      return label === "overconfident" || label === "underconfident" ? "neg" : "zero";
     }
 
-    function renderEceBins(calibration) {
-      const rows = (((calibration || {}).overall || {}).bins || []);
-      const body = $("range-ece-bin-body");
-      if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="6" class="muted">暂无 ECE 分桶</td></tr>';
+    function renderRangeCells(rows) {
+      const body = $("range-cell-body");
+      if (!rows || !rows.length) {
+        body.innerHTML = '<tr><td colspan="6" class="muted">暂无足够样本（每格至少 100 行）</td></tr>';
         return;
       }
-      body.innerHTML = rows.map((row) => {
-        const gap = Number(row.gap || 0);
-        return `<tr>
+      body.innerHTML = rows.map((row) => `<tr>
+          <td>${streetText(row.street)} ${escapeHtml(RANGE_ACTION_TEXT[row.action] || row.action || "-")}</td>
+          <td>${Number(row.rows || 0).toLocaleString()}</td>
+          <td>${pctMaybe(row.predicted)}</td>
+          <td>${pctMaybe(row.actual)}</td>
+          <td class="${rangeBiasClass(row.label)}">${pointsMaybe(row.diff)}<br><span class="muted">± ${(Number(row.se || 0) * 100).toFixed(1)}</span></td>
+          <td>${rangeBiasText(row.label)}</td>
+        </tr>`).join("");
+    }
+
+    function renderRangeBuckets(rows) {
+      const body = $("range-bucket-body");
+      if (!rows || !rows.length) {
+        body.innerHTML = '<tr><td colspan="6" class="muted">暂无样本</td></tr>';
+        return;
+      }
+      body.innerHTML = rows.map((row) => `<tr>
+          <td>${escapeHtml(RANGE_BUCKET_TEXT[row.key] || row.key || "-")}</td>
+          <td>${Number(row.points || 0).toLocaleString()}</td>
+          <td>${pctMaybe(row.avg_pred)}</td>
+          <td>${pctMaybe(row.empirical)}</td>
+          <td class="${rangeBiasClass(row.bias_label)}">${pointsMaybe(row.bias)}</td>
+          <td>${probMaybe(row.ece)}</td>
+        </tr>`).join("");
+    }
+
+    function renderRangeBins(rows) {
+      const body = $("range-bin-body");
+      if (!rows || !rows.length) {
+        body.innerHTML = '<tr><td colspan="5" class="muted">暂无样本</td></tr>';
+        return;
+      }
+      body.innerHTML = rows.map((row) => `<tr>
           <td>${escapeHtml(row.bin || "-")}</td>
           <td>${Number(row.count || 0).toLocaleString()}</td>
-          <td>${pctMaybe(row.avg_pred, 1)}</td>
-          <td>${pctMaybe(row.empirical, 1)}</td>
-          <td class="${eceBiasClass(gap)}">${gap >= 0 ? "+" : ""}${pctMaybe(gap, 1)}</td>
-          <td>${eceBiasText(row.bias_label)}</td>
-        </tr>`;
-      }).join("");
+          <td>${pctMaybe(row.avg_pred)}</td>
+          <td>${pctMaybe(row.empirical)}</td>
+          <td class="${rangeBiasClass(row.bias_label)}">${pointsMaybe(row.gap)}</td>
+        </tr>`).join("");
     }
 
-    function renderEceRows(bodyId, rows, emptyText) {
-      const body = $(bodyId);
+    function renderRangeStreets(rows) {
+      const body = $("range-street-body");
       if (!rows || !rows.length) {
-        body.innerHTML = `<tr><td colspan="6" class="muted">${escapeHtml(emptyText || "暂无 ECE 分析")}</td></tr>`;
+        body.innerHTML = '<tr><td colspan="5" class="muted">暂无样本</td></tr>';
         return;
       }
       body.innerHTML = rows.map((row) => {
-        const bias = Number(row.bias || 0);
-        const title = row.source ? `${row.source}: ${row.key || "-"}` : (row.key || "-");
-        return `<tr>
-          <td>${escapeHtml(title)}</td>
-          <td>${Number(row.points || 0).toLocaleString()}<br><span class="muted">rows ${Number(row.rows || 0).toLocaleString()}</span></td>
-          <td>${probMaybe(row.ece)}<br><span class="muted">Brier ${probMaybe(row.brier)}</span></td>
-          <td>${pctMaybe(row.avg_pred, 1)}</td>
-          <td>${pctMaybe(row.empirical, 1)}</td>
-          <td class="${eceBiasClass(bias)}">${bias >= 0 ? "+" : ""}${pctMaybe(bias, 1)}<br><span class="muted">${eceBiasText(row.bias_label)}</span></td>
-        </tr>`;
-      }).join("");
-    }
-
-    function gainClass(value) {
-      const n = Number(value || 0);
-      if (n > 0.0001) return "pos";
-      if (n < -0.0001) return "neg";
-      return "zero";
-    }
-
-    function renderRangeExamples(examples) {
-      const rows = [
-        ...((examples && examples.improved) || []).map((item) => ({...item, side: "改善"})),
-        ...((examples && examples.worse) || []).map((item) => ({...item, side: "变差"})),
-      ].slice(0, 20);
-      if (!rows.length) {
-        $("range-example-body").innerHTML = '<tr><td colspan="6" class="muted">暂无样例</td></tr>';
-        return;
-      }
-      $("range-example-body").innerHTML = rows.map((item) => {
-        const delta = Number(item.delta_nll || 0);
-        const deltaText = `${delta > 0 ? "+" : ""}${delta.toFixed(4)}`;
+        const delta = Number(row.avg_delta_nll || 0);
         const deltaCls = delta > 0 ? "pos" : (delta < 0 ? "neg" : "zero");
         return `<tr>
-          <td>${item.side}</td>
-          <td>${item.hand_id ? `第 ${escapeHtml(item.hand_id)} 手` : "-"}<br><span class="muted">${escapeHtml(item.trigger || "-")}</span></td>
-          <td>${streetText(item.street)}</td>
-          <td>${escapeHtml(item.player || "-")}</td>
-          <td>${cardsHtml(item.actual_cards)}<br><span class="muted">${escapeHtml(item.actual_combo || item.actual_bucket || "-")}</span></td>
-          <td>Bayes ${probMaybe(item.bayes_combo_prob)} / ${probMaybe(item.nll_bayes)}<br><span class="${deltaCls}">静态 ${probMaybe(item.static_combo_prob)} / ${probMaybe(item.nll_static)} Δ${deltaText}</span></td>
+          <td>${streetText(row.key)}</td>
+          <td>${Number(row.count || 0).toLocaleString()}</td>
+          <td>${pctMaybe(row.positive_rate)}<br><span class="muted">${Number(row.improved || 0).toLocaleString()} 改善 / ${Number(row.worse || 0).toLocaleString()} 变差</span></td>
+          <td>${probMaybe(row.avg_bayes_prob)}<br><span class="muted">起手 ${probMaybe(row.avg_static_prob)}</span></td>
+          <td class="${deltaCls}">${delta > 0 ? "+" : ""}${delta.toFixed(3)}<br><span class="muted">中位 ${Number(row.median_delta_nll || 0).toFixed(3)}</span></td>
         </tr>`;
       }).join("");
     }
 
     function renderRangeAnalysis(data) {
       const summary = data.summary || {};
-      $("range-count").textContent = Number(summary.count || 0).toLocaleString();
+      const calibration = data.calibration || {};
+      const has = (value) => value !== null && value !== undefined;
+      $("range-count").textContent = Number(summary.rows || 0).toLocaleString();
       $("range-hands").textContent = Number(summary.hands || 0).toLocaleString();
-      $("range-pf-better").textContent = Number(summary.improved || 0).toLocaleString();
-      $("range-g5-better").textContent = Number(summary.worse || 0).toLocaleString();
-      $("range-ece").textContent = summary.bucket_ece !== null && summary.bucket_ece !== undefined
-        ? Number(summary.bucket_ece).toFixed(4)
+      $("range-ece").textContent = has(summary.bucket_ece) ? Number(summary.bucket_ece).toFixed(4) : "-";
+      $("range-strong").textContent = has(summary.strong_mass_predicted)
+        ? `${pctMaybe(summary.strong_mass_predicted)} / ${pctMaybe(summary.strong_mass_actual)}`
         : "-";
-      $("range-top-acc").textContent = pctMaybe(summary.top_bucket_accuracy, 1);
-      $("range-winner").textContent = rangeWinnerText(summary.winner);
-      $("range-winner").className = summary.winner === "bayes" ? "pos" : (summary.winner === "static" ? "neg" : "zero");
+      const delta = has(summary.avg_delta_nll) ? Number(summary.avg_delta_nll) : null;
+      $("range-delta").textContent = delta === null ? "-" : `${delta > 0 ? "+" : ""}${delta.toFixed(3)}`;
+      $("range-delta").className = delta === null ? "" : (delta > 0 ? "pos" : (delta < 0 ? "neg" : "zero"));
       $("range-meta").textContent = [
         `文件 ${Number(summary.files || 0).toLocaleString()}`,
-        `采集行 ${Number(summary.rows || 0).toLocaleString()}`,
-        summary.skipped ? `跳过 ${Number(summary.skipped).toLocaleString()}` : "",
-        summary.bucket_ece !== null && summary.bucket_ece !== undefined ? `Bucket ECE ${Number(summary.bucket_ece).toFixed(4)}` : "",
+        `计入 ${Number(summary.rows || 0).toLocaleString()} 行`,
+        `旧版模型 ${Number(summary.older_rows || 0).toLocaleString()} 行未计`,
+        `人机 ${Number(summary.robot_rows || 0).toLocaleString()} 行未计`,
         summary.bad_lines ? `坏行 ${Number(summary.bad_lines).toLocaleString()}` : "",
       ].filter(Boolean).join("  ·  ");
       const conclusion = data.conclusion || [];
@@ -441,13 +339,10 @@
       $("range-conclusion").innerHTML = conclusion.length
         ? conclusion.map((line) => `<div>${escapeHtml(line)}</div>`).join("")
         : "暂无分析";
-      renderRangeTable("range-street-body", data.by_street || []);
-      renderRangeTable("range-category-body", data.by_category || []);
-      renderRangeTable("range-player-body", data.by_player || []);
-      renderEceBins(data.calibration || {});
-      renderEceRows("range-ece-bucket-body", ((data.calibration || {}).by_bucket || []), "暂无 bucket 校准分析");
-      renderEceRows("range-ece-hotspot-body", ((data.calibration || {}).hotspots || []), "暂无校准热点");
-      renderRangeExamples(data.examples || {});
+      renderRangeCells(calibration.by_cell || []);
+      renderRangeBuckets(calibration.by_bucket || []);
+      renderRangeBins((calibration.overall || {}).bins || []);
+      renderRangeStreets(data.by_street || []);
     }
 
     async function waitRangeAnalysisJob(initialJob) {
@@ -472,7 +367,7 @@
 
     async function runRangeAnalysis() {
       $("range-run-btn").disabled = true;
-      setRangeNotice("正在启动独立进程分析 NLL / ECE...", "warn");
+      setRangeNotice("正在启动独立进程分析...", "warn");
       try {
         const started = await api("/api/range/compare", {method: "POST"});
         const data = started.summary ? started : await waitRangeAnalysisJob(started.job || {});
@@ -485,101 +380,14 @@
       }
     }
 
-    function botSettingsPayload() {
-      return {
-        profit_lock_bb: Number($("bot-profit-lock-bb").value),
-        decision_engine: $("bot-decision-engine").value || "local",
-        preflop_sticky_pool_adjust: $("bot-preflop-sticky-pool-adjust").checked,
-      };
-    }
-
     function renderStatus(status) {
       const runtime = status.runtime;
-      const running = status.job.running;
-      const connected = runtime.session_state === "connected";
-      $("session-dot").className = `dot ${runtime.session_state === "connected" ? "on" : ""}`;
+      $("session-dot").className = `dot ${["connected","headless"].includes(runtime.session_state) ? "on" : ""}`;
       $("session-text").textContent = `WSS ${runtime.session_state}`;
-      $("job-dot").className = `dot ${running ? "run" : ""}`;
-      $("job-text").textContent = running ? "任务运行中" : "任务空闲";
       $("web-url").textContent = (runtime.web_urls && runtime.web_urls.length)
         ? runtime.web_urls.join("  ")
         : (runtime.web_url || "");
-      $("start-btn").disabled = running || !connected;
-      $("stop-btn").disabled = !running;
-      if (!connected) {
-        setNotice("WSS 未连接：先让设备连上 proxy，再启动彩球任务。", "warn");
-      } else {
-        setNotice("");
-      }
-      const record = currentRecord(status);
-      renderRecord(record);
-      renderBotSettings(runtime.bot_settings);
       renderDashboard(runtime.bot_dashboard);
-    }
-
-    function renderRecord(record) {
-      const summary = record && record.summary ? record.summary : {};
-      $("m-played").textContent = Number(summary.played || 0).toLocaleString();
-      $("m-cycles").textContent = Number(summary.profit_cycles || 0).toLocaleString();
-      $("m-bet").textContent = Number(summary.total_bet || 0).toLocaleString();
-      $("m-return").textContent = Number(summary.total_return || 0).toLocaleString();
-      $("m-net").textContent = signed(summary.net_profit);
-      $("m-net").className = moneyClass(summary.net_profit);
-
-      const rows = record && Array.isArray(record.rounds) ? record.rounds.slice().reverse() : [];
-      if (rows.length === 0) {
-        $("rounds-body").innerHTML = '<tr><td colspan="10" class="muted">暂无记录</td></tr>';
-        return;
-      }
-      $("rounds-body").innerHTML = rows.map((round) => {
-        const ids = (round.ids || []).map(swatch).join("");
-        const counts = (round.color_counts_after || [])
-          .map((item) => `${colorName(item)}:${item.count}`)
-          .join(" ");
-        const pick = round.selected || {};
-        const scope = pickScopeText(pick.scope);
-        const reason = pickReasonText(pick.reason);
-        return `<tr>
-          <td>${round.index}</td>
-          <td>${round.cycle}</td>
-          <td>${round.attempt}</td>
-          <td>${swatch({id: pick.id, name: pick.name})}<span class="muted">${scope} ${reason}</span></td>
-          <td>${Number(round.stake || 0).toLocaleString()}</td>
-          <td>${ids || "-"}</td>
-          <td class="${moneyClass(round.net_profit)}">${signed(round.net_profit)}</td>
-          <td class="${moneyClass(round.cycle_net)}">${signed(round.cycle_net)}</td>
-          <td class="${moneyClass(round.total_net)}">${signed(round.total_net)}</td>
-          <td class="muted">${counts}</td>
-        </tr>`;
-      }).join("");
-    }
-
-    function renderHistory(records, summary = {}) {
-      renderHistorySummary(summary);
-      if (!records.length) {
-        $("history").textContent = "暂无记录";
-        return;
-      }
-      $("history").className = "history";
-      $("history").innerHTML = records.map((record) => {
-        const s = record.summary || {};
-        return `<div class="history-item">
-          <div>${record.started_at || "-"}<br><span class="muted">${record.status || "-"}</span></div>
-          <div>局数 ${s.played || 0}</div>
-          <div>投入 ${Number(s.total_bet || 0).toLocaleString()}</div>
-          <div>派彩 ${Number(s.total_return || 0).toLocaleString()}</div>
-          <div class="${moneyClass(s.net_profit)}">盈亏 ${signed(s.net_profit)}</div>
-        </div>`;
-      }).join("");
-    }
-
-    function renderHistorySummary(summary = {}) {
-      $("h-records").textContent = Number(summary.records || 0).toLocaleString();
-      $("h-played").textContent = Number(summary.played || 0).toLocaleString();
-      $("h-bet").textContent = Number(summary.total_bet || 0).toLocaleString();
-      $("h-return").textContent = Number(summary.total_return || 0).toLocaleString();
-      $("h-net").textContent = signed(summary.net_profit);
-      $("h-net").className = moneyClass(summary.net_profit);
     }
 
     function resultText(hand) {
@@ -730,61 +538,11 @@
       try {
         const status = await api("/api/status");
         renderStatus(status);
-        const history = await api("/api/records?limit=12");
-        renderHistory(history.records || [], history.summary || {});
       } catch (err) {
         setNotice(err.message);
       }
     }
 
-    async function refreshBotSettings() {
-      const data = await api("/api/bot/settings");
-      renderBotSettings(data.settings);
-    }
-
-    $("run-form").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      try {
-        await api("/api/color/run", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(formPayload()),
-        });
-        setNotice("彩球任务已启动", "warn");
-        await refresh();
-      } catch (err) {
-        setNotice(err.message);
-      }
-    });
-    $("stop-btn").addEventListener("click", async () => {
-      try {
-        await api("/api/color/stop", {method: "POST"});
-        setNotice("已请求停止任务", "warn");
-        await refresh();
-      } catch (err) {
-        setNotice(err.message);
-      }
-    });
-    $("bot-settings-form").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      try {
-        const data = await api("/api/bot/settings", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(botSettingsPayload()),
-        });
-        renderBotSettings(data.settings);
-        setBotNotice("运行参数已保存", "warn");
-      } catch (err) {
-        setBotNotice(err.message);
-      }
-    });
-    $("bot-refresh-btn").addEventListener("click", () => {
-      refreshBotSettings()
-        .then(() => setBotNotice("运行参数已刷新", "warn"))
-        .catch((err) => setBotNotice(err.message));
-    });
-    $("refresh-btn").addEventListener("click", refresh);
     $("range-run-btn").addEventListener("click", () => {
       runRangeAnalysis();
     });
@@ -836,8 +594,6 @@
         });
         if (activeTab === "hands") {
           refreshHands().catch((err) => setNotice(err.message));
-        } else if (activeTab === "bot") {
-          refreshBotSettings().catch((err) => setBotNotice(err.message));
         } else if (activeTab === "live") {
           refreshLive();
         }

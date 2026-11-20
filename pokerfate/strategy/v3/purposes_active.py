@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import os as _os
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from pokerfate.strategy.v3 import bluff_context, draw_quality, early_relative
 from pokerfate.strategy.v3.context import DecisionCtx
@@ -588,10 +588,6 @@ def _barrel_resistance_eq_add(ctx: DecisionCtx) -> float:
     return add
 
 
-def _strong_draw_profile(ctx: DecisionCtx) -> bool:
-    return draw_quality.strong_draw(ctx)
-
-
 def _realizable_no_fe_draw(ctx: DecisionCtx) -> bool:
     """Draws worth betting when villain is unlikely to fold.
 
@@ -1133,9 +1129,6 @@ class RangeCbet(Purpose):
             return [(0.25, 0.55), (0.33, 0.45)]
         return [(0.33, 0.45), (0.40, 0.55)]
 
-    def alpha_target(self, ctx: DecisionCtx, frac: float) -> Optional[float]:
-        return None  # merged
-
 
 # ---------------------------------------------------------------------------
 # 2. polarized_cbet
@@ -1230,10 +1223,6 @@ class ProtectionBet(Purpose):
                 return [(0.50, 0.45), (0.60, 0.55)]
             return [(0.60, 0.45), (0.75, 0.55)]
         return [(0.50, 0.45), (0.66, 0.55)]
-
-    def alpha_target(self, ctx: DecisionCtx, frac: float) -> Optional[float]:
-        # Merged — small configured bluff share (~20-25%).
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -1342,9 +1331,6 @@ class ThinValueBet(Purpose):
             return [(0.50, 0.45), (0.66, 0.55)]
         return [(0.45, 0.40), (0.55, 0.40), (0.66, 0.20)]
 
-    def alpha_target(self, ctx: DecisionCtx, frac: float) -> Optional[float]:
-        return None  # merged
-
 
 # ---------------------------------------------------------------------------
 # 5. monster_value_plan
@@ -1415,9 +1401,6 @@ class MonsterValuePlan(Purpose):
         if air_weak >= _MONSTER_AIR_WEAK_MIN:
             return [(0.00, 0.10), (0.33, 0.50), (0.50, 0.40)]
         return [(0.40, 0.45), (0.55, 0.55)]
-
-    def alpha_target(self, ctx: DecisionCtx, frac: float) -> Optional[float]:
-        return None
 
     def active_value_sizing_allowed(self, ctx: DecisionCtx, frac: float) -> bool:
         return ctx.street not in {'flop', 'turn'}
@@ -1570,9 +1553,6 @@ class BlockBet(Purpose):
 
     def sizer(self, ctx: DecisionCtx) -> List[Tuple[float, float]]:
         return [(0.20, 0.3), (0.25, 0.4), (0.33, 0.3)]
-
-    def alpha_target(self, ctx: DecisionCtx, frac: float) -> Optional[float]:
-        return None  # merged
 
 
 # ---------------------------------------------------------------------------
@@ -2273,9 +2253,6 @@ class ProfitFlopCbet(Purpose):
             return [(0.40, 0.45), (0.50, 0.55)]
         return [(0.40, 0.35), (0.50, 0.45), (0.60, 0.20)]
 
-    def alpha_target(self, ctx: DecisionCtx, frac: float) -> Optional[float]:
-        return None
-
 
 class ProfitDelayedProbe(Purpose):
     """Turn stab after flop checks through.
@@ -2358,9 +2335,6 @@ class ProfitDelayedProbe(Purpose):
             return [(0.55, 0.45), (0.66, 0.55)]
         return [(0.45, 0.45), (0.55, 0.40), (0.66, 0.15)]
 
-    def alpha_target(self, ctx: DecisionCtx, frac: float) -> Optional[float]:
-        return None
-
 
 class ProfitPaidValueContinue(Purpose):
     """Multi-street value continuation after a prior call.
@@ -2402,9 +2376,6 @@ class ProfitPaidValueContinue(Purpose):
         if sticky:
             return [(0.66, 0.35), (0.75, 0.45), (0.85, 0.20)]
         return [(0.55, 0.35), (0.66, 0.45), (0.75, 0.20)]
-
-    def alpha_target(self, ctx: DecisionCtx, frac: float) -> Optional[float]:
-        return None
 
 
 # ---------------------------------------------------------------------------

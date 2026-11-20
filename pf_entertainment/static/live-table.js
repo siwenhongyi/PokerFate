@@ -30,6 +30,30 @@
     const POS_TITLE = { "BTN": "庄位", "BTN/SB": "庄位（兼小盲）", "SB": "小盲", "BB": "大盲",
                         "CO": "关煞位（庄位前一位）", "MP": "中位", "UTG": "枪口位" };
 
+    // Stacks and the running result are read in big blinds: 1,967,500 at a 20,000 blind → "98.4BB".
+    function bbText(chips, bb, signed, digits = 1) {
+      const n = Number((Number(chips || 0) / bb).toFixed(digits));
+      return `${signed && n > 0 ? "+" : ""}${n.toLocaleString("zh-CN", { maximumFractionDigits: digits })}BB`;
+    }
+    // Bets, pots and winnings keep two decimals (a 2.25BB raise, a 0.5BB small blind).
+    const betText = (chips, bb) => bbText(chips, bb, false, 2);
+    const chipsTitle = (chips) => `${Number(chips || 0).toLocaleString()} 筹码`;
+    // The observer (live_table.py) writes amounts into its texts as plain chip counts:
+    //   an action, on a seat or in the feed   "跟注 70000"   → the number at the end
+    //   a result   "A 赢 27300  |  B 赢 100  本手 -10000"    → each win and our own result
+    function actionInBb(text, bb) {
+      const t = String(text || "");
+      return bb > 0 ? t.replace(/ (\d+)$/, (_, n) => " " + betText(n, bb)) : t;
+    }
+    function resultInBb(text, bb) {
+      const t = String(text || "");
+      if (!(bb > 0)) return t;
+      return t.replace(/ 赢 (\d+)(?=  \|  |  本手 |$)/g, (_, n) => " 赢 " + betText(n, bb))
+        .replace(/(^|  )本手 ([+-]?\d+)$/, (_, lead, n) => `${lead}本手 ${bbText(n, bb, true, 2)}`);
+    }
+    // The blind of the table last seen: a kept settlement outlives the table it came from.
+    let lastBb = 0;
+
     let settlement = null;
     let settlementId = null;
     let revealUntil = 0;
@@ -60,8 +84,9 @@
       const shown = settlement.revealed || [];
       const revealHtml = shown.map((p) =>
         `<div class="showdown-reveal"><span>${escapeHtml(p.name)}</span><div>${holeCards(p.hole)}</div></div>`).join("");
+      const wonBb = Number(settlement.bb || 0) || lastBb;
       const winnerHtml = (settlement.winners || []).map((p) =>
-        groupHtml(p, `${p.name || "赢家"} · 获得 ${Number(p.chips || 0).toLocaleString()}`)).join("");
+        groupHtml(p, `${p.name || "赢家"} · 获得 ${wonBb > 0 ? betText(p.chips, wonBb) : Number(p.chips || 0).toLocaleString()}`)).join("");
       const board = (settlement.board || []).map(liveCardHtml).join("");
       const markup = `<div class="showdown-heading"><strong>第 ${Number(settlement.hand_no || 0)} 手结算</strong>` +
         `<span>${revealing ? "公开亮牌" : "最佳五张牌"}</span></div>` +
@@ -104,10 +129,17 @@
         if (data.connection_status === "reconnecting") conn.textContent = "● 连接中断 · 自动重连中";
         if (data.connection_status === "restoring") conn.textContent = "● 已连接 · 恢复牌桌中";
       }
+      const bb = Number(data.bb || 0);
+      if (bb > 0) lastBb = bb;
       const pnl = $("live-pnl"), rewards = $("live-rewards");
       if (pnl) {
         const n = data.session_pnl_chips;
-        pnl.textContent = Number.isSafeInteger(n) ? `${n > 0 ? "+" : ""}${n.toLocaleString("zh-CN")} 筹码` : "—";
+        // Chips and big blinds side by side.  The server adds up each hand at the blind it was
+        // played at; an older bot process sends chips only, which are then read at this table's blind.
+        const inBb = Number.isFinite(data.session_pnl_bb) ? bbText(data.session_pnl_bb, 1, true)
+          : bb > 0 ? bbText(n, bb, true) : "";
+        pnl.textContent = Number.isSafeInteger(n)
+          ? `${n > 0 ? "+" : ""}${n.toLocaleString("zh-CN")} 筹码${inBb ? `（${inBb}）` : ""}` : "—";
         pnl.className = n > 0 ? "pos" : n < 0 ? "neg" : "";
       }
       if (rewards) {
@@ -118,13 +150,16 @@
       $("live-room").textContent = data.room_id || "-";
       $("live-blinds").textContent = (data.sb && data.bb) ? `${data.sb}/${data.bb}` : "-";
       $("live-street").textContent = ({preflop:"翻前",flop:"翻牌",turn:"转牌",river:"河牌"}[data.street]) || "-";
-      $("live-pot").textContent = Number(data.pot || 0).toLocaleString();
+      // Pot, bets, action amounts and winnings in big blinds too; chips stay in the tooltips.
+      const potText = bb > 0 ? betText(data.pot, bb) : Number(data.pot || 0).toLocaleString();
+      $("live-pot").textContent = potText;
+      $("live-pot").title = $("live-potc").title = bb > 0 ? chipsTitle(data.pot) : "";
       $("live-hand").textContent = data.hand_no || "-";
       const mix = $("live-mix");
       if (mix) mix.textContent = data.room_id ? `真人 ${Number(data.humans || 0)} · 人机 ${Number(data.robots || 0)}` : "-";
       $("live-board").innerHTML = (data.board || []).map(liveCardHtml).join("");
-      $("live-potc").textContent = "底池 " + Number(data.pot || 0).toLocaleString();
-      $("live-result").textContent = data.result || "";
+      $("live-potc").textContent = "底池 " + potText;
+      $("live-result").textContent = resultInBb(data.result, Number(data.result_bb || 0) || bb);
 
       const seats = data.seats || [];
       const seatNum = Math.max(data.seat_num || 6, seats.length || 0) || 6;
@@ -189,17 +224,28 @@
         if (s.revealed) tags.push('<span class="pill">亮牌</span>');
         const posCls = { "BTN": "btn", "BTN/SB": "btn", "SB": "sb", "BB": "bb" }[s.pos] || "";
         const posHtml = s.pos ? `<span class="s-pos ${posCls}" title="${POS_TITLE[s.pos] || ""}">${escapeHtml(s.pos)}</span>` : "";
+        // Everyone's stack, ours included, in big blinds; the chip count stays in the tooltip.
+        const stackChips = Number(s.stack || 0).toLocaleString();
+        const stackHtml = bb > 0
+          ? `<div class="s-stack" title="${stackChips} 筹码">${bbText(s.stack, bb)}</div>`
+          : `<div class="s-stack">${stackChips}</div>`;
         node.innerHTML =
           `<div class="s-head">${posHtml}<div class="s-name">${escapeHtml(s.name || ("玩家" + i))}${s.is_me ? " ·我" : ""}</div></div>` +
-          `<div class="s-stack">${Number(s.stack || 0).toLocaleString()}</div>` +
+          stackHtml +
           (tags.length ? `<div class="s-tags">${tags.join("")}</div>` : "") +
           `<div class="s-cards">${cardsHtmlStr}</div>` +
-          `<div class="s-last">${escapeHtml(s.last || "")}</div>` +
-          (s.bet > 0 ? `<div class="s-bet">${Number(s.bet).toLocaleString()}</div>` : "");
+          `<div class="s-last">${escapeHtml(actionInBb(s.last, bb))}</div>` +
+          (s.bet > 0 ? (bb > 0 ? `<div class="s-bet" title="${chipsTitle(s.bet)}">${betText(s.bet, bb)}</div>`
+                               : `<div class="s-bet">${Number(s.bet).toLocaleString()}</div>`) : "");
       }
       felt.querySelectorAll('.live-seat[data-keep="0"]').forEach((n) => n.remove());
 
-      const feed = data.feed || [];
+      // Each line is read at the blind it was played at when the bot sends it (feed_bb), else this table's.
+      const feedBb = Array.isArray(data.feed_bb) ? data.feed_bb : [];
+      const feed = (data.feed || []).map((t, i) => {
+        const lineBb = Number(feedBb[i] || 0) || bb;
+        return t.startsWith("▸") ? resultInBb(t, lineBb) : actionInBb(t, lineBb);
+      });
       $("live-feed").innerHTML = feed.length
         ? feed.slice().reverse().map((t) => `<li class="${t.startsWith("▸") ? "win" : ""}">${escapeHtml(t)}</li>`).join("")
         : '<li class="muted">暂无</li>';

@@ -6,6 +6,8 @@ parameter searches cannot silently reintroduce passive leaks.
 
 from __future__ import annotations
 
+import pytest
+
 from pokerfate.core.card import Card
 from pokerfate.strategy.v3 import (
     BlockerSet, BoardSignals, DecisionCtx, DrawProfile, V3Engine, VillainStats,
@@ -121,7 +123,7 @@ def test_semi_bluff_is_not_stolen_by_default_check() -> None:
     out = V3Engine().decide(ctx)
 
     assert out.action == 'bet'
-    assert out.purpose in ('semi_bluff', 'small_pressure_bet')
+    assert out.purpose == 'semi_bluff'
     assert candidate_prob(out, 'default_check') <= 0.05
 
 
@@ -256,7 +258,15 @@ def test_sticky_heads_up_strong_value_gets_larger_sizing_candidates() -> None:
 
 
 def test_obvious_plus_ev_call_cannot_collapse_to_fold() -> None:
+    # Top pair with a queen kicker facing a third-pot bet. The strength bucket comes from the live
+    # classifier: this fixture used to say 'medium' by hand, which is not how the engine grades the
+    # hand, and with that label the vote folds it (fold 0.82 vs call 0.18). Only the EV promotion
+    # (deleted 2026-11-18) made the old fixture pass. Live, top pair with a good kicker facing a bet
+    # was graded 'strong' 65 times out of 65 and the vote called or raised 54 of them.
+    from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards
     board = cards('As', 'Kd', '2c')
+    hero_bucket = categorize_cards(cards('Ah', 'Qs'), board)
+    assert hero_bucket == 'strong'
     ctx = DecisionCtx(
         street='flop',
         hole_cards=cards('Ah', 'Qs'),
@@ -271,7 +281,7 @@ def test_obvious_plus_ev_call_cannot_collapse_to_fold() -> None:
         spr=5.0,
         pot_odds=35.0 / 135.0,
         facing_bet=True,
-        hero_bucket='medium',
+        hero_bucket=hero_bucket,
         equity_mc=0.55,
         equity_range=0.42,
         equity_uncertainty=0.03,
@@ -348,8 +358,15 @@ def test_fold_override_rescues_marginal_tracker_compressed_equity() -> None:
     # the 53% MC figure.
     assert out.action == 'fold'
 
+# The four "vote fold stands" tests below were "fold override rescues ..." until
+# 2026-11-18: the EV layer used to turn these folds into calls (ev_promote).
+# That direction was deleted - over 15,187 live hands the promoted calls lost
+# against folding, and the committed low-SPR rescues these fixtures describe
+# were the worst of them (12 calls, -267bb). The spots stay as fixtures of what
+# the vote itself does. See docs/candidates/local_engine_audit_2026-11-17.
 
-def test_fold_override_rescues_low_spr_commit_spot_when_cheap_edge_is_clear() -> None:
+
+def test_vote_fold_stands_in_low_spr_commit_spot() -> None:
     board = cards('6d', 'Ad', '8s')
     ctx = DecisionCtx(
         street='flop',
@@ -380,12 +397,12 @@ def test_fold_override_rescues_low_spr_commit_spot_when_cheap_edge_is_clear() ->
 
     out = V3Engine().decide(ctx)
 
-    assert out.action == 'call'
-    assert out.purpose in ('fold_override_call', 'ev_promote_call')
-    assert 'call' in out.reason
+    assert out.action == 'fold'
+    assert out.purpose == 'fold'
+    assert 'ev_promote' not in out.arbitration_mode
 
 
-def test_fold_override_rescues_committed_low_spr_when_range_edge_is_clear() -> None:
+def test_vote_fold_stands_when_committed_at_low_spr() -> None:
     board = cards('Js', 'Jd', '4h')
     ctx = DecisionCtx(
         street='flop',
@@ -415,13 +432,12 @@ def test_fold_override_rescues_committed_low_spr_when_range_edge_is_clear() -> N
 
     out = V3Engine().decide(ctx)
 
-    assert out.action == 'call'
-    assert out.purpose in ('fold_override_call', 'ev_promote_call')
-    assert out.action == 'call'
-    assert 'call' in out.reason
+    assert out.action == 'fold'
+    assert out.purpose == 'fold'
+    assert 'ev_promote' not in out.arbitration_mode
 
 
-def test_fold_override_rescues_cheap_committed_low_spr_call() -> None:
+def test_vote_fold_stands_for_cheap_committed_low_spr_call() -> None:
     board = cards('Ad', 'Kh', '7s')
     ctx = DecisionCtx(
         street='flop',
@@ -452,12 +468,12 @@ def test_fold_override_rescues_cheap_committed_low_spr_call() -> None:
 
     out = V3Engine().decide(ctx)
 
-    assert out.action == 'call'
-    assert out.purpose in ('fold_override_call', 'ev_promote_call')
-    assert 'call' in out.reason
+    assert out.action == 'fold'
+    assert out.purpose == 'fold'
+    assert 'ev_promote' not in out.arbitration_mode
 
 
-def test_fold_override_rescues_cheap_low_spr_river_call_with_range_edge() -> None:
+def test_vote_fold_stands_for_cheap_low_spr_river_call() -> None:
     board = cards('2c', 'Qh', '9c', '5c', '4s')
     ctx = DecisionCtx(
         street='river',
@@ -489,9 +505,9 @@ def test_fold_override_rescues_cheap_low_spr_river_call_with_range_edge() -> Non
 
     out = V3Engine().decide(ctx)
 
-    assert out.action == 'call'
-    assert out.purpose in ('fold_override_call', 'ev_promote_call')
-    assert 'call' in out.reason
+    assert out.action == 'fold'
+    assert out.purpose == 'fold'
+    assert 'ev_promote' not in out.arbitration_mode
 
 
 def test_fold_override_does_not_rescue_fold_dominant_call_candidate() -> None:
@@ -559,5 +575,5 @@ def test_hu_pfr_default_stab_survives_when_range_cbet_is_soft_penalized() -> Non
 
     out = V3Engine().decide(ctx)
 
-    assert any(p in dict(out.candidates) for p in ('default_stab', 'small_pressure_bet', 'range_cbet'))
+    assert any(p in dict(out.candidates) for p in ('default_stab', 'range_cbet'))
     assert candidate_prob(out, 'default_stab') >= candidate_prob(out, 'default_check') * 5

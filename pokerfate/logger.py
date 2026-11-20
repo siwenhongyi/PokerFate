@@ -977,8 +977,3 @@ def _archive_runtime_log(filepath: str | pathlib.Path) -> None:
             if not data.endswith("\n"):
                 dst.write("\n")
     p.write_text("", encoding="utf-8")
-
-
-def _rotate_log(filepath: str) -> None:
-    """Backward-compatible alias for the daily archive runtime-log rotation."""
-    _archive_runtime_log(filepath)

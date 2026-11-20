@@ -2,7 +2,7 @@
 
 import json
 
-from pokerfate.core.robots import HUMAN, ROBOT, SUSPECT, UNKNOWN, RobotRegistry, RoomRobotTracker, load_robot_uids
+from pokerfate.core.robots import HUMAN, ROBOT, SUSPECT, UNKNOWN, RobotRegistry, RoomRobotTracker
 
 ME = "10262053"
 
@@ -102,7 +102,7 @@ def test_blocks_make_unproven_neighbours_suspect(tmp_path):
     assert reg.status(1201) == UNKNOWN
 
 
-def test_registry_round_trip_and_offline_loader(tmp_path):
+def test_registry_round_trip(tmp_path):
     path = tmp_path / "robots.json"
     reg = RobotRegistry(path, autosave=False)
     for uid in (500, 505, 510, 515, 520):
@@ -113,7 +113,6 @@ def test_registry_round_trip_and_offline_loader(tmp_path):
     assert data["counts"] == {"robot": 5, "human": 1, "conflict": 0}
     again = RobotRegistry(path, autosave=False)
     assert again.robots() == {"500", "505", "510", "515", "520"} and again.humans() == {"42"}
-    assert load_robot_uids(path, include_suspect_of=[507, 42, 900]) == {"500", "505", "510", "515", "520", "507"}
 
 
 def test_composition_prefers_the_server_count(tmp_path):
@@ -137,3 +136,12 @@ def test_training_rows_about_robots_are_dropped(tmp_path):
             {"player_uid": "42", "x": 3}, {"player_uid": "", "x": 4}, {"x": 5}]  # human / no uid: kept
     kept, dropped = drop_robot_rows(rows, reg)
     assert dropped == 2 and [r["x"] for r in kept] == [3, 4, 5]
+
+
+def test_learning_uses_the_table_rule():
+    from pf_intercept.table_policy import verdict
+    from pokerfate.core.robots import table_verdict
+
+    assert verdict is table_verdict
+    assert [table_verdict(h, r) for h, r in ((0, 0), (0, 2), (1, 2), (2, 2), (3, 1), (2, 0))] == [
+        "empty", "no_humans", "outnumbered", "stay", "stay", "stay"]

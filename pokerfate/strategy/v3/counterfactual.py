@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from pokerfate.strategy.v3 import bluff_context
 from pokerfate.strategy.v3.context import DecisionCtx, VillainStats
 from pokerfate.strategy.v3.exploit import no_fold_equity
 
@@ -42,7 +41,6 @@ _STAB_LIKE_PURPOSES = {
     "float_bet",
     "turn_donk",
     "profit_delayed_probe",
-    "small_pressure_bet",
     "semi_bluff",
 }
 
@@ -243,8 +241,6 @@ def _stat_fold_prior(ctx: DecisionCtx, action_kind: str, frac: float, purpose: s
         base *= 1.08
     if ctx.board_sig.is_wet:
         base *= 0.82
-    if purpose == "small_pressure_bet":
-        base *= 0.90
     try:
         if no_fold_equity(ctx):
             cap = 0.16 if ctx.hero_bucket in {"air", "weak", "weak_draw"} else 0.24
@@ -374,10 +370,3 @@ def reaction_estimate(
         key=context_key(ctx, frac, action_kind),
         sample_count=sample_count,
     )
-
-
-def bluff_score(ctx: DecisionCtx) -> float:
-    try:
-        return float(bluff_context.evaluate(ctx).score)
-    except Exception:
-        return 0.35

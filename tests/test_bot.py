@@ -663,3 +663,171 @@ class TestPlayerProfileProjection:
         assert prof.river_action_count == 35
         assert prof.river_facing_bet_opps == 3
         assert prof.river_fold_rate == pytest.approx(1 / 3)
+
+
+class TestPreflopShowdownPrice:
+    """A call that leaves nothing to bet against the players in for the raise is priced
+    (PokerBot._preflop_showdown_price); everything else is left to the charts."""
+
+    BB = 10_000.0
+
+    @staticmethod
+    def _range(*classes):
+        import numpy as np
+        from pokerfate.strategy.range_v2 import hand_combo_map as hcm
+
+        weights = np.zeros(len(hcm.ALL_COMBOS))
+        for cls in classes:
+            weights[hcm.CATEGORY_TO_INDICES[cls]] = 1.0
+        return weights
+
+    def _bot(self, ranges):
+        import numpy as np
+        from pokerfate.strategy.range_v2 import hand_combo_map as hcm
+
+        bot = PokerBot(equity_iterations=200)
+        uniform = np.ones(len(hcm.ALL_COMBOS))
+        bot._range_tracker.get_distribution = lambda pid: ranges.get(pid, uniform)
+        bot.set_next_decision_seed(7)
+        return bot
+
+    def _state(self, players, history, pot, level):
+        return GameState(
+            players=players, dealer_pos=len(players) - 1, street=Street.PREFLOP, pot=pot,
+            current_bet=level, big_blind=self.BB, small_blind=self.BB / 2, current_player_idx=0,
+            action_history=history,
+        )
+
+    def test_committed_stack_is_priced_and_called(self):
+        # Hand 830 of 2026-11-16: 99, 22.5bb in, 11.7bb behind, a limper re-raises to 56bb.
+        hero = Player(0, 'Hero', 117_450.0, cards('9h', '9c'), current_bet=225_000.0)
+        limper = Player(1, 'limper', 1_417_500.0, [], current_bet=562_500.0)
+        opener = Player(2, 'opener', 1_925_000.0, [], current_bet=75_000.0, is_folded=True)
+        gs = self._state(
+            [hero, limper, opener],
+            [
+                (1, Action(ActionType.CALL, 10_000.0), 'preflop'),
+                (2, Action(ActionType.RAISE, 75_000.0), 'preflop'),
+                (0, Action(ActionType.RAISE, 225_000.0), 'preflop'),
+                (1, Action(ActionType.RAISE, 562_500.0), 'preflop'),
+            ],
+            pot=877_500.0, level=562_500.0,
+        )
+        bot = self._bot({1: self._range('AA', 'KK', 'QQ', 'JJ', 'TT', 'AKs', 'AKo', 'AQs')})
+        _raw, to_call, pot, _odds = bot._effective_call_context(gs, hero)
+
+        price = bot._preflop_showdown_price(gs, hero, to_call, pot)
+
+        assert (to_call, pot) == (117_450.0, 657_450.0)       # 22bb of the re-raise cannot be won
+        assert price.pending == 0 and price.call == 117_450.0
+        assert price.need == pytest.approx(117_450.0 / (RAKE_KEEP * 774_900.0))
+        assert 0.30 < price.equity < 0.42                     # against a tight re-raising range
+        assert price.ev > 0
+        action = bot.decide(gs, 0)
+        assert (action.action_type, action.amount) == (ActionType.CALL, pytest.approx(117_450.0))
+        assert bot.preflop.last_expand_reason.startswith('showdown_price:call call=11.7bb')
+
+    def test_betting_that_goes_on_is_not_priced(self):
+        hero = Player(0, 'Hero', 930_000.0, cards('Ts', 'Tc'), current_bet=60_000.0)
+        three_bettor = Player(1, 'villain', 800_000.0, [], current_bet=200_000.0)
+        gs = self._state(
+            [hero, three_bettor],
+            [(0, Action(ActionType.RAISE, 60_000.0), 'preflop'), (1, Action(ActionType.RAISE, 200_000.0), 'preflop')],
+            pot=260_000.0, level=200_000.0,
+        )
+        bot = self._bot({})
+
+        assert bot._preflop_showdown_price(gs, hero, 140_000.0, 260_000.0) is None
+
+    def test_all_in_raiser_with_players_still_to_act(self):
+        # Hand 802 of 2026-11-16: JTs raises a limper to 6bb, both blinds call, the limper shoves 58.7bb.
+        hero = Player(0, 'Hero', 925_000.0, cards('Jd', 'Td'), current_bet=60_000.0)
+        shover = Player(1, 'shover', 0.0, [], current_bet=587_150.0, is_all_in=True)
+        small = Player(2, 'sb', 205_149.0, [], current_bet=60_000.0)
+        big = Player(3, 'bb', 1_569_583.0, [], current_bet=60_000.0)
+        gs = self._state(
+            [hero, shover, small, big],
+            [
+                (1, Action(ActionType.CALL, 10_000.0), 'preflop'),
+                (0, Action(ActionType.RAISE, 60_000.0), 'preflop'),
+                (2, Action(ActionType.CALL, 55_000.0), 'preflop'),
+                (3, Action(ActionType.CALL, 50_000.0), 'preflop'),
+                (1, Action(ActionType.RAISE, 587_150.0), 'preflop'),
+            ],
+            pot=767_150.0, level=587_150.0,
+        )
+        tight = self._range('AA', 'KK', 'QQ', 'JJ', 'AKs', 'AKo')
+        bot = self._bot({1: tight})
+
+        price = bot._preflop_showdown_price(gs, hero, 527_150.0, 767_150.0)
+
+        assert price.pending == 2
+        assert 0.23 < price.equity < 0.32          # against the shover alone (JTs v JJ+, AK: 27%)
+        assert price.need == pytest.approx(527_150.0 / (RAKE_KEEP * 1_294_300.0))
+        assert price.ev < 0
+        assert bot.decide(gs, 0).action_type == ActionType.FOLD
+        assert bot.preflop.last_expand_reason.startswith('showdown_price:fold call=52.7bb')
+        assert bot.last_equity < price.equity - 0.05   # the equity against everybody still in is not the price
+
+    def _five_bet_spot(self, earlier_raisers: bool):
+        """Hand 216 of 2026-11-16: 66 in the BB with 24.6bb; open, 3-bet, 4-bet, then the SB makes
+        it 120bb.  The call is all-in.  ``earlier_raisers``: the three players between them are the
+        opener, 3-bettor and 4-bettor (as it happened), or have only limped in for the same chips."""
+        hero = Player(0, 'Hero', 236_384.0, cards('6s', '6d'), current_bet=10_000.0)
+        opener = Player(1, 'utg', 1_463_917.0, [], current_bet=30_000.0)
+        three = Player(2, 'mp', 873_300.0, [], current_bet=155_000.0)
+        four = Player(3, 'btn', 1_057_050.0, [], current_bet=300_000.0)
+        five = Player(4, 'sb', 421_100.0, [], current_bet=1_200_000.0)
+        kind = ActionType.RAISE if earlier_raisers else ActionType.CALL
+        gs = self._state(
+            [hero, opener, three, four, five],
+            [
+                (1, Action(kind, 30_000.0), 'preflop'),
+                (2, Action(kind, 155_000.0), 'preflop'),
+                (3, Action(kind, 300_000.0), 'preflop'),
+                (4, Action(ActionType.RAISE, 1_200_000.0), 'preflop'),
+            ],
+            pot=1_695_000.0, level=1_200_000.0,
+        )
+        strong = self._range('AA', 'KK', 'QQ', 'JJ', 'TT', '99', 'AKs', 'AKo', 'AQs', 'AQo', 'AJs', 'KQs')
+        loose = self._range('AKs', 'AKo', 'AQs', 'AQo', 'AJs', 'AJo', 'KQs', 'KQo', 'QQ', 'JJ', 'KK', 'AA')
+        bot = self._bot({1: strong, 2: strong, 3: strong, 4: loose})
+        _raw, to_call, pot, _odds = bot._effective_call_context(gs, hero)
+        return bot, gs, hero, to_call, pot
+
+    def test_raisers_still_to_act_mostly_come_along(self):
+        bot, gs, hero, to_call, pot = self._five_bet_spot(earlier_raisers=True)
+
+        price = bot._preflop_showdown_price(gs, hero, to_call, pot)
+
+        assert (to_call, price.pending) == (236_384.0, 3)
+        assert pot == pytest.approx(246_384.0 * 2 + 155_000.0 + 30_000.0 + 10_000.0)   # what 24.6bb can win
+        # Against the 5-bettor alone the price is fine ...
+        assert price.equity > price.need + 0.08
+        # ... but each of the three raisers behind comes along 69% of the time, with a real hand.
+        assert price.ev < 0
+        assert bot.decide(gs, 0).action_type == ActionType.FOLD
+        assert bot.preflop.last_expand_reason.startswith('showdown_price:fold call=23.6bb')
+
+    def test_players_who_only_called_come_along_less_often(self):
+        raisers, gs, hero, to_call, pot = self._five_bet_spot(earlier_raisers=True)
+        callers, gs2, hero2, _, _ = self._five_bet_spot(earlier_raisers=False)
+
+        behind_raisers = raisers._preflop_showdown_price(gs, hero, to_call, pot)
+        behind_callers = callers._preflop_showdown_price(gs2, hero2, to_call, pot)
+
+        assert [PokerBot._preflop_earlier_action(gs, pid) for pid in (1, 2, 3, 0)] == ['raised'] * 3 + ['none']
+        assert [PokerBot._preflop_earlier_action(gs2, pid) for pid in (1, 2, 3)] == ['called'] * 3
+        assert behind_callers.equity == behind_raisers.equity          # same players in for the raise
+        assert behind_callers.ev > behind_raisers.ev + 1.0 * self.BB
+
+    def test_a_player_who_comes_along_holds_the_top_of_his_range(self):
+        import numpy as np
+        from pokerfate.bot.poker_bot import _strongest_share
+        from pokerfate.strategy.range_v2 import hand_combo_map as hcm
+
+        kept = _strongest_share(np.ones(len(hcm.ALL_COMBOS)), 0.30)
+        strength = np.asarray(hcm.STRENGTH_PCT)
+
+        assert kept.sum() / len(hcm.ALL_COMBOS) == pytest.approx(0.30, abs=0.01)
+        assert strength[kept > 0].min() >= strength[kept == 0].max()

@@ -1,11 +1,8 @@
-"""Tests for Range V2: sequence-pattern detection + is_raise_over wiring.
+"""Tests for Range V2: priors, board handling, is_raise_over wiring, floor mixing, calibration hooks.
 
-Target bugs from the equity-branch review (see docs/reviews/2026-04-20-equity-branch/):
+Target bug from the equity-branch review (see docs/reviews/2026-04-20-equity-branch/):
   P0 #1: is_raise_over judged True on first raise because count-of-raises
          was done AFTER appending current action (api.py ordering bug).
-  P0 #3: post-correction floor was missing, so capped_range nuts=0.10
-         pushed combos below 1e-4/n and they never recovered.
-  Structural gap: no unit test for _detect_sequence_pattern at all.
 """
 
 import itertools
@@ -22,11 +19,8 @@ from pokerfate.strategy.range_v2.action_model import (
 )
 from pokerfate.strategy.range_v2.range_equity_calculator import RangeEquityCalculator
 from pokerfate.strategy.range_v2.bayesian_range_tracker import (
-    GTO_VPIP,
+
     BayesianRangeTracker,
-    _ACT_BET, _ACT_CALL, _ACT_CHECK, _ACT_RAISE_OVER,
-    _SEQUENCE_CORRECTIONS,
-    _detect_sequence_pattern,
 )
 from pokerfate.strategy.range_v2.hand_combo_map import (
     CATEGORY_TO_INDICES,
@@ -38,7 +32,7 @@ from pokerfate.strategy.range_v2.hand_combo_map import (
 @pytest.fixture(autouse=True)
 def _bucket_ml_off(monkeypatch):
     """These tests pin down the formula tracker layers (prior, likelihood,
-    sequence corrections, runtime bucket params). The LightGBM bucket layer is
+    runtime bucket params). The LightGBM bucket layer is
     on by default since 2026-11-11 and has its own tests, so it is switched off
     here to keep the expected numbers independent of the model file."""
     from pokerfate.strategy.range_v2 import bucket_ml_calibration as bml
@@ -46,129 +40,9 @@ def _bucket_ml_off(monkeypatch):
     bml._CACHE.clear()
 
 
-def _h(*pairs):
-    """Build action history: _h(('flop', 'bet'), ('turn', 'check'))."""
-    return list(pairs)
-
-
-class TestSequencePatternDetection:
-    """All seven patterns are triggered correctly, preflop-only input ignored."""
-
-    def test_preflop_only_history_returns_none(self):
-        # Pattern corrections are calibrated on postflop category semantics;
-        # running them on preflop buckets (pocket pairs etc.) is meaningless.
-        assert _detect_sequence_pattern(_h(('preflop', _ACT_RAISE_OVER))) is None
-        assert _detect_sequence_pattern(_h(
-            ('preflop', _ACT_BET),
-            ('preflop', _ACT_RAISE_OVER),
-        )) is None
-
-    def test_empty_history_returns_none(self):
-        assert _detect_sequence_pattern([]) is None
-
-    def test_xr_trap_requires_two_prior_check_streets(self):
-        history = _h(
-            ('flop', _ACT_CHECK),
-            ('turn', _ACT_CHECK),
-            ('river', _ACT_RAISE_OVER),
-        )
-        assert _detect_sequence_pattern(history) == 'xr_trap'
-
-    def test_check_raise_same_street(self):
-        history = _h(
-            ('river', _ACT_CHECK),
-            ('river', _ACT_RAISE_OVER),
-        )
-        assert _detect_sequence_pattern(history) == 'check_raise'
-
-    def test_reraise_same_street(self):
-        history = _h(
-            ('flop', _ACT_BET),
-            ('flop', _ACT_RAISE_OVER),
-        )
-        assert _detect_sequence_pattern(history) == 'reraise'
-
-    def test_triple_barrel_requires_river_bet(self):
-        ok = _h(
-            ('flop', _ACT_BET),
-            ('turn', _ACT_BET),
-            ('river', _ACT_BET),
-        )
-        assert _detect_sequence_pattern(ok) == 'triple_barrel'
-        # Turn-ending bet/bet/bet stream: NOT triple_barrel yet (not at river).
-        early = _h(
-            ('flop', _ACT_BET),
-            ('turn', _ACT_BET),
-        )
-        # No river bet yet → no triple_barrel (we don't match 2 bets).
-        assert _detect_sequence_pattern(early) != 'triple_barrel'
-
-    def test_bet_bet_give_up(self):
-        history = _h(
-            ('flop', _ACT_BET),
-            ('turn', _ACT_BET),
-            ('river', _ACT_CHECK),
-        )
-        assert _detect_sequence_pattern(history) == 'bet_bet_give_up'
-
-    def test_aggression_drop(self):
-        history = _h(
-            ('flop', _ACT_BET),
-            ('turn', _ACT_CHECK),
-        )
-        assert _detect_sequence_pattern(history) == 'aggression_drop'
-
-    def test_capped_range_partial_vs_full(self):
-        """Two streets of calls → partial cap; three → full cap.
-
-        Review fix: original diff used the SAME nuts=0.10 factor for both
-        2-street and 3-street cases. 2-street is insufficient evidence to
-        rule out slow-play; split into partial (nuts=0.30) / full (0.10).
-        """
-        partial = _h(
-            ('flop', _ACT_CALL),
-            ('turn', _ACT_CALL),
-        )
-        assert _detect_sequence_pattern(partial) == 'capped_range_partial'
-        full = _h(
-            ('flop', _ACT_CALL),
-            ('turn', _ACT_CALL),
-            ('river', _ACT_CALL),
-        )
-        assert _detect_sequence_pattern(full) == 'capped_range_full'
-
-    def test_capped_range_broken_by_any_raise(self):
-        """If the player ever bet/raise-over on a postflop street, no cap."""
-        history = _h(
-            ('flop', _ACT_CALL),
-            ('turn', _ACT_BET),
-            ('river', _ACT_CALL),
-        )
-        assert _detect_sequence_pattern(history) is None
-
-
-class TestSequenceCorrectionShape:
-    """Shape / structural invariants on the correction tables."""
-
-    def test_partial_and_full_caps_differ_on_nuts(self):
-        """Partial cap must keep more nuts mass than full cap (review fix)."""
-        p = _SEQUENCE_CORRECTIONS['capped_range_partial']['nuts']
-        f = _SEQUENCE_CORRECTIONS['capped_range_full']['nuts']
-        assert p > f, f"partial cap nuts ({p}) should exceed full cap ({f})"
-
-    def test_triple_barrel_has_no_draw_keys(self):
-        """Draw / weak_draw in triple_barrel are dead code (river maps them
-        to 'air' before correction). Keeping the keys misleads readers."""
-        tb = _SEQUENCE_CORRECTIONS['triple_barrel']
-        assert 'draw' not in tb
-        assert 'weak_draw' not in tb
-
-
 class TestResetHandPositionPrior:
-    """`reset_hand` uses GTO position priors for small samples, observed
-    stats once hands_seen >= 20. Review 05_tests_infra §1.2 flagged no
-    coverage of this switchover.
-    """
+    """`reset_hand` starts every hand uniform: what a player holds is told by what he then
+    does (the fitted preflop likelihood), not assumed from his position or statistics."""
 
     def _make_tracker(self):
         return BayesianRangeTracker(ActionModel())
@@ -176,56 +50,13 @@ class TestResetHandPositionPrior:
     def _profile(self, hands_seen, vpip, pfr):
         return PlayerProfile(hands_seen=hands_seen, vpip=vpip, pfr=pfr)
 
-    def test_bb_uses_gto_wide_prior_when_sample_small(self):
-        """BB with hands_seen<20 → GTO VPIP 0.40 (wide), not default 0.27.
-
-        This test guards against the regression where an empty-string
-        position leaked into dict.get() and fell through to the 0.27
-        default (the root cause of the position-chain P0 bug in api.py).
-        """
-        tracker_bb = self._make_tracker()
-        tracker_co = self._make_tracker()
-        prof = self._profile(hands_seen=5, vpip=0.0, pfr=0.0)
-        tracker_bb.reset_hand(1, 'BB', prof)
-        tracker_co.reset_hand(1, 'CO', prof)
-        # BB's GTO VPIP (0.40) is much wider than CO's (0.27) → BB's
-        # "call_floor" threshold is lower, so more combos get the 0.6
-        # weight tier. Concretely: fraction of combos with weight >= 0.6
-        # should be strictly higher for BB than for CO.
-        w_bb = tracker_bb.get_distribution(1)
-        w_co = tracker_co.get_distribution(1)
-        # Normalised distributions aren't directly comparable on magnitude,
-        # but the count of combos above the observed "medium-tier" weight
-        # should scale with VPIP width.
-        #
-        # Note: all three tiers (1.0, 0.6, 0.03) get normalised by their
-        # total. Since BB has MORE 0.6/1.0 combos, the normalised weights
-        # of the strongest hands are LOWER (same numerator over larger
-        # denominator). So compare wide-range fraction directly.
-        assert GTO_VPIP['BB'] > GTO_VPIP['CO']   # sanity on source data
-        # combos that survive 'call_floor' — approximate via top-percentile count
-        threshold = w_co.max() * 0.05
-        wide_bb = int((w_bb > threshold).sum())
-        wide_co = int((w_co > threshold).sum())
-        assert wide_bb > wide_co, (
-            f"BB prior should be wider than CO: BB={wide_bb}, CO={wide_co}"
-        )
-
-    def test_observed_stats_override_gto_when_sample_large(self):
-        """hands_seen >= 20 → use prof.vpip/pfr instead of GTO table."""
-        tracker_nit = self._make_tracker()
-        tracker_maniac = self._make_tracker()
-        # Same position (UTG), very different observed tendencies
-        tracker_nit.reset_hand(1, 'UTG',
-                               self._profile(hands_seen=100, vpip=0.08, pfr=0.07))
-        tracker_maniac.reset_hand(1, 'UTG',
-                                  self._profile(hands_seen=100, vpip=0.55, pfr=0.45))
-        w_nit = tracker_nit.get_distribution(1)
-        w_maniac = tracker_maniac.get_distribution(1)
-        # Maniac UTG opens 45% → many more "raise-tier" (weight 1.0) combos.
-        top_nit = int((w_nit > 1.0 / 1326).sum())
-        top_maniac = int((w_maniac > 1.0 / 1326).sum())
-        assert top_maniac > top_nit
+    def test_every_hand_starts_equally_likely_whoever_the_player_is(self):
+        """A nit under the gun and a maniac in the big blind start from the same range."""
+        nit, maniac = self._make_tracker(), self._make_tracker()
+        nit.reset_hand(1, 'UTG', self._profile(hands_seen=100, vpip=0.08, pfr=0.07))
+        maniac.reset_hand(1, 'BB', self._profile(hands_seen=100, vpip=0.55, pfr=0.45))
+        w = nit.get_distribution(1)
+        assert np.allclose(w, 1.0 / 1326) and np.allclose(w, maniac.get_distribution(1))
 
     def test_empty_position_falls_back_to_co(self):
         """Empty / None position → CO (neutral) instead of dict.get default.
@@ -501,32 +332,12 @@ class TestPositionEndToEnd:
         api.deal_hole_cards(['As', 'Ad'])
         return api
 
-    def test_bb_prior_is_wider_than_co_via_end_to_end(self):
-        """When PlayerInfo says villain is BB, the tracker must use the
-        wide BB prior (vpip 0.40), not fall through to the 0.27 default
-        that the CO/MP positions have.
-        """
-        api_bb = self._setup('BB')
-        api_co = self._setup('CO')
-
-        # Emit an ambiguous action (check on flop) — the key is that the
-        # starting prior differs before any action. We inspect the tracker
-        # distribution directly after new_hand/reset_hand.
-        tracker_bb = api_bb._bot._range_tracker
-        tracker_co = api_co._bot._range_tracker
-
-        w_bb = tracker_bb.get_distribution(1)
-        w_co = tracker_co.get_distribution(1)
-
-        # BB's wider GTO VPIP (0.40) → more combos in the middle weight tier.
-        # Not directly equal-weight comparable, but "fraction of combos above
-        # some low threshold" scales with VPIP width.
-        threshold = w_co.max() * 0.05
-        wide_bb = int((w_bb > threshold).sum())
-        wide_co = int((w_co > threshold).sum())
-        assert wide_bb > wide_co, (
-            f"BB prior didn't propagate: BB={wide_bb} combos vs CO={wide_co}"
-        )
+    def test_a_new_hand_starts_uniform_for_every_seat(self):
+        """Whatever seat the opponent is in, he starts with every hand he can still hold."""
+        for seat in ('BB', 'CO'):
+            w = self._setup(seat)._bot._range_tracker.get_distribution(1)
+            live = w > 0
+            assert np.allclose(w[live], 1.0 / int(live.sum())) and int(live.sum()) >= 1225
 
     def test_opp_position_feeds_action_context(self):
         api = self._setup('SB')
@@ -733,66 +544,6 @@ class TestMultiwayEquity:
         )
 
 
-class TestPreflopOpenShoveNarrow:
-    """问题 2：preflop 大 open/shove 的 range 应窄化到顶端。"""
-
-    def _profile(self, **over) -> PlayerProfile:
-        base = dict(
-            name='test', hands_seen=30, vpip=0.30, pfr=0.20, af=2.0,
-            fold_to_cbet_opps=0,
-        )
-        base.update(over)
-        return PlayerProfile(**base)
-
-    def test_large_open_collapses_likelihood_for_weak_hands(self):
-        model = ActionModel()
-        prof = self._profile()
-        # bet_ratio = 15 (≈ open 22bb into 1.5bb blinds pot) 应触发窄化
-        ctx_big = ActionContext(
-            position='UTG', board=[], street='preflop',
-            facing_action='open', bet_ratio=15.0,
-        )
-        # 正常 open (bet_ratio=2) 不触发
-        ctx_small = ActionContext(
-            position='UTG', board=[], street='preflop',
-            facing_action='open', bet_ratio=2.0,
-        )
-        like_big = model.batch_likelihood('raise', 'preflop', ctx_big, prof, [])
-        like_small = model.batch_likelihood('raise', 'preflop', ctx_small, prof, [])
-
-        # 对顶 4% 牌（STRENGTH_PCT ≥ 0.96），两者 likelihood 都应较高。
-        # 对 STRENGTH_PCT ∈ [0.85, 0.96) 的中强牌，big open 应显著降低 likelihood。
-        mid_idx = np.where((STRENGTH_PCT >= 0.85) & (STRENGTH_PCT < 0.96))[0]
-        assert len(mid_idx) > 0
-        # big open 应比 normal open 对中强牌更 skeptical。
-        mean_big = like_big[mid_idx].mean()
-        mean_small = like_small[mid_idx].mean()
-        assert mean_big < mean_small * 0.6, (
-            f"big-open 对中强牌应窄化: big={mean_big:.3f} small={mean_small:.3f}"
-        )
-
-    def test_raise_over_does_not_trigger_preflop_narrow(self):
-        """3-bet/4-bet（is_raise_over=True）不走 open-shove 窄化——poker_bot
-        observe_action 已把 bet_ratio 置 0，但测试双保险：is_raise_over 为 True
-        时显式跳过。"""
-        model = ActionModel()
-        prof = self._profile()
-        ctx = ActionContext(
-            position='UTG', board=[], street='preflop',
-            facing_action='open', bet_ratio=15.0, is_raise_over=True,
-        )
-        # 对比：同参数但 is_raise_over=False
-        ctx_open = ActionContext(
-            position='UTG', board=[], street='preflop',
-            facing_action='open', bet_ratio=15.0, is_raise_over=False,
-        )
-        like_rr = model.batch_likelihood('raise', 'preflop', ctx, prof, [])
-        like_open = model.batch_likelihood('raise', 'preflop', ctx_open, prof, [])
-        # raise_over 路径不窄化：中强牌 likelihood 应明显更高
-        mid_idx = np.where((STRENGTH_PCT >= 0.85) & (STRENGTH_PCT < 0.96))[0]
-        assert like_rr[mid_idx].mean() > like_open[mid_idx].mean() * 2.0
-
-
 class TestVsHeroDist:
     """问题 8(a)：tracker.get_vs_hero_dist 在 river 返回 hero 视角 win/tie/loss。"""
 
@@ -842,221 +593,36 @@ class TestVsHeroDist:
         assert d['win'] >= 0.95, f"straight flush win 率应 >= 95%，实际 {d}"
 
 
-class TestCallFlattenByMetrics:
-    """call 动作的 nuts:air 压缩程度由 (wtsd, vpip-pfr gap) 两项指标驱动。
+class TestFloorMixing:
+    """However strongly the likelihood speaks against a bucket, floor mixing keeps it alive."""
 
-    触发条件：wtsd ≥ 0.30 AND (vpip - pfr) > 0.20，两项同时满足才 flatten。
-    未触发则保留 GTO baseline 的 nuts:air 比（≈17.5×）。
-
-    问题背景：call 的 GTO baseline nuts:air = 0.35/0.02 = 17.5×，这个比值对
-    高 wtsd 高 gap（用 air 跟注多）的对手严重偏离。不 flatten 的话每次 call
-    更新把 air 权重近乎清零，3 街累积后 range 只剩 strong+，hero 系统性低估
-    equity → 过度 fold。
-    """
-
-    def _board(self):
-        return [Card.from_str(c) for c in ['5h', '8d', 'Kc']]
-
-    def _get_call_nuts_air_ratio(self, wtsd: float, vpip: float, pfr: float, af: float = 2.0) -> float:
-        """给定指标，返回 call 动作下 mean(nuts_likelihood) / mean(air_likelihood)。
-
-        用 model 内部的 `_categorize_all` 而不是 `hcat.categorize_cards`——
-        前者会对 board-conflict combo 保留默认 'air' 分类，后者会把
-        5h5x（含板上的 5h）算成 trips=NUTS，两边不一致会污染桶均值。
-        """
-        prof = PlayerProfile(hands_seen=80, vpip=vpip, pfr=pfr, af=af, wtsd=wtsd)
-        model = ActionModel()
-        board = self._board()
-        ctx = ActionContext(
-            position='CO', board=board, street='flop',
-            facing_action='bet',
-        )
-        like = model.batch_likelihood('call', 'flop', ctx, prof, board)
-        cats_internal = model._categorize_all(board)
-        nuts_idx = [i for i in range(1326) if cats_internal[i] == 'nuts']
-        air_idx = [i for i in range(1326) if cats_internal[i] == 'air']
-        nuts_mean = float(like[nuts_idx].mean()) if nuts_idx else 0.0
-        air_mean = float(like[air_idx].mean()) if air_idx else 1e-9
-        return nuts_mean / max(air_mean, 1e-9)
-
-    def test_high_wtsd_high_gap_flattens_ratio(self):
-        """wtsd=0.45, gap=0.48（双门限都触发）→ ratio 从 17.5× 压到 < 6。"""
-        ratio = self._get_call_nuts_air_ratio(wtsd=0.45, vpip=0.60, pfr=0.12, af=0.8)
-        assert ratio < 6.0, f"双门限触发时 ratio 应 < 6，实际 {ratio:.2f}"
-
-    def test_high_wtsd_low_gap_does_not_flatten(self):
-        """wtsd=0.32 触发单边，但 gap=0.05 不够 → gate 不过，保留 baseline。
-
-        典型对应"aggressive 高 VPIP"类画像（wtsd 高但 PFR 跟上了，不用 air 跟）。
-        """
-        ratio = self._get_call_nuts_air_ratio(wtsd=0.32, vpip=0.30, pfr=0.25, af=3.0)
-        assert ratio > 8.0, f"gap 未达门槛时应保留紧 ratio，实际 {ratio:.2f}"
-
-    def test_low_wtsd_does_not_flatten(self):
-        """wtsd=0.20 < 0.30 门槛 → gate 不过。对应紧手画像。"""
-        ratio = self._get_call_nuts_air_ratio(wtsd=0.20, vpip=0.14, pfr=0.12, af=2.5)
-        assert ratio > 8.0, f"wtsd 未达门槛时应保留紧 ratio，实际 {ratio:.2f}"
-
-    def test_mid_wtsd_low_gap_does_not_flatten(self):
-        """wtsd=0.26, gap=0.05（两项都不过门槛）→ baseline 行为。"""
-        ratio = self._get_call_nuts_air_ratio(wtsd=0.26, vpip=0.25, pfr=0.20, af=2.0)
-        assert ratio > 8.0, f"两项都未达门槛时应保留紧 ratio，实际 {ratio:.2f}"
-
-    def test_high_wtsd_high_gap_prevents_air_runaway_over_streets(self):
-        """多街累积效应：wtsd=0.45 + gap=0.48 连续 3 次 call 更新后，
-        nuts/air 权重比应保持 < 5（修前 ≈30×，air 被抹除）。
-
-        这是 log 里观察到的"3 街 passive 对手行动后 range 收窄 20pp"的
-        根因——修前 air 权重 0.11%（归零），修后 1.04%（合理保留）；
-        比值从 30× 降到 ~1.5×，但用 < 5 做断言留容差。
-        """
-        prof = PlayerProfile(hands_seen=80, vpip=0.60, pfr=0.12, af=0.8, wtsd=0.45)
+    def test_three_bets_that_are_almost_never_air_still_leave_air_in_the_range(self, tmp_path, monkeypatch):
+        import json
+        fit = tmp_path / "fit.json"
+        fit.write_text(json.dumps({"likelihood_model": {"features": [], "actions": {"bet": {
+            "base": {"flop": {"nuts": 0.0, "strong": 0.0, "medium": 0.0, "draw": 0.0, "weak_draw": 0.0, "air": -5.0}},
+            "weights": {}}}}}), encoding="utf-8")
+        monkeypatch.setenv("PF_FORMULA_FIT_PATH", str(fit))
+        prof = PlayerProfile(name='villain', hands_seen=50, vpip=0.40, pfr=0.15, af=1.2, wtsd=0.35)
         model = ActionModel()
         tracker = BayesianRangeTracker(action_model=model)
-        pid = 1
-        tracker.reset_hand(player_id=pid, position='CO', profile=prof)
-        board = self._board()
-        ctx = ActionContext(
-            position='CO', board=board, street='flop',
-            facing_action='bet',
-        )
-        for _ in range(3):
-            tracker.observe_action(pid, 'call', 'flop', ctx, prof, board=board)
-
-        w = tracker._weights[pid]
-        cats_internal = model._categorize_all(board)
-        nuts_total = sum(float(w[i]) for i in range(1326) if cats_internal[i] == 'nuts')
-        air_total = sum(float(w[i]) for i in range(1326) if cats_internal[i] == 'air')
-        ratio = nuts_total / max(air_total, 1e-9)
-        assert ratio < 5.0, (
-            f"3 次 call 后 nuts/air 权重比应 < 5（修前~30×），实际 {ratio:.2f}"
-        )
-
-
-class TestAntiConcentrationRegularization:
-    """2026-04-23：验证 α-tempering 下限降低 + posterior floor mixing + unknown
-    damping 三项协同抵抗连续 polar barrel 的累积过度窄化。
-
-    文献依据：Grünwald 2012 SafeBayes、Franzolini 2023 Entropy Regularization、
-    BlackRain79 unknown opponent baseline。
-    """
-
-    def _board(self):
-        return [Card.from_str(c) for c in ['5h', '8d', 'Kc']]
-
-    def test_floor_mixing_preserves_air_across_streets(self):
-        """连续 3 次 pot-size 下注更新后，air 权重不应塌缩到 <1%。
-
-        floor mixing λ=0.08 + α 下限 0.10 组合后，即使极端似然比（50×）也被
-        抵抗住——3 街累积不再清零 air。
-        """
-        prof = PlayerProfile(
-            name='villain', hands_seen=50,
-            vpip=0.40, pfr=0.15, af=1.2, wtsd=0.35,
-        )
-        model = ActionModel()
-        tracker = BayesianRangeTracker(action_model=model)
-        pid = 1
-        tracker.reset_hand(player_id=pid, position='CO', profile=prof)
-        board = self._board()
-        # 模拟 villain 连续 3 次 pot-size raise（极强似然信号）
-        ctx = ActionContext(
-            position='CO', board=board, street='flop', facing_action='bet',
-            bet_ratio=1.0,  # pot-size bet ("large" bucket)
-        )
-        for _ in range(3):
-            tracker.observe_action(pid, 'raise', 'flop', ctx, prof, board=board)
-
-        w = tracker._weights[pid]
+        tracker.reset_hand(player_id=1, position='CO', profile=prof)
+        board = [Card.from_str(c) for c in ['5h', '8d', 'Kc']]
         cats = model._categorize_all(board)
-        air_mass = sum(float(w[i]) for i in range(1326) if cats[i] == 'air')
-        total = float(w.sum())
-        air_pct = air_mass / total if total > 0 else 0.0
-        # 修前：air 权重被连乘压到 < 0.3%；修后：≥ 1% (floor mixing λ=0.08
-        # 保证 active combo 至少 0.08/n_active 权重，air 占相当比例 active
-        # combo 因此加总也有几个百分点)
-        assert air_pct >= 0.01, (
-            f"3 次 pot-size barrel 后 air 至少保留 1% 权重（修前 < 0.3%），"
-            f"实际 {air_pct:.3%}"
-        )
 
-    def test_alpha_formula_bounds(self):
-        """验证 α 公式：confidence=0 时 α=0.85（全力更新），confidence=1 时
-        α=0.10（下限，几乎不更新）。相比旧公式 max(0.3, 0.85 - 0.4*c) 在
-        高 confidence 场景显著下降，解决累积塌缩。"""
-        new_alpha = lambda c: max(0.1, 0.85 - 0.75 * c)
-        old_alpha = lambda c: max(0.3, 0.85 - 0.4 * c)
+        def air_share():
+            w = tracker._weights[1]
+            return sum(float(w[i]) for i in range(1326) if cats[i] == 'air') / float(w.sum())
 
-        # 边界值
-        assert abs(new_alpha(0.0) - 0.85) < 1e-6, "confidence=0 时 α=0.85（全力更新）"
-        assert abs(new_alpha(1.0) - 0.10) < 1e-6, "confidence=1 时 α=0.10（新下限）"
-
-        # 高 confidence 场景新版显著低于旧版
-        assert new_alpha(0.8) < old_alpha(0.8) - 0.1, \
-            f"confidence=0.8 时新 α ({new_alpha(0.8):.2f}) 应 << 旧 α ({old_alpha(0.8):.2f})"
-
-        # 累积效应量化：50× 似然比的 3 街累积
-        # 旧：α≥0.30 → 50^0.3 ≈ 3.2× 单街 → 33× 累积
-        # 新：α=0.10 → 50^0.1 ≈ 1.48× 单街 → 3.2× 累积
-        new_accum = (50 ** new_alpha(1.0)) ** 3
-        old_accum = (50 ** old_alpha(1.0)) ** 3
-        assert new_accum < 10, f"新 α 下 3 街累积应 < 10×（实际 {new_accum:.1f}×）"
-        assert old_accum > new_accum * 3, \
-            f"旧 α 累积应 > 新 α 累积 3 倍（旧 {old_accum:.1f}× vs 新 {new_accum:.1f}×）"
-
-    def test_unknown_opponent_sizing_damped(self):
-        """未知对手 (hands_seen < MIN) 的 sizing_adj 偏离 1.0 的幅度应被阻尼 50%。
-
-        直接对比 unknown 的 adj 输出 与 "50/50 mix polar+merged 的 raw 值"——
-        因为 unknown 固定 polarization=0.5，所以 raw=0.5*polar+0.5*merged，
-        damped 应是 1.0 + 0.5*(raw - 1.0)。
-        """
-        from pokerfate.strategy.range_v2.action_model import (
-            _sizing_adj_for, SIZING_CATEGORY_ADJ_POLARIZED, SIZING_CATEGORY_ADJ_MERGED,
-        )
-
-        unknown = PlayerProfile(hands_seen=3)   # 触发 damping
-        adj = _sizing_adj_for('overbet', unknown)
-
-        # Raw unknown: 两表 50/50 mix（因为 _polarization_index cold-start = 0.5）
-        polar = SIZING_CATEGORY_ADJ_POLARIZED['overbet']
-        merged = SIZING_CATEGORY_ADJ_MERGED['overbet']
-        raw = {cat: 0.5 * polar[cat] + 0.5 * merged[cat] for cat in polar}
-
-        # damped = 1.0 + 0.5 * (raw - 1.0)
-        checked = 0
-        for cat in adj:
-            dev_damped = abs(adj[cat] - 1.0)
-            dev_raw = abs(raw[cat] - 1.0)
-            if dev_raw > 0.05:  # 只检查偏离明显的 cat
-                ratio = dev_damped / dev_raw
-                checked += 1
-                assert 0.45 <= ratio <= 0.55, (
-                    f"cat={cat}: damped dev={dev_damped:.3f}, raw dev={dev_raw:.3f}, "
-                    f"ratio={ratio:.2f}（应 ≈ 0.5，即 50% damping 精确实现）"
-                )
-        assert checked > 0, "应至少有一个 cat 偏离明显 > 0.05"
-
-    def test_unknown_opponent_damping_skipped_with_server_priors(self):
-        """unknown damping 只对 hands_seen 少 AND 无服务端先验的玩家生效。
-        有服务端先验说明至少是这个 ID 在平台打过很多手，应按服务端指标走。"""
-        from pokerfate.strategy.range_v2.action_model import _sizing_adj_for
-
-        unknown_with_server = PlayerProfile(
-            hands_seen=3, server_af_prior=1.0, server_wtsd_prior=0.25,
-        )
-        adj = _sizing_adj_for('overbet', unknown_with_server)
-        # 不应被阻尼——和 server_priors_available 的对手一致
-        known_equiv = PlayerProfile(
-            hands_seen=50, af=1.0, wtsd=0.25, vpip=0.30, pfr=0.20,
-        )
-        adj_ref = _sizing_adj_for('overbet', known_equiv)
-        # 结果应相差不大（同样不阻尼）
-        for cat in adj:
-            assert abs(adj[cat] - adj_ref[cat]) < 0.15, (
-                f"有服务端先验的 unknown 不应被阻尼，cat={cat}: "
-                f"adj={adj[cat]:.3f}, ref={adj_ref[cat]:.3f}"
-            )
+        before = air_share()
+        ctx = ActionContext(position='CO', board=board, street='flop', facing_action='bet', bet_ratio=1.0)
+        for _ in range(3):
+            tracker.observe_action(1, 'raise', 'flop', ctx, prof, board=board)
+        # the likelihood did its work (air is 150 times less likely to bet) ...
+        assert air_share() < 0.25 * before
+        # ... and a share lam = 0.08 of a uniform range still came back in after every bet
+        assert air_share() >= 0.01
+        assert tracker.last_update_trace['lam'] == 0.08
 
 
 class TestShowdownCalibration:
@@ -1412,6 +978,36 @@ def test_categorize_all_is_shared_and_marks_blocked_combos_air():
             assert cats[idx] == hc.categorize_cards([c1, c2], board)
 
 
+def _knn_scores_reference(em, profile, index):
+    """Pre-vectorisation scalar implementation of ``em._knn_scores``.
+
+    Moved here from empirical_model on 2026-11-14: it only serves as the
+    reference for the equivalence test below.
+    """
+    current = em._profile_vector(profile, index)
+    query_conf = em._query_confidence(current)
+    if query_conf <= 0.03:
+        return [], query_conf
+    scored = []
+    for row in index.rows:
+        dist = 0.0
+        weight_sum = 0.0
+        for name in em.FEATURES:
+            cur_rel = current.reliability.get(name, 0.0)
+            row_rel = row.reliability.get(name, 0.0)
+            if cur_rel <= 0.04 or row_rel <= 0.04:
+                continue
+            weight = em.FEATURE_WEIGHTS[name] * cur_rel * row_rel
+            delta = current.z.get(name, 0.0) - row.z.get(name, 0.0)
+            dist += weight * delta * delta
+            weight_sum += weight
+        if weight_sum <= 0.12:
+            continue
+        scored.append((dist / weight_sum, row))
+    scored.sort(key=lambda item: item[0])
+    return scored, query_conf
+
+
 def test_vectorised_knn_matches_scalar_reference():
     import random
     from pokerfate.strategy.range_v2 import empirical_model as em
@@ -1438,7 +1034,7 @@ def test_vectorised_knn_matches_scalar_reference():
         p.server_af_prior = rng.choice([0.0, 2.0]); p.server_wtsd_prior = rng.choice([0.0, 0.3])
         em._KNN_CACHE.clear()
         fast, conf_fast = em._knn_scores(p, index)
-        ref, conf_ref = em._knn_scores_reference(p, index)
+        ref, conf_ref = _knn_scores_reference(em, p, index)
         assert conf_fast == conf_ref
         assert bool(fast) == bool(ref)
         assert len(fast) == len(ref)

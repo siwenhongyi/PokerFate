@@ -71,7 +71,6 @@ class GameState:
     player_positions: Dict[int, str] = field(default_factory=dict)
     # Uniform shape: (player_id, Action, street) with street in {"preflop","flop","turn","river"}.
     action_history: list = field(default_factory=list)
-    street_action_count: int = 0  # actions taken this street
     # Physical seats disambiguate postflop order when new players post blinds
     # out of turn or the button is on an empty seat. Blind labels still drive
     # preflop ranges; they need not describe the clockwise action order.

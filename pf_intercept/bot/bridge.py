@@ -41,6 +41,7 @@ from typing import TypeAlias
 from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
 from pokerfate.calibration.spool_showdown_calibration import spool_backpressure_status
 from pokerfate.core.robots import RoomRobotTracker, default_registry
+from pokerfate.core.seating import derive_seating, standard_blind_seats
 from pf_intercept import config
 from pf_intercept.table_policy import Step, TablePolicy, TablePolicyConfig
 from pf_intercept.game_api.collcard import _sync_collect_game
@@ -69,7 +70,13 @@ _BANKROLL_REASONS: dict[str, str] = {
     "room_escape": "连续破产换桌",
     "profit_lock": "盈利锁仓离桌",
     "table_switch": "选桌换桌",
+    "topup": "桌上补码后余额刷新",
 }
+# The amounts the client's top-up slider offers, in big blinds (tpl_constdata.PokerBuyinStep).
+_TOPUP_STEPS_BB = tuple(range(20, 31)) + tuple(range(40, 201, 10))
+_TOPUP_PENDING_HANDS = 2    # a request not credited after this many hands is given up
+_TOPUP_RETRY_HANDS = 30     # hands to wait after a refused or lost request
+_BUYIN_BB = 100             # one buy-in in big blinds: a bust rebuy, and the unit of the loss cap
 _TABLE_LOG_PATH = Path(__file__).resolve().parents[1] / "logs" / "table_select.jsonl"
 
 
@@ -169,7 +176,6 @@ _STAGE_TO_STREET = {1: "preflop", 2: "flop", 3: "turn", 4: "river"}
 # Client GF.isTournament (SNG holdem/omaha/train + MTT) plus friend SNG.
 _TOURNAMENT_GAME_TYPES = {10050301, 10060301, 40050301, 10070401, 20050302}
 _FRIEND_GAME_TYPES = {20010103}
-_POSITION_LABELS_AFTER_BB = ["UTG", "UTG+1", "UTG+2", "LJ", "HJ", "CO"]
 # Frames still handled while seated in a tournament room: identity + room
 # detection only, so leaving the tournament can be noticed.
 _TOURNAMENT_PASSTHROUGH_TYPES = frozenset({"pb.SelfUserInfoRSP", "pb.EnterRoomRSP"})
@@ -183,90 +189,6 @@ def _is_tournament_enter_room(msg: dict) -> bool:
 
 def _is_friend_game_type(game_type) -> bool:
     return _chip_int(game_type, 0) in _FRIEND_GAME_TYPES
-
-
-def _inferred_blind_seats(seats: list[int], dealer: int) -> tuple[int | None, int | None]:
-    ordered = sorted(int(s) for s in seats)
-    if not ordered:
-        return None, None
-
-    n = len(ordered)
-    try:
-        dealer_idx = ordered.index(int(dealer))
-    except ValueError:
-        dealer_idx = 0
-
-    if n == 1:
-        return None, None
-    if n == 2:
-        return ordered[dealer_idx], ordered[(dealer_idx + 1) % n]
-    return ordered[(dealer_idx + 1) % n], ordered[(dealer_idx + 2) % n]
-
-
-def _seat_positions(
-    seats: list[int],
-    dealer: int,
-    small_blind: int | None = None,
-    big_blind: int | None = None,
-) -> dict[int, str]:
-    ordered = sorted(int(s) for s in seats)
-    if not ordered:
-        return {}
-
-    n = len(ordered)
-    try:
-        dealer_idx = ordered.index(int(dealer))
-    except ValueError:
-        dealer_idx = 0
-
-    if n == 1:
-        return {ordered[0]: "BTN"}
-    if n == 2:
-        return {
-            ordered[dealer_idx]: "BTN",
-            ordered[(dealer_idx + 1) % n]: "BB",
-        }
-
-    inferred_sb, inferred_bb = _inferred_blind_seats(ordered, dealer)
-    btn_seat = ordered[dealer_idx]
-    sb_seat = (
-        int(small_blind)
-        if small_blind is not None and int(small_blind) in ordered
-        else inferred_sb
-    )
-    bb_seat = (
-        int(big_blind)
-        if big_blind is not None and int(big_blind) in ordered
-        else inferred_bb
-    )
-    try:
-        bb_idx = (
-            ordered.index(int(bb_seat))
-            if bb_seat is not None
-            else (dealer_idx + 2) % n
-        )
-    except ValueError:
-        bb_idx = (dealer_idx + 2) % n
-
-    out: dict[int, str] = {}
-    out[btn_seat] = "BTN"
-    if sb_seat is not None:
-        out[sb_seat] = "SB"
-    if bb_seat is not None:
-        out[bb_seat] = "BB"
-
-    label_idx = 0
-    for offset in range(1, n + 1):
-        seat = ordered[(bb_idx + offset) % n]
-        if seat in out:
-            continue
-        out[seat] = (
-            _POSITION_LABELS_AFTER_BB[label_idx]
-            if label_idx < len(_POSITION_LABELS_AFTER_BB)
-            else "MP"
-        )
-        label_idx += 1
-    return out
 
 
 def _chip_int(value, default: int = 0) -> int:
@@ -309,21 +231,6 @@ def _s2c_rsp_code(msg: dict, default_if_omitted: int = 0) -> int:
     return _chip_int(msg.get("code"), default_if_omitted)
 
 
-def _runtime_bool(value, default: bool = False) -> bool:
-    if value is None:
-        return bool(default)
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    raw = str(value).strip().lower()
-    if raw in {"1", "true", "yes", "on", "y"}:
-        return True
-    if raw in {"0", "false", "no", "off", "n"}:
-        return False
-    return bool(default)
-
-
 # ── BotBridge ─────────────────────────────────────────────────────────────────
 
 class BotBridge:
@@ -348,11 +255,15 @@ class BotBridge:
 
         self._api: PokerFateAPI | None = None   # created once blinds are known
 
-        # Auto-rebuy when chips hit 0 (NoticeRebyRSP）。
-        # _max_auto_rebuy：启动时 CLI 上限，仅盈利锁仓成功回桌时 +1。
-        # _auto_rebuy_done：本代理进程内累计已自动续入次数，进/出房间不重置（避免反复进出刷爆亏损）。
-        self._max_auto_rebuy: int = max(0, min(20, int(max_auto_rebuy)))  # 0 = 破产不补买
+        # 净亏损上限：本次启动最多净亏 (1 + _max_auto_rebuy) 个 100BB 买入（_loss_cap_chips）。
+        # 所有把筹码带上桌的动作（破产买入、桌上补码、换桌或异常离桌后的重新买入）都先过
+        # _loss_room 这一条：已亏的 + 桌上的 + 要带的不超过上限。不再单独数破产买入的次数，
+        # 盈利锁仓也不再把上限 +1：赢到的已经在净盈亏里。
+        # _auto_rebuy_done：本次启动破产买入了几次，只用于展示。
+        # _loss_stop：上限下连最小一档买入都放不下了，本次启动到此为止，停在大厅。
+        self._max_auto_rebuy: int = max(0, min(20, int(max_auto_rebuy)))  # 0 = 净亏一个买入即停
         self._auto_rebuy_done: int = 0
+        self._loss_stop: bool = False
         self._auto_rejoin_fields: dict | None = None
         self._shutdown_requested = False
         self._transport_can_match: bool | None = None
@@ -361,19 +272,23 @@ class BotBridge:
         # DelayLeaveRoomREQ；真正 LeaveRoomRSP 成功后再采样余额并 EnterRoom（100BB）。
         self._profit_lock_deferred: dict[str, int | str | bool | None] | None = None
         self._profit_lock_reenter: dict[str, int | str | bool | None] | None = None
-        self._profit_lock_award_rebuy_after_enter: bool = False
+        self._profit_lock_awaiting_enter: bool = False
         # 最近一次注入的 EnterRoomREQ 字段（失败时打日志 / 人工对照）
         self._profit_lock_last_enter_fields: dict | None = None
-        # 资金看板：钱包余额 + 桌上筹码相对启动基线的变化，扣除确认到账的奖励。
-        # 不再用牌局内输赢/买入事件维护近似累计值。
+        # 资金看板记三本互不相干的账：
+        #   对局盈亏  服务端每手结算（WinnerRSP.profit）里自己那一项的累计，每手只记一次；
+        #   活动奖励  领取成功的筹码；
+        #   小游戏    每局的净输赢。
+        # 钱包余额和桌上筹码只按原样展示，不用来倒推对局盈亏：倒推时任何一笔奖励或
+        # 小游戏的金额不明，对局盈亏就跟着不明。
         self._bankroll_login_sample_requested: bool = False
         self._bankroll_base_total_chips: int | None = None
         self._bankroll_base_at: float | None = None
+        self._session_poker_pnl = 0
+        self._settled_hands: set[str] = set()
+        self._sidegame_net = 0
         self._bankroll_reward_chips = 0
-        self._bankroll_wallet_reward_chips = 0
-        self._bankroll_base_reward_chips = 0
         self._bankroll_rewards_uncertain = False
-        self._bankroll_reward_claim_inflight = False
         self._bankroll_wallet_chips: int | None = None
         self._bankroll_last_total_chips: int | None = None
         self._bankroll_last_sample_at: float | None = None
@@ -385,6 +300,12 @@ class BotBridge:
         self._bankroll_pending_reason: str = ""
         self._bankroll_profit_lock_count: int = 0
         self._bankroll_room_escape_count: int = 0
+        # 桌上补码（config.TOPUP_BELOW_BB）：已发出、还没到账的请求；被拒后到哪一手再试。
+        self._topup_pending: dict | None = None
+        self._topup_retry_hand: int = 0
+        self._topup_budget_logged: bool = False
+        self._topup_count: int = 0
+        self._topup_chips_total: int = 0
         # 从最近一次成功进房 RSP 缓存，供 QuickStart 兜底（与客户端大厅一致）
         self._session_game_type: int = 0
         self._session_lobby_coin: int = 0
@@ -473,32 +394,9 @@ class BotBridge:
     # ── Public ────────────────────────────────────────────────────────────────
 
     def runtime_settings(self) -> dict:
-        """Current runtime-adjustable bot settings for the local Web UI."""
-        return {
-            "profit_lock_bb": int(config.PROFIT_LOCK_BB_THRESHOLD),
-            "decision_engine": (
-                str(getattr(config, "DECISION_ENGINE", "local") or "local")
-                .strip()
-                .lower()
-                .replace("-", "_")
-            ),
-            "preflop_sticky_pool_adjust": bool(
-                getattr(config, "PREFLOP_STICKY_POOL_ADJUST", True)
-            ),
-            "decision_engine_status": (
-                self._api.decision_engine_status()
-                if self._api is not None else None
-            ),
-            "tournament_passthrough": self._tournament_passthrough,
-            "profit_lock_enabled": not self._skip_profit_lock,
-            "profit_lock_skip_reason": self._skip_profit_lock_reason,
-            "big_blind": self._bb,
-            "profit_lock_chips": (
-                int(config.PROFIT_LOCK_BB_THRESHOLD * self._bb)
-                if self._bb and self._bb > 0
-                else None
-            ),
-        }
+        """Bridge state the proxy process reads (it runs the bot in a worker and gets this with
+        every snapshot): whether an SNG/MTT table is being played by hand."""
+        return {"tournament_passthrough": self._tournament_passthrough}
 
     def bankroll_dashboard(self) -> dict:
         """Current bankroll snapshot for the local Web UI."""
@@ -506,15 +404,7 @@ class BotBridge:
         table_chips = self._current_table_chips()
         current_total = (int(wallet) + table_chips) if wallet is not None else None
         base_total = self._bankroll_base_total_chips
-        delta = (
-            int(current_total) - int(base_total)
-            - (self._bankroll_wallet_reward_chips - self._bankroll_base_reward_chips)
-            if current_total is not None and base_total is not None
-            else None
-        )
-        pending_rewards = self._rewards_pending()
-        if self._bankroll_rewards_uncertain or pending_rewards:
-            delta = None
+        delta = self._session_poker_pnl
         bb = float(self._bb or 0.0)
         return {
             "wallet_chips": wallet,
@@ -522,15 +412,19 @@ class BotBridge:
             "current_total_chips": current_total,
             "base_total_chips": base_total,
             "session_delta_chips": delta,
-            "session_delta_bb": (delta / bb) if delta is not None and bb > 0 else None,
+            "session_delta_bb": (delta / bb) if bb > 0 else None,
             "reward_chips": self._bankroll_reward_chips,
             "rewards_uncertain": self._bankroll_rewards_uncertain,
-            "rewards_pending": pending_rewards,
+            "sidegame_net_chips": self._sidegame_net,
             "big_blind": bb if bb > 0 else None,
             "auto_rebuy_count": self._auto_rebuy_done,
             "max_auto_rebuy": self._max_auto_rebuy,
+            "loss_cap_chips": self._loss_cap_chips(),
+            "loss_stop": self._loss_stop,
             "profit_lock_count": self._bankroll_profit_lock_count,
             "room_escape_count": self._bankroll_room_escape_count,
+            "topup_count": self._topup_count,
+            "topup_chips": self._topup_chips_total,
             "last_sample_at": self._bankroll_last_sample_at,
             "base_at": self._bankroll_base_at,
             "pending_reason": self._bankroll_pending_reason or None,
@@ -539,79 +433,37 @@ class BotBridge:
         }
 
     def record_reward_credit(self, chips: int, uncertain: bool = False) -> None:
-        """Record confirmed lobby rewards separately from poker PnL.
+        """Count a claimed reward. ``uncertain``: a claim or side-game round whose amount is unknown.
 
-        The session attaches the cumulative credit watermark to wallet replies;
-        do not subtract a newly claimed reward from an older wallet snapshot.
+        Rewards and side games have their own totals; neither enters the poker PnL.
         """
         self._bankroll_reward_chips += max(0, int(chips))
         self._bankroll_rewards_uncertain |= uncertain
 
-    def set_reward_claim_inflight(self, in_flight: bool) -> None:
-        self._bankroll_reward_claim_inflight = in_flight
+    def record_sidegame_result(self, net: int) -> None:
+        self._sidegame_net += int(net)
 
-    def _rewards_pending(self) -> bool:
-        return (self._bankroll_reward_claim_inflight
-                or self._bankroll_wallet_reward_chips < self._bankroll_reward_chips)
+    def _settle_my_hand(self, msg: dict) -> None:
+        """Add our net result of this hand, as the server settled it, to the session's poker PnL."""
+        if not self._my_uid:
+            return
+        mine = next((p for p in msg.get("profit") or []
+                     if isinstance(p, dict) and str(p.get("uid", "")) == self._my_uid), None)
+        if mine is None:
+            return
+        # A settlement replayed after a reconnect or a room snapshot counts once.
+        hand = str(self._current_gameid or "") or f"hand#{self._hand_seq}"
+        if hand in self._settled_hands:
+            return
+        self._settled_hands.add(hand)
+        self._session_poker_pnl += _chip_int(mine.get("chips", 0), 0)
 
-    def update_runtime_settings(
-        self,
-        *,
-        profit_lock_bb: int | None = None,
-        decision_engine: str | None = None,
-        preflop_sticky_pool_adjust=None,
-    ) -> dict:
-        """Update the small set of bot settings that are safe to change live."""
-        changed: list[str] = []
-        if profit_lock_bb is not None:
-            value = int(profit_lock_bb)
-            if value < 1:
-                raise ValueError("profit_lock_bb must be >= 1")
-            old = int(config.PROFIT_LOCK_BB_THRESHOLD)
-            if value != old:
-                config.PROFIT_LOCK_BB_THRESHOLD = value
-                changed.append(f"profit_lock_bb {old}->{value}")
-        if decision_engine is not None:
-            value = str(decision_engine or "local").strip().lower().replace("-", "_")
-            if value in {"", "pokerfate"}:
-                value = "local"
-            if value not in {"local", "g5", "g5_all", "cfr"}:
-                raise ValueError("decision_engine must be local, g5, g5_all, or cfr")
-            old = (
-                str(getattr(config, "DECISION_ENGINE", "local") or "local")
-                .strip()
-                .lower()
-                .replace("-", "_")
-            )
-            api_status = (
-                self._api.decision_engine_status()
-                if self._api is not None else {}
-            )
-            should_apply_api = (
-                self._api is not None
-                and (
-                    value != old
-                    or str(api_status.get("requested") or "local") != value
-                    or bool(api_status.get("error"))
-                )
-            )
-            if value != old:
-                config.DECISION_ENGINE = value
-                changed.append(f"decision_engine {old}->{value}")
-            if should_apply_api:
-                self._api.set_decision_engine(value)
-        if preflop_sticky_pool_adjust is not None:
-            value = _runtime_bool(preflop_sticky_pool_adjust, True)
-            old = bool(getattr(config, "PREFLOP_STICKY_POOL_ADJUST", True))
-            if value != old:
-                config.PREFLOP_STICKY_POOL_ADJUST = value
-                changed.append(
-                    f"preflop_sticky_pool_adjust {int(old)}->{int(value)}"
-                )
-            self._apply_preflop_sticky_pool_adjust(value)
-        if changed:
-            log.warning("[BOT] 运行参数已更新：%s", ", ".join(changed))
-        return self.runtime_settings()
+    def activity_emoji_target(self):
+        for seat in self._all_seats:
+            uid = self._seat_uids.get(seat)
+            if seat != self._my_seat and uid and int(uid) > 0 and str(uid) != self._my_uid:
+                return int(uid)
+        return None
 
     def _apply_preflop_sticky_pool_adjust(self, enabled: bool) -> None:
         api_bot = getattr(self._api, "_bot", None) if self._api is not None else None
@@ -660,6 +512,7 @@ class BotBridge:
         self._last_hero_action_notify_at = 0.0
         self._profit_lock_cancel_reenter()
         self._room_escape_reenter = None
+        self._topup_pending = None
         self._bankroll_pending_action = None
         self._bankroll_pending_reason = ""
         self._bankroll_pending_buyin_reason = ""
@@ -674,7 +527,9 @@ class BotBridge:
         self._table_room_id = 0
         self._current_gameid = ""
         self._reset_hand_local_state(stage=0)
-        return bool(allowed and not self._shutdown_requested
+        if allowed and not self._loss_stop and self._auto_rejoin_fields:
+            self.cap_match_buyin(self._auto_rejoin_fields)      # ends the start if nothing fits
+        return bool(allowed and not self._shutdown_requested and not self._loss_stop
                     and not self._is_friend_room and not self._tournament_passthrough
                     and not (self._table_policy is not None and self._table_policy.stopped)
                     and self._runtime_calibration_should_pause_play() is None)
@@ -698,12 +553,16 @@ class BotBridge:
                 self._profit_lock_cancel_reenter()
             if inject_type == "pb.LeaveRoomREQ":
                 self._room_escape_reenter = None
-        elif inject_type == "pb.EnterRoomREQ" and self._profit_lock_award_rebuy_after_enter:
-            log.warning("[BOT] 盈利锁仓：EnterRoom 未发出，已取消续入次数奖励。")
-            self._profit_lock_award_rebuy_after_enter = False
+        elif inject_type == "pb.EnterRoomREQ" and self._profit_lock_awaiting_enter:
+            log.warning("[BOT] 盈利锁仓：EnterRoom 未发出。")
+            self._profit_lock_awaiting_enter = False
             self._profit_lock_last_enter_fields = None
         elif inject_type == "pb.QuickStartREQ":
             log.warning("[BOT] 盈利锁仓：QuickStartREQ 编码/发送失败，请手动从大厅进桌。")
+        elif inject_type == "pb.SetRebyREQ" and self._topup_pending is not None:
+            log.warning("[BOT] 桌上补码：SetRebyREQ 未发出，%d 手后再试。", _TOPUP_RETRY_HANDS)
+            self._topup_pending = None
+            self._topup_retry_hand = self._hand_seq + _TOPUP_RETRY_HANDS
         elif inject_type == "pb.UserValueREQ" and self._bankroll_pending_action is not None:
             log.warning(
                 "[BOT] 余额采样请求未发出，取消待完成动作：%s",
@@ -728,18 +587,34 @@ class BotBridge:
     def wants_tick(self) -> bool:
         return self._table_policy is not None
 
-    def table_select_status(self) -> dict:
-        comp = self._table_composition()
-        out = {"enabled": self._table_policy is not None, **comp, "registry": self._robots.counts()}
-        if self._table_policy is not None:
-            out.update(self._table_policy.snapshot())
-        return out
-
     def adjust_match_fields(self, fields: dict) -> dict:
         """Let the table policy pick stake / buy-in / wait-for-blind of a QuickStart."""
         if self._table_policy is None:
             return dict(fields)
         return self._table_policy.match_fields(fields)
+
+    def cap_match_buyin(self, fields: dict) -> dict:
+        """Keep the buy-in of a QuickStart under the loss cap of this start.
+
+        Returns a copy; ``byin_chips`` 0 means not even the smallest buy-in fits: the caller
+        must not send the request, and the start has been stopped.
+        """
+        out = dict(fields)
+        want = _chip_int(out.get("byin_chips", 0), 0)
+        bb = float(_chip_int(out.get("boot", 0), 0) or self._bb or 0.0)
+        got = self._capped_buyin(want, bb)
+        if got == want:
+            return out
+        out["byin_chips"] = got
+        if got <= 0:
+            self._stop_for_loss_cap("重新买入")
+        else:
+            log.warning(
+                "[BOT] 净亏损上限：本次启动已亏 %d，上限 %d，买入从 %d 减到 %d（%.0fBB）。",
+                max(0, -int(self._session_poker_pnl)), self._loss_cap_chips(bb), want, got,
+                got / bb if bb > 0 else 0.0,
+            )
+        return out
 
     def note_match_sent(self) -> None:
         if self._table_policy is not None:
@@ -756,6 +631,7 @@ class BotBridge:
         return (
             self._table_policy is None
             or self._shutdown_requested
+            or self._loss_stop
             or self._tournament_passthrough
             or self._is_friend_room
             or self._profit_lock_reenter is not None
@@ -791,8 +667,15 @@ class BotBridge:
         if not step:
             return None
         if step.kind == "leave":
-            self._table_switch = {"mode": "delay" if step.delayed else "leave", "reason": step.reason,
-                                  "at": time.time()}
+            # ``played``: we were dealt in at this table, so leaving it ends a stretch of play
+            # (a table rejected on arrival is not one).  A retry of an unanswered leave keeps
+            # what the first request recorded.
+            first = self._table_switch if step.reason == "retry" and self._table_switch else None
+            self._table_switch = {
+                "mode": "delay" if step.delayed else "leave", "reason": step.reason, "at": time.time(),
+                "cause": first["cause"] if first else step.reason,
+                "played": first["played"] if first else not step.info.get("rejected", True),
+            }
             self._table_log("leave", reason=step.reason, delayed=bool(step.delayed))
             if self._api:
                 self._api._log.note(f"[选桌] 离桌换桌：{step.reason}")
@@ -807,8 +690,12 @@ class BotBridge:
             fields = self._table_match_fields(int(step.bb))
             if fields is None:
                 return None
-            self._bankroll_pending_buyin_reason = "table_switch"
             self._auto_rejoin_fields = dict(fields)
+            # 换桌带上桌的筹码也算在净亏损上限里：正在亏的时候最多带回离桌时的筹码量。
+            fields = self.cap_match_buyin(fields)
+            if _chip_int(fields.get("byin_chips", 0), 0) <= 0:
+                return None
+            self._bankroll_pending_buyin_reason = "table_switch"
             self._table_log("match", stake=int(step.bb), byin=int(fields.get("byin_chips", 0)))
             return "pb.QuickStartREQ", fields, 0.0
         if step.kind == "stop":
@@ -880,7 +767,7 @@ class BotBridge:
     def _profit_lock_cancel_reenter(self) -> None:
         self._profit_lock_deferred = None
         self._profit_lock_reenter = None
-        self._profit_lock_award_rebuy_after_enter = False
+        self._profit_lock_awaiting_enter = False
         self._profit_lock_last_enter_fields = None
 
     def _clear_room_escape_stats_for_rematch(self) -> None:
@@ -904,6 +791,7 @@ class BotBridge:
         """Clear stale on-table chips after the server confirms hero left/stood up."""
         before = self._current_table_chips()
         self._mark_my_table_chips_zero()
+        self._topup_pending = None
         if before > 0:
             log.info("[BOT] 资金看板：%s，桌上筹码 %d -> 0", reason, before)
         if self._bankroll_pending_action is not None or self._bankroll_pending_reason:
@@ -945,23 +833,17 @@ class BotBridge:
         log.info("[BOT] 余额采样：请求 UserValueREQ reason=%s action=%s", reason, action.get("kind") if action else "-")
         return "pb.UserValueREQ", fields, max(0.0, float(delay_sec))
 
-    def _record_bankroll_sample(self, reason: str, wallet_chips: int, *, reward_chips: int | None = None) -> dict:
+    def _record_bankroll_sample(self, reason: str, wallet_chips: int) -> dict:
         now = time.time()
         wallet = max(0, int(wallet_chips))
         table = self._current_table_chips()
         total = wallet + table
-        self._bankroll_wallet_reward_chips = min(
-            self._bankroll_reward_chips,
-            max(0, self._bankroll_reward_chips if reward_chips is None else int(reward_chips)),
-        )
         if self._bankroll_base_total_chips is None:
             self._bankroll_base_total_chips = total
             self._bankroll_base_at = now
-            self._bankroll_base_reward_chips = self._bankroll_wallet_reward_chips
             reason = "startup" if reason == "refresh" else reason
         base = int(self._bankroll_base_total_chips)
-        rewards = self._bankroll_wallet_reward_chips - self._bankroll_base_reward_chips
-        delta = total - base - rewards
+        delta = self._session_poker_pnl
         bb = float(self._bb or 0.0)
         sample = {
             "ts": now,
@@ -971,9 +853,7 @@ class BotBridge:
             "table_chips": table,
             "total_chips": total,
             "base_total_chips": base,
-            "reward_chips": rewards,
-            "rewards_uncertain": self._bankroll_rewards_uncertain,
-            "rewards_pending": self._rewards_pending(),
+            "reward_chips": self._bankroll_reward_chips,
             "delta_chips": delta,
             "delta_bb": (delta / bb) if bb > 0 else None,
             "big_blind": bb if bb > 0 else None,
@@ -985,7 +865,7 @@ class BotBridge:
         if len(self._bankroll_samples) > _BANKROLL_SAMPLE_LIMIT:
             self._bankroll_samples = self._bankroll_samples[-_BANKROLL_SAMPLE_LIMIT:]
         log.info(
-            "[BOT] 余额采样：%s wallet=%d table=%d total=%d delta=%+d",
+            "[BOT] 余额采样：%s wallet=%d table=%d total=%d 对局盈亏=%+d",
             sample["reason_text"],
             wallet,
             table,
@@ -1017,8 +897,7 @@ class BotBridge:
         wallet = max(0, int(self._bankroll_wallet_chips))
         total = wallet + table
         base = int(self._bankroll_base_total_chips)
-        rewards = self._bankroll_wallet_reward_chips - self._bankroll_base_reward_chips
-        delta = total - base - rewards
+        delta = self._session_poker_pnl
         bb = float(self._bb or 0.0)
         point = {
             "ts": time.time(),
@@ -1031,9 +910,7 @@ class BotBridge:
             "table_chips": table,
             "total_chips": total,
             "base_total_chips": base,
-            "reward_chips": rewards,
-            "rewards_uncertain": self._bankroll_rewards_uncertain,
-            "rewards_pending": self._rewards_pending(),
+            "reward_chips": self._bankroll_reward_chips,
             "delta_chips": delta,
             "delta_bb": (delta / bb) if bb > 0 else None,
             "hand_delta_chips": int(profit_delta),
@@ -1044,13 +921,12 @@ class BotBridge:
         self._bankroll_hand_points.append(point)
 
     def _bankroll_notify_fields(self, sample: dict) -> dict:
-        pending = sample.get("rewards_pending") or sample.get("rewards_uncertain")
         return {
             "current_total_chips": int(sample.get("total_chips", 0)),
             "wallet_chips": int(sample.get("wallet_chips", 0)),
             "table_chips": int(sample.get("table_chips", 0)),
-            "session_delta_chips": None if pending else int(sample.get("delta_chips", 0)),
-            "session_delta_bb": None if pending else sample.get("delta_bb"),
+            "session_delta_chips": int(sample.get("delta_chips", 0)),
+            "session_delta_bb": sample.get("delta_bb"),
         }
 
     def _complete_bankroll_action(self, action: dict | None, sample: dict) -> WireInject | None:
@@ -1060,27 +936,29 @@ class BotBridge:
         if self._shutdown_requested:
             return None
         if kind == "unexpected_leave":
+            fields = self.cap_match_buyin(self.adjust_match_fields(dict(action["quickstart_fields"])))
+            byin = _chip_int(fields.get("byin_chips", 0), 0)
+            if byin <= 0:
+                return None
             self._bankroll_pending_buyin_reason = "unexpected_leave"
-            log.warning("[BOT] 异常离桌：余额已刷新，重新匹配；续入次数保持 %d/%d。",
-                        self._auto_rebuy_done, self._max_auto_rebuy)
-            return "pb.QuickStartREQ", self.adjust_match_fields(dict(action["quickstart_fields"])), 0.0
+            log.warning("[BOT] 异常离桌：余额已刷新，重新匹配，买入 %d。", byin)
+            return "pb.QuickStartREQ", fields, 0.0
         if kind == "auto_rebuy":
             rebuy_chips = _chip_int(action.get("rebuy_chips", 0), 0)
             self._bankroll_pending_buyin_reason = "auto_rebuy"
             self._notify(
                 "auto_rebuy",
                 nth=_chip_int(action.get("nth", self._auto_rebuy_done), self._auto_rebuy_done),
-                max_n=self._max_auto_rebuy,
+                loss_cap_chips=self._loss_cap_chips(),
                 rebuy_chips=rebuy_chips,
                 balance_chips=0,
                 rebuy_window_sec=_chip_int(action.get("rebuy_window_sec", 0), 0),
                 **self._bankroll_notify_fields(sample),
             )
             log.warning(
-                "[BOT] ⚠️  筹码清零！余额已采样，自动续入 %d（100BB） 第 %d/%d 次，rebuy 窗口 %d 秒。本次启动盈亏 %+d",
+                "[BOT] ⚠️  筹码清零！余额已采样，自动续入 %d 第 %d 次，rebuy 窗口 %d 秒。本次启动盈亏 %+d",
                 rebuy_chips,
                 _chip_int(action.get("nth", self._auto_rebuy_done), self._auto_rebuy_done),
-                self._max_auto_rebuy,
                 _chip_int(action.get("rebuy_window_sec", 0), 0),
                 int(sample.get("delta_chips", 0)),
             )
@@ -1110,7 +988,7 @@ class BotBridge:
             fields = dict(action.get("enter_fields") or {})
             delay = max(0.0, min(60.0, float(action.get("delay_sec", 0.0) or 0.0)))
             self._profit_lock_last_enter_fields = dict(fields)
-            self._profit_lock_award_rebuy_after_enter = True
+            self._profit_lock_awaiting_enter = True
             self._bankroll_pending_buyin_reason = "profit_lock"
             self._notify(
                 "profit_lock_trigger",
@@ -1133,54 +1011,6 @@ class BotBridge:
 
         log.warning("[BOT] 余额采样：未知待完成动作 kind=%s action=%s", kind, action)
         return None
-
-    def _show_my_card_request(
-        self,
-        *,
-        pos: int,
-        flag: int = 1,
-        delay_sec: float = 0.0,
-    ) -> WireInject | None:
-        """Build pb.ShowMyCardREQ for one of our hole-card positions."""
-        gameid = str(self._current_gameid or "").strip()
-        if not gameid or gameid == "0":
-            log.warning("[BOT] 亮牌：缺少 gameid，跳过展示第 %s 张手牌。", pos)
-            return None
-        if pos <= 0:
-            return None
-        return (
-            "pb.ShowMyCardREQ",
-            {
-                "gameid": gameid,
-                "pos": int(pos),
-                "flag": int(flag),
-            },
-            max(0.0, float(delay_sec)),
-        )
-
-    def show_my_card(self, pos: int, *, flag: int = 1, delay_sec: float = 0.0) -> bool:
-        """Queue one ShowMyCardREQ. Decision logic calls this when it wants to reveal."""
-        req = self._show_my_card_request(pos=pos, flag=flag, delay_sec=delay_sec)
-        if req is None:
-            return False
-        self._pending_injects.append(req)
-        return True
-
-    def show_my_hole_cards(self, count: int = 2) -> int:
-        """Queue ShowMyCardREQ for our first `count` hole cards."""
-        requests: list[WireInject] = []
-        for idx, pos in enumerate(range(1, min(2, int(count)) + 1)):
-            req = self._show_my_card_request(pos=pos, flag=1, delay_sec=idx * 0.05)
-            if req is not None:
-                requests.append(req)
-        self._pending_injects.extend(requests)
-        if requests:
-            log.info(
-                "[BOT] 亮牌：已排队展示自己的 %d 张手牌 gameid=%s",
-                len(requests),
-                self._current_gameid,
-            )
-        return len(requests)
 
     def _drain_pending_injects(self, result: WireInjectResult) -> WireInjectResult:
         if not self._pending_injects:
@@ -1314,6 +1144,7 @@ class BotBridge:
         elif type_name == "pb.LeaveRoomRSP":     return self._on_leave_room_rsp(msg)
         elif type_name == "pb.NoticeRebyRSP":    return self._on_notice_reby(msg)
         elif type_name == "pb.RebyBRC":          self._on_reby_brc(msg)
+        elif type_name == "pb.SetRebyRSP":       self._on_set_reby_rsp(msg)
         return None
 
     # ── Session setup ─────────────────────────────────────────────────────────
@@ -1376,10 +1207,7 @@ class BotBridge:
         self._bankroll_pending_reason = ""
         if not reason:
             reason = "startup" if self._bankroll_base_total_chips is None else "refresh"
-        sample = self._record_bankroll_sample(
-            reason, _chip_int(msg.get("value", 0), 0),
-            reward_chips=msg.get("_reward_chips_at_request"),
-        )
+        sample = self._record_bankroll_sample(reason, _chip_int(msg.get("value", 0), 0))
         return self._complete_bankroll_action(pending, sample)
 
     def _on_sit_down(self, msg: dict) -> None:
@@ -1408,7 +1236,164 @@ class BotBridge:
         if self._my_seat is not None and seat == self._my_seat:
             self._my_chips = self._seat_chips[seat]
             if chips > 0:
-                self._note_bankroll_buyin(self._bankroll_pending_buyin_reason or "reby")
+                kind = str(msg.get("type") or "")
+                if kind == "topup" or (not kind and self._topup_pending is not None):
+                    self._on_my_topup(chips)
+                else:
+                    self._note_bankroll_buyin(self._bankroll_pending_buyin_reason or "reby")
+
+    # ── 桌上补码 ──────────────────────────────────────────────────────────────
+
+    # ── 净亏损上限 ────────────────────────────────────────────────────────────
+    #
+    # One number ends a start: its net loss may not pass (1 + _max_auto_rebuy) buy-ins of 100BB.
+    # Everything that brings chips to a table is checked against it — a top-up, a bust rebuy, the
+    # buy-in after a table switch or an unexpected leave — so what is lost plus what is on the
+    # table never exceeds the cap, whichever way the chips arrived.  Winnings need no rule of
+    # their own: they are in the net result and make room by themselves.
+    #
+    # A profit-lock re-entry is not checked: it takes at least the threshold off the table and
+    # brings 100BB back, so it can only lower what is at risk.
+
+    def _loss_cap_bb(self, fallback: float = 0.0) -> float:
+        """The blind the cap is counted in: the stake the start was launched for, else the table's."""
+        cfg = getattr(self._table_policy, "cfg", None)
+        home = float(getattr(cfg, "home_bb", 0) or 0.0)
+        return home or float(self._bb or 0.0) or float(fallback or 0.0)
+
+    def _loss_cap_chips(self, fallback_bb: float = 0.0) -> int:
+        """The most this start may lose, in chips; 0 while no blind is known yet."""
+        return (1 + self._max_auto_rebuy) * int(_BUYIN_BB * self._loss_cap_bb(fallback_bb))
+
+    def _loss_room(self, table_chips: int = 0, fallback_bb: float = 0.0) -> int:
+        """Chips that may still be brought to the table: the cap less what is lost and what sits there."""
+        cap = self._loss_cap_chips(fallback_bb)
+        return cap - max(0, -int(self._session_poker_pnl)) - max(0, int(table_chips))
+
+    def _capped_buyin(self, want: int, bb: float) -> int:
+        """What a buy-in of ``want`` chips at blind ``bb`` may bring after leaving a table or busting.
+
+        ``want`` when the cap has room for it, else the largest amount the client's buy-in slider
+        offers that fits (the same slider serves buy-in, rebuy and top-up); 0 when none does.
+        """
+        want = max(0, int(want))
+        if bb <= 0 or self._loss_cap_chips(bb) <= 0:
+            return want
+        room = self._loss_room(0, bb)
+        if want <= room:
+            return want
+        return max((int(s * bb) for s in _TOPUP_STEPS_BB if int(s * bb) <= room), default=0)
+
+    def _stop_for_loss_cap(self, what: str) -> None:
+        """The cap leaves no room for even the smallest buy-in: this start plays no more hands."""
+        if self._loss_stop:
+            return
+        self._loss_stop = True
+        self._topup_pending = None
+        lost, cap = max(0, -int(self._session_poker_pnl)), self._loss_cap_chips()
+        log.warning(
+            "[BOT] 净亏损上限：本次启动已亏 %d，上限 %d（%d 个 100BB 买入），放不下%s，"
+            "不再买入，停在大厅。重启后恢复。",
+            lost, cap, 1 + self._max_auto_rebuy, what,
+        )
+        self._notify(
+            "loss_stop",
+            what=what,
+            session_delta_chips=int(self._session_poker_pnl),
+            loss_cap_chips=cap,
+            buyins=1 + self._max_auto_rebuy,
+        )
+
+    def _maybe_topup(self, final_stacks: dict[int, int]) -> WireInject | None:
+        """A short stack at the end of a hand asks the server to add chips before the next deal."""
+        below_bb = float(getattr(config, "TOPUP_BELOW_BB", 0) or 0)
+        if below_bb <= 0 or self._skip_profit_lock or self._shutdown_requested or self._loss_stop:
+            return None
+        if (
+            self._my_seat is None
+            or self._profit_lock_reenter is not None
+            or self._profit_lock_deferred is not None
+            or self._table_switch is not None
+            or self._room_escape_reenter is not None
+        ):
+            return None
+        bb = float(self._bb or 0.0)
+        if bb <= 0:
+            return None
+        pending = self._topup_pending
+        if pending is not None:
+            if self._hand_seq - int(pending.get("hand_seq", 0)) < _TOPUP_PENDING_HANDS:
+                return None
+            log.warning(
+                "[BOT] 桌上补码：请求的 %d 过了 %d 手仍未到账，%d 手后再试。",
+                int(pending.get("chips", 0)), _TOPUP_PENDING_HANDS, _TOPUP_RETRY_HANDS,
+            )
+            self._topup_pending = None
+            self._topup_retry_hand = self._hand_seq + _TOPUP_RETRY_HANDS
+            return None
+        if self._hand_seq < self._topup_retry_hand:
+            return None
+        stack = int(final_stacks.get(self._my_seat, 0))
+        if stack <= 0 or stack >= int(below_bb * bb):
+            return None
+        short = int(float(getattr(config, "TOPUP_TARGET_BB", 100)) * bb) - stack
+        budget = self._loss_room(stack)
+        chips = max((int(s * bb) for s in _TOPUP_STEPS_BB if int(s * bb) <= min(short, budget)), default=0)
+        if chips <= 0:
+            if budget < short and not self._topup_budget_logged:
+                self._topup_budget_logged = True
+                log.warning(
+                    "[BOT] 桌上补码：本次启动已亏 %d，再补就超过净亏损上限 %d（%d 个买入），不再补码。",
+                    max(0, -int(self._session_poker_pnl)), self._loss_cap_chips(), 1 + self._max_auto_rebuy,
+                )
+            return None
+        self._topup_budget_logged = False
+        self._topup_pending = {"chips": chips, "hand_seq": self._hand_seq, "stack": stack}
+        log.warning(
+            "[BOT] 桌上补码：筹码 %d（%.1fBB）低于 %gBB，请求补 %d（%.0fBB），下一手发牌前到账。",
+            stack, stack / bb, below_bb, chips, chips / bb,
+        )
+        return "pb.SetRebyREQ", {"reby_chips": chips}, 0.0
+
+    def _on_set_reby_rsp(self, msg: dict) -> None:
+        code = _s2c_rsp_code(msg, 0)
+        if code == 0:
+            log.info("[BOT] 桌上补码：服务端已受理 reby_chips=%s。", msg.get("reby_chips"))
+            return
+        log.warning(
+            "[BOT] 桌上补码：服务端拒绝 code=%s（请求 %s），%d 手后再试。",
+            code, (self._topup_pending or {}).get("chips"), _TOPUP_RETRY_HANDS,
+        )
+        self._topup_pending = None
+        self._topup_retry_hand = self._hand_seq + _TOPUP_RETRY_HANDS
+
+    def _on_my_topup(self, chips: int) -> None:
+        """The server credited a top-up to our seat (pb.RebyBRC type=topup; chips = the amount added)."""
+        pending = self._topup_pending
+        self._topup_pending = None
+        self._topup_count += 1
+        self._topup_chips_total += chips
+        self._note_bankroll_buyin("topup")
+        bb = float(self._bb or 0.0)
+        log.warning(
+            "[BOT] 桌上补码到账 %d（请求 %s），桌上筹码 %d（%.1fBB）。本次启动第 %d 次，累计补 %d，对局盈亏 %+d",
+            chips, pending.get("chips") if pending else "不是 bot 发的",
+            self._my_chips, (self._my_chips / bb) if bb > 0 else 0.0,
+            self._topup_count, self._topup_chips_total, int(self._session_poker_pnl),
+        )
+        self._notify(
+            "topup",
+            added_chips=chips,
+            stack_chips=int(self._my_chips),
+            big_blind=int(bb),
+            nth=self._topup_count,
+            session_delta_chips=int(self._session_poker_pnl),
+        )
+        # Refresh the wallet figure on the dashboard; skipped while another wallet action is waiting.
+        if self._bankroll_pending_action is None and not self._bankroll_pending_reason:
+            sample = self._request_bankroll_sample("topup")
+            if sample is not None:
+                self._pending_injects.append(sample)
 
     def _apply_table_blinds(
         self,
@@ -1503,34 +1488,26 @@ class BotBridge:
             if self._bankroll_pending_buyin_reason in {"profit_lock", "room_escape", "table_switch"}:
                 self._note_bankroll_buyin(self._bankroll_pending_buyin_reason)
         fallback_inject: tuple[str, dict, float] | None = None
-        if self._profit_lock_award_rebuy_after_enter:
+        if self._profit_lock_awaiting_enter:
             if self._profit_lock_last_enter_fields is None:
-                log.warning("[BOT] 盈利锁仓：收到 EnterRoomRSP 但没有待确认的 EnterRoomREQ，忽略重进奖励。")
-                self._profit_lock_award_rebuy_after_enter = False
+                log.warning("[BOT] 盈利锁仓：收到 EnterRoomRSP 但没有待确认的 EnterRoomREQ，忽略。")
+                self._profit_lock_awaiting_enter = False
             elif code == 0:
                 reenter_buyin = _chip_int(
                     (self._profit_lock_last_enter_fields or {}).get("byin_chips", 0),
                     0,
                 )
-                self._max_auto_rebuy += 1
                 self._profit_lock_last_enter_fields = None
-                log.warning(
-                    "[BOT] 盈利锁仓：已重新进房，买入 %d，自动续入次数上限 +1 → %d。",
-                    reenter_buyin,
-                    self._max_auto_rebuy,
-                )
-                self._profit_lock_award_rebuy_after_enter = False
+                log.warning("[BOT] 盈利锁仓：已重新进房，买入 %d。", reenter_buyin)
+                self._profit_lock_awaiting_enter = False
             else:
-                log.warning(
-                    "[BOT] 盈利锁仓：重新进房失败 code=%s，未增加续入次数。",
-                    code,
-                )
+                log.warning("[BOT] 盈利锁仓：重新进房失败 code=%s。", code)
                 if self._profit_lock_last_enter_fields is not None:
                     log.warning(
                         "[BOT] 盈利锁仓 [EnterRoomREQ 备份，可对客户端抓包对照] %s",
                         self._profit_lock_last_enter_fields,
                     )
-                self._profit_lock_award_rebuy_after_enter = False
+                self._profit_lock_awaiting_enter = False
                 fallback_inject = self._profit_lock_quick_start_fallback()
 
         rid = msg.get("roomid")
@@ -1667,7 +1644,9 @@ class BotBridge:
             "wait_blind": False,
             "ip": "",
         }
-        fields = self.adjust_match_fields(fields)
+        fields = self.cap_match_buyin(self.adjust_match_fields(fields))
+        if _chip_int(fields.get("byin_chips", 0), 0) <= 0:
+            return None
         log.warning(
             "[BOT] %s：%.1fs 后发送 QuickStartREQ（随机桌，同盲注/100BB）: %s",
             context,
@@ -1751,9 +1730,6 @@ class BotBridge:
 
     def _seat_map_to_player_ids(self, values: dict[int, object]) -> dict[int, object]:
         return {self._seat_to_player_id(seat): value for seat, value in values.items()}
-
-    def _seat_list_to_player_ids(self, seats: list[int]) -> list[int]:
-        return [self._seat_to_player_id(seat) for seat in seats]
 
     def _seat_showdown_to_player_ids(self, hands: dict[int, list[str]]) -> dict[int, list[str]]:
         return {self._seat_to_player_id(seat): cards for seat, cards in hands.items()}
@@ -2006,6 +1982,10 @@ class BotBridge:
                 )
         self._pending_seeds.clear()
 
+    def _is_robot_seat(self, seat: int, player_id: int) -> bool:
+        """人机（已证实或位于人机号段内），不含自己。策略层据此让整手牌不参与采集 / 学习。"""
+        return seat != self._my_seat and player_id > 0 and self._robots.is_robot(player_id)
+
     def _start_hand_from_enter_room_snapshot_if_needed(
         self,
         table_status: dict,
@@ -2041,7 +2021,14 @@ class BotBridge:
         start_info.sort(key=lambda si: si["seatid"])
         self._all_seats = [si["seatid"] for si in start_info]
         dealer_seat = _chip_int(table_status.get("d_idx", 0), 0)
-        seat_positions = _seat_positions(self._all_seats, dealer_seat)
+        # Zero-valued fields are dropped from the decoded message, so one blind
+        # index being present means both were sent.
+        blinds_named = "sb_idx" in table_status or "bb_idx" in table_status
+        seat_positions = derive_seating(
+            self._all_seats,
+            dealer_seat,
+            big_blind=_chip_int(table_status.get("bb_idx", 0), 0) if blinds_named else None,
+        ).labels
         self._seat_chips = {}
         self._hand_start_chips = {}
 
@@ -2053,12 +2040,14 @@ class BotBridge:
             self._hand_start_chips[seat] = chips
             if seat == self._my_seat:
                 self._my_chips = chips
+            player_id = self._seat_to_player_id(seat)
             players.append(PlayerInfo(
-                player_id=self._seat_to_player_id(seat),
+                player_id=player_id,
                 name=self._seat_player_name(seat),
                 stack=chips,
                 position=seat_positions.get(seat, ""),
                 seat_index=seat,
+                is_robot=self._is_robot_seat(seat, player_id),
             ))
 
         self._apply_pending_seeds_for_players(players)
@@ -2375,19 +2364,22 @@ class BotBridge:
             if blind_fields_present
             else None
         )
-        seat_positions = _seat_positions(
+        seat_positions = derive_seating(
             self._all_seats,
             dealer_seat,
-            small_blind=small_blind_seat,
             big_blind=big_blind_seat,
-        )
-        inferred_sb, inferred_bb = _inferred_blind_seats(self._all_seats, dealer_seat)
+        ).labels
+        inferred_sb, inferred_bb = standard_blind_seats(self._all_seats, dealer_seat)
         blind_layout_is_standard = (
             small_blind_seat is None
             or big_blind_seat is None
             or small_blind_seat not in self._all_seats
             or big_blind_seat not in self._all_seats
-            or (small_blind_seat == inferred_sb and big_blind_seat == inferred_bb)
+            or (
+                dealer_seat in self._all_seats
+                and small_blind_seat == inferred_sb
+                and big_blind_seat == inferred_bb
+            )
         )
         self._seat_chips = {}
         self._hand_start_chips = {}
@@ -2409,8 +2401,7 @@ class BotBridge:
                 stack=chips,
                 position=position,
                 seat_index=seat,
-                # 人机（已证实或位于人机号段内）：策略层据此把它排除在采集 / 学习之外。
-                is_robot=(seat != self._my_seat and player_id > 0 and self._robots.is_robot(player_id)),
+                is_robot=self._is_robot_seat(seat, player_id),
             ))
 
         # 应用 API 创建前已缓冲的 server stats：
@@ -2593,29 +2584,6 @@ class BotBridge:
         if pool:
             self._pot = sum(_chip_int(p, 0) for p in pool)
 
-    def _decision_purpose(self) -> str:
-        if self._api is None:
-            return ""
-        getter = getattr(self._api, "last_decision_diagnostics", None)
-        if not callable(getter):
-            return ""
-        try:
-            diag = getter() or {}
-        except Exception:
-            log.exception("[BOT] failed to read decision diagnostics")
-            return ""
-        return str(diag.get("final_purpose") or "").split("→", 1)[0].strip()
-
-    def _maybe_show_pure_bluff_before_action(self, decision: BotDecision) -> None:
-        if (decision.action or "").lower() != "raise":
-            return
-        if self._decision_purpose() != "pure_bluff_river":
-            return
-        # Auto reveal is disabled while pure-bluff show strategy is under review.
-        # shown = self.show_my_hole_cards()
-        # if shown:
-        #     log.info("[BOT] 纯诈唬亮牌：ActionREQ 前展示 %d 张手牌。", shown)
-
     def _on_action_notify(self, msg: dict) -> WireInject | None:
         if self._api is None or self._my_seat is None:
             return None
@@ -2690,7 +2658,6 @@ class BotBridge:
 
         action_type, chips = _decision_to_wire(decision, current_bet=self._my_bet)
         self._remember_hero_wire_action(decision, notify_sig=notify_sig)
-        self._maybe_show_pure_bluff_before_action(decision)
         delay_sec = _inject_delay_before_action(
             street, decision, self._pot, self._bb or 0.0,
         )
@@ -2802,6 +2769,7 @@ class BotBridge:
                 self._pending_showdown[int(seat)] = cards
 
     def _on_winner(self, msg: dict) -> tuple[str, dict, float] | None:
+        self._settle_my_hand(msg)
         if self._api is None:
             return None
 
@@ -2855,9 +2823,8 @@ class BotBridge:
             if seat not in final_stacks:
                 final_stacks[seat] = chips
 
-        # NOTE: per-hand profit_delta is not used as the session PnL source.
-        # Dashboard PnL still comes from UserValueRSP wallet samples + current
-        # table chips. The per-hand value below only densifies the chart.
+        # The session's poker PnL is the running sum of these server-settled
+        # results (_settle_my_hand); wallet samples only show the balances.
         self._seat_chips = dict(final_stacks)
         if self._my_seat is not None:
             self._my_chips = max(0, _chip_int(final_stacks.get(self._my_seat, self._my_chips), 0))
@@ -2888,7 +2855,11 @@ class BotBridge:
         if inject is not None:
             return inject
         # 选桌：每手结束时按桌上真人 / 人机数决定去留（打法本身不变）。
-        return self._table_event("hand_end")
+        inject = self._table_event("hand_end")
+        if inject is not None:
+            return inject
+        # 留在这张桌：筹码短了就在桌上补码。
+        return self._maybe_topup(final_stacks)
 
     def _maybe_auto_collect_current_hand(self, reasons: list[str]) -> bool:
         if not getattr(config, "AUTO_COLLECT_SPECIAL_HANDS_ENABLED", True):
@@ -2976,8 +2947,8 @@ class BotBridge:
             - 对游戏抽水不敏感（桌上多少就带走多少）
             - 一手一判，不需要累计
           本次启动盈亏：
-            - 由 UserValueRSP 钱包余额 + 当前桌上筹码相对启动基线计算
-            - 不依赖 WinnerRSP.profit / 本地买入扣减等牌局内近似统计
+            - 服务端每手结算 WinnerRSP.profit 里自己那一项的累计（_settle_my_hand）
+            - 与钱包余额、活动奖励、小游戏输赢无关
         """
         if self._skip_profit_lock:
             return None
@@ -3004,12 +2975,10 @@ class BotBridge:
             return None
 
         buyin = int(100 * bb)
-        seat_reserve = bool(config.PROFIT_LOCK_LEAVE_SEAT_RESERVE)
         pending = {
             "roomid": room_id,
             "byin_chips": buyin,
             "uid": self._my_uid,
-            "seat_reserve": seat_reserve,
             "leave_mode": "delay_leave",
             "delay_leave_requested": True,
             "delay_leave_confirmed": False,
@@ -3090,6 +3059,10 @@ class BotBridge:
                 self._bankroll_pending_buyin_reason = "table_switch"
                 log.warning("[BOT] 选桌：已离桌（%s），%s", switch.get("reason"),
                             "停止匹配" if step else "稍后重新匹配")
+                if switch.get("played"):
+                    # 下一张桌会重新买入，桌上筹码不再连续：把累计的对局盈亏报出来。
+                    self._notify("table_leave", reason=switch.get("cause"),
+                                 session_delta_chips=int(self._session_poker_pnl))
                 if step:
                     self._table_step(step)
                 return self._mark_my_left_table("leave_room")
@@ -3124,11 +3097,11 @@ class BotBridge:
         if pending is None:
             if code in (0, 2, 3):
                 if (was_seated and chips_before_leave > 0 and self._auto_rejoin_fields
+                        and not self._loss_stop
                         and not self._is_friend_room and not self._tournament_passthrough
                         and self._runtime_calibration_should_pause_play() is None):
                     self._mark_my_table_chips_zero()
-                    log.warning("[BOT] 非破产、非锁仓离桌：将重新匹配，续入次数保持 %d/%d。",
-                                self._auto_rebuy_done, self._max_auto_rebuy)
+                    log.warning("[BOT] 非破产、非锁仓离桌：将重新匹配。")
                     return self._request_bankroll_sample("unexpected_leave", action={
                         "kind": "unexpected_leave", "quickstart_fields": dict(self._auto_rejoin_fields),
                     })
@@ -3175,7 +3148,7 @@ class BotBridge:
             return None
 
         reby_left_time = msg.get("reby_left_time", 0)
-        rebuy_chips = int(100 * (self._bb or 1000))
+        bb = float(self._bb or 1000)
         pause_status = self._runtime_calibration_should_pause_play()
         if pause_status is not None:
             log.warning(
@@ -3185,13 +3158,12 @@ class BotBridge:
             )
             return None
 
-        if self._auto_rebuy_done >= self._max_auto_rebuy:
-            log.warning(
-                "[BOT] ⚠️  筹码清零！已达本房间最大自动续入次数 %d/%d，不再续入。rebuy 窗口 %d 秒。",
-                self._auto_rebuy_done,
-                self._max_auto_rebuy,
-                reby_left_time,
-            )
+        # 破产买入也是把筹码带上桌：100BB 放得下就买 100BB，放不下就买上限还容得下的最大一档，
+        # 连最小一档都放不下，本次启动到此为止。
+        rebuy_chips = self._capped_buyin(int(_BUYIN_BB * bb), bb)
+        if rebuy_chips <= 0:
+            log.warning("[BOT] ⚠️  筹码清零！净亏损已到上限，不再续入。rebuy 窗口 %d 秒。", reby_left_time)
+            self._stop_for_loss_cap("破产买入")
             return None
 
         self._auto_rebuy_done += 1
@@ -3227,10 +3199,10 @@ class BotBridge:
             "rebuy_window_sec": reby_left_time,
         }
         log.warning(
-            "[BOT] ⚠️  筹码清零！自动续入 %d（100BB） 第 %d/%d 次，先采样余额再买入。rebuy 窗口 %d 秒。",
+            "[BOT] ⚠️  筹码清零！自动续入 %d（%.0fBB） 第 %d 次，先采样余额再买入。rebuy 窗口 %d 秒。",
             rebuy_chips,
+            rebuy_chips / bb,
             rebuy_nth,
-            self._max_auto_rebuy,
             reby_left_time,
         )
         return self._request_bankroll_sample("auto_rebuy", action=action)

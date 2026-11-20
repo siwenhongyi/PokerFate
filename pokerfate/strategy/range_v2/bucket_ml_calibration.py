@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -15,6 +16,7 @@ from pokerfate.core.card import Card
 from pokerfate.strategy.range_v2 import hand_categorizer as hcat
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
 from pokerfate.strategy.range_v2 import board_analyzer as _board_analyzer
+from pokerfate.strategy.range_v2 import formula_fit
 
 try:
     Booster = importlib.import_module("lightgbm").Booster
@@ -101,6 +103,16 @@ def _load_model(mode: str) -> Optional[dict[str, Any]]:
     if float(model.get("blend_alpha", 0.0) or 0.0) <= 0:
         _CACHE[cache_key] = None
         return None
+    # The model is fitted on the output of the formula layer.  With another formula fit in
+    # force it would correct errors that are not there any more (the 2026-11-11 model did,
+    # for four days), so it is left out until it is retrained: docs/range_v2_bucket_ml.md.
+    trained_on = model.get("formula_fit")
+    if trained_on is not None and trained_on != formula_fit.fingerprint():
+        logging.getLogger(__name__).warning(
+            "bucket model %s ignored: trained on formula fit %s, running %s — retrain it",
+            path.name, trained_on, formula_fit.fingerprint())
+        _CACHE[cache_key] = None
+        return None
     _CACHE[cache_key] = model
     return model
 
@@ -181,18 +193,6 @@ def _board_features(board: Iterable[Card] | None) -> dict[str, Any]:
         "high_card_rank": int(sig.high_card_rank or 0),
         "connectedness": float(sig.connectedness),
     }
-
-
-def _experiment_profile() -> str:
-    keys = (
-        "PF_TURN_FLOP_RELATIVE_GUARD",
-        "PF_BUCKET_ML",
-    )
-    defaults = {
-        "PF_TURN_FLOP_RELATIVE_GUARD": "1",
-        "PF_BUCKET_ML": "lgbm",
-    }
-    return "|".join(f"{key}={os.environ.get(key, defaults[key])}" for key in keys)
 
 
 def _hero_bucket(known_cards: Iterable[int], board: list[Card]) -> str:

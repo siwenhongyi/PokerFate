@@ -38,6 +38,9 @@ BARK_EVENT_ICONS: dict[str, str] = {
     "auto_rebuy": f"{_FE}/Money%20with%20Wings/3D/money_with_wings_3d.png",
     "room_escape": f"{_FE}/Money%20with%20Wings/3D/money_with_wings_3d.png",
     "profit_lock_trigger": f"{_FE}/Gem%20Stone/3D/gem_stone_3d.png",
+    "table_leave": f"{_FE}/Robot/3D/robot_3d.png",
+    "topup": f"{_FE}/Coin/3D/coin_3d.png",
+    "loss_stop": f"{_FE}/Face%20Screaming%20in%20Fear/3D/face_screaming_in_fear_3d.png",
     "chips_below_50bb": f"{_FE}/Face%20Screaming%20in%20Fear/3D/face_screaming_in_fear_3d.png",
     "hand_swing_up": f"{_FE}/Chart%20Increasing/3D/chart_increasing_3d.png",
     "hand_swing_down": f"{_FE}/Chart%20Decreasing/3D/chart_decreasing_3d.png",
@@ -47,6 +50,14 @@ BARK_EVENT_ICONS: dict[str, str] = {
 }
 
 _WSS_NOTICE_ID = "pokerfate-wss-disconnected"
+
+# 选桌让 bot 离开一张已经打过牌的桌子（table_policy 的离桌原因 → 标题）。
+_TABLE_LEAVE_TITLES: dict[str, str] = {
+    "no_humans": "选桌离桌 · 桌上没有真人了",
+    "outnumbered": "选桌离桌 · 真人少于人机",
+    "empty_timeout": "选桌离桌 · 桌上没人了",
+    "better_stake": "选桌离桌 · 回优先场次",
+}
 
 
 def _fit_utf8(text: str, max_bytes: int, suffix: str = "...") -> str:
@@ -98,11 +109,25 @@ def format_bark_message(event: str, fields: dict[str, Any]) -> tuple[str, str, s
     if event == "auto_rebuy":
         delta_str = _format_optional_chips(fields.get("session_delta_chips"))
         title = "筹码清零 · 自动买入"
+        cap = fields.get("loss_cap_chips")
+        cap_line = f"\n净亏损上限: {format_chips_km_signed(-float(cap))}" if isinstance(cap, (int, float)) and cap > 0 else ""
         body = (
-            f"第 {fields.get('nth')}/{fields.get('max_n')} 次自动续入\n"
+            f"第 {fields.get('nth')} 次自动续入\n"
             f"续入筹码: {fields.get('rebuy_chips')}\n"
             f"rebuy 窗口: {fields.get('rebuy_window_sec')} 秒\n"
             f"本次启动盈亏: {delta_str}（筹码）"
+            f"{cap_line}"
+        )
+        return title, body, icon
+
+    if event == "loss_stop":
+        cap = fields.get("loss_cap_chips")
+        cap_str = format_chips_km_signed(-float(cap)) if isinstance(cap, (int, float)) and cap > 0 else "-"
+        title = "净亏损到上限 · 已停止"
+        body = (
+            f"本次启动盈亏: {_format_optional_chips(fields.get('session_delta_chips'))}（筹码）\n"
+            f"净亏损上限: {cap_str}（{fields.get('buyins')} 个 100BB 买入）\n"
+            f"放不下{fields.get('what') or '买入'}，已停在大厅，不再买入。重启后恢复。"
         )
         return title, body, icon
 
@@ -131,6 +156,29 @@ def format_bark_message(event: str, fields: dict[str, Any]) -> tuple[str, str, s
             f"房间 room_id={fields.get('room_id')}  BB={fields.get('big_blind')}\n"
             f"本次启动盈亏: {delta_str}（筹码）"
         )
+        return title, body, icon
+
+    if event == "topup":
+        try:
+            bb = float(fields.get("big_blind") or 0)
+        except (TypeError, ValueError):
+            bb = 0.0
+
+        def in_bb(chips: Any) -> str:
+            return f"（{float(chips) / bb:.0f}BB）" if bb > 0 and isinstance(chips, (int, float)) else ""
+
+        added, stack = fields.get("added_chips"), fields.get("stack_chips")
+        title = "桌上补码"
+        body = (
+            f"补充筹码: {added}{in_bb(added)}，本次启动第 {fields.get('nth')} 次\n"
+            f"桌上筹码: {stack}{in_bb(stack)}\n"
+            f"本次启动盈亏: {_format_optional_chips(fields.get('session_delta_chips'))}（筹码）"
+        )
+        return title, body, icon
+
+    if event == "table_leave":
+        title = _TABLE_LEAVE_TITLES.get(str(fields.get("reason") or ""), "选桌离桌")
+        body = f"本次启动盈亏: {_format_optional_chips(fields.get('session_delta_chips'))}（筹码）"
         return title, body, icon
 
     if event == "hand_swing":

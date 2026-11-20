@@ -11,25 +11,23 @@
     <h1>PokerFate 控制台</h1>
     <div class="status">
       <span id="session-dot" class="dot"></span><span id="session-text">WSS -</span>
-      <span id="job-dot" class="dot"></span><span id="job-text">任务 -</span>
       <span id="web-url"></span>
     </div>
   </header>
   <main>
+    <div id="notice" class="notice"></div>
     <div class="tabs" role="tablist">
       <button class="tab-btn active" type="button" data-tab="live">实时对局</button>
-      <button class="tab-btn" type="button" data-tab="color">彩球集</button>
       <button class="tab-btn" type="button" data-tab="dashboard">资金看板</button>
       <button class="tab-btn" type="button" data-tab="hands">对局列表</button>
       <button class="tab-btn" type="button" data-tab="range">校准评估</button>
-      <button class="tab-btn" type="button" data-tab="bot">运行参数</button>
     </div>
 
     <div id="tab-live" class="tab-panel active">
     <section>
       <dl class="live-totals">
         <dt title="本次启动以来，按已结算牌局累计">本次对局盈亏</dt><dd id="live-pnl">—</dd>
-        <dt title="每日、每周、挑战任务、活跃度宝箱和 07:00 / 19:00（UTC+8）发展基金的已领筹码">本次活动奖励</dt><dd id="live-rewards">—</dd>
+        <dt title="每日、每周、挑战任务、活跃度宝箱、蓝湾漫游（落格及里程碑）和发展基金的已领筹码">本次活动奖励</dt><dd id="live-rewards">—</dd>
       </dl>
       <div class="live-head">
         <span>房间 <b id="live-room">-</b></span>
@@ -58,103 +56,15 @@
     </section>
     </div>
 
-    <div id="tab-color" class="tab-panel">
-    <section>
-      <form id="run-form">
-        <label>起始筹码
-          <input name="base_bet" type="number" min="1" step="1" value="1000">
-        </label>
-        <label>最大筹码
-          <input name="max_bet" type="number" min="1" step="1" value="100000">
-        </label>
-        <label>倍投倍率
-          <input name="multiplier" type="number" min="2" step="1" value="2">
-        </label>
-        <label>循环次数
-          <input name="cycles" type="number" min="1" step="1" value="1">
-        </label>
-        <label>选球模式
-          <select name="selection_mode">
-            <option value="cycle" selected>每个循环固定少见球</option>
-            <option value="bet">每次重选少见球</option>
-            <option value="random_each">每次随机选择</option>
-            <option value="recent3_most">最近3次结果最多</option>
-          </select>
-        </label>
-        <label>等级
-          <input name="lvl" type="number" min="1" max="5" step="1" value="1">
-        </label>
-        <label>间隔秒
-          <input name="delay" type="number" min="0" step="0.1" value="1.5">
-        </label>
-        <label>超时秒
-          <input name="timeout" type="number" min="1" step="0.5" value="20">
-        </label>
-        <label>from_game_type
-          <input name="from_game_type" type="number" step="1" value="0">
-        </label>
-        <label>room_id
-          <input name="room_id" type="number" min="0" step="1" value="0">
-        </label>
-        <button id="start-btn" type="submit">开始彩球</button>
-        <button id="stop-btn" class="danger" type="button">停止</button>
-        <button id="refresh-btn" class="secondary" type="button">刷新</button>
-      </form>
-      <div id="notice" class="notice"></div>
-      <div class="metrics">
-        <div class="metric"><span>局数</span><b id="m-played">0</b></div>
-        <div class="metric"><span>盈利循环</span><b id="m-cycles">0</b></div>
-        <div class="metric"><span>总投入</span><b id="m-bet">0</b></div>
-        <div class="metric"><span>总派彩</span><b id="m-return">0</b></div>
-        <div class="metric"><span>总盈亏</span><b id="m-net">0</b></div>
-      </div>
-    </section>
-
-    <section>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>循环</th>
-              <th>轮次</th>
-              <th>选择</th>
-              <th>筹码</th>
-              <th>开奖结果</th>
-              <th>本局盈亏</th>
-              <th>循环盈亏</th>
-              <th>累计盈亏</th>
-              <th>计数</th>
-            </tr>
-          </thead>
-          <tbody id="rounds-body">
-            <tr><td colspan="10" class="muted">暂无记录</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section>
-      <h2 style="font-size:16px;margin:0 0 10px;">历史记录</h2>
-      <div class="metrics" style="margin:0 0 12px;">
-        <div class="metric"><span>历史次数</span><b id="h-records">0</b></div>
-        <div class="metric"><span>历史局数</span><b id="h-played">0</b></div>
-        <div class="metric"><span>历史总投入</span><b id="h-bet">0</b></div>
-        <div class="metric"><span>历史总派彩</span><b id="h-return">0</b></div>
-        <div class="metric"><span>历史总盈亏</span><b id="h-net">0</b></div>
-      </div>
-      <div id="history" class="history muted">暂无记录</div>
-    </section>
-    </div>
-
     <div id="tab-dashboard" class="tab-panel">
       <section>
         <div class="metrics">
           <div class="metric"><span>当前总筹码</span><b id="bank-total">-</b></div>
           <div class="metric"><span>钱包余额</span><b id="bank-wallet">-</b></div>
           <div class="metric"><span>桌上筹码</span><b id="bank-table">-</b></div>
-          <div class="metric"><span>本次对局盈亏（扣除奖励）</span><b id="bank-delta">-</b></div>
-          <div class="metric"><span>本次领取奖励筹码</span><b id="bank-rewards">0</b></div>
+          <div class="metric"><span title="本次启动以来，服务端每手结算的累计；与钱包余额、活动奖励、小游戏无关">本次对局盈亏</span><b id="bank-delta">-</b></div>
+          <div class="metric"><span title="每日、每周、挑战任务、活跃度宝箱、蓝湾漫游和发展基金领到的筹码">本次领取奖励筹码</span><b id="bank-rewards">0</b></div>
+          <div class="metric"><span title="为做活动任务玩的染色、弹珠小游戏的净输赢">本次小游戏输赢</span><b id="bank-sidegame">0</b></div>
           <div class="metric"><span>最近采样</span><b id="bank-last">-</b></div>
         </div>
       </section>
@@ -171,7 +81,8 @@
         <section>
           <div class="metrics" style="grid-template-columns: repeat(2, minmax(0, 1fr)); margin:0 0 12px;">
             <div class="metric"><span>盈利锁仓</span><b id="bank-locks">0</b></div>
-            <div class="metric"><span>自动续入</span><b id="bank-rebuys">0</b></div>
+            <div class="metric"><span>破产买入</span><b id="bank-rebuys">0</b></div>
+            <div class="metric"><span>净亏损上限</span><b id="bank-losscap">-</b></div>
             <div class="metric"><span>换桌</span><b id="bank-escapes">0</b></div>
             <div class="metric"><span>BB</span><b id="bank-bb">-</b></div>
           </div>
@@ -180,66 +91,73 @@
       </div>
     </div>
 
-    <div id="tab-bot" class="tab-panel">
-      <section>
-        <form id="bot-settings-form">
-          <label>盈利锁仓 BB
-            <input id="bot-profit-lock-bb" name="profit_lock_bb" type="number" min="1" step="1" required>
-          </label>
-          <label>决策引擎
-            <select id="bot-decision-engine" name="decision_engine">
-              <option value="local">local</option>
-              <option value="g5">g5</option>
-              <option value="g5_all">g5_all</option>
-              <option value="cfr">cfr</option>
-            </select>
-          </label>
-          <label>粘池翻前调整
-            <input id="bot-preflop-sticky-pool-adjust" name="preflop_sticky_pool_adjust" type="checkbox">
-          </label>
-          <button id="bot-save-btn" type="submit">保存运行参数</button>
-          <button id="bot-refresh-btn" class="secondary" type="button">刷新参数</button>
-        </form>
-        <div id="bot-notice" class="notice"></div>
-        <div class="metrics">
-          <div class="metric"><span>锁仓阈值</span><b id="bot-lock-bb">-</b></div>
-          <div class="metric"><span>锁仓筹码</span><b id="bot-lock-chips">-</b></div>
-          <div class="metric"><span>锁仓状态</span><b id="bot-lock-state">-</b></div>
-          <div class="metric"><span>决策引擎</span><b id="bot-engine-state">-</b></div>
-          <div class="metric"><span>粘池翻前</span><b id="bot-preflop-sticky-state">-</b></div>
-        </div>
-      </section>
-    </div>
-
     <div id="tab-range" class="tab-panel">
       <section>
         <div class="hand-detail-title">
-          <h2>范围校准评估</h2>
+          <h2>对手范围校准</h2>
           <button id="range-run-btn" type="button">计算校准</button>
         </div>
         <div id="range-notice" class="notice"></div>
         <div class="metrics">
-          <div class="metric"><span>决策点</span><b id="range-count">0</b></div>
+          <div class="metric"><span>计入行数</span><b id="range-count">0</b></div>
           <div class="metric"><span>手牌数</span><b id="range-hands">0</b></div>
-          <div class="metric"><span>Bayes 改善</span><b id="range-pf-better">0</b></div>
-          <div class="metric"><span>Bayes 变差</span><b id="range-g5-better">0</b></div>
-          <div class="metric"><span>Bucket ECE</span><b id="range-ece">-</b></div>
-          <div class="metric"><span>Top Bucket</span><b id="range-top-acc">-</b></div>
-          <div class="metric"><span>结论</span><b id="range-winner">-</b></div>
+          <div class="metric"><span title="翻后六个牌力档的预测概率与真实频率的平均差距，越小越好">牌力档 ECE</span><b id="range-ece">-</b></div>
+          <div class="metric"><span title="决策实际读取的量：对手范围里强牌与坚果合计的占比">强牌+坚果 预测 / 实际</span><b id="range-strong">-</b></div>
+          <div class="metric"><span title="起手范围的 NLL 减去逐街更新后的 NLL；正数表示更新让对手真实手牌更可能">逐街更新 ΔNLL</span><b id="range-delta">-</b></div>
         </div>
       </section>
 
       <section>
         <div class="hand-detail-title">
           <h2>结论</h2>
-          <span id="range-meta" class="muted">点击重新分析读取最新采集</span>
+          <span id="range-meta" class="muted">点击“计算校准”读取最新采集</span>
         </div>
         <div id="range-conclusion" class="range-conclusion muted">暂无分析</div>
       </section>
 
       <div class="range-layout">
         <section class="range-table">
-          <h2>ECE 可靠性曲线</h2>
+          <h2>强牌+坚果占比（街道 × 对手刚做的动作）</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>场景</th>
+                  <th>行数</th>
+                  <th>预测</th>
+                  <th>实际</th>
+                  <th>偏差（点）</th>
+                  <th title="偏差超过 3 个点且超过 2 个标准误才算偏离">判断</th>
+                </tr>
+              </thead>
+              <tbody id="range-cell-body">
+                <tr><td colspan="6" class="muted">暂无分析</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section class="range-table">
+          <h2>各牌力档</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>牌力档</th>
+                  <th>点数</th>
+                  <th>平均预测</th>
+                  <th>真实频率</th>
+                  <th>偏差（点）</th>
+                  <th>ECE</th>
+                </tr>
+              </thead>
+              <tbody id="range-bucket-body">
+                <tr><td colspan="6" class="muted">暂无分析</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section class="range-table">
+          <h2>可靠性曲线</h2>
           <div class="table-wrap">
             <table>
               <thead>
@@ -248,132 +166,30 @@
                   <th>点数</th>
                   <th>平均预测</th>
                   <th>真实频率</th>
-                  <th>偏差</th>
-                  <th>方向</th>
+                  <th>偏差（点）</th>
                 </tr>
               </thead>
-              <tbody id="range-ece-bin-body">
-                <tr><td colspan="6" class="muted">暂无分析</td></tr>
+              <tbody id="range-bin-body">
+                <tr><td colspan="5" class="muted">暂无分析</td></tr>
               </tbody>
             </table>
           </div>
         </section>
         <section class="range-table">
-          <h2>按 Bucket 校准</h2>
+          <h2>逐街更新是否有效</h2>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Bucket</th>
-                  <th>点数</th>
-                  <th>ECE</th>
-                  <th>平均预测</th>
-                  <th>真实频率</th>
-                  <th>方向</th>
-                </tr>
-              </thead>
-              <tbody id="range-ece-bucket-body">
-                <tr><td colspan="6" class="muted">暂无分析</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <section class="range-table">
-          <h2>校准热点</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>场景</th>
-                  <th>点数</th>
-                  <th>ECE</th>
-                  <th>平均预测</th>
-                  <th>真实频率</th>
-                  <th>方向</th>
-                </tr>
-              </thead>
-              <tbody id="range-ece-hotspot-body">
-                <tr><td colspan="6" class="muted">暂无分析</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <section class="range-table">
-          <h2>按街道</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>维度</th>
+                  <th>街道</th>
                   <th>样本</th>
-                  <th>改善/变差</th>
-                  <th>Combo 概率</th>
-                  <th>Logloss</th>
+                  <th>更新后更准的比例</th>
+                  <th>真实手牌概率</th>
                   <th>ΔNLL</th>
                 </tr>
               </thead>
               <tbody id="range-street-body">
-                <tr><td colspan="6" class="muted">暂无分析</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <section class="range-table">
-          <h2>按实际牌型</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>维度</th>
-                  <th>样本</th>
-                  <th>改善/变差</th>
-                  <th>Combo 概率</th>
-                  <th>Logloss</th>
-                  <th>ΔNLL</th>
-                </tr>
-              </thead>
-              <tbody id="range-category-body">
-                <tr><td colspan="6" class="muted">暂无分析</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <section class="range-table">
-          <h2>按玩家</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>维度</th>
-                  <th>样本</th>
-                  <th>改善/变差</th>
-                  <th>Combo 概率</th>
-                  <th>Logloss</th>
-                  <th>ΔNLL</th>
-                </tr>
-              </thead>
-              <tbody id="range-player-body">
-                <tr><td colspan="6" class="muted">暂无分析</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <section class="range-table">
-          <h2>明显样例</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>方向</th>
-                  <th>手牌</th>
-                  <th>街道</th>
-                  <th>玩家</th>
-                  <th>实际</th>
-                  <th>概率 / NLL</th>
-                </tr>
-              </thead>
-              <tbody id="range-example-body">
-                <tr><td colspan="6" class="muted">暂无分析</td></tr>
+                <tr><td colspan="5" class="muted">暂无分析</td></tr>
               </tbody>
             </table>
           </div>

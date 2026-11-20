@@ -1,20 +1,14 @@
 """Bayesian 1326-dim range tracker.
 
-# 2026-04-28 P0.3 selected defaults:
-#   loose-passive (vpip>=0.45 & pfr/vpip<=0.30) signal ×=0.5
-#   new villain (hands_seen<30) signal ×=0.7
-
-Maintains a probability vector w[1326] for each opponent.  Every observed
-action multiplies by the action likelihood and re-normalizes.
+Maintains a probability vector w[1326] for each opponent.  Every hand starts with all combos
+equally likely; every observed action multiplies by the fitted action likelihood
+(``fitted_likelihood.py``: by preflop strength bin before the flop, by strength bucket after
+it), re-normalizes, and mixes a small share of a uniform range back in so that no hand is
+ever ruled out.
 
 References:
   - Bayes' Bluff (Southey et al., UAI 2005) — Bayesian opponent modeling
   - Libratus (Brown & Sandholm, 2017) — reach probability as range prior
-  - Johanson et al. (AISTATS 2009) — GTO↔observed confidence interpolation
-    (paper: "Data Biased Robust Counter Strategies")
-  - Grünwald (2012, SafeBayes) — power likelihood tempering (α-Bayes).
-    The specific α = max(0.3, 0.85 - 0.4·confidence) schedule is a heuristic;
-    Grünwald's original work uses cross-validation to pick η.
 """
 
 from __future__ import annotations
@@ -28,24 +22,18 @@ from collections import OrderedDict
 import numpy as np
 
 from pokerfate.core.card import Card
-from pokerfate.core.config import MIN_HANDS_FOR_CLASSIFICATION
 from pokerfate.core.hand_evaluator import HandEvaluator
 from pokerfate.strategy.range_v2 import hand_categorizer as hcat
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
-from pokerfate.strategy.range_v2.action_model import (
-    ActionContext,
-    ActionModel,
-    GTO_PFR,
-    GTO_VPIP,
-    PlayerProfile,
-)
+from pokerfate.strategy.range_v2.action_model import ActionContext, ActionModel, PlayerProfile
 from pokerfate.strategy.range_v2.bucket_ml_calibration import (
     calibrate_bucket_probs,
     profile_feature_dict,
 )
-from pokerfate.strategy.range_v2.empirical_model import (
-    CAT_ORDER as EMPIRICAL_CAT_ORDER,
-    empirical_preflop_bucket_prior,
+from pokerfate.strategy.range_v2.empirical_model import action_label
+from pokerfate.strategy.range_v2.fitted_likelihood import (
+    ACTIONS as LIKELIHOOD_ACTIONS, PREFLOP_BINS, likelihood_features, preflop_bin_index, preflop_features,
+    preflop_label,
 )
 
 log = logging.getLogger(__name__)
@@ -54,11 +42,7 @@ _BUCKET_CAL_MIN_FACTOR = 0.25
 _BUCKET_CAL_MAX_FACTOR = 8.0
 _BUCKET_CAL_CATS = ('nuts', 'strong', 'medium', 'draw', 'weak_draw', 'air')
 _BUCKET_CAL_IDX = {cat: i for i, cat in enumerate(_BUCKET_CAL_CATS)}
-_PREFLOP_CAT_IDX = np.array(
-    [_BUCKET_CAL_IDX.get(hcat.categorize(idx, []), _BUCKET_CAL_IDX['air'])
-     for idx in range(1326)],
-    dtype=np.int8,
-)
+
 
 
 
@@ -117,182 +101,9 @@ def _preflop_action_type(action: str, context: ActionContext) -> str:
     return action or ''
 
 
-# ---------------------------------------------------------------------------
-# Cross-street sequence pattern corrections
-#
-# Empirically calibrated factors applied AFTER the independent Bayesian
-# update. Goal: capture sequential information that category-level likelihoods
-# miss (e.g. a capped calling line sharply de-weights nuts).
-#
-# Calibration methodology:
-#   1. Run independent Bayesian updates with GTO freq tables + α=0.7
-#   2. Get target distributions from PioSolver / Upswing / Red Chip data
-#   3. correction = target ÷ independent_result
-#
-# These numbers come from a private solver run; they are not citable from any
-# public source. Treat as engineering heuristics, not GTO truth.
-# ---------------------------------------------------------------------------
-
 # Refined action types (produced from raw 'raise' by context.is_raise_over)
 _ACT_BET = 'bet'                 # first aggressive action on this street
 _ACT_RAISE_OVER = 'raise_over'   # raising over someone else's bet
-_ACT_CALL = 'call'
-_ACT_CHECK = 'check'
-_ACT_FOLD = 'fold'
-
-_SEQUENCE_CORRECTIONS: Dict[str, Dict[str, float]] = {
-    # check-check-raise_over on 2+ streets → slow-play trap.
-    #  - strong 1.1→1.3: overpair/two-pair share of xr range is higher than 1.1 implied
-    #  - draw 0.2→0.4: semi-bluff CR with FD is a real GTO line
-    'xr_trap': {
-        'nuts': 2.0, 'strong': 1.3, 'medium': 0.3,
-        'draw': 0.4, 'weak_draw': 0.1, 'air': 0.4,
-    },
-    # same-street check-then-raise-over (river CR)
-    'check_raise': {
-        'nuts': 1.5, 'strong': 1.0, 'medium': 0.3,
-        'draw': 0.7, 'weak_draw': 0.3, 'air': 0.7,
-    },
-    # same-street re-raise (e.g. flop 3bet).
-    #  - weak_draw 0.1→0.3: gutshot + overcard is a real 3bet bluff combo
-    'reraise': {
-        'nuts': 2.0, 'strong': 0.8, 'medium': 0.2,
-        'draw': 0.5, 'weak_draw': 0.3, 'air': 0.6,
-    },
-    # bet-bet-bet through the river.
-    #  - draw/weak_draw would be remapped to 'air' on the river anyway
-    #    (HandCategorizer rule). Keys omitted.
-    'triple_barrel': {
-        'nuts': 1.2, 'strong': 1.0, 'medium': 0.7,
-        'air': 0.65,
-    },
-    # call-call (2-street cap): PARTIAL cap — nuts still possible (0.3 not 0.1)
-    # because 2 calls isn't enough evidence to rule out slow-play.
-    'capped_range_partial': {
-        'nuts': 0.30, 'strong': 0.50, 'medium': 1.50,
-        'draw': 1.20, 'weak_draw': 1.10, 'air': 1.0,
-    },
-    # call-call-call (3-street cap): FULL cap — nuts effectively ruled out.
-    'capped_range_full': {
-        'nuts': 0.10, 'strong': 0.35, 'medium': 1.65,
-        'draw': 1.30, 'weak_draw': 1.20, 'air': 1.0,
-    },
-    # bet-bet-check give-up
-    'bet_bet_give_up': {
-        'nuts': 0.12, 'strong': 0.25, 'medium': 5.0,
-        'draw': 2.0, 'weak_draw': 1.5, 'air': 5.0,
-    },
-    # raise → check on next street: failed semi-bluff signature
-    'aggression_drop': {
-        'nuts': 0.19, 'strong': 0.42, 'medium': 1.8,
-        'draw': 2.0, 'weak_draw': 1.8, 'air': 2.7,
-    },
-}
-
-
-def _detect_sequence_pattern(history: List[tuple]) -> Optional[str]:
-    """Detect if the (street, refined_action) history matches a known pattern.
-
-    Returns the most-specific matching pattern name, or None.
-    Only triggers on POSTFLOP streets — preflop sequences go through the
-    preflop action model and should not be double-weighted here.
-    """
-    if not history:
-        return None
-
-    last_street, last_act = history[-1]
-    if last_street == 'preflop':
-        # Pattern corrections are calibrated on postflop category semantics.
-        # Running them on preflop would apply postflop nuts/medium/air
-        # labels to preflop hand buckets — incorrect by construction.
-        return None
-
-    street_actions: Dict[str, List[str]] = {}
-    for street, act in history:
-        street_actions.setdefault(street, []).append(act)
-
-    streets_in_order = ['preflop', 'flop', 'turn', 'river']
-    postflop_streets = [
-        s for s in streets_in_order
-        if s in street_actions and s != 'preflop'
-    ]
-
-    # ── Strong signals (triggered on raise/bet) ──
-
-    if last_act == _ACT_RAISE_OVER:
-        # x/x/xr: checked on 2+ prior postflop streets, then raise_over
-        check_streets = sum(
-            1 for s in postflop_streets[:-1]
-            if _ACT_CHECK in street_actions.get(s, [])
-        )
-        if check_streets >= 2:
-            return 'xr_trap'
-
-        current_street_acts = street_actions.get(last_street, [])
-        # check-raise: checked earlier this street, now raise_over
-        if len(current_street_acts) >= 2 and current_street_acts[-2] == _ACT_CHECK:
-            return 'check_raise'
-
-        # re-raise: already bet/raised this street
-        prior_raises = sum(
-            1 for a in current_street_acts[:-1]
-            if a in (_ACT_BET, _ACT_RAISE_OVER)
-        )
-        if prior_raises >= 1:
-            return 'reraise'
-
-    if last_act == _ACT_BET:
-        # triple barrel: a bet/raise on flop + turn + river, ending with a
-        # river bet (this action). '3 streets of aggression + river bet'.
-        bet_streets = [
-            s for s in postflop_streets
-            if any(a in (_ACT_BET, _ACT_RAISE_OVER) for a in street_actions.get(s, []))
-        ]
-        if len(bet_streets) >= 3 and last_street == 'river':
-            return 'triple_barrel'
-
-    # ── Weak signals (triggered on check/call) ──
-
-    if last_act == _ACT_CHECK:
-        # bet-bet-give_up: bet on 2 prior streets, now check
-        bet_streets = [
-            s for s in postflop_streets
-            if any(a in (_ACT_BET, _ACT_RAISE_OVER) for a in street_actions.get(s, []))
-            and s != last_street
-        ]
-        if len(bet_streets) >= 2:
-            return 'bet_bet_give_up'
-
-        # aggression_drop: bet/raised on previous street, check on current
-        prev_idx = streets_in_order.index(last_street) - 1 if last_street in streets_in_order else -1
-        if prev_idx >= 0:
-            prev_street = streets_in_order[prev_idx]
-            prev_acts = street_actions.get(prev_street, [])
-            if any(a in (_ACT_BET, _ACT_RAISE_OVER) for a in prev_acts):
-                return 'aggression_drop'
-
-    if last_act == _ACT_CALL:
-        # Capped range: ONLY call, never bet/raise on any postflop street.
-        # Triggered pre-emptively at 2 calls (partial) so the bot's NEXT
-        # decision can exploit; tightens further at 3 calls (full).
-        ever_raised = any(
-            a in (_ACT_BET, _ACT_RAISE_OVER)
-            for s in postflop_streets
-            for a in street_actions.get(s, [])
-        )
-        if ever_raised:
-            return None
-        call_streets = [
-            s for s in postflop_streets
-            if _ACT_CALL in street_actions.get(s, [])
-        ]
-        if len(call_streets) >= 3:
-            return 'capped_range_full'
-        if len(call_streets) >= 2:
-            return 'capped_range_partial'
-
-    return None
-
 
 _RIVER_SCORE_CACHE: "OrderedDict[tuple, List[int]]" = OrderedDict()
 _RIVER_SCORE_CACHE_MAX = 16
@@ -367,16 +178,37 @@ class BayesianRangeTracker:
         # Per-layer trace of the most recent observe_action; consumed by the
         # API's opponent_action log.
         self.last_update_trace: Dict[str, Any] = {}
+        # Off in play.  The training-row extractor turns it on to get, next to the trace, the
+        # weights the last postflop update started from (analysis/type_truth.py).
+        self.keep_update_weights: bool = False
+        self.last_update_weights: Optional[np.ndarray] = None
 
     def set_big_blind(self, big_blind: float) -> None:
         self._big_blind = float(big_blind or 0.0)
 
     def set_known_cards(self, cards: List[Card]) -> None:
-        """Call once per hand with bot's hole cards."""
+        """Call once per hand with bot's hole cards: nobody else can hold them.
+
+        The ranges of the hand usually exist already (``reset_hand`` runs when the hand
+        starts, the hole cards arrive after), so the removal is applied to them here.
+        """
         self._known_cards = {hcm.card_to_int(c) for c in cards}
+        if not self._known_cards:
+            return
+        blocked = hcm.blocked_by(self._known_cards)
+        for store in (self._weights, self._formula_weights):
+            for w in store.values():
+                w[blocked] = 0.0
+                total = w.sum()
+                if total > 0:
+                    w /= total
 
     def start_new_hand(self) -> None:
         """Reset per-hand range state before per-player reset_hand calls."""
+        # The previous hand's hole cards say nothing about this one.  Until 2026-11-15 they
+        # were still in force when the new ranges were built: every combo containing one of
+        # them stayed impossible for the whole hand (7.6% of what opponents really held).
+        self._known_cards = set()
         self._weights.clear()
         self._folded.clear()
         self._action_history.clear()
@@ -513,71 +345,19 @@ class BayesianRangeTracker:
 
     def reset_hand(self, player_id: int, position: str,
                    profile: PlayerProfile) -> None:
-        """Initialize prior distribution for a new hand.
+        """Start a new hand for this player: every combo he can hold is equally likely.
 
-        Prior construction (Johanson 2009 Data-Biased method):
-          - Hands in PFR range → weight 1.0
-          - Hands in VPIP range but not PFR → weight 0.6
-          - Hands outside VPIP → weight 0.03 (never zero — allows deviation)
-          - Card removal: combos containing known cards → 0
+        What he holds is told by what he then does (the fitted preflop likelihood), not
+        assumed from his statistics before he has acted: a big blind who is checked to, or a
+        player still to act, can have any two cards.
         """
-        # Guard against empty/falsy position upstream (None / '').
-        # Empty string was missing from GTO_VPIP so it fell through to the
-        # 0.27 default, which is MP/CO-shaped. Use CO as neutral default when
-        # unknown so BB 0.40 never accidentally maps to 0.27.
         if not position:
             position = 'CO'
         self._player_profiles[player_id] = profile
         self._formula_weights.pop(player_id, None)
 
         w = np.ones(1326, dtype=np.float64)
-
-        # Card removal: my hole cards
-        block = hcm.blocked_by(self._known_cards)
-        w[block] = 0.0
-
-        # Position prior
-        vpip = profile.vpip if profile.hands_seen >= MIN_HANDS_FOR_CLASSIFICATION else GTO_VPIP.get(position, 0.27)
-        pfr = profile.pfr if profile.hands_seen >= MIN_HANDS_FOR_CLASSIFICATION else GTO_PFR.get(position, 0.20)
-
-        raise_thresh = 1.0 - pfr
-        call_floor = 1.0 - vpip
-
-        strengths = hcm.STRENGTH_PCT
-        for idx in range(1326):
-            if w[idx] == 0.0:
-                continue
-            s = strengths[idx]
-            if s >= raise_thresh:
-                w[idx] = 1.0
-            elif s >= call_floor:
-                w[idx] = 0.6
-            else:
-                w[idx] = 0.03
-
-        empirical_prior = empirical_preflop_bucket_prior(position, profile)
-        if empirical_prior is not None:
-            target_dist, blend, _key, _n = empirical_prior
-            active_total = float(w.sum())
-            if active_total > 1e-15 and blend > 0.0:
-                current = {}
-                for cat in EMPIRICAL_CAT_ORDER:
-                    cat_idx = _BUCKET_CAL_IDX.get(cat)
-                    if cat_idx is None:
-                        continue
-                    current[cat] = float(w[_PREFLOP_CAT_IDX == cat_idx].sum()) / active_total
-                multipliers = np.ones(len(EMPIRICAL_CAT_ORDER), dtype=np.float64)
-                for i, cat in enumerate(EMPIRICAL_CAT_ORDER):
-                    cur = current.get(cat, 0.0)
-                    if cur <= 1e-12:
-                        continue
-                    target = (
-                        (1.0 - blend) * cur
-                        + blend * float(target_dist.get(cat, cur) or 0.0)
-                    )
-                    multipliers[i] = max(0.25, min(4.0, target / cur))
-                w *= multipliers[_PREFLOP_CAT_IDX]
-
+        w[hcm.blocked_by(self._known_cards)] = 0.0       # card removal: my hole cards
         total = w.sum()
         if total > 0:
             w /= total
@@ -593,9 +373,8 @@ class BayesianRangeTracker:
             'is_raise_over': False,
             'action_sequence': '',
         }
-        # Sequence-pattern history starts fresh for this hand. If this call
-        # gets skipped, _detect_sequence_pattern would see stale entries from
-        # the previous hand and fire spurious triple_barrel/capped patterns.
+        # The player's own actions in this hand, read by the fitted likelihood ("bet the
+        # street before", "checked earlier on this street").  Starts fresh every hand.
         self._action_history[player_id] = []
 
         self._emit_prediction(player_id, 'preflop', [], 'reset')
@@ -642,22 +421,14 @@ class BayesianRangeTracker:
     def observe_action(self, player_id: int, action: str, street: str,
                        context: ActionContext, profile: PlayerProfile,
                        board: List[Card]) -> None:
-        """Tempered Bayesian update with entropy-adaptive damping.
+        """Bayesian update of one player's range on one action, then floor mixing.
 
-        Standard Bayes: w *= likelihood
-        Tempered:       w *= likelihood^α   (α < 1 slows convergence)
-
-        α is adaptive — when the posterior is already concentrated (low
-        entropy), α decreases to resist further collapse.  This prevents
-        the distribution from collapsing to a handful of combos after
-        3-4 sequential updates, which is the core over-convergence problem
-        in sequential Bayesian range tracking.
-
-        References:
-          - Grünwald 2012, SafeBayes — power likelihood / likelihood tempering
-          - Posterior regularization — floor mixing to prevent zero probabilities
-
+        w *= likelihood, the likelihood being the fitted model (fitted_likelihood.py) for the
+        street: by preflop strength bin before the flop, by strength bucket after it.  It is
+        fitted through this very update, so it is applied as it is.  Then a share λ of a
+        uniform range is mixed in, so no hand is ever ruled out.
         """
+
         if player_id not in self._weights:
             self.reset_hand(player_id, context.position or 'CO', profile)
         if context.big_blind <= 0 and self._big_blind:
@@ -670,7 +441,10 @@ class BayesianRangeTracker:
         w = self._weights[player_id]
         trace: Optional[Dict[str, Any]] = None
         self.last_update_trace = {}
-        if board and len(board) >= 3:
+        # Postflop every update is traced (bucket shares after each step).  Preflop only for
+        # the training-row extractor (shares per preflop strength bin): in play it would add
+        # a trace to every preflop action in the log.
+        if (board and len(board) >= 3) or (street == 'preflop' and self.keep_update_weights):
             trace = {
                 'street': street, 'action': action,
                 'bet_ratio': round(float(context.bet_ratio or 0.0), 3),
@@ -684,6 +458,36 @@ class BayesianRangeTracker:
             all_known = self._known_cards | board_ints
             w[self._blocked_mask(all_known)] = 0.0
 
+        if trace is not None and self.keep_update_weights:
+            self.last_update_weights = w.copy()
+
+        # What the fitted likelihood may depend on.  Computed here, once, and recorded in the
+        # trace: the model is fitted on exactly these values.
+        label = action_label(action, bool(context.is_raise_over))
+        context.likelihood_features = None
+        if street == 'preflop':
+            pre_label = preflop_label(context.preflop_action_type, action)
+            if pre_label is not None:
+                context.likelihood_features = preflop_features(
+                    label=pre_label, action_type=context.preflop_action_type,
+                    position=context.position or '', bet_ratio=float(context.bet_ratio or 0.0),
+                    is_raise_over=bool(context.is_raise_over), hands_seen=profile.hands_seen,
+                    vpip=profile.vpip, pfr=profile.pfr, aggression_factor=profile.af,
+                    history=self._action_history.get(player_id, []),
+                )
+            if trace is not None:
+                trace['preflop_label'] = pre_label
+        elif label in LIKELIHOOD_ACTIONS:
+            context.likelihood_features = likelihood_features(
+                action=label, street=street, bet_ratio=float(context.bet_ratio or 0.0),
+                players_in_pot=sum(1 for pid in self._weights if pid not in self._folded),
+                in_position=bool(context.is_ip), hands_seen=profile.hands_seen,
+                vpip=profile.vpip, aggression_factor=profile.af,
+                history=self._action_history.get(player_id, []),
+            )
+        if trace is not None:
+            trace['features'] = context.likelihood_features
+
         # Compute likelihoods for all 1326 combos
         hero_cards = (
             [hcm.int_to_card(i) for i in self._known_cards]
@@ -693,28 +497,8 @@ class BayesianRangeTracker:
             action, street, context, profile, board, hero_cards=hero_cards
         )
 
-        # ── Adaptive likelihood tempering ──
-        # Compute current entropy to gauge how concentrated the posterior is
-        active = w > 1e-10
-        n_active = int(active.sum())
-        if n_active > 1:
-            w_pos = w[active]
-            entropy = float(-np.sum(w_pos * np.log2(w_pos)))
-            max_entropy = np.log2(n_active)
-            confidence = 1.0 - entropy / max_entropy if max_entropy > 0 else 0.0
-        else:
-            confidence = 1.0
-        # α_adaptive ∈ [0.10, 0.85]: high confidence → very low α (强抗集中)。
-        # 2026-04-23：按 Grünwald SafeBayes (2012) 的 adaptive tempering 思路。
-        # The "signal strength" interpolation towards α=1 / λ=0 that used to sit
-        # here was removed 2026-11-11: forcing it off changed nothing in closed-loop
-        # replay (ΔBrier −0.0003) and forcing it on cost +0.010.
-        alpha = max(0.1, 0.85 - 0.75 * confidence)
-
-        # Tempered Bayesian update
-        w *= likelihoods ** alpha
-        if trace is not None:
-            trace['alpha'] = round(float(alpha), 3)
+        # The likelihood is fitted through this very update, so it is applied as it is.
+        w *= likelihoods
 
         # Normalize
         total = w.sum()
@@ -733,7 +517,7 @@ class BayesianRangeTracker:
                 w[:] = 1.0 / 1326
 
         # ── Posterior regularization (floor mixing) ──
-        # 2026-04-23：Grünwald SafeBayes prior mixing，和 α-tempering 互补——
+        # 2026-04-23：Grünwald SafeBayes prior mixing——
         # α 管"单次更新激进度"、floor mixing 管"累积集中度上限"。
         # 混入 λ 的"对 active combos 均匀分布"，阻止连续 pot-size barrels
         # 把 air 权重压到 ~0。
@@ -747,6 +531,7 @@ class BayesianRangeTracker:
             if n_active > 0:
                 uniform = np.zeros_like(w)
                 uniform[active_mask] = 1.0 / n_active
+                self._trace_layer(trace, 'uniform', uniform, board)
                 w = (1.0 - lam) * w + lam * uniform
 
         # ── Probability floor: no combo drops below floor ──
@@ -763,7 +548,6 @@ class BayesianRangeTracker:
 
         self._trace_layer(trace, 'floor', w, board)
 
-        # ── Cross-street sequence pattern correction ──
         # Refine action: distinguish 'bet' (first) from 'raise_over' (re-raise/CR).
         if action == 'raise':
             refined = _ACT_RAISE_OVER if context.is_raise_over else _ACT_BET
@@ -775,41 +559,6 @@ class BayesianRangeTracker:
         history = self._action_history.setdefault(player_id, [])
         history.append((street, refined))
         action_sequence = _action_sequence_key(history)
-
-        pattern_name = _detect_sequence_pattern(history)
-        if pattern_name:
-            correction = _SEQUENCE_CORRECTIONS.get(pattern_name)
-            if correction:
-                board_ints = self._board_ints(board) if board else set()
-                categories = self._get_categories(board)
-                for idx in range(1326):
-                    if w[idx] < 1e-10:
-                        continue
-                    c1, c2 = hcm.ALL_COMBOS[idx]
-                    if c1 in board_ints or c2 in board_ints:
-                        continue
-                    cat = categories[idx]
-                    # River: draws become air (HandCategorizer rule).
-                    if street == 'river' and cat in ('draw', 'weak_draw'):
-                        cat = 'air'
-                    factor = correction.get(cat, 1.0)
-                    w[idx] *= factor
-                s = w.sum()
-                if s > 1e-15:
-                    w /= s
-                # Re-apply floor AFTER correction: small multipliers
-                # (capped nuts=0.10, bet_bet_give_up nuts=0.12) can push
-                # nuts combos below the 1e-4/n floor, from which they can
-                # never recover. This regularisation prevents permanent
-                # collapse of rare-but-live combos.
-                active = w > 0
-                n_active = int(active.sum())
-                if n_active > 0:
-                    floor = 1e-4 / n_active
-                    below = active & (w < floor)
-                    if below.any():
-                        w[below] = floor
-                        w /= w.sum()
 
         existing_meta = self._action_meta.get(player_id, {})
         position = context.position or str(existing_meta.get('position') or '') or 'CO'
@@ -829,9 +578,6 @@ class BayesianRangeTracker:
             'action_sequence': action_sequence,
         }
         self._weights[player_id] = w
-        if trace is not None:
-            trace['pattern'] = pattern_name or ''
-            self._trace_layer(trace, 'sequence', w, board)
         self._apply_bucket_calibration(
             player_id, street, board, f'action:{refined}'
         )
@@ -1015,8 +761,8 @@ class BayesianRangeTracker:
             buckets = {k: v / total for k, v in buckets.items()}
         return buckets
 
-    def _strong_mass_from_weights(self, w: np.ndarray, board: List[Card]) -> Dict[str, float]:
-        """Mass of the nuts / strong / air buckets for a weight vector (layer trace)."""
+    def _bucket_mass_from_weights(self, w: np.ndarray, board: List[Card]) -> Dict[str, float]:
+        """Mass of every strength bucket for a weight vector (layer trace)."""
         if not board or len(board) < 3:
             return {}
         cats = np.asarray(self._get_categories(board))
@@ -1027,7 +773,7 @@ class BayesianRangeTracker:
         if total <= 1e-15:
             return {}
         out: Dict[str, float] = {}
-        for cat in ('nuts', 'strong', 'air'):
+        for cat in ('nuts', 'strong', 'medium', 'draw', 'weak_draw', 'air'):
             out[cat] = round(float(valid[cats == cat].sum()) / total, 4)
         return out
 
@@ -1035,7 +781,12 @@ class BayesianRangeTracker:
                      w: np.ndarray, board: List[Card]) -> None:
         if trace is None:
             return
-        entry: Dict[str, Any] = dict(self._strong_mass_from_weights(w, board))
+        if not board:
+            total = float(w.sum())
+            mass = np.bincount(preflop_bin_index(), weights=w, minlength=len(PREFLOP_BINS)) / (total or 1.0)
+            trace['layers'][name] = {b: round(float(v), 5) for b, v in zip(PREFLOP_BINS, mass)}
+            return
+        entry: Dict[str, Any] = dict(self._bucket_mass_from_weights(w, board))
         if len(board) >= 5 and len(self._known_cards) >= 2:
             hero_cards = [hcm.int_to_card(i) for i in sorted(self._known_cards)]
             rel = self._vs_hero_from_weights(w, board, hero_cards)

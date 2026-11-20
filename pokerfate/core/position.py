@@ -75,11 +75,12 @@ def normalize_position(raw: str, default: str = '', *, warn: bool = True) -> str
 # ---------------------------------------------------------------------------
 # Button-relative relabelling for short-handed tables
 #
-# Upstream labels (pf_intercept bridge `_seat_positions`, `GameState.
-# position_of`) count the seats after the BB *forwards*: 'UTG', 'UTG+1',
-# 'UTG+2', 'LJ', 'HJ', 'CO'. Every consumer of a position — the greenline /
+# `GameState.position_of` and callers of the API other than the bridge count
+# the seats after the BB *forwards*: 'UTG', 'UTG+1', 'UTG+2', 'LJ', 'HJ',
+# 'CO'. (The bridge sends button-relative labels from `core.seating`, which
+# pass through here unchanged.) Every consumer of a position — the greenline /
 # PokerGTO chart keys, `_POSITION_RANGES`, 3bet/4bet matrices, the Range V2
-# preflop priors (GTO_VPIP/GTO_PFR), the flop-book scenario and the hero reach
+# preflop likelihood (position feature), the flop-book scenario and the hero reach
 # range — is keyed on 6-max positions counted *backwards* from the button
 # (UTG, MP, CO, BTN). The two agree only at a full 6-handed table. 4-handed
 # the single seat between BB and BTN is labelled 'UTG' although it is the CO;

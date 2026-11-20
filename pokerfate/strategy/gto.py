@@ -1,53 +1,13 @@
-"""GTO mathematical principles: MDF, bluff frequencies, EV calculations."""
+"""Poker math helpers: call EV, SPR buckets, stack depth, implied odds."""
 
 from __future__ import annotations
 
 
 class GTOMath:
     @staticmethod
-    def minimum_defense_frequency(bet_size: float, pot_before_bet: float) -> float:
-        """MDF: fraction of range we must defend to prevent profitable bluffing.
-
-        MDF = pot / (pot + bet)
-        """
-        if bet_size <= 0:
-            return 1.0
-        return pot_before_bet / (pot_before_bet + bet_size)
-
-    @staticmethod
-    def required_equity_to_call(call_amount: float, pot_after_call: float) -> float:
-        """Minimum equity required to profitably call.
-
-        equity = call / pot_after_call
-        """
-        if pot_after_call <= 0:
-            return 1.0
-        return call_amount / pot_after_call
-
-    @staticmethod
-    def optimal_bluff_frequency(bet_size: float, pot_before_bet: float) -> float:
-        """Optimal river bluff frequency to make opponent indifferent.
-
-        bluff_freq = bet / (bet + pot)
-        This equals (1 - MDF) from the bettor's perspective.
-        """
-        total = bet_size + pot_before_bet
-        if total <= 0:
-            return 0.0
-        return bet_size / total
-
-    @staticmethod
     def ev_call(equity: float, pot: float, call_amount: float) -> float:
         """EV of calling = equity * pot - (1-equity) * call_amount."""
         return equity * pot - (1.0 - equity) * call_amount
-
-    @staticmethod
-    def breakeven_fold_rate(bet: float, pot: float) -> float:
-        """How often opponent must fold for a bluff to break even.
-
-        fold_rate = bet / (pot + bet)
-        """
-        return bet / (pot + bet)
 
     @staticmethod
     def spr(stack: float, pot: float) -> float:
@@ -94,8 +54,3 @@ class GTOMath:
         if spr >= 4.0:
             return 0.04
         return 0.02
-
-    @staticmethod
-    def pot_fraction_bet(fraction: float, pot: float, min_bet: float, stack: float) -> float:
-        """Calculate a bet of `fraction` of pot, clamped to stack."""
-        return min(max(pot * fraction, min_bet), stack)

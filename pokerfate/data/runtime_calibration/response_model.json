@@ -1,0 +1,222 @@
+{
+ "version": 1,
+ "fitted_at": "2026-11-19T01:26:25",
+ "rows_from": "2026-11-15T17:03:09.935739+00:00",
+ "rows_to": "2026-11-19T09:15:56.513650+00:00",
+ "holdout_from": null,
+ "features": {
+  "facing_bet": [
+   "size_lo",
+   "size_mid",
+   "size_hi",
+   "facing_raise",
+   "in_position",
+   "checked_this_street",
+   "prev_bet",
+   "prev_call",
+   "called_twice",
+   "opp_bet_prev",
+   "known",
+   "tight",
+   "aggressive",
+   "nuts",
+   "strong",
+   "medium",
+   "draw"
+  ],
+  "checked_to": [
+   "prev_bet",
+   "prev_call",
+   "called_twice",
+   "opp_bet_prev",
+   "known",
+   "tight",
+   "aggressive",
+   "nuts",
+   "strong",
+   "medium",
+   "draw"
+  ]
+ },
+ "classes": {
+  "facing_bet": [
+   "fold",
+   "call",
+   "raise"
+  ],
+  "checked_to": [
+   "check",
+   "bet"
+  ]
+ },
+ "models": {
+  "facing_bet": {
+   "turn": {
+    "call": {
+     "intercept": 2.30613,
+     "weights": {
+      "size_lo": -2.97698,
+      "size_mid": -0.88089,
+      "size_hi": -0.44999,
+      "facing_raise": 0.17547,
+      "in_position": -0.32893,
+      "checked_this_street": -0.64783,
+      "prev_bet": 0.50657,
+      "prev_call": 0.38446,
+      "called_twice": 0.0,
+      "opp_bet_prev": 0.13451,
+      "known": -0.92351,
+      "tight": -0.06759,
+      "aggressive": -0.20491,
+      "nuts": 0.81285,
+      "strong": 0.50893,
+      "medium": 0.37273,
+      "draw": -0.08927
+     }
+    },
+    "raise": {
+     "intercept": -0.03263,
+     "weights": {
+      "size_lo": -2.02314,
+      "size_mid": 0.08264,
+      "size_hi": 0.13038,
+      "facing_raise": 0.36527,
+      "in_position": -0.51782,
+      "checked_this_street": -0.98879,
+      "prev_bet": 0.9084,
+      "prev_call": 0.08734,
+      "called_twice": 0.0,
+      "opp_bet_prev": 0.74221,
+      "known": -1.05128,
+      "tight": -0.04813,
+      "aggressive": 0.18417,
+      "nuts": 2.30691,
+      "strong": 0.78335,
+      "medium": 0.86016,
+      "draw": 0.97694
+     }
+    }
+   },
+   "river": {
+    "call": {
+     "intercept": 1.10361,
+     "weights": {
+      "size_lo": -2.39432,
+      "size_mid": -0.99501,
+      "size_hi": -1.4654,
+      "facing_raise": 0.0964,
+      "in_position": -0.67542,
+      "checked_this_street": -0.50196,
+      "prev_bet": 0.17549,
+      "prev_call": 0.49806,
+      "called_twice": 0.21398,
+      "opp_bet_prev": -0.64763,
+      "known": -0.25297,
+      "tight": 0.0828,
+      "aggressive": 0.22229,
+      "nuts": 1.82853,
+      "strong": 1.25638,
+      "medium": 0.87138,
+      "draw": 0.0
+     }
+    },
+    "raise": {
+     "intercept": 0.09855,
+     "weights": {
+      "size_lo": -0.50941,
+      "size_mid": -0.65278,
+      "size_hi": -0.38889,
+      "facing_raise": -0.37131,
+      "in_position": -0.58096,
+      "checked_this_street": -1.28699,
+      "prev_bet": 0.32854,
+      "prev_call": 0.08162,
+      "called_twice": 0.5399,
+      "opp_bet_prev": -0.12907,
+      "known": -1.69914,
+      "tight": -0.0927,
+      "aggressive": 0.45927,
+      "nuts": 3.01657,
+      "strong": 1.91859,
+      "medium": 1.38184,
+      "draw": 0.0
+     }
+    }
+   }
+  },
+  "checked_to": {
+   "turn": {
+    "bet": {
+     "intercept": -0.8589,
+     "weights": {
+      "prev_bet": 0.96333,
+      "prev_call": 0.09823,
+      "called_twice": 0.0,
+      "opp_bet_prev": 0.26772,
+      "known": 0.07938,
+      "tight": 0.02939,
+      "aggressive": 0.53493,
+      "nuts": 0.45855,
+      "strong": 0.55607,
+      "medium": 0.20948,
+      "draw": 0.35734
+     }
+    }
+   },
+   "river": {
+    "bet": {
+     "intercept": -0.97013,
+     "weights": {
+      "prev_bet": 0.90623,
+      "prev_call": 0.29461,
+      "called_twice": -0.02341,
+      "opp_bet_prev": 0.01818,
+      "known": 0.39462,
+      "tight": 0.12095,
+      "aggressive": 0.89419,
+      "nuts": 0.56233,
+      "strong": -0.02944,
+      "medium": 0.02113,
+      "draw": 0.0
+     }
+    }
+   }
+  }
+ },
+ "report": {
+  "facing_bet/turn": {
+   "rows": 1979,
+   "ridge": 0.3,
+   "answers": {
+    "fold": 0.4053,
+    "call": 0.4694,
+    "raise": 0.1253
+   }
+  },
+  "facing_bet/river": {
+   "rows": 1431,
+   "ridge": 0.3,
+   "answers": {
+    "fold": 0.4997,
+    "call": 0.355,
+    "raise": 0.1454
+   }
+  },
+  "checked_to/turn": {
+   "rows": 1493,
+   "ridge": 3.0,
+   "answers": {
+    "check": 0.5238,
+    "bet": 0.4762
+   }
+  },
+  "checked_to/river": {
+   "rows": 1132,
+   "ridge": 3.0,
+   "answers": {
+    "check": 0.5954,
+    "bet": 0.4046
+   }
+  }
+ }
+}

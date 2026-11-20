@@ -1,4 +1,4 @@
-"""Purpose base class + registry.
+"""Purpose base class.
 
 A Purpose encapsulates one betting-decision motive (see doc 02 §2, doc 03 §4).
 """
@@ -6,7 +6,7 @@ A Purpose encapsulates one betting-decision motive (see doc 02 §2, doc 03 §4).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from pokerfate.strategy.v3.context import DecisionCtx
 
@@ -46,13 +46,6 @@ class Purpose:
         """Whether the generic active value sizing optimizer may rewrite frac."""
         return True
 
-    def alpha_target(self, ctx: DecisionCtx, frac: float) -> Optional[float]:
-        """α target for this purpose at the given pot fraction.
-
-        None means this purpose is merged (α check not applicable).
-        """
-        return frac / (1.0 + frac) if frac > 0 else None
-
     def exploit_weight(self, ctx: DecisionCtx) -> float:
         """Multiplier applied to vote_weight based on opponent exploit reads.
 
@@ -60,35 +53,3 @@ class Purpose:
         override by registering adjustments against purpose.id.
         """
         return 1.0
-
-
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-
-class PurposeRegistry:
-    """Collects all purposes; splits into active/defensive/passive views."""
-
-    def __init__(self) -> None:
-        self._all: List[Purpose] = []
-
-    def register(self, p: Purpose) -> None:
-        if not p.id:
-            raise ValueError("Purpose.id must be set")
-        self._all.append(p)
-
-    def active(self) -> List[Purpose]:
-        return [p for p in self._all if not p.facing_bet and p.default_action in ('bet', 'check')]
-
-    def defensive(self) -> List[Purpose]:
-        return [p for p in self._all if p.facing_bet]
-
-    def all(self) -> List[Purpose]:
-        return list(self._all)
-
-    def by_id(self, pid: str) -> Optional[Purpose]:
-        for p in self._all:
-            if p.id == pid:
-                return p
-        return None

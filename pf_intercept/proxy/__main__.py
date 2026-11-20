@@ -13,12 +13,6 @@ def run() -> None:
         main(
             max_auto_rebuy=args.max_auto_rebuy,
             profit_lock_bb=args.profit_lock_bb,
-            entertainment_web_host=(
-                None if args.no_entertainment_web else args.entertainment_web_host
-            ),
-            entertainment_web_port=(
-                None if args.no_entertainment_web else args.entertainment_web_port
-            ),
         )
     )
 

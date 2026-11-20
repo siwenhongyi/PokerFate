@@ -111,16 +111,28 @@ G5_SHADOW_DECISIONS = True
 # 语义：触发条件是「本手结束时桌上筹码的 BB 数」，一手一判，不累计。
 # 对游戏抽水不敏感 —— 桌上多少就是多少。
 #
-# 本次启动盈亏展示不再依赖牌局内累计。Bot 在登录后和关键节点请求
-# pb.UserValueREQ(type=Gold)，用「钱包余额 + 当前桌上筹码」相对启动基线计算。
-# 盈利锁仓触发条件仍然只看当前桌上筹码，不看启动盈亏。
+# 本次启动盈亏是服务端每手结算（WinnerRSP.profit）的累计，与钱包余额、活动奖励、
+# 小游戏输赢无关。Bot 在登录后和关键节点请求 pb.UserValueREQ(type=Gold) 只为展示
+# 钱包余额和总筹码。盈利锁仓触发条件只看当前桌上筹码，不看启动盈亏。
 PROFIT_LOCK_BB_THRESHOLD = 200
 
 # 离桌后等待多久再发 EnterRoomREQ（秒），给客户端切场景/进桌动画一点时间。
 PROFIT_LOCK_REENTER_DELAY_SEC = 4.0
 
-# 兼容旧即时 LeaveRoom 路径的留座字段；当前盈利锁仓走 DelayLeaveRoomREQ，不携带 seat_reserve。
-PROFIT_LOCK_LEAVE_SEAT_RESERVE = True
+# 桌上补码：一手结束时若 **0 < 桌上筹码 < TOPUP_BELOW_BB 个大盲**，发客户端菜单「补充筹码」
+# 同款的 pb.SetRebyREQ(reby_chips=加多少)。服务端在下一手发牌前把筹码加到桌上，并广播
+# pb.RebyBRC(type="topup", chips=加上去的数量)；不用离桌。
+#
+# 加多少：补到不超过 TOPUP_TARGET_BB 的最大一档。档位是客户端滑块的档位
+# （tpl_constdata.PokerBuyinStep：20–30BB 每 1BB 一档，40–200BB 每 10BB 一档）。
+# 上限：净亏损上限（见 README「净亏损上限」）。本次启动已亏的 + 桌上筹码 + 这次补的，
+# 不超过 (1 + --max-auto-rebuy) 个 100BB 买入；破产买入、换桌重新买入过的是同一条。
+# 所以 --max-auto-rebuy 0 时只有本次启动是赚的才会补码。
+#
+# 为什么：筹码短的时候盲注照付、能赢的却随筹码缩小，9% 抽水下低筹码的全下要 54.9% 胜率才保本；
+# 实测筹码不到 70BB 的手连抽水前都是亏的。0 = 关闭。
+TOPUP_BELOW_BB = 70
+TOPUP_TARGET_BB = 100
 
 # EnterRoom 失败后必发 QuickStartREQ 随机配桌（逻辑在 bot 内固定，与 LobbyByinDialog 一致）。
 # 仅当本局从未缓存到 EnterRoomRSP.game_type / EnterRoomRSP.room_info.lobby_coin 时用下列默认：
@@ -189,6 +201,7 @@ WATCH_S2C = {
     # Bust-out / rebuy
     "pb.NoticeRebyRSP",  # server notifies us when our chips hit 0 (rebuy window)
     "pb.RebyBRC",  # update current table chips after successful rebuy
+    "pb.SetRebyRSP",  # table top-up: the server's answer to our pb.SetRebyREQ
     "pb.DelayLeaveRoomRSP",  # profit-lock: confirm next-hand leave flag
     "pb.LeaveRoomRSP",  # profit-lock: after actual leave, inject EnterRoomREQ
 }

@@ -248,14 +248,6 @@ def _danger_non_nut_call_block(ctx: DecisionCtx) -> bool:
     )
 
 
-def _relative_call_ok(ctx: DecisionCtx) -> bool:
-    """Price-aware hero-relative support for high-leverage bluff catches."""
-    rel = ctx.villain_vs_hero_dist or {}
-    if not rel:
-        return True
-    return _relative_showdown_eq(ctx) >= ctx.pot_odds + _relative_call_margin(ctx)
-
-
 def _relative_showdown_eq(ctx: DecisionCtx) -> float:
     rel = ctx.villain_vs_hero_dist or {}
     hero_wins = float(rel.get('win', 0.0) or 0.0)

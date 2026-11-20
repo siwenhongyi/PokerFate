@@ -109,6 +109,9 @@ def parse_json_log(log_path: Path, hero_names: HeroNames, big_blind: float = 0.0
                     "winners": r.get("winners") or [], "pot": r.get("pot"),
                     "my_delta": r.get("my_delta"), "final_stacks": r.get("final_stacks") or {},
                     "showdown_hands": r.get("showdown_hands") or {},
+                    # The server names the winner's hand type (高牌 / 一对 / ...) even when the
+                    # pot is won without showdown: truth about bets nobody called.
+                    "hand_combos": r.get("hand_combos") or {},
                 }
                 pots = [p for p in cur.pop("_pots") if p > 0]
                 cur.pop("_street_bets", None)

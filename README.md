@@ -61,6 +61,7 @@ request_action()
 
 | 文件 | 职责 |
 |------|------|
+| `launcher.py` | 代理模式一键启动器：mitmweb + 伪 DNS + proxy，见下文「快速启动（代理模式）」 |
 | `proxy/` | 主代理包：WSS runtime、TCP 透传、路由选择、TLS、日志和监控 |
 | `bot/bridge.py` | BotBridge：状态机管理（seat/blinds/筹码/锁仓），翻译游戏事件 |
 | `config/` | 所有可调参数（服务器地址、盈利锁仓阈值、delay 等） |
@@ -77,7 +78,14 @@ request_action()
 - **比赛房完全旁路**：进入 SNG / MTT / 好友 SNG（`EnterRoomRSP` 的 game_type 或 `sngroom_info` / `mttroom_info`）后，程序只做识别，不决策、不注入、不采集、不记资金、不推送，由玩家手动打；进入下一个非比赛房自动恢复托管
 - **seat / blinds 自检测**：从 `SitDownRSP` / `EnterRoomRSP` 自动识别
 - **盈利锁仓**：现金桌筹码达到阈值（默认 200BB）后自动离桌，以 100BB 重进，避免亏还回去；好友房不触发
-- **自动续入**：筹码清零后自动 rebuy（次数上限可配置，锁仓成功回桌后上限 +1）
+- **净亏损上限**：本次启动最多净亏 (1 + `--max-auto-rebuy`) 个 100BB 买入（按启动场次的大盲算）。
+  破产买入、桌上补码、换桌或异常离桌后的重新买入都先过这一条：已亏的 + 桌上的 + 要带的不超过上限。
+  放不下 100BB 就带上限还容得下的最大一档，连最小一档（20BB）都放不下就停在大厅并推送 `loss_stop`。
+  赢到的已经在净盈亏里，所以盈利锁仓不再增加次数，也不再单独数破产买入的次数
+- **自动续入**：筹码清零后自动 rebuy，买多少、买不买由净亏损上限决定
+- **桌上补码**：一手结束时桌上筹码低于 70BB（没输光），用客户端「补充筹码」同款的 `pb.SetRebyREQ`
+  在桌上补到不超过 100BB 的最大一档，下一手发牌前到账，不用离桌；好友房不触发。
+  补多少受净亏损上限约束
 - **人类延迟模拟**：按 street/动作类型/底池大小随机注入思考延迟
 
 ---
@@ -90,6 +98,9 @@ request_action()
 |------|---------|
 | `auto_rebuy` | 筹码清零，自动续入时 |
 | `profit_lock_trigger` | 现金桌盈利锁仓触发（准备离桌时） |
+| `topup` | 桌上补码到账：补了多少、桌上筹码、本次启动盈亏 |
+| `loss_stop` | 净亏损到上限，放不下下一次买入：已停在大厅，重启后恢复 |
+| `table_leave` | 选桌让 bot 离开一张已经打过牌的桌子（没有真人了、真人少于人机等）；正文只有本次启动盈亏 |
 | `hand_swing` | 单手盈亏达到 20BB |
 | `wss_disconnected` | WebSocket 异常断开 |
 | `gamedata_no_history` | 本次进程首次遇到无历史数据玩家（code=-2），每次启动最多一次 |
@@ -119,7 +130,6 @@ bash pf_intercept/tools/gen_pb2.sh
 | `bark_key.txt` | Bark 设备 Key（第一行） |
 | `auth_token.txt` | 游戏 REST API 鉴权 token（由 `force_domain.py` 登录时自动写入，无需手动填写） |
 | `ip_cache.json` | DNS 解析结果缓存（跨重启复用，加速连接） |
-| `entertainment_color_records.json` | 小游戏 Web 记录的彩球任务历史与每局盈亏 |
 
 ---
 
@@ -128,17 +138,51 @@ bash pf_intercept/tools/gen_pb2.sh
 
 ## 快速启动（代理模式）
 
-### 1. 生成证书（一次性）
+日常只用一条命令。`pf_intercept/launcher.py` 会把代理模式需要的三样东西一次拉起来：
+
+```bash
+.venv/bin/python -m pf_intercept.launcher
+```
+
+| 顺序 | 启动的东西 | 作用 |
+|------|-----------|------|
+| 1 | `mitmweb`（子进程，端口 `8080`） | HTTP 代理，挂载 `pf_reverse/force_domain.py`：从登录响应提取 `authorization` token 写入 `data/auth_token.txt`；过滤服务器列表，只保留证书覆盖范围内的域名服务器，首选域名记到 `data/discovered_server.json` |
+| 2 | 伪 DNS `pf_intercept.dns_server`（子进程，端口 `53`） | 把游戏域名解析到本机，其余域名转发上游正常解析 |
+| 3 | proxy（launcher 进程本身） | WSS MITM（`9012`）、`443` / `80` 透传、bot 决策、牌局 Web（`9022`） |
+
+launcher 的行为：
+
+- **权限**：只有伪 DNS 需要 root（53 端口）。macOS / Linux 下 launcher 自己调 `sudo`，会要密码或 Touch ID；
+  Windows 下弹 UAC。launcher 本身用普通用户运行即可，不需要给整条命令加 `sudo`。
+- **mitmweb**：在 `PATH` 里找 `mitmweb` 命令，找不到就打印提示并跳过。只装在 `.venv` 里时先
+  `source .venv/bin/activate` 再启动。输出写到项目根目录的 `logs/mitmweb.log`，不自动打开浏览器。
+- **伪 DNS 起不来**（取消授权、53 端口被占、30 秒内没就绪）：只跳过这一项，proxy 照常启动，
+  这时要靠 hosts 文件把游戏域名指到本机。
+- **停止**：Ctrl+C，mitmweb 和伪 DNS 跟着一起停。例外是 Windows：伪 DNS 跑在 UAC 拉起的独立窗口里，要手动关。
+
+### 1. 一次性准备
+
+**证书**
 
 ```bash
 .venv/bin/python -m pf_intercept.gen_cert
 ```
 
-输出到 `pf_intercept/certs/`，将 `ca.crt` 安装为系统受信任根 CA。
+输出到 `pf_intercept/certs/`，将 `ca.crt` 安装为受信任根 CA。没有证书时 proxy 报 `certs not found` 后直接退出。
 
-### 2. 配置流量劫持
+**mitmproxy**（不在 `requirements.txt` 里）
 
-**Windows**（hosts 文件重定向）：
+```bash
+.venv/bin/python -m pip install mitmproxy
+```
+
+**Android 手机**（和电脑在同一局域网）
+
+1. Wi-Fi 设置 → 代理 → 手动，填电脑的局域网 IP 和端口 `8080`。登录请求经过 mitmweb。
+2. Wi-Fi 设置 → 修改 DNS 为电脑的局域网 IP。游戏的 WSS 连接由伪 DNS 引到本机 proxy。
+3. 首次使用安装 mitmproxy 的 CA 证书（手机浏览器访问 `mitm.it` 下载后安装）。
+
+**Windows 客户端**（和 proxy 在同一台机器，用 hosts 文件代替伪 DNS）
 
 在 `C:\Windows\System32\drivers\etc\hosts` 添加：
 
@@ -146,85 +190,52 @@ bash pf_intercept/tools/gen_pb2.sh
 127.0.0.1  ga-foreign.poker-fate.com
 ```
 
-**Android**（DNS 模式）：
+启动时加 `--no-dns`。proxy 启动时也会打印需要的 hosts 条目。
 
-**方式一：DNS 劫持（首选）**
-
-1. 手机和电脑连接同一局域网
-2. 手机 Wi-Fi 设置 → 修改 DNS 为电脑的局域网 IP
-3. 电脑启动伪 DNS 服务：
-   ```bash
-   sudo .venv/bin/python -m pf_intercept.dns_server
-   ```
-   伪 DNS 会将游戏域名解析到本机，其余域名转发上游正常解析。
-
-**方式二：HTTP 代理（DNS 无法生效时的备选）**
-
-若手机仍无法连接到电脑（部分机型 DNS 不走 Wi-Fi 设置），改用 HTTP 代理模式：
-
-1. 手机 Wi-Fi 设置 → 代理 → 手动，填入电脑局域网 IP 和端口 `8080`
-2. 电脑安装 mitmproxy：
-   ```bash
-   .venv/bin/python -m pip install mitmproxy
-   ```
-3. 启动 mitmweb，挂载 `force_domain.py` 插件：
-   ```bash
-   mitmweb --listen-port 8080 --ignore-hosts "xiaomi.com|xiaomi.net|miui.com|aliyuncs.com" -s pf_reverse/force_domain.py
-   ```
-   `--ignore-hosts` 排除已知与游戏无关的推送/云存储域名，其余全部拦截；不要反过来只放行游戏域名
-   ——真机登录可能走裸 IP（见 `pf_reverse/output/lua/src/app/Constants.lua` 的 `G_HTTP_URL_2/_3/_4`），
-   域名白名单会直接漏掉这些连接。`python -m pf_intercept.launcher` 会自动按同样的参数拉起 mitmweb，
-   手动起 mitmweb 时才需要自己写这一串。
-   插件会：
-   - 自动从登录响应中提取 `authorization` token，写入 `data/auth_token.txt`（无需手动填写）
-   - 过滤服务器列表，只保留证书覆盖范围内的域名服务器，并将首选域名记录到 `data/discovered_server.json`
-4. 手机首次使用需安装 mitmproxy 的 CA 证书（访问 `mitm.it` 下载后安装）。
-5. 游戏登录完成后（`force_domain.py` 打印出保留的服务器），再按方式一启动
-   `pf_intercept.dns_server`，让后续 WSS 连接走到本机代理。
-
-### 3. 启动代理
+### 2. 启动
 
 ```bash
+.venv/bin/python -m pf_intercept.launcher --max-auto-rebuy 3 --profit-lock-bb 200
+```
+
+launcher 自己的参数：
+
+- `--no-mitmweb`：不拉起 mitmweb（已在别处运行，或不需要）。
+- `--no-dns`：不拉起伪 DNS（用 hosts 文件代替）。
+
+其余参数原样交给 proxy：
+
+- `--max-auto-rebuy N`：净亏损上限，本次启动最多净亏 (1+N) 个 100BB 买入。代理模式只接受 1–20，默认 1（即 200BB）。
+- `--profit-lock-bb BB`：盈利锁仓阈值；不传则使用 `pf_intercept.config` 的 `PROFIT_LOCK_BB_THRESHOLD`。
+
+启动后打开游戏客户端正常登录、进桌，proxy 自动检测 seat/blinds 并开始决策。
+
+### 3. 牌局 Web
+
+默认监听 `0.0.0.0:9022`：本机打开 `http://127.0.0.1:9022`，局域网内用电脑 IP 访问牌局与资金看板。
+启动时会打印实际地址（`[proxy] 牌局 Web ...`）。
+
+牌局 Web 随 proxy 一起启动，没有命令行开关；地址和端口在 `pf_intercept/config/` 的
+`ENTERTAINMENT_WEB_HOST` / `ENTERTAINMENT_WEB_PORT`。
+
+### 4. 单独启动各部分
+
+排查问题、或者只需要其中一部分时用。launcher 做的就是下面三条：
+
+```bash
+# proxy（参数同上：--max-auto-rebuy、--profit-lock-bb）
 .venv/bin/python -m pf_intercept.proxy
+
+# 伪 DNS
+sudo .venv/bin/python -m pf_intercept.dns_server
+
+# mitmweb
+mitmweb --listen-port 8080 --ignore-hosts "xiaomi.com|xiaomi.net|miui.com|aliyuncs.com" -s pf_reverse/force_domain.py
 ```
 
-常用参数：
-
-```bash
-.venv/bin/python -m pf_intercept.proxy \
-  --max-auto-rebuy 3 \
-  --profit-lock-bb 200
-```
-
-参数含义：
-
-- `--max-auto-rebuy`：最大自动续入次数（默认 1）。
-- `--profit-lock-bb`：盈利锁仓阈值；不传则使用 `pf_intercept.config`。
-
-启动后打开游戏客户端正常进桌，proxy 自动检测 seat/blinds 并开始决策。
-
-### 4. 小游戏 Web
-
-代理启动后会同时启动娱乐小游戏 Web，并默认监听所有本机网卡，局域网设备可通过电脑的局域网 IP 访问：
-
-```text
-http://127.0.0.1:9022
-http://<电脑局域网IP>:9022
-```
-
-页面里可以设置彩球的起始筹码、最大筹码、倍投倍率、循环次数和选球模式，也可以在运行参数页动态修改 `max_auto_rebuy` 和 `profit_lock_bb`。选球模式支持每个循环固定少见球、每次重选少见球、每次随机选择、最近 3 次结果最多；其中“每次”和“最近 3 次”都按每次开奖结果响应统计，不按循环统计。任务结束后会把本次每局盈亏写入：
-
-```text
-data/entertainment_color_records.json
-```
-
-如需关闭或改端口：
-
-```bash
-.venv/bin/python -m pf_intercept.proxy --no-entertainment-web
-.venv/bin/python -m pf_intercept.proxy --entertainment-web-port 19022
-.venv/bin/python -m pf_intercept.proxy --entertainment-web-host 127.0.0.1
-```
+`--ignore-hosts` 用的是排除法：只排除已知与游戏无关的推送 / 云存储域名，其余全部拦截；不要反过来只放行游戏域名。
+真机登录可能走裸 IP（见 `pf_reverse/output/lua/src/app/Constants.lua` 的 `G_HTTP_URL_2/_3/_4`），
+域名白名单会直接漏掉这些连接。这串值的唯一来源是 `pf_intercept.config.MITM_IGNORE_HOSTS`，launcher 用的也是它。
 
 ---
 
@@ -271,7 +282,8 @@ data/entertainment_color_records.json
 
 - `--bb`：进桌的大盲（不传则只登录+心跳，不进桌）。
 - `--buyin-bb`：买入多少个大盲，默认 100。
-- `--max-auto-rebuy` / `--profit-lock-bb`：含义同代理模式。
+- `--max-auto-rebuy` / `--profit-lock-bb`：含义同代理模式；headless 下 `--max-auto-rebuy` 还可以传 `0`（净亏一个买入即停）。
+- `--topup-below-bb`：桌上筹码低于多少个大盲就在桌上补码（默认 70，`0` 关闭）。
 - `--no-web`：不启动实时对局 Web（默认启动，监听 `0.0.0.0:9022`，手机同 WiFi 可看）。
 - `--stop`：校验 `pf_intercept/logs/headless.pid` 对应实例后发送优雅停止请求，不登录游戏。
 
@@ -295,7 +307,8 @@ PID 由 bot 自动维护，退出后删除；同一项目通过文件锁防止�
 |------|--------|------|
 | `PROFIT_LOCK_BB_THRESHOLD` | `200` | 触发盈利锁仓的筹码阈值（BB 倍数） |
 | `PROFIT_LOCK_REENTER_DELAY_SEC` | `4.0` | 离桌后等待多久再重进（秒） |
-| `PROFIT_LOCK_LEAVE_SEAT_RESERVE` | `True` | 离桌时是否留座 |
+| `TOPUP_BELOW_BB` | `70` | 一手结束时桌上筹码低于这个数（BB 倍数）就在桌上补码；`0` 关闭 |
+| `TOPUP_TARGET_BB` | `100` | 补码补到不超过这个数的最大一档（20–30BB 每 1BB 一档，40BB 起每 10BB 一档） |
 | `ACTION_INJECT_DELAY_MAX_SEC` | `3.0` | 模拟人类思考的最长延迟（秒） |
 | `GAMEDATA_HTTP_HOST` | `ga-foreign.poker-fate.com` | 拉取玩家统计的 API 域名 |
 
@@ -307,4 +320,4 @@ PID 由 bot 自动维护，退出后删除；同一项目通过文件锁防止�
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-Python 3.12+。完整依赖以 `requirements.txt` 为准；其中包含 AI 决策运行依赖、WSS 代理依赖和测试工具。HTTP 代理模式需要的 `mitmproxy` 按上面的步骤单独安装。
+Python 3.12+。完整依赖以 `requirements.txt` 为准；其中包含 AI 决策运行依赖、WSS 代理依赖和测试工具。代理模式的 launcher 和 headless 取凭证脚本用到的 `mitmproxy` 不在其中，按上面的步骤单独安装。

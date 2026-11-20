@@ -72,10 +72,10 @@ def test_river_opponent_action_has_layer_trace(tmp_path):
     trace = river["layer_trace"]
     assert trace["street"] == "river" and trace["action"] == "raise"
     layers = trace["layers"]
-    assert set(layers) == {"pre", "likelihood", "floor", "sequence", "bucket_cal"}
+    assert set(layers) == {"pre", "likelihood", "uniform", "floor", "bucket_cal"}
     for entry in layers.values():
         assert "loss" in entry and 0.0 <= entry["loss"] <= 1.0
         assert "nuts" in entry
-    assert "alpha" in trace and "lam" in trace
+    assert "lam" in trace and trace["features"]["size_none"] == 0.0
     # Preflop actions carry no trace (no board yet).
     assert all(r.get("layer_trace") is None for r in opp if r["street"] == "preflop")

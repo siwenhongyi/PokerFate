@@ -70,14 +70,19 @@ def _parse_args() -> argparse.Namespace:
                    help="会话凭证文件（默认 data/headless_session.json）")
     p.add_argument("--bb", type=int, default=0, help="进桌：大厅现金桌大盲（如 10000）。不传则只登录+心跳")
     p.add_argument("--buyin-bb", type=int, default=100, help="买入多少个大盲，默认 100")
-    p.add_argument("--max-auto-rebuy", type=int, default=1, help="破产自动续入上限，0=破产即停")
+    p.add_argument("--max-auto-rebuy", type=int, default=1, metavar="N",
+                   help="净亏损上限：本次启动最多净亏 (1+N) 个 100BB 买入，破产买入、桌上补码、换桌重新买入"
+                        "都算在内；0=净亏一个买入即停")
     p.add_argument("--profit-lock-bb", type=int, default=None, metavar="BB", help="盈利锁仓阈值（大盲数）")
+    p.add_argument("--topup-below-bb", type=int, default=None, metavar="BB",
+                   help="桌上筹码低于多少个大盲就在桌上补码到 100BB（默认 70；0=不补码）")
     p.add_argument("--stakes", default="", metavar="BB,BB,...",
                    help="选桌换场的偏好顺序，如 10000,5000,20000；默认从 --bb 起由近到远、同距离先高后低，范围 1000..20000。"
                         "选桌本身没有开关：桌上没有真人或真人少于人机就换桌，连续不合格则换场")
     p.add_argument("--hold", type=float, default=30.0, help="不进桌时登录后保持连接的秒数，默认 30")
     p.add_argument("--no-notify", action="store_true", help="不发 Bark 通知（默认启用，读 data/bark_key.txt）")
     p.add_argument("--no-auto-rewards", action="store_true", help="关闭基金、每日/每周/挑战任务和活跃度奖励自动领取（默认开启）")
+    p.add_argument("--no-auto-dispatch", action="store_true", help="只关闭协会经营（派遣）的自动派遣和领奖，其余奖励照常")
     p.add_argument("--no-web", action="store_true", help="不启动实时对局 Web（默认启动）")
     p.add_argument("--no-remote-live", action="store_true", help="关闭远程直播上传（默认开启；读取 data/remote_live.json，失败自动跳过）")
     p.add_argument("--web-host", default="0.0.0.0", help="Web 绑定地址，默认 0.0.0.0（允许局域网/手机访问）")
@@ -220,6 +225,9 @@ async def _run(args: argparse.Namespace, stop: asyncio.Event | None = None) -> i
 
     if args.profit_lock_bb is not None:
         config.PROFIT_LOCK_BB_THRESHOLD = int(args.profit_lock_bb)
+    topup_below_bb = getattr(args, "topup_below_bb", None)
+    if topup_below_bb is not None:
+        config.TOPUP_BELOW_BB = max(0, int(topup_below_bb))
 
     observer = None
     remote_live_enabled = not getattr(args, "no_remote_live", False)
@@ -243,6 +251,7 @@ async def _run(args: argparse.Namespace, stop: asyncio.Event | None = None) -> i
         return HeadlessSession(result, chnl=chnl, client_version=client_version,
                                max_auto_rebuy=args.max_auto_rebuy, on_frame=on_frame,
                                auto_rewards=not getattr(args, "no_auto_rewards", False),
+                               auto_dispatch=not getattr(args, "no_auto_dispatch", False),
                                reconnect_enabled=getattr(args, "bb", 0) > 0,
                                table_policy=table_policy)
 

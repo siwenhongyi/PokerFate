@@ -318,75 +318,137 @@ def test_realtime_cfr_solver_menu_matches_realtime_book():
     assert river_args["include_evs"] is True
 
 
-def test_realtime_cfr_exploit_uses_response_evs_against_overfolder():
-    result = {
-        "node": {
-            "path": "r",
-            "player": 1,
-            "actions": ["Check", "Bet(100)"],
-            "num_hands": 1,
-            "strategy": [0.70, 0.30],
-            "evs": [100.0, 99.5],
-        },
+def _bluff_spot(fold_eq=0.30):
+    """Hero (in position) holds air on the turn: pot 20bb, a 10bb bet. Values as the solver
+    reports them: an action's own EV is net of the bet, the value after each answer still
+    counts the bet as hero's (fold: pot after rake + bet = 28.2bb, called: 0)."""
+    bet_ev = fold_eq * 18.2 - (1.0 - fold_eq) * 10.0
+    root = {
+        "path": "r", "player": 1, "actions": ["Check", "Bet(100)"], "num_hands": 1,
+        "strategy": [0.70, 0.30], "evs": [0.0, bet_ev * 10.0],
+    }
+    return {
+        "node": root,
         "nodes": [
+            root,
             {
-                "path": "r",
-                "player": 1,
-                "actions": ["Check", "Bet(100)"],
-                "num_hands": 1,
-                "strategy": [0.70, 0.30],
-                "evs": [100.0, 99.5],
-            },
-            {
-                "path": "r:Bet(100)",
-                "player": 0,
-                "actions": ["Fold", "Call"],
-                "num_hands": 2,
-                "strategy": [0.30, 0.30, 0.70, 0.70],
-                "weights": [0.50, 0.50],
-                "opponent_num_hands": 1,
-                "opponent_evs": [180.0, 20.0],
+                "path": "r:Bet(100)", "player": 0, "actions": ["Fold", "Call"], "num_hands": 2,
+                "strategy": [fold_eq, fold_eq, 1.0 - fold_eq, 1.0 - fold_eq], "weights": [0.50, 0.50],
+                "opponent_num_hands": 1, "opponent_evs": [282.0, 0.0],
             },
         ],
         "oop_hands": ["QcQd", "JcJd"],
-        "ip_hands": ["AsAh"],
+        "ip_hands": ["7s6s"],
     }
-    profile = PlayerProfile(
-        name="overfolder",
-        hands_seen=240,
-        flop_seen_count=80,
-        vpip=0.24,
-        pfr=0.18,
-        af=1.4,
-        fold_to_cbet=0.82,
-        fold_to_cbet_opps=90,
-        wtsd=0.16,
-        turn_action_count=90,
-    )
 
+
+_KNOWN_PLAYER = dict(name="regular", hands_seen=600, flop_seen_count=200, vpip=0.30, pfr=0.20, af=1.5,
+                     fold_to_cbet=0.45, fold_to_cbet_opps=60, wtsd=0.25, turn_action_count=150)
+_TURN_BLUFF_CONTEXT = {
+    "street": "turn", "current_pot_bb": 20.0, "hero_current_bet_bb": 0.0, "current_to_call_bb": 0.0,
+    "effective_stack_bb": 100.0, "hero_actions": [], "villain_actions": [("turn", "check")],
+    "range_v2": {"bucket_dist": {"medium": 0.5, "air": 0.5}},
+}
+
+
+def _use_response_model(monkeypatch, tmp_path, models):
+    """Point the response model at a file holding ``models`` ({kind: {street: spec}})."""
+    import json as _json
+    path = tmp_path / "response_model.json"
+    path.write_text(_json.dumps({"version": 1, "models": models}), encoding="utf-8")
+    monkeypatch.setenv("PF_RESPONSE_MODEL_PATH", str(path))
+    return path
+
+
+def _constant_answers(fold, call, raise_=1e-9):
+    """A facing-bet model that answers fold / call / raise with these frequencies whatever the spot."""
+    import math as _math
+    return {"call": {"intercept": _math.log(call / fold), "weights": {}},
+            "raise": {"intercept": _math.log(raise_ / fold), "weights": {}}}
+
+
+def test_bet_value_follows_the_fitted_fold_frequency(monkeypatch, tmp_path):
+    # Equilibrium folds 32%, which makes the bluff lose 0.98bb. The fitted model says this
+    # opponent folds 60%: (0.60 - 0.32) x (18.2 + 10) = +7.90bb.
+    _use_response_model(monkeypatch, tmp_path, {"facing_bet": {"turn": _constant_answers(0.6, 0.4)}})
     selection = _select_exploit_action(
-        result,
-        hero_combo="AsAh",
-        hero_side="ip",
-        street="turn",
-        gto_strategy={"Check": 0.70, "Bet(100)": 0.30},
-        profile=profile,
-        adjustments={"bluff_ag_scale": 1.10, "value_ag_scale": 0.55},
-        max_confidence=0.45,
-        enabled=True,
+        _bluff_spot(fold_eq=0.32), hero_combo="7s6s", hero_side="ip", street="turn",
+        gto_strategy={"Check": 0.70, "Bet(100)": 0.30}, profile=PlayerProfile(**_KNOWN_PLAYER),
+        adjustments={}, max_confidence=0.45, enabled=True, line_context=dict(_TURN_BLUFF_CONTEXT),
     )
-
+    exploit = selection["exploit"]
+    assert exploit["used"] is True
+    assert exploit["gto_action_evs_bb"]["Bet(100)"] == pytest.approx(-0.976, abs=1e-3)
+    assert exploit["adjusted_action_evs_bb"]["Bet(100)"] == pytest.approx(6.92, abs=1e-3)
+    answers = exploit["response_summaries"]["Bet(100)"]
+    assert answers["response"]["model"] is True
+    assert answers["response"]["equilibrium"] == {"fold": 0.32, "call": 0.68}
+    assert answers["response"]["fitted"] == {"fold": pytest.approx(0.6, abs=1e-4), "call": pytest.approx(0.4, abs=1e-4)}
+    assert answers["response"]["size"] == pytest.approx(0.5)
+    assert answers["adj"]["Fold"] == pytest.approx(0.6, abs=1e-4)
+    # blended with the confidence in the read, the bluff is now better than checking
+    confidence = exploit["confidence"]
+    assert exploit["final_action_evs_bb"]["Bet(100)"] == pytest.approx((1 - confidence) * -0.976 + confidence * 6.92, abs=2e-3)
     assert selection["selected_label"] == "Bet(100)"
-    assert selection["exploit"]["used"] is True
-    assert selection["exploit"]["confidence"] > 0.10
-    assert (
-        selection["exploit"]["adjusted_action_evs_bb"]["Bet(100)"]
-        > selection["exploit"]["gto_action_evs_bb"]["Bet(100)"]
+
+
+def test_fitted_answers_cannot_lift_an_action_the_solver_rates_far_below_its_best(monkeypatch, tmp_path):
+    # Same spot with a 25% equilibrium fold rate: the bluff is 2.95bb worse than checking,
+    # beyond the GTO leash, so no expected fold frequency makes it the choice.
+    _use_response_model(monkeypatch, tmp_path, {"facing_bet": {"turn": _constant_answers(0.9, 0.1)}})
+    selection = _select_exploit_action(
+        _bluff_spot(fold_eq=0.25), hero_combo="7s6s", hero_side="ip", street="turn",
+        gto_strategy={"Check": 0.70, "Bet(100)": 0.30}, profile=PlayerProfile(**_KNOWN_PLAYER),
+        adjustments={}, max_confidence=0.45, enabled=True, line_context=dict(_TURN_BLUFF_CONTEXT),
     )
-    assert (
-        selection["exploit"]["response_summaries"]["Bet(100)"]["adj"]["Fold"]
-        > selection["exploit"]["response_summaries"]["Bet(100)"]["eq"]["Fold"]
+    assert selection["exploit"]["adjusted_action_evs_bb"]["Bet(100)"] > 10.0
+    assert selection["exploit"]["safety"]["gto_leash"][0]["action"] == "Bet(100)"
+    assert selection["selected_label"] == "Check"
+
+
+def test_bet_keeps_its_solver_value_where_the_model_has_nothing_to_say(monkeypatch, tmp_path):
+    spot = dict(result=_bluff_spot(), hero_combo="7s6s", hero_side="ip", street="turn",
+                gto_strategy={"Check": 0.70, "Bet(100)": 0.30}, profile=PlayerProfile(**_KNOWN_PLAYER),
+                adjustments={}, max_confidence=0.45, enabled=True)
+
+    def bet_values(context, reason):
+        selection = _select_exploit_action(spot["result"], line_context=context,
+                                           **{k: v for k, v in spot.items() if k != "result"})
+        exploit = selection["exploit"]
+        assert exploit["response_summaries"]["Bet(100)"]["response"]["model"] is False
+        assert exploit["response_summaries"]["Bet(100)"]["response"]["reason"] == reason
+        assert exploit["adjusted_action_evs_bb"]["Bet(100)"] == pytest.approx(exploit["gto_action_evs_bb"]["Bet(100)"])
+        assert selection["selected_label"] == "Check"
+
+    _use_response_model(monkeypatch, tmp_path, {"facing_bet": {"turn": _constant_answers(0.6, 0.4)}})
+    robot = dict(_TURN_BLUFF_CONTEXT, range_v2={"bucket_dist": {"medium": 0.5, "air": 0.5}, "villain_is_robot": True})
+    bet_values(robot, "robot")                                   # a house robot is not in the fit
+    bet_values({k: v for k, v in _TURN_BLUFF_CONTEXT.items() if k != "range_v2"}, "no_range")
+    _use_response_model(monkeypatch, tmp_path, {"facing_bet": {"river": _constant_answers(0.6, 0.4)}})
+    bet_values(dict(_TURN_BLUFF_CONTEXT), "no_model")            # no model for this street
+    monkeypatch.setenv("PF_RESPONSE_MODEL_PATH", "off")
+    bet_values(dict(_TURN_BLUFF_CONTEXT), "no_model")
+
+
+def test_answers_to_a_bet_are_read_net_of_the_bet(monkeypatch):
+    from pokerfate.decision.realtime_cfr import _response_adjusted_ev_detail_from_result
+
+    monkeypatch.setenv("PF_RESPONSE_MODEL_PATH", "off")
+    result = _bluff_spot()
+    detail = _response_adjusted_ev_detail_from_result(
+        result, result["nodes"][1], hero_combo="7s6s", hero_side="ip", profile=None,
+        street="turn", hero_action_label="Bet(100)", line_context=dict(_TURN_BLUFF_CONTEXT),
     )
+    assert detail is not None
+    assert detail["response_evs"] == {"Fold": pytest.approx(18.2), "Call": pytest.approx(-10.0)}
+    assert detail["ev"] == pytest.approx(-1.54, abs=1e-3)
+
+    # values that do not add up to the action's own EV once the bet is taken off are not used
+    result["nodes"][1]["opponent_evs"] = [182.0, -100.0]
+    assert _response_adjusted_ev_detail_from_result(
+        result, result["nodes"][1], hero_combo="7s6s", hero_side="ip", profile=None,
+        street="turn", hero_action_label="Bet(100)", line_context=dict(_TURN_BLUFF_CONTEXT),
+    ) is None
 
 
 def test_realtime_cfr_exploit_low_data_prior_is_capped():
@@ -926,8 +988,11 @@ def test_realtime_cfr_river_call_chain_reprices_big_bluff():
 
     assert selection["selected_label"] == "Check"
     assert selection["exploit"]["used"] is True
+    # no range from the tracker here: the answers stay at the equilibrium frequencies and
+    # the repricing is the risk guard's (its own estimate of the folds after two calls)
     summary = selection["exploit"]["response_summaries"]["Bet(300)"]
-    assert summary["adj"]["Fold"] < summary["eq"]["Fold"]
+    assert summary["response"]["model"] is False
+    assert summary["adj"] == summary["eq"]
     assert selection["exploit"]["safety"]["river_aggression_risk"][0]["discount_bb"] > 0.0
 
 
@@ -986,8 +1051,11 @@ def test_realtime_cfr_river_call_chain_keeps_value_big_bet():
             "current_to_call_bb": 0.0,
             "effective_stack_bb": 100.0,
         },
+        hero_made_rank="full_house",
     )
 
+    # The risk guard judges the bet by hero's own hand (it is not given the opponent's
+    # answers): a full house keeps the big bet after two calls.
     assert selection["selected_label"] == "Bet(300)"
     assert selection["exploit"]["used"] is True
     risk = selection["exploit"]["safety"]["river_aggression_risk"][0]
@@ -1143,78 +1211,42 @@ def test_realtime_cfr_large_size_support_keeps_supported_value_bet():
     assert "large_size_support" not in selection["exploit"]["safety"]
 
 
-def test_realtime_cfr_raise_exposure_penalizes_bet_fold_trap():
-    result = {
-        "node": {
-            "path": "r",
-            "player": 1,
-            "actions": ["Check", "Bet(80)"],
-            "num_hands": 1,
-            "strategy": [0.05, 0.95],
-            "evs": [50.0, 56.0],
+def test_raise_exposure_guard_prices_a_bet_that_folds_to_a_raise():
+    from pokerfate.decision.realtime_cfr import _raise_exposure_risk_discount
+
+    context = {
+        "street": "river",
+        "board": ["Ks", "Qd", "8h", "8c", "2d"],
+        "hero_combo": "AhAd",
+        "current_pot_bb": 20.0,
+        "hero_current_bet_bb": 0.0,
+        "current_to_call_bb": 0.0,
+        "effective_stack_bb": 100.0,
+        "range_v2": {
+            "bucket_dist": {"nuts": 0.12, "strong": 0.42, "medium": 0.26, "draw": 0.0, "weak_draw": 0.0, "air": 0.20},
+            "vs_hero": {"win": 0.41, "tie": 0.02, "loss": 0.57},
         },
-        "nodes": [
-            {
-                "path": "r",
-                "player": 1,
-                "actions": ["Check", "Bet(80)"],
-                "num_hands": 1,
-                "strategy": [0.05, 0.95],
-                "evs": [50.0, 56.0],
-            },
-            {
-                "path": "r:Bet(80)",
-                "player": 0,
-                "actions": ["Fold", "Call", "Raise(240)"],
-                "num_hands": 1,
-                "strategy": [0.35, 0.45, 0.20],
-                "weights": [1.0],
-                "opponent_num_hands": 1,
-                "opponent_evs": [100.0, 55.0, -20.0],
-            },
-        ],
-        "oop_hands": ["JcTc"],
-        "ip_hands": ["AhAd"],
     }
-
-    selection = _select_exploit_action(
-        result,
-        hero_combo="AhAd",
-        hero_side="ip",
-        street="river",
-        gto_strategy={"Check": 0.05, "Bet(80)": 0.95},
-        profile=None,
-        adjustments={},
-        max_confidence=0.45,
-        enabled=True,
-        line_context={
-            "street": "river",
-            "board": ["Ks", "Qd", "8h", "8c", "2d"],
-            "hero_combo": "AhAd",
-            "current_pot_bb": 20.0,
-            "hero_current_bet_bb": 0.0,
-            "current_to_call_bb": 0.0,
-            "effective_stack_bb": 100.0,
-            "range_v2": {
-                "bucket_dist": {
-                    "nuts": 0.12,
-                    "strong": 0.42,
-                    "medium": 0.26,
-                    "draw": 0.0,
-                    "weak_draw": 0.0,
-                    "air": 0.20,
-                },
-                "vs_hero": {"win": 0.41, "tie": 0.02, "loss": 0.57},
-            },
-        },
-        hero_made_rank="one_pair",
+    # hero's values after each answer, net of the 8bb bet: fold +10, call +5.5, raise -2
+    answers = {
+        "adj_probs": {"Fold": 0.35, "Call": 0.45, "Raise(240)": 0.20},
+        "response_evs": {"Fold": 10.0, "Call": 5.5, "Raise(240)": -2.0},
+    }
+    risk = _raise_exposure_risk_discount(
+        "Bet(80)", street="river", line_context=context, response_detail=answers,
+        best_passive_gto_ev=5.0, hero_combo="AhAd", hero_made_rank="one_pair", numeric_prior=None,
     )
-
-    assert selection["selected_label"] == "Check"
-    risk = selection["exploit"]["safety"]["raise_exposure_risk"][0]
     assert risk["raise_mass"] >= 0.15
     assert risk["ev_gap_bb"] > 0.0
-    assert selection["exploit"]["final_action_evs_bb"]["Bet(80)"] < selection["exploit"]["final_action_evs_bb"]["Check"]
+    assert risk["discount_bb"] > 0.0
+    # Without the opponent's answers it has nothing to price. That is how it has always
+    # run inside the selection: every bet's answers failed the consistency check there, so
+    # this guard never fired in live play (0 of 2,889 solver decisions, 2026-11-09..18).
+    # The selection still gives it none while the risk guards wait for their review.
+    assert _raise_exposure_risk_discount(
+        "Bet(80)", street="river", line_context=context, response_detail={},
+        best_passive_gto_ev=5.0, hero_combo="AhAd", hero_made_rank="one_pair", numeric_prior=None,
+    ) is None
 
 
 def test_realtime_cfr_calloff_risk_blocks_unsupported_large_call():
@@ -1627,11 +1659,12 @@ def test_hero_range_uses_solver_street_filter_when_present():
     assert sum(1 for w in weights if w > 1e-9) == 1
 
 
-def test_response_evs_ignored_when_hero_combo_never_takes_action():
+def test_response_evs_ignored_when_hero_combo_never_takes_action(monkeypatch):
     """Solver EVs at a child node are conditional on reach; with ~0 reach they
-    are garbage. Such actions must fall back to the bounded direct delta."""
+    have been garbage. Such an action keeps its solver value."""
     from pokerfate.decision.realtime_cfr import _response_adjusted_ev_detail_from_result
 
+    monkeypatch.setenv("PF_RESPONSE_MODEL_PATH", "off")
     result = {
         "node": {
             "path": "r:Check:Bet(120)",
@@ -1654,37 +1687,43 @@ def test_response_evs_ignored_when_hero_combo_never_takes_action():
         "opponent_num_hands": 1,
         "opponent_evs": [365.0, 4000.0, -264.0],  # 4000 = reach-normalised garbage
     }
-    detail = _response_adjusted_ev_detail_from_result(
-        result, child, hero_combo="9s7s", hero_side="oop", profile=None, adjustments={},
-        street="turn", hero_action_label="Raise(264)", line_context={"current_pot_bb": 36.5},
-    )
-    assert detail is None
+    context = {"current_pot_bb": 36.5, "current_to_call_bb": 12.0, "hero_current_bet_bb": 0.0}
 
-    # With real reach and self-consistent EVs the detail is produced.
+    def detail():
+        return _response_adjusted_ev_detail_from_result(
+            result, child, hero_combo="9s7s", hero_side="oop", profile=None,
+            street="turn", hero_action_label="Raise(264)", line_context=context,
+        )
+
+    assert detail() is None
+
+    # With real reach the garbage is still caught: the values do not add up to the raise's own EV.
     result["node"]["strategy"] = [0.5, 0.2, 0.3]
-    child["opponent_evs"] = [365.0, 10.0, -264.0]   # eq-weighted ≈ (365*.42+10*.11-264*.47)/10 = 3.0bb
     result["node"]["evs"] = [0.0, -3.4, 30.4]
-    detail = _response_adjusted_ev_detail_from_result(
-        result, child, hero_combo="9s7s", hero_side="oop", profile=None, adjustments={},
-        street="turn", hero_action_label="Raise(264)", line_context={"current_pot_bb": 36.5},
-    )
-    assert detail is not None
+    assert detail() is None
+
+    # Self-consistent values are used. They count the 26.4bb of the raise as hero's:
+    # (56.64 x .42 + 30 x .11 + 5 x .47) - 26.4 = 3.04bb, the raise's own EV.
+    child["opponent_evs"] = [566.4, 300.0, 50.0]
+    out = detail()
+    assert out is not None
+    assert out["ev"] == pytest.approx(3.04, abs=1e-6)
+    assert out["response_evs"]["Fold"] == pytest.approx(56.64 - 26.4)
 
 
 # ---------------------------------------------------------------------------
-# River value-bet floor and tracker-backed cheap call (2026-11-12).
+# River guards (2026-11-12): tracker-backed cheap call.
 # Inputs are the solver outputs logged for real hands in pokerfate.log
 # (session 2026-11-11T18:03Z); node EVs are in tenths of a big blind.
 # ---------------------------------------------------------------------------
-from pokerfate.decision.realtime_cfr import (  # noqa: E402
-    _apply_value_bet_floor,
-    _safety_hard_blocked_actions,
-)
 
+# The river fold rate is the villain's own (80 river bets faced).  Left to the pool it made
+# Check and the overbet differ by under 0.01bb, and the test flipped with the pool rates.
 _STICKY_PROFILE = dict(
     name="sticky", hands_seen=600, flop_seen_count=200, vpip=0.55, pfr=0.10, af=0.9,
     fold_to_cbet=0.25, fold_to_cbet_opps=120, wtsd=0.45, turn_action_count=150,
     river_action_count=90, river_bet_freq=0.55, river_afq=0.50,
+    river_fold_rate=0.20, river_facing_bet_opps=80,
 )
 
 
@@ -1733,129 +1772,19 @@ def _hand_1260_selection(options, *, win=0.936, seed=None):
     )
 
 
-def test_value_bet_floor_restores_solver_bet_against_sticky_villain():
-    old = _hand_1260_selection(RealtimeCFROptions(value_bet_floor_enabled=False))
-    # Against a sticky villain every bet's exploit EV drops below Check, so a
-    # combo the solver bets 83% of the time is checked (what the live bot did).
-    assert old["selected_label"] == "Check"
-    assert "value_bet_floor" not in old["exploit"]["safety"]
-
-    new = _hand_1260_selection(RealtimeCFROptions())
-    floor = new["exploit"]["safety"]["value_bet_floor"]
-    assert new["selected_label"] == "Bet(165)"
-    assert floor["from"] == "Check" and floor["to"] == "Bet(165)"
-    assert floor["solver_bet_freq"] == pytest.approx(0.8336, abs=1e-3)
-    # The 150%-pot size is above the cap; its 40% share moves to the pot-size bet.
-    assert "Bet(248)" not in floor["candidates"]
-    assert floor["candidates"]["Bet(165)"] == pytest.approx(0.5868, abs=1e-3)
-    assert floor["candidates"]["Check"] == pytest.approx(0.1664, abs=1e-3)
-
-
-def test_value_bet_floor_keeps_the_solver_mix():
-    labels = [
-        _hand_1260_selection(RealtimeCFROptions(), seed=seed)["selected_label"]
-        for seed in range(400)
-    ]
-    check_share = labels.count("Check") / len(labels)
-    # Solver checks this combo 16.6% of the time; the floor must not turn the
-    # hand into a pure bet and must never use the excluded overbet.
-    assert 0.10 <= check_share <= 0.24
-    assert labels.count("Bet(165)") > labels.count("Bet(109)") > 0
-    assert "Bet(248)" not in labels
-
-
-def test_value_bet_floor_leaves_low_showdown_value_hands_checked():
-    # Same solver output, but the tracker says hero is behind most of the time:
-    # this is a bluff, which the exploit layer is right to suppress.
-    selection = _hand_1260_selection(RealtimeCFROptions(), win=0.40)
-    assert selection["selected_label"] == "Check"
-    assert "value_bet_floor" not in selection["exploit"]["safety"]
-
-
-def test_value_bet_floor_on_logged_final_evs_of_hand_264():
-    # Hand #264: 7c2c on 2s2d5hJh4h, pot 31.8bb. Logged exploit-adjusted EVs
-    # put Check on top (26.21 vs 25.94) although the solver bets 86%.
-    strategy = {"Check": 0.1427, "Bet(105)": 0.6786, "Bet(210)": 0.1659,
-                "Bet(318)": 0.0038, "Bet(477)": 0.0089}
-    final = {"Check": 26.2121, "Bet(105)": 25.9427, "Bet(210)": 25.4991,
-             "Bet(318)": 24.7401, "Bet(477)": 23.8952}
-    assert max(final, key=final.get) == "Check"
-    context = {
-        "street": "river", "current_pot_bb": 31.8, "hero_current_bet_bb": 0.0,
-        "effective_stack_bb": 103.2,
-        "range_v2": {"vs_hero": {"win": 0.89, "tie": 0.0, "loss": 0.11}},
-    }
-    import random as _random
-
-    drawn = []
-    for seed in range(600):
-        safety = {}
-        label, applied = _apply_value_bet_floor(
-            "Check", final, strategy, street="river", line_context=context, safety=safety,
-            rng=_random.Random(seed), enabled=True, min_bet_freq=0.50,
-            min_showdown_value=0.66, max_pot_ratio=1.0,
-        )
-        assert applied and safety["value_bet_floor"]["to"] == label
-        drawn.append(label)
-    assert 0.10 <= drawn.count("Check") / len(drawn) <= 0.19
-    assert 0.62 <= drawn.count("Bet(105)") / len(drawn) <= 0.74
-    assert "Bet(477)" not in drawn  # 150% pot
-
-
-def _floor_call(strategy, final_evs, *, street="river", win=0.80, pot=10.5, safety=None,
-                min_bet_freq=0.50, max_pot_ratio=1.0, enabled=True):
-    safety = {} if safety is None else safety
-    context = {"street": street, "current_pot_bb": pot, "hero_current_bet_bb": 0.0,
-               "effective_stack_bb": 100.0}
-    if win is not None:
-        context["range_v2"] = {"vs_hero": {"win": win, "tie": 0.0, "loss": 1.0 - win}}
-    label, applied = _apply_value_bet_floor(
-        "Check", final_evs, strategy, street=street, line_context=context, safety=safety,
-        rng=None, enabled=enabled, min_bet_freq=min_bet_freq, min_showdown_value=0.66,
-        max_pot_ratio=max_pot_ratio,
-    )
-    return label, applied, safety
-
-
-def test_value_bet_floor_needs_a_solver_majority_bet():
-    # Hand #783: T8 on TsKd2sTd5d, solver checks 64% - the check stands.
-    strategy = {"Check": 0.6382, "Bet(35)": 0.3618, "Bet(69)": 0.0, "Bet(105)": 0.0}
-    final = {"Check": 7.9146, "Bet(35)": 7.6704, "Bet(69)": 7.5826, "Bet(105)": 2.4731}
-    label, applied, safety = _floor_call(strategy, final)
-    assert (label, applied) == ("Check", False)
-    assert safety == {}
-
-
-def test_value_bet_floor_is_river_only_and_switchable():
-    strategy = {"Check": 0.05, "Bet(105)": 0.95}
-    final = {"Check": 31.6, "Bet(105)": 31.0}
-    assert _floor_call(strategy, final, street="turn", pot=31.8)[:2] == ("Check", False)
-    # No hero-vs-range comparison from the tracker (as on the turn): no opinion.
-    assert _floor_call(strategy, final, win=None, pot=31.8)[:2] == ("Check", False)
-    assert _floor_call(strategy, final, enabled=False, pot=31.8)[:2] == ("Check", False)
-    assert _floor_call(strategy, final, pot=31.8)[:2] == ("Bet(105)", True)
-
-
-def test_value_bet_floor_skips_capped_and_hard_blocked_sizes():
-    # Hand #1260: 98 on 9dJcKc9h2h, pot 16.5bb. Solver: 40% on the 150% overbet.
-    strategy = {"Check": 0.1664, "Bet(54)": 0.0183, "Bet(109)": 0.2285,
-                "Bet(165)": 0.1883, "Bet(248)": 0.3985}
-    final = {"Check": 17.4085, "Bet(54)": 16.5252, "Bet(109)": 16.7905,
-             "Bet(165)": 11.5705, "Bet(248)": 8.4564}
-    label, applied, safety = _floor_call(strategy, final, win=0.936, pot=16.5)
-    assert (label, applied) == ("Bet(165)", True)
-    assert safety["value_bet_floor"]["candidates"]["Bet(165)"] == pytest.approx(0.5868, abs=1e-3)
-
-    blocked = {"large_size_support": [{"action": "Bet(165)", "blocked": True, "penalty_bb": 1.0}]}
-    assert "Bet(165)" in _safety_hard_blocked_actions(blocked)
-    label, applied, safety = _floor_call(strategy, final, win=0.936, pot=16.5, safety=blocked)
-    assert (label, applied) == ("Bet(109)", True)
-    assert "Bet(165)" not in safety["value_bet_floor"]["candidates"]
-
-    # Every bet size excluded: nothing to restore.
-    only_overbet = {"Check": 0.2, "Bet(248)": 0.8}
-    label, applied, _ = _floor_call(only_overbet, {"Check": 17.4, "Bet(248)": 8.4}, win=0.936, pot=16.5)
-    assert (label, applied) == ("Check", False)
+def test_bet_without_answers_in_the_tree_keeps_its_solver_value():
+    # The logged node carries no opponent decisions, so nothing is known about the answers
+    # to a bet and each bet keeps its solver value; the pot-size overbet is the solver's
+    # best action for this hand by 0.14bb and the tracker rates the hand as value, so the
+    # risk guards leave it alone. (Until 2026-11-19 a hand-written penalty on bets against
+    # a sticky opponent turned this into a check, and from 2026-11-12 to 11-18 a river
+    # "value-bet floor" turned it back: docs/candidates/value_bet_floor_removal_2026-11-18/.)
+    selection = _hand_1260_selection(RealtimeCFROptions())
+    exploit = selection["exploit"]
+    assert selection["selected_label"] == "Bet(248)"
+    for label in ("Bet(54)", "Bet(109)", "Bet(165)", "Bet(248)"):
+        assert exploit["adjusted_action_evs_bb"][label] == pytest.approx(exploit["gto_action_evs_bb"][label])
+    assert "value_bet_floor" not in exploit["safety"]
 
 
 def _river_facing_selection(options, *, pot, to_call, call_ev_bb, win, rank="two_pair",
@@ -1940,3 +1869,168 @@ def test_cheap_call_guard_tracker_path_keeps_its_limits():
         strategy=(0.455, 0.545), path="r:Bet(308)",
     )
     assert not_cheap["selected_label"] == "Fold"
+
+
+def _unreached_result(hero_weight: float, other_weight: float, opponent_weights=None, call_ev: float = 0.0) -> dict:
+    """Hero (OOP) bet, the opponent moved all in; hero's combo is the first of two hands at the node.
+
+    ``weights`` is each hand's own reach times the opponent's. A binding without
+    ``opponent_weights`` reports 0 for every action of a hand whose weight is 0."""
+    node = {
+        "path": "r:Bet(160):AllIn(278)",
+        "player": 0,
+        "actions": ["Fold", "Call"],
+        "num_hands": 2,
+        "strategy": [0.0, 0.6, 1.0, 0.4],
+        "evs": [0.0, 0.0, call_ev if opponent_weights else (0.0 if hero_weight <= 0.0 else 500.0),
+                0.0 if other_weight <= 0.0 else -30.0],
+        "weights": [hero_weight, other_weight],
+    }
+    if opponent_weights is not None:
+        node["opponent_weights"] = list(opponent_weights)
+    return {"node": node, "nodes": [node], "oop_hands": ["Ad4d", "KcQh"], "ip_hands": ["7c7s"]}
+
+
+def _nut_heavy_caller_profile() -> PlayerProfile:
+    return PlayerProfile(
+        name="loose_passive",
+        hands_seen=1976,
+        flop_seen_count=40,
+        vpip=0.74,
+        pfr=0.14,
+        af=0.53,
+        fold_to_cbet=0.43,
+        fold_to_cbet_opps=20,
+        wtsd=0.39,
+        turn_action_count=27,
+    )
+
+
+_ALL_IN_OVER_HERO_BET = {
+    "street": "turn",
+    "hero_turn_bet_bb": 16.0,
+    "current_pot_bb": 59.78,
+    "current_to_call_bb": 11.78,
+    "hero_current_bet_bb": 16.0,
+    "effective_stack_bb": 27.78,
+    "range_v2": {
+        "bucket_dist": {"nuts": 0.29, "strong": 0.28, "medium": 0.27, "draw": 0.11, "weak_draw": 0.02, "air": 0.03},
+        "action_context": {
+            "action": "raise", "street": "turn", "is_ip": True, "is_raise_over": True,
+            "bet_ratio": 0.87, "facing_action": "bet",
+        },
+    },
+}
+
+
+def _select_at_all_in(result: dict) -> dict:
+    return _select_exploit_action(
+        result,
+        hero_combo="4dAd",
+        hero_side="oop",
+        street="turn",
+        gto_strategy={"Fold": 0.0, "Call": 1.0},
+        profile=_nut_heavy_caller_profile(),
+        adjustments={"value_ag_scale": 0.73, "bluff_ag_scale": 0.63, "river_bet_rare": True},
+        max_confidence=0.45,
+        enabled=True,
+        big_blind=5000.0,
+        hero_made_rank="flush",
+        line_context=dict(_ALL_IN_OVER_HERO_BET),
+        decision_seed=7,
+    )
+
+
+def test_zero_evs_of_a_combo_that_does_not_reach_the_node_are_not_read_as_evs():
+    # Live 2026-11-17: hero bet the turn with the nut flush through the rule
+    # engine; the solver never bets that size with it, so at the node after the
+    # opponent's all-in the combo had reach 0 and "EVs" Fold 0 / Call 0. The
+    # exploit nudges alone then chose Fold against a 100% Call strategy.
+    selection = _select_at_all_in(_unreached_result(0.0, 0.004))
+
+    assert selection["selected_label"] == "Call"
+    assert selection["exploit"]["used"] is False
+    assert selection["exploit"]["reason"] == "hero_combo_unreached"
+    assert "action_evs_bb" not in selection
+
+
+def test_real_evs_of_a_combo_that_reaches_the_node_are_still_used():
+    selection = _select_at_all_in(_unreached_result(0.002, 0.004))
+
+    assert selection["selected_label"] == "Call"
+    assert selection["action_evs_bb"] == {"Fold": 0.0, "Call": 50.0}
+    assert selection["exploit"]["used"] is True
+
+
+def test_a_combo_off_the_solver_line_keeps_its_real_evs_when_the_binding_reports_them():
+    # The patched binding divides by the opponent's weight, so the combo has a
+    # real EV although its own reach is 0; the exploit layer then works as usual
+    # and cannot talk itself out of a +51bb call.
+    selection = _select_at_all_in(_unreached_result(0.0, 0.004, opponent_weights=[0.36, 0.36], call_ev=512.86))
+
+    assert selection["selected_label"] == "Call"
+    assert selection["action_evs_bb"] == {"Fold": 0.0, "Call": 51.286}
+    assert selection["exploit"]["used"] is True
+    assert selection["exploit"]["final_action_evs_bb"]["Call"] > 25.0
+
+
+def test_a_node_no_opponent_hand_reaches_has_no_values_even_with_the_patched_binding():
+    selection = _select_at_all_in(_unreached_result(0.0, 0.0, opponent_weights=[0.0, 0.0]))
+
+    assert selection["exploit"]["used"] is False
+    assert selection["exploit"]["reason"] == "solver_node_unreached"
+    assert "action_evs_bb" not in selection
+
+
+@pytest.mark.parametrize(
+    "weights, reason",
+    [([0.0, 0.2], "hero_combo_unreached"), ([0.0, 0.0], "solver_node_unreached")],
+)
+def test_realtime_cfr_falls_back_when_the_solver_has_no_values_for_the_hand(monkeypatch, weights, reason):
+    hero = Player(0, "Hero", 1000.0, hole_cards=_cards("As", "Ah"), current_bet=0.0)
+    villain = Player(1, "Villain", 940.0, current_bet=60.0)
+    gs = GameState(
+        players=[hero, villain],
+        dealer_pos=0,
+        street=Street.TURN,
+        board=_cards("Kh", "7d", "2c", "9s"),
+        pot=260.0,
+        current_bet=60.0,
+        big_blind=10.0,
+        small_blind=5.0,
+        player_positions={0: "BTN", 1: "BB"},
+        action_history=[(1, Action(ActionType.RAISE, 60.0), "turn")],
+    )
+
+    def fake_solve(state, **_kwargs):
+        return {
+            "node": {
+                "path": "r:Bet(60)",
+                "player": 1,
+                "actions": ["Fold", "Call"],
+                "num_hands": 2,
+                "strategy": [0.0, 0.5, 1.0, 0.5],
+                "evs": [0.0, 0.0, 0.0, 0.0],
+                "weights": weights,
+            },
+            "oop_hands": ["QcQd"],
+            "ip_hands": ["AsAh", "KsKh"],
+            "exploitability_pct": 0.42,
+        }
+
+    monkeypatch.setattr("pokerfate.decision.realtime_cfr.solve_realtime_cfr", fake_solve)
+    engine = RealtimeCFRDecisionEngine(RealtimeCFROptions(timeout_sec=0.1))
+    action = engine.decide(
+        RealtimeCFRDecisionContext(
+            gs=gs,
+            hero_player_id=0,
+            street_start_pot=200.0,
+            range_provider=lambda player_id: _weights("QcQd") if player_id == 1 else _weights(),
+        )
+    )
+
+    assert action is None
+    assert engine.last_result["status"] == "fallback"
+    assert engine.last_result["reason"] == reason
+    assert engine.last_result["strategy"] == {"Fold": 0.0, "Call": 1.0}
+    assert engine.last_hero_reach_update == {}

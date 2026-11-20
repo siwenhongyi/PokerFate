@@ -322,8 +322,8 @@ def test_bridge_leaves_a_robot_table_and_rematches_waiting_for_the_blind(monkeyp
     # a table with two humans and one robot is kept
     assert b.handle("pb.EnterRoomRSP", _enter([ME, "10700890", "10774146", ROBOTS[2]])) is None
     assert b._table_policy.state == SEATED
-    status = b.table_select_status()
-    assert (status["humans"], status["robots"]) == (2, 1)
+    comp = b._table_composition()
+    assert (comp["humans"], comp["robots"]) == (2, 1)
 
 
 def test_bridge_uses_the_server_count_and_grows_the_registry(monkeypatch):
@@ -389,6 +389,33 @@ def test_bridge_hand_end_leave_and_profit_lock_do_not_collide(monkeypatch):
     assert b._table_event("hand_end") is None
 
 
+def test_leaving_a_played_table_reports_the_running_result(monkeypatch):
+    sent = []
+    monkeypatch.setattr("pf_intercept.bot.notify", lambda event, **f: sent.append((event, f)))
+    b = _bridge(monkeypatch)
+    b.handle("pb.EnterRoomRSP", _enter([ME, "10700890", ROBOTS[0]]))
+    b.handle("pb.SitDownRSP", {"seatid": 0})
+    b._table_policy.on_dealt()
+    b._session_poker_pnl = -235_066
+    leave = b.handle("pb.OtherLeaveRoomBRC", {"uid": "10700890", "num": 2, "rb_num": 1})
+    assert leave == ("pb.DelayLeaveRoomREQ", {"flag": True}, 0.0)
+    # the server never answers: the retry is still the same leave, for the same reason
+    retry = b.handle("pf.Tick", {"now": b._table_policy.deadline})
+    assert retry == ("pb.DelayLeaveRoomREQ", {"flag": True}, 0.0) and b._table_switch["reason"] == "retry"
+    assert sent == []                                  # nothing before the server confirms
+    b.handle("pb.LeaveRoomRSP", {"roomid": 21203448})
+    assert sent == [("table_leave", {"reason": "no_humans", "session_delta_chips": -235_066})]
+
+
+def test_rejecting_a_table_on_arrival_sends_nothing(monkeypatch):
+    sent = []
+    monkeypatch.setattr("pf_intercept.bot.notify", lambda event, **f: sent.append((event, f)))
+    b = _bridge(monkeypatch)
+    b.handle("pb.EnterRoomRSP", _enter([ME, ROBOTS[0], ROBOTS[1]]))
+    b.handle("pb.LeaveRoomRSP", {"roomid": 21203448})
+    assert sent == [] and b._table_policy.state == SCHEDULED
+
+
 def test_stop_notifies_once_and_blocks_reconnect_rematch(monkeypatch):
     sent = []
     monkeypatch.setattr("pf_intercept.bot.notify", lambda event, **f: sent.append((event, f)))
@@ -400,6 +427,43 @@ def test_stop_notifies_once_and_blocks_reconnect_rematch(monkeypatch):
     assert b.handle("pf.Tick", {"now": 9e9}) is None
     b.prepare_transport_reconnect()
     assert b.restore_lobby_after_disconnect() is False
+
+
+def test_table_switch_buy_in_stays_under_the_net_loss_cap(monkeypatch):
+    # home stake 10000, --max-auto-rebuy 0: the start may lose 1,000,000 in all
+    def leave_and_tick(net):
+        b = _bridge(monkeypatch)
+        monkeypatch.setattr("pf_intercept.bot.time.time", lambda: 1000.0)
+        b.handle("pb.EnterRoomRSP", _enter([ME, ROBOTS[0], ROBOTS[1]]))
+        b.handle("pb.LeaveRoomRSP", {"roomid": 21203448})
+        b.handle("pb.UserValueRSP", {"type": 10100001, "value": "50000000"})
+        b._session_poker_pnl = net
+        return b, b.handle("pf.Tick", {"now": 1061.0})
+
+    sent = []
+    monkeypatch.setattr("pf_intercept.bot.notify", lambda event, **f: sent.append((event, f)))
+    _, match = leave_and_tick(+300_000)
+    assert match[1]["byin_chips"] == 1_000_000              # ahead: a full buy-in
+    b, match = leave_and_tick(-20_000)
+    assert match[0] == "pb.QuickStartREQ" and match[1]["byin_chips"] == 900_000    # 98BB of room → 90BB
+    assert b._auto_rejoin_fields["byin_chips"] == 1_000_000 and not b._loss_stop
+    b, match = leave_and_tick(-990_000)                     # 1BB of room: the start is over
+    assert match is None and b._loss_stop
+    assert [e for e, _ in sent] == ["loss_stop"]
+    assert b.handle("pf.Tick", {"now": 9e9}) is None        # and it does not keep trying
+    b.prepare_transport_reconnect()
+    assert b.restore_lobby_after_disconnect() is False
+
+
+def test_the_loss_cap_is_counted_at_the_home_stake_whatever_table_we_sit_at(monkeypatch):
+    b = _bridge(monkeypatch)                                # home 10000, N = 0
+    b._bb = 2000.0                                          # playing a fallback stake
+    assert b._loss_cap_chips() == 1_000_000
+    b._session_poker_pnl = -100_000
+    assert b._capped_buyin(200_000, 2000.0) == 200_000      # 100BB at the 2000 blind fits easily
+    b._bb = 20000.0
+    # at the 20000 blind the 900,000 of room is 45BB: the largest amount on offer below it is 40BB
+    assert b._capped_buyin(2_000_000, 20000.0) == 800_000
 
 
 def test_policy_off_changes_nothing(monkeypatch):

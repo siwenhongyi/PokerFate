@@ -220,15 +220,17 @@ def _select_bucket_blend(
     max_mass_bias_pp: float,
     max_mass_cell_bias_pp: float,
     max_mass_cell_worsen_pp: float,
+    pinned_alpha: float | None = None,
 ) -> dict[str, Any]:
     """Pick the blend weight alpha (runtime: (1-alpha)*raw + alpha*model).
 
     Among alphas that satisfy every gate, the one with the largest NLL gain wins.
-    If none does, alpha=0 and the model is marked unusable.
+    If none does, alpha=0 and the model is marked unusable.  ``pinned_alpha`` skips the
+    search: the gates were passed on a real hold-out and this fit only adds its sessions.
     """
     raw_m = _bucket_metrics(rows, raw_probs)
     best: dict[str, Any] | None = None
-    for alpha in np.linspace(0.05, 1.0, 20):
+    for alpha in (np.linspace(0.05, 1.0, 20) if pinned_alpha is None else (float(pinned_alpha),)):
         blended = (1.0 - float(alpha)) * raw_probs + float(alpha) * model_probs
         blended = np.clip(blended, EPS, 1.0)
         blended /= blended.sum(axis=1, keepdims=True)
@@ -244,6 +246,8 @@ def _select_bucket_blend(
             and risk["strong_nuts_mass_cell_worsen_pp"] <= max_mass_cell_worsen_pp
         )
         candidate = {"alpha": round(float(alpha), 2), "metrics": metrics, "risk": risk, "nll_gain": nll_gain, "usable": usable}
+        if pinned_alpha is not None:
+            return {**candidate, "usable": True, "pinned": True}
         if usable and (best is None or candidate["nll_gain"] > best["nll_gain"]
                        or (candidate["nll_gain"] == best["nll_gain"] and candidate["alpha"] > best["alpha"])):
             best = candidate
@@ -297,27 +301,39 @@ def main() -> None:
     ap.add_argument("--val-strategy-version")
     ap.add_argument("--train-experiment-flag", action="append", default=[])
     ap.add_argument("--val-experiment-flag", action="append", default=[])
-    ap.add_argument("--keep-robots", action="store_true",
-                    help="do NOT drop rows about house robots (default: drop them, using the robot registry)")
+    ap.add_argument("--blend-alpha", type=float, default=None,
+                    help="use this blend instead of selecting it on --val-rows: for the final fit on "
+                         "all sessions, after the gates were passed and alpha chosen on a real hold-out")
     ap.add_argument("--robot-registry", type=Path, default=None,
                     help="robot registry file (default pokerfate/data/local_models/robots.json)")
     args = ap.parse_args()
 
     raw_train_rows = _load_rows(args.train_rows)
     raw_val_rows = _load_rows(args.val_rows)
-    robot_rows = {"train": 0, "val": 0, "excluded": not args.keep_robots}
-    if not args.keep_robots:
-        from pokerfate.core.robots import RobotRegistry
-        registry = RobotRegistry(args.robot_registry, autosave=False)
-        raw_train_rows, robot_rows["train"] = drop_robot_rows(raw_train_rows, registry)
-        raw_val_rows, robot_rows["val"] = drop_robot_rows(raw_val_rows, registry)
-        robot_rows["registry"] = registry.counts()
+    # Rows about house robots never train a model.
+    from pokerfate.core.robots import RobotRegistry
+    registry = RobotRegistry(args.robot_registry, autosave=False)
+    robot_rows = {"excluded": True, "registry": registry.counts()}
+    raw_train_rows, robot_rows["train"] = drop_robot_rows(raw_train_rows, registry)
+    raw_val_rows, robot_rows["val"] = drop_robot_rows(raw_val_rows, registry)
+    # The runtime applies the model when a player acts and when a board card lands.  A
+    # ``fold_other`` row is the unchanged range of a player who stayed in while somebody else
+    # folded: the model is never applied there, and which of those players reach showdown
+    # depends on what happened next.  Such rows neither train nor gate the model.
+    raw_train_rows = [r for r in raw_train_rows if r.get("trigger") != "action:fold_other"]
+    raw_val_rows = [r for r in raw_val_rows if r.get("trigger") != "action:fold_other"]
     train_flag_filter = parse_flag_filters(args.train_experiment_flag)
     val_flag_filter = parse_flag_filters(args.val_experiment_flag)
     train_rows = limit_rows(filter_rows_by_meta(raw_train_rows, strategy_version=args.train_strategy_version,
                                                 experiment_flags=train_flag_filter), args.max_train_rows)
     val_rows = limit_rows(filter_rows_by_meta(raw_val_rows, strategy_version=args.val_strategy_version,
                                               experiment_flags=val_flag_filter), args.max_val_rows)
+    # The model corrects one particular formula layer: remember which (rows carry its
+    # fingerprint), so the runtime can refuse the model once the layer below has changed.
+    formula_fits = {r.get("formula_fit") for r in train_rows} - {None}
+    if len(formula_fits) > 1:
+        raise SystemExit(f"training rows were extracted with different formula fits: {sorted(formula_fits)}")
+    formula_fit = next(iter(formula_fits), None)
     streets = {s.strip() for s in args.bucket_streets.split(",") if s.strip()}
     tr = _bucket_rows(train_rows, streets)
     va = _bucket_rows(val_rows, streets)
@@ -371,6 +387,7 @@ def main() -> None:
         max_mass_bias_pp=args.max_bucket_mass_bias_pp,
         max_mass_cell_bias_pp=args.max_bucket_mass_cell_bias_pp,
         max_mass_cell_worsen_pp=args.max_bucket_mass_cell_worsen_pp,
+        pinned_alpha=args.blend_alpha,
     )
     runtime_usable = bool(selected["usable"])
     train_args = {k: getattr(args, k) for k in (
@@ -387,6 +404,7 @@ def main() -> None:
             "classes": [int(c) for c in clf.classes_],
             "blend_alpha": selected["alpha"],
             "runtime_usable": runtime_usable,
+            "formula_fit": formula_fit,
             "model_str": clf.booster_.model_to_string(),
             "selected_blend": selected,
             "feature_source": "pokerfate.strategy.range_v2.bucket_ml_calibration._feature_values",

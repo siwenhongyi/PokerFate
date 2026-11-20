@@ -1,10 +1,10 @@
-"""House robots are played against but never learned from."""
+"""House robots are played against but never learned from; at a table the bot would leave, nobody is."""
 
 import json
+from unittest.mock import Mock
 
-from pokerfate.api import ActionEvent, PlayerInfo, PokerFateAPI
-from pokerfate.core.game_state import Action, ActionType
-from pokerfate.decision.g5_model import G5ActionModel, stable_player_name
+from pokerfate.api import PlayerInfo, PokerFateAPI
+from pokerfate.decision.g5_model import stable_player_name
 
 HERO, HUMAN_ID, ROBOT_ID = 10262053, 10700890, 10334071
 
@@ -17,11 +17,11 @@ def _api(tmp_path) -> PokerFateAPI:
     )
 
 
-def _players():
+def _players(robots=1):
     return [
         PlayerInfo(HERO, "hero", 1_000_000, seat_index=0),
         PlayerInfo(HUMAN_ID, "human", 1_000_000, seat_index=1),
-        PlayerInfo(ROBOT_ID, "robot", 1_000_000, seat_index=2, is_robot=True),
+        *[PlayerInfo(ROBOT_ID + i, f"robot{i}", 1_000_000, seat_index=2 + i, is_robot=True) for i in range(robots)],
     ]
 
 
@@ -38,17 +38,57 @@ def test_hand_start_log_marks_robots_and_only_robots(tmp_path):
     assert api._hand_robot_ids == set()
 
 
-def test_no_calibration_prediction_is_recorded_about_a_robot(tmp_path):
+def test_calibration_predictions_follow_the_table_rule(tmp_path):
     api = _api(tmp_path)
     seen = []
-    api._calibrator.record_prediction = lambda **kw: seen.append(kw["player_id"])
-    api.new_hand(_players(), dealer_id=HERO, hand_number=1)
+    api._calibrator.record_prediction = lambda **kw: seen.append((kw["player_id"], kw.get("hero_eq_sample", True)))
     hook = api._bot._range_tracker._prediction_hook
+
+    # A table the bot stays at (humans >= robots): the human is recorded and the robot is not;
+    # while the robot is still in the pot the prediction is a training row but no hero-equity sample.
+    api.new_hand(_players(), dealer_id=HERO, hand_number=1)
+    assert not api._hand_skip_learning
+    seen.clear()
     hook(player_id=ROBOT_ID, active_weights={})
     hook(player_id=HUMAN_ID, active_weights={HERO: 1, HUMAN_ID: 1, ROBOT_ID: 1})
+    hook(player_id=HUMAN_ID, active_weights={HERO: 1, HUMAN_ID: 1})          # the robot has folded
     hook(player_id=HERO, active_weights={})
-    # the tracker also predicts on its own (e.g. when the hand starts): only the human shows up
-    assert seen and set(seen) == {HUMAN_ID}
+    assert seen == [(HUMAN_ID, False), (HUMAN_ID, True)]
+
+    # A table it would leave: fewer humans than robots, or no human at all. Nothing is recorded.
+    for players in (_players(robots=2), [_players()[0], _players()[2]]):
+        seen.clear()
+        api.new_hand(players, dealer_id=HERO, hand_number=2)
+        assert api._hand_skip_learning
+        hook(player_id=HUMAN_ID, active_weights={HERO: 1, HUMAN_ID: 1})
+        assert seen == []
+
+    # No robot: everything as usual (the tracker also predicts on its own when the hand starts).
+    api.new_hand(_players(robots=0), dealer_id=HERO, hand_number=3)
+    hook(player_id=HUMAN_ID, active_weights={HERO: 1, HUMAN_ID: 1})
+    assert seen and {uid for uid, _ in seen} == {HUMAN_ID} and all(sample for _, sample in seen)
+
+
+def test_a_prediction_made_with_a_robot_in_the_pot_is_no_hero_equity_sample():
+    import numpy as np
+    from pokerfate.calibration.showdown_calibration import ShowdownCalibrator
+    from pokerfate.core.card import Card
+
+    cards = lambda text: [Card.from_str(c) for c in text.split()]
+    board, hero = cards("Ah 7d 2c Ks 9h"), cards("Ac Kd")
+    weights = np.ones(1326)
+    kept = {}
+    for flag in (True, False):
+        cal = ShowdownCalibrator(logger=None)
+        cal.start_hand(1)
+        cal.record_prediction(player_id=HUMAN_ID, player_name="human", street="river", board=board,
+                              weights=weights, hero_cards=hero, trigger="action:bet",
+                              active_weights={HUMAN_ID: weights, ROBOT_ID: weights}, hero_eq_sample=flag)
+        kept[flag] = cal._hand_predictions[HUMAN_ID][-1]
+    assert kept[True].predicted_hero_eq_multi is not None
+    assert kept[False].predicted_hero_eq_multi is None                      # nothing to calibrate against
+    assert kept[False].active_player_ids == kept[True].active_player_ids    # the row still says who was in
+    assert kept[False].bucket_dist == kept[True].bucket_dist
 
 
 def test_a_flagged_hero_is_never_treated_as_a_robot(tmp_path):
@@ -59,24 +99,46 @@ def test_a_flagged_hero_is_never_treated_as_a_robot(tmp_path):
     assert HERO not in api._hand_robot_ids
 
 
-def test_g5_model_does_not_profile_skipped_players():
-    model = G5ActionModel()
-    players = [
-        {"player_id": pid, "name": stable_player_name(pid), "stack": 1_000_000.0, "position": pos,
-         "seat_index": i}
-        for i, (pid, pos) in enumerate(((HERO, "BTN"), (HUMAN_ID, "SB"), (ROBOT_ID, "BB")))
-    ]
-    history = [
-        (HERO, Action(ActionType.RAISE, 30000), "preflop"),
-        (HUMAN_ID, Action(ActionType.CALL, 25000), "preflop"),
-        (ROBOT_ID, Action(ActionType.FOLD), "preflop"),
-    ]
-    assert model.record_hand(players=players, dealer_id=HERO, action_history=history,
-                             big_blind=10000, small_blind=5000,
-                             skip_names={stable_player_name(ROBOT_ID)})
-    names = set(model.players)
-    assert stable_player_name(HUMAN_ID) in names and stable_player_name(HERO) in names
-    assert stable_player_name(ROBOT_ID) not in names
+def test_player_statistics_and_g5_profiles_follow_the_table_rule(tmp_path):
+    api = _api(tmp_path)
+    profiled = []
+    api._g5_model_path = "unused"
+    api._g5_action_model = Mock(record_hand=lambda **kw: profiled.append(set(kw["skip_names"])) and False)
+    stats = api._bot.opponent_model
+
+    api.new_hand(_players(robots=2), dealer_id=HERO, hand_number=1)          # outnumbered: leave
+    assert stats.frozen
+    stats.record_vpip(HUMAN_ID)
+    stats.record_action(HUMAN_ID, "call", "flop")
+    stats.record_showdown(HUMAN_ID, won=True)
+    api._record_g5_action_model_hand()
+    human = stats.get(HUMAN_ID)
+    assert (human.hands_seen, human.vpip_count, human.showdown_count) == (0, 0, 0) and profiled == []
+
+    api.new_hand(_players(), dealer_id=HERO, hand_number=2)                  # one human, one robot: stay
+    assert not stats.frozen
+    stats.record_vpip(HUMAN_ID)
+    api._record_g5_action_model_hand()
+    human = stats.get(HUMAN_ID)
+    assert (human.hands_seen, human.vpip_count) == (1, 1)
+    assert profiled == [{stable_player_name(ROBOT_ID)}]                      # the robot itself is not profiled
+
+
+def test_a_replayed_hand_flags_robots_like_a_live_one(tmp_path):
+    import pokerfate.core.robots as robots
+    from scripts.replay_and_compare import _replay_hand
+
+    for uid in (ROBOT_ID, ROBOT_ID + 5, ROBOT_ID + 10, ROBOT_ID + 15, ROBOT_ID + 20):
+        robots.default_registry().confirm(uid, "robot", "test")
+    seat = lambda uid, name: {"id": uid, "name": name, "stack": 1_000_000}
+    hand = {"players": [seat(HERO, "hero"), seat(HUMAN_ID, "human"), seat(ROBOT_ID + 7, "robot")],   # unproven, in the block
+            "dealer_id": HERO, "hole_cards": [], "events": []}
+    api = _api(tmp_path)
+    _replay_hand(api, hand, hero_id=HERO)
+    assert api._hand_robot_ids == {ROBOT_ID + 7} and not api._hand_skip_learning
+    hand["players"].append(seat(ROBOT_ID + 8, "robot2"))                     # now outnumbered
+    _replay_hand(api, hand, hero_id=HERO)
+    assert api._hand_skip_learning and api._bot.opponent_model.frozen
 
 
 def test_cfr_opponent_prior_library_leaves_robots_out(tmp_path, monkeypatch):
@@ -105,3 +167,20 @@ def test_cfr_opponent_prior_library_leaves_robots_out(tmp_path, monkeypatch):
         assert abs(model.pool["vpip"] - 0.30) < 1e-9 and abs(model.pool["fold_to_cbet"] - 0.40) < 1e-9
     finally:
         onp._load_model.cache_clear()
+
+
+def test_training_row_extraction_uses_the_same_filter_as_live_play(tmp_path):
+    from scripts.extract_range_calibration_rows_parallel import _attach_inline_calibrator
+
+    api = _api(tmp_path)
+    seen = []
+    _attach_inline_calibrator(api, Mock(record_prediction=lambda **kw: seen.append(kw["player_id"])))
+    hook = api._bot._range_tracker._prediction_hook
+    api.new_hand(_players(robots=2), dealer_id=HERO, hand_number=1)          # a table the bot would leave
+    hook(player_id=HUMAN_ID, active_weights={})
+    assert seen == []
+    api.new_hand(_players(), dealer_id=HERO, hand_number=2)
+    seen.clear()
+    for uid in (HUMAN_ID, ROBOT_ID, HERO):
+        hook(player_id=uid, active_weights={})
+    assert seen == [HUMAN_ID]

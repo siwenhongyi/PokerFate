@@ -26,7 +26,6 @@ _CALL_MAX_ADD = 0.10
 _CALL_BASE_ADD = 0.03
 _VALUE_JAM_MAX_ADD = 0.12
 _VALUE_JAM_BASE_ADD = 0.04
-_FOLD_OVERRIDE_MIN_EDGE = 0.08
 
 _FRAGILE_SUBTYPES = {
     "clean_overpair",
@@ -181,13 +180,6 @@ def call_margin_add(ctx: DecisionCtx) -> float:
     add = _CALL_BASE_ADD + max(0.0, risk - _MIN_RISK) * 0.22
     add += min(0.03, _villain_nuts(ctx) * 0.06)
     return min(_CALL_MAX_ADD, add)
-
-
-def fold_override_need(ctx: DecisionCtx) -> float:
-    add = call_margin_add(ctx)
-    if add <= 0:
-        return 0.0
-    return ctx.pot_odds + max(add, _FOLD_OVERRIDE_MIN_EDGE)
 
 
 def active_value_eq_add(ctx: DecisionCtx) -> float:

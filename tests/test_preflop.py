@@ -7,7 +7,13 @@ from pokerfate.core.card import Card
 from pokerfate.core.config import RAKE_KEEP
 from pokerfate.strategy import preflop as preflop_module
 from pokerfate.strategy.preflop import (
+    SHOWDOWN_CONTINUE_RATE,
+    SHOWDOWN_EQUITY_MARGIN,
     PreflopStrategy,
+    ShowdownPrice,
+    continue_outcomes,
+    showdown_call_ev,
+    showdown_continue_rate,
     _3BET_CALL_BY_POS,
     _3BET_CALL_DEFAULT,
     _hand_category,
@@ -1198,9 +1204,34 @@ class TestPreflopChartPrimary:
         assert (action, amount) == ('fold', 0.0)
         assert self.strat.last_expand_reason.startswith('chart_block:3bet_pressure JTs')
 
-    def test_fallback_3bet_call_range_is_not_blocked_by_post_call_spr(self):
+    def test_static_3bet_call_range_stands_while_there_is_room_to_play(self):
+        # JTs has no chart entry for BTN against a CO 3-bet.  100bb deep, 16bb more is a
+        # sixth of the stack: the static range decides, whatever the showdown price says.
         strat = PreflopStrategy()
         action, amount = strat.decide(
+            hole_cards=cards('Jd', 'Td'),
+            position='BTN',
+            facing_action='3bet',
+            open_raise=180.0,
+            is_ip=True,
+            big_blind=10.0,
+            stack=1000.0,
+            pot=260.0,
+            to_call=160.0,
+            stack_bb=100.0,
+            villain_position='CO',
+            equity=0.30,
+        )
+
+        assert action == 'call'
+        assert amount == pytest.approx(160.0)
+        assert not strat.last_expand_reason.startswith(('chart_block:', 'static_block:'))
+
+    def test_static_3bet_call_range_cannot_carry_a_third_of_the_stack_below_the_price(self):
+        # Same hand and raise at 45bb: the call is 36% of the stack and needs 42%
+        # at showdown (9% rake); with 34% the range does not make it a call.
+        strat = PreflopStrategy()
+        spot = dict(
             hole_cards=cards('Jd', 'Td'),
             position='BTN',
             facing_action='3bet',
@@ -1212,12 +1243,33 @@ class TestPreflopChartPrimary:
             to_call=160.0,
             stack_bb=45.0,
             villain_position='CO',
-            equity=0.34,
         )
 
-        assert action == 'call'
-        assert amount == pytest.approx(160.0)
-        assert not strat.last_expand_reason.startswith('chart_block:')
+        assert strat.decide(equity=0.34, **spot) == ('fold', 0.0)
+        assert strat.last_expand_reason.startswith('static_block:3bet_below_price JTs eq=34% po=42% commit=36%')
+        # At or above the price the range stands; no extra margin is asked.
+        assert strat.decide(equity=0.43, **spot) == ('call', pytest.approx(160.0))
+
+    def test_static_4bet_call_fallback_is_priced_the_same_way(self):
+        # AKo, no chart entry (SB against a UTG 4-bet), 39bb of 97bb to call.
+        strat = PreflopStrategy()
+        spot = dict(
+            hole_cards=cards('Ac', 'Kd'),
+            position='SB',
+            facing_action='4bet',
+            open_raise=480_000.0,
+            is_ip=False,
+            big_blind=10_000.0,
+            stack=970_000.0,
+            pot=680_000.0,
+            to_call=390_000.0,
+            stack_bb=97.0,
+            villain_position='UTG',
+        )
+
+        assert strat.decide(equity=0.38, **spot) == ('fold', 0.0)
+        assert strat.last_expand_reason.startswith('static_block:4bet_below_price AKo')
+        assert strat.decide(equity=0.45, **spot) == ('call', pytest.approx(390_000.0))
 
     def test_chart_call_vetoes_static_tt_4bet(self):
         action, amount = self.strat.decide(
@@ -1830,3 +1882,141 @@ def test_pool_value_3bet_folds_to_a_4bet_jam():
         to_call=904.0, stack_bb=90.4, equity=0.40,
     )
     assert action == 'fold'
+
+
+# ---------------------------------------------------------------------------
+# Calls that end the betting are decided by their price (2026-11-15).
+# ---------------------------------------------------------------------------
+
+def test_showdown_call_ev_is_the_raked_pot_share_minus_the_call():
+    ev = showdown_call_ev(call=100.0, pot=300.0, equity=0.40)
+    assert ev == pytest.approx((0.40 - SHOWDOWN_EQUITY_MARGIN) * RAKE_KEEP * 400.0 - 100.0)
+    # Break-even sits at the raked price plus the margin.
+    need = 100.0 / (RAKE_KEEP * 400.0) + SHOWDOWN_EQUITY_MARGIN
+    assert showdown_call_ev(call=100.0, pot=300.0, equity=need + 0.01) > 0 > showdown_call_ev(call=100.0, pot=300.0, equity=need - 0.01)
+
+
+def test_showdown_call_ev_weighs_every_way_the_players_behind_can_split():
+    alone = showdown_call_ev(call=100.0, pot=300.0, equity=0.50)
+    crowded = (0.30 - SHOWDOWN_EQUITY_MARGIN) * RAKE_KEEP * 500.0 - 100.0
+    # One player behind who comes along 30% of the time, adding 100 and cutting hero to 30%.
+    one = showdown_call_ev(call=100.0, pot=300.0, equity=0.50, outcomes=[(0.70, 0.50, 0.0), (0.30, 0.30, 100.0)])
+    assert one == pytest.approx(0.70 * alone + 0.30 * crowded)
+    assert one < alone
+    # Rare splits that were left out make the weights fall short of 1: the rest is rescaled.
+    short = showdown_call_ev(call=100.0, pot=300.0, equity=0.50, outcomes=[(0.35, 0.50, 0.0), (0.15, 0.30, 100.0)])
+    assert short == pytest.approx(one)
+
+
+def test_continue_outcomes_cover_every_split_of_the_players_behind():
+    assert continue_outcomes([]) == [(1.0, ())]
+    splits = {who: probability for probability, who in continue_outcomes([0.7, 0.7, 0.13])}
+    assert len(splits) == 8 and sum(splits.values()) == pytest.approx(1.0)
+    assert splits[()] == pytest.approx(0.3 * 0.3 * 0.87)
+    assert splits[(0, 1)] == pytest.approx(0.7 * 0.7 * 0.87)          # both raisers, not the third player
+    assert splits[(0, 1, 2)] == pytest.approx(0.7 * 0.7 * 0.13)
+    # A split rarer than the cut-off is left out.
+    assert [who for _, who in continue_outcomes([0.999])] == [(0,)]
+
+
+def test_continue_rate_follows_the_raise_size_and_what_the_player_did_before():
+    # Hand 216 of 2026-11-16: opener, 3-bettor and 4-bettor still to act behind a 5-bet to 120bb.
+    assert showdown_continue_rate(120.0, 'raised') == 0.69
+    assert showdown_continue_rate(120.0, 'called') == 0.35
+    assert showdown_continue_rate(120.0, 'none') == 0.15
+    assert showdown_continue_rate(20.0, 'none') == 0.15 and showdown_continue_rate(19.9, 'none') == 0.21
+    assert showdown_continue_rate(8.0, 'called') == 0.51 and showdown_continue_rate(2.6, 'none') == 0.46
+    assert showdown_continue_rate(50.0, 'anything else') == showdown_continue_rate(50.0, 'none')
+    # Raisers come along most and untouched players least at every size; a bigger raise thins all of them out.
+    for rates in SHOWDOWN_CONTINUE_RATE.values():
+        assert rates['raised'] > rates['called'] > rates['none']
+    for earlier in ('raised', 'called', 'none'):
+        by_size = [SHOWDOWN_CONTINUE_RATE[size][earlier] for size in ('small', 'medium', 'big')]
+        assert by_size == sorted(by_size, reverse=True)
+
+
+def _committed_spot(**overrides):
+    """Hand 830 of 2026-11-16: 99 in the CO, 22.5bb in, 11.7bb behind, facing a 4-bet."""
+    spot = dict(
+        hole_cards=cards('9h', '9c'),
+        position='CO',
+        facing_action='4bet',
+        open_raise=562_500.0,
+        is_ip=True,
+        big_blind=10_000.0,
+        stack=117_450.0,
+        pot=657_450.0,
+        to_call=117_450.0,
+        stack_bb=11.7,
+        villain_position='UTG',
+        equity=0.61,
+        current_bet=225_000.0,
+    )
+    spot.update(overrides)
+    return spot
+
+
+def _price(ev_bb, *, call=117_450.0, pending=0):
+    return ShowdownPrice(ev=ev_bb * 10_000.0, call=call, equity=0.59, need=0.17, pending=pending, big_blind=10_000.0)
+
+
+def test_committed_call_was_folded_by_the_charts_and_is_called_on_its_price():
+    strat = PreflopStrategy()
+    # The charts alone: every call for the whole remaining stack counted as a jam and was refused.
+    assert strat.decide(**_committed_spot()) == ('fold', 0.0)
+
+    assert strat.decide(showdown_price=_price(+27.5), **_committed_spot()) == ('call', pytest.approx(117_450.0))
+    assert strat.last_expand_reason.startswith('showdown_price:call call=11.7bb eq=59% need=17% ev=+27.5bb')
+
+
+def test_price_folds_a_call_the_static_range_would_make():
+    # Hand 802 of 2026-11-16: JTs in the MP calls a limp-shove of 58.7bb out of the static range.
+    strat = PreflopStrategy()
+    spot = dict(
+        hole_cards=cards('Jd', 'Td'),
+        position='MP',
+        facing_action='3bet',
+        open_raise=587_150.0,
+        is_ip=True,
+        big_blind=10_000.0,
+        stack=925_000.0,
+        pot=767_150.0,
+        to_call=527_150.0,
+        stack_bb=92.5,
+        villain_position='UTG',
+        equity=0.30,
+        current_bet=60_000.0,
+    )
+    price = ShowdownPrice(ev=-104_000.0, call=527_150.0, equity=0.41, need=0.45, pending=2, big_blind=10_000.0)
+
+    assert strat.decide(showdown_price=price, **spot) == ('fold', 0.0)
+    assert strat.last_expand_reason.startswith('showdown_price:fold call=52.7bb eq=41% need=45% ev=-10.4bb pending=2')
+
+
+def test_chart_raise_survives_the_price_only_while_somebody_can_be_shut_out():
+    strat = PreflopStrategy()
+    spot = dict(
+        hole_cards=cards('Ac', 'Ad'),
+        position='BB',
+        facing_action='open',
+        open_raise=50_000.0,
+        is_ip=False,
+        big_blind=10_000.0,
+        stack=990_000.0,
+        pot=65_000.0,
+        to_call=40_000.0,
+        stack_bb=99.0,
+        villain_position='BTN',
+        equity=0.85,
+        current_bet=10_000.0,
+    )
+    assert strat.decide(**spot)[0] == 'raise'
+
+    # The opener is all-in and nobody else is left: a raise shuts nobody out.
+    assert strat.decide(showdown_price=_price(+3.0, call=40_000.0), **spot) == ('call', pytest.approx(40_000.0))
+    # A player still to act: the chart's raise stands.
+    action, amount = strat.decide(showdown_price=_price(+3.0, call=40_000.0, pending=1), **spot)
+    assert action == 'raise' and amount > 50_000.0
+    assert strat.last_expand_reason.startswith('showdown_price:raise')
+    # A losing price folds whatever the chart says.
+    assert strat.decide(showdown_price=_price(-0.5, call=40_000.0, pending=1), **spot) == ('fold', 0.0)

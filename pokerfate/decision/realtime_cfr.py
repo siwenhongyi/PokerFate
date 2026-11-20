@@ -28,6 +28,7 @@ from pokerfate.core.card import Card
 from pokerfate.core.config import RAKE_CAP_BB, RAKE_RATE
 from pokerfate.core.game_state import Action, ActionType, GameState, Player
 from pokerfate.core.hand_evaluator import HandEvaluator, HandRank
+from pokerfate.decision import response_model
 from pokerfate.decision.opponent_numeric_prior import (
     NumericOpponentPrior,
     build_numeric_prior,
@@ -65,22 +66,6 @@ MIXED_SAMPLE_EPS_BB = 0.15
 MIXED_SAMPLE_EPS_POT = 0.01
 _ACTION_RE = re.compile(r"^(Check|Call|Fold|Bet|Raise|AllIn)(?:\((\d+)\))?$")
 
-# ── River value-bet floor (2026-11-12) ───────────────────────────────────────
-# Logs 2026-11-09..12: on first-in river decisions the exploit blend + safety
-# discounts turned a solver-majority bet into a check 74 times and the reverse
-# 12 times (made hands, n=320). Scored against revealed villain hands, the
-# river checks with solver bet frequency >= 0.5 and tracker showdown value
-# >= 0.55..0.75 would each have gained +4..+7 bb as a half-pot bet (n=21..32,
-# every threshold in that band has a 95% interval above zero), while the same
-# checks with showdown value < 0.5 lose money as bets. The floor therefore only
-# restores the solver's own mix for hands the tracker rates as value. With the
-# solver's own sizes (mostly <= 40% pot) the estimate is smaller and its
-# interval touches zero: +3.3 +/- 3.4 bb per trigger, 28 triggers in 4976 hands
-# (analysis/guard_diff.py).
-#   PF_CFR_VALUE_BET_FLOOR=0 switches it off (old behaviour).
-VALUE_BET_FLOOR_MIN_BET_FREQ = 0.50
-VALUE_BET_FLOOR_MIN_SHOWDOWN_VALUE = 0.66
-VALUE_BET_FLOOR_MAX_POT_RATIO = 1.0
 # ── Cheap river call backed by the tracker (2026-11-12) ──────────────────────
 # Facing a river bet/raise at pot odds <= 25%, the solver's EV(call) assumes an
 # equilibrium (value-heavy) raising range; pool river raises are 20% air and
@@ -92,13 +77,6 @@ VALUE_BET_FLOOR_MAX_POT_RATIO = 1.0
 # behaviour.
 CHEAP_CALL_POT_TOLERANCE = 0.06
 CHEAP_CALL_MIN_SHOWDOWN_VALUE = 0.45
-
-
-def _env_flag(name: str, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None or not str(raw).strip():
-        return bool(default)
-    return str(raw).strip().lower() not in {"0", "false", "off", "no"}
 
 
 def _env_float(name: str, default: float) -> float:
@@ -124,24 +102,6 @@ class RealtimeCFROptions:
     max_exploit_confidence: float = 0.45
     # Environment overrides are read when the options object is built (process
     # start for the live bot); explicit constructor arguments always win.
-    value_bet_floor_enabled: bool = field(
-        default_factory=lambda: _env_flag("PF_CFR_VALUE_BET_FLOOR", True)
-    )
-    value_bet_floor_min_bet_freq: float = field(
-        default_factory=lambda: _env_float(
-            "PF_CFR_VALUE_BET_FLOOR_MIN_BET_FREQ", VALUE_BET_FLOOR_MIN_BET_FREQ,
-        )
-    )
-    value_bet_floor_min_showdown_value: float = field(
-        default_factory=lambda: _env_float(
-            "PF_CFR_VALUE_BET_FLOOR_MIN_SHOWDOWN", VALUE_BET_FLOOR_MIN_SHOWDOWN_VALUE,
-        )
-    )
-    value_bet_floor_max_pot_ratio: float = field(
-        default_factory=lambda: _env_float(
-            "PF_CFR_VALUE_BET_FLOOR_MAX_POT_RATIO", VALUE_BET_FLOOR_MAX_POT_RATIO,
-        )
-    )
     cheap_call_pot_tolerance: float = field(
         default_factory=lambda: _env_float(
             "PF_CFR_CHEAP_CALL_POT_TOLERANCE", CHEAP_CALL_POT_TOLERANCE,
@@ -256,6 +216,21 @@ class RealtimeCFRDecisionEngine:
                 "elapsed_ms": elapsed_ms,
                 "timing": timing,
                 "node_actions": list((result.get("node") or {}).get("actions") or []),
+            }
+            return None
+
+        unavailable = _solver_values_unavailable(result, meta["hero_side"], meta["hero_combo"])
+        if unavailable:
+            self._last_error = unavailable
+            self._last_result = {
+                **meta,
+                "status": "fallback",
+                "reason": unavailable,
+                "elapsed_ms": elapsed_ms,
+                "timing": timing,
+                "node_path": (result.get("node") or {}).get("path"),
+                "node_actions": list((result.get("node") or {}).get("actions") or []),
+                "strategy": {k: round(float(v), 6) for k, v in strategy.items()},
             }
             return None
 
@@ -954,6 +929,12 @@ def _select_exploit_action(
     node = result.get("node") or {}
     hero_idx = _hand_index(result, hero_side, hero_combo)
     gto_evs = _node_hand_values(node, "evs", hero_idx) if hero_idx is not None else {}
+    unavailable = _solver_values_unavailable(result, hero_side, hero_combo)
+    if unavailable:
+        # The zeros the solver reports here mark "no value", they are not EVs:
+        # keep the solver's own strategy pick and adjust nothing.
+        gto_evs = {}
+        out["exploit"]["reason"] = unavailable
     if gto_evs:
         # Even without exploitation, pick by solver EV (not by raw frequency)
         # and mix between near-equal actions at their equilibrium frequency.
@@ -1010,21 +991,21 @@ def _select_exploit_action(
     }
     best_passive_gto_ev = max(passive_gto_evs.values(), default=best_gto_ev)
 
+    solve_cache: dict[str, Any] = {}
     for label, gto_ev in gto_evs.items():
         child = by_path.get(f"{current_path}:{label}")
-        response_detail = _response_adjusted_ev_detail_from_result(
+        answered = _response_adjusted_ev_detail_from_result(
             result,
             child,
             hero_combo=hero_combo,
             hero_side=hero_side,
             profile=profile,
-            adjustments=adjustments,
             street=street,
             hero_action_label=label,
             line_context=line_context,
-            numeric_prior=numeric_prior,
+            cache=solve_cache,
         )
-        if response_detail is None:
+        if answered is None:
             adj_ev = gto_ev + _direct_exploit_delta(
                 label,
                 profile=profile,
@@ -1034,9 +1015,25 @@ def _select_exploit_action(
                 numeric_prior=numeric_prior,
                 hero_made_rank=hero_made_rank,
             )
-            response_detail = {}
+            if child is not None:
+                summary = _response_summary(
+                    child,
+                    profile,
+                    street,
+                    hero_side=hero_side,
+                    hero_action_label=label,
+                    line_context=line_context,
+                )
+                if summary is not None:
+                    response_summaries[label] = summary
         else:
-            adj_ev = float(response_detail["ev"])
+            adj_ev = float(answered["ev"])
+            response_summaries[label] = answered["summary"]
+        # The risk guards below have never been given the opponent's answers to a bet or
+        # a raise (the comparison that let them through rejected every one, see
+        # _response_adjusted_ev_detail_from_result) and they act on bets, raises and calls
+        # only. They keep exactly that view until they are reviewed on their own.
+        response_detail: dict[str, Any] = {}
         adjusted_evs[label] = adj_ev
         final_ev = (1.0 - confidence) * gto_ev + confidence * adj_ev
         blend_evs[label] = final_ev
@@ -1147,18 +1144,6 @@ def _select_exploit_action(
         if gto_gap > leash:
             leashed[label] = gto_gap
         final[label] = final_ev
-        if child is not None:
-            summary = _response_summary(
-                child,
-                profile,
-                adjustments,
-                street,
-                hero_action_label=label,
-                line_context=line_context,
-                numeric_prior=numeric_prior,
-            )
-            if summary is not None:
-                response_summaries[label] = summary
 
     # GTO leash: an action the solver rates far below its best may never beat
     # the solver's best action on exploit-adjusted EV alone. It stays in the
@@ -1203,25 +1188,15 @@ def _select_exploit_action(
         pot_tolerance=guard_options.cheap_call_pot_tolerance,
         min_showdown_value=guard_options.cheap_call_min_showdown_value,
     )
-    selected_label, value_floor_applied = _apply_value_bet_floor(
-        selected_label,
-        final,
-        gto_strategy,
-        street=street,
-        line_context=line_context,
-        safety=safety,
-        rng=rng,
-        enabled=guard_options.value_bet_floor_enabled,
-        min_bet_freq=guard_options.value_bet_floor_min_bet_freq,
-        min_showdown_value=guard_options.value_bet_floor_min_showdown_value,
-        max_pot_ratio=guard_options.value_bet_floor_max_pot_ratio,
-    )
     final_probs = _softmax_from_evs(final)
     blocked = _safety_discounted_actions(safety) | set(_safety_hard_blocked_actions(safety)) | set(leashed)
     mixable = {k: v for k, v in final.items() if k not in blocked}
-    # The value-bet floor already drew from the solver's own mix; a second
-    # near-EV draw would hand part of the restored bet frequency back to Check.
-    if selected_label in mixable and not value_floor_applied:
+    # A solver-majority bet that the adjustments above turn into a check stays
+    # a check unless it is inside the near-EV margin below. Sending such river
+    # hands back to the solver's own mix (the "value-bet floor",
+    # 2026-11-12..18) did not beat the check on 77 live uses and had 2.4x its
+    # spread: docs/candidates/value_bet_floor_removal_2026-11-18/.
+    if selected_label in mixable:
         mixed_label, _p, mixed = _sample_near_ev(
             mixable, gto_strategy, gto_evs, pot_bb=pot_bb, rng=rng, anchor=selected_label,
         )
@@ -1509,104 +1484,6 @@ def _tracker_showdown_value(line_context: Optional[dict[str, Any]]) -> Optional[
     return _clamp(f.get("hero_win", 0.0) + 0.50 * f.get("hero_tie", 0.0), 0.0, 1.0)
 
 
-def _apply_value_bet_floor(
-    selected_label: str,
-    final_evs: dict[str, float],
-    gto_strategy: dict[str, float],
-    *,
-    street: str,
-    line_context: dict[str, Any],
-    safety: dict[str, Any],
-    rng: Optional[random.Random],
-    enabled: bool,
-    min_bet_freq: float,
-    min_showdown_value: float,
-    max_pot_ratio: float,
-) -> tuple[str, bool]:
-    """Do not let exploit/safety adjustments turn a solver value bet into a check.
-
-    Mixed actions have equal EV at equilibrium, so the small one-sided
-    adjustments of the exploit layer (response frequencies are rescaled but the
-    equilibrium calling range is kept, which makes a "sticky" villain lower the
-    EV of a value bet) decide the argmax and made hands end up checking far
-    more often than the solver does. When
-
-      * it is the river and the selection is ``Check``,
-      * the solver bets this exact combo at least ``min_bet_freq`` of the time,
-      * the tracker rates the hand as value (showdown value >=
-        ``min_showdown_value`` against villain's current range),
-
-    the action is redrawn from the solver's own mix: ``Check`` keeps its
-    equilibrium frequency and the bet frequency is spread over the solver's
-    sizes. Sizes above ``max_pot_ratio`` x pot or hard-blocked by a safety gate
-    are not used; their share goes to the largest remaining size. Without an
-    rng the most likely action is returned.
-
-    Returns ``(label, applied)``; ``applied`` is True whenever the redraw
-    happened, even if it landed on ``Check``.
-    """
-    if not enabled or str(street).lower() != "river":
-        return selected_label, False
-    if _action_kind(selected_label) != "Check":
-        return selected_label, False
-    showdown_value = _tracker_showdown_value(line_context)
-    if showdown_value is None or showdown_value < float(min_showdown_value):
-        return selected_label, False
-
-    bet_labels = [
-        label for label in gto_strategy
-        if _action_kind(label) in {"Bet", "AllIn"}
-    ]
-    bet_freq = sum(max(0.0, float(gto_strategy.get(label, 0.0))) for label in bet_labels)
-    if bet_freq < float(min_bet_freq):
-        return selected_label, False
-
-    hard_blocked = set(_safety_hard_blocked_actions(safety))
-    eligible: list[tuple[float, str]] = []
-    for label in bet_labels:
-        if label not in final_evs or label in hard_blocked:
-            continue
-        candidate = _candidate_action_context(label, line_context or {})
-        if float(candidate.get("pot_ratio") or 0.0) > float(max_pot_ratio) + 1e-9:
-            continue
-        eligible.append((float(candidate.get("risk_bb") or 0.0), label))
-    if not eligible:
-        return selected_label, False
-    eligible.sort()
-
-    weights: dict[str, float] = {
-        selected_label: max(0.0, float(gto_strategy.get(selected_label, 0.0))),
-    }
-    for _risk, label in eligible:
-        weights[label] = max(0.0, float(gto_strategy.get(label, 0.0)))
-    largest = eligible[-1][1]
-    weights[largest] += max(0.0, bet_freq - sum(weights[label] for _risk, label in eligible))
-    total = sum(weights.values())
-    if total <= 1e-12:
-        return selected_label, False
-
-    if rng is None:
-        chosen = max(weights.items(), key=lambda item: item[1])[0]
-    else:
-        draw = rng.random() * total
-        acc = 0.0
-        chosen = largest
-        for label, weight in weights.items():
-            acc += weight
-            if draw <= acc:
-                chosen = label
-                break
-    safety["value_bet_floor"] = {
-        "applied": True,
-        "from": selected_label,
-        "to": chosen,
-        "solver_bet_freq": round(bet_freq, 4),
-        "showdown_value": round(showdown_value, 4),
-        "candidates": {label: round(weight / total, 4) for label, weight in weights.items()},
-    }
-    return chosen, True
-
-
 def _call_price_features(line_context: dict[str, Any]) -> dict[str, float]:
     to_call = max(0.0, float((line_context or {}).get("current_to_call_bb") or 0.0))
     pot = max(0.0, float((line_context or {}).get("current_pot_bb") or 0.0))
@@ -1684,6 +1561,15 @@ def _build_line_context(
             ):
                 called_vs_hero[street] = True
 
+    action_names = {ActionType.CHECK: "check", ActionType.CALL: "call", ActionType.RAISE: "bet"}
+    hero_actions: list[tuple[str, str]] = []
+    villain_actions: list[tuple[str, str]] = []
+    for street in streets:
+        for pid, action in by_street[street]:
+            name = action_names.get(getattr(action, "action_type", None))
+            if name is not None:
+                (hero_actions if pid == int(hero_player_id) else villain_actions).append((street, name))
+
     prior_streets = [s for s in ("flop", "turn") if streets.index(s) < streets.index(current_street)]
     call_chain = sum(1 for street in prior_streets if called_vs_hero.get(street))
     turn_to_bb = hero_max_to_bb.get("turn", 0.0)
@@ -1704,6 +1590,9 @@ def _build_line_context(
             if hero is not None and len(hero.hole_cards) >= 2
             else ""
         ),
+        # each player's own postflop actions so far, (street, check / call / bet)
+        "hero_actions": hero_actions,
+        "villain_actions": villain_actions,
         "villain_called_flop": bool(called_vs_hero.get("flop")),
         "villain_called_turn": bool(called_vs_hero.get("turn")),
         "villain_call_chain": int(call_chain),
@@ -1908,67 +1797,154 @@ def _range_v2_direct_delta(
             hero_made_rank=hero_made_rank,
         )
         return _clamp(-0.78 * call_delta, -0.45, 0.45)
-    if kind in {"Bet", "Raise", "AllIn"}:
-        pressure = _candidate_pressure_factor(label, line_context or {})
-        foldable = f["bluff_mass"] + 0.20 * f["medium"]
-        resistance = f["nuts"] + 0.62 * f["strong"] + 0.20 * f["medium"]
-        delta = 0.26 * pressure * (foldable - resistance)
-        return _clamp(delta, -0.40, 0.35)
     return 0.0
 
 
-def _range_v2_response_multipliers(
+def _answer_groups(eq_probs: dict[str, float], hero_kind: str) -> tuple[Optional[str], dict[str, list[str]]]:
+    """Which response model fits hero's action, and the solver's answers sorted into its classes."""
+    kinds = {label: _action_kind(label) for label in eq_probs}
+    aggressive = [label for label, kind in kinds.items() if kind in {"Bet", "Raise", "AllIn"}]
+    if hero_kind in {"Bet", "Raise", "AllIn"}:
+        return response_model.FACING_BET, {
+            "fold": [label for label, kind in kinds.items() if kind == "Fold"],
+            "call": [label for label, kind in kinds.items() if kind == "Call"],
+            "raise": aggressive,
+        }
+    if hero_kind == "Check":
+        return response_model.CHECKED_TO, {
+            "check": [label for label, kind in kinds.items() if kind == "Check"],
+            "bet": aggressive,
+        }
+    return None, {}
+
+
+def _expected_response_probs(
+    eq_probs: dict[str, float],
+    *,
     street: str,
+    hero_side: str,
     hero_action_label: str,
-    line_context: dict[str, Any],
-) -> dict[str, float]:
-    f = _range_v2_features(line_context)
-    if not f:
-        return {}
-    candidate = _candidate_action_context(hero_action_label, line_context)
-    if candidate.get("kind") not in {"Bet", "Raise", "AllIn"}:
-        return {}
-    pressure = _candidate_pressure_factor(hero_action_label, line_context)
-    if pressure <= 1e-9:
-        return {}
-    foldable = f["bluff_mass"] + 0.20 * f["medium"]
-    call_region = f["strong"] + 0.80 * f["medium"] + 0.20 * f["draw"]
-    raise_region = f["nuts"] + 0.18 * f["strong"]
-    fold_mult = 1.0 + pressure * (0.58 * foldable - 0.52 * (f["nuts"] + f["strong"]))
-    call_mult = 1.0 + pressure * (0.42 * call_region - 0.25 * f["air"])
-    raise_mult = 1.0 + pressure * (0.55 * raise_region - 0.28 * f["medium"] - 0.25 * f["air"])
-    return {
-        "Fold": _clamp(fold_mult, 0.40, 1.75),
-        "Call": _clamp(call_mult, 0.55, 1.85),
-        "Check": _clamp(call_mult, 0.55, 1.85),
-        "Bet": _clamp(raise_mult, 0.45, 1.90),
-        "Raise": _clamp(raise_mult, 0.45, 1.90),
-        "AllIn": _clamp(raise_mult, 0.45, 1.90),
+    profile: Any,
+    line_context: Optional[dict[str, Any]],
+) -> tuple[dict[str, float], dict[str, Any]]:
+    """What the opponent is expected to answer to ``hero_action_label``.
+
+    The answer classes (fold / call / raise, or check / bet after hero's check) take the
+    frequencies of the fitted response model (``response_model``): what human opponents
+    did in the logs given the bet size, their own line, the kind of player and the range
+    the tracker gives them.  Inside a class the solver's split over sizes is kept.  Where
+    the model has nothing to say - a house robot, a street it does not cover, no range
+    from the tracker, an answer class the tree does not offer - the equilibrium
+    frequencies are returned unchanged.  The second value records which it was and both
+    sets of class frequencies, for the decision log.
+    """
+    ctx = line_context or {}
+    street_l = str(street).lower()
+    candidate = _candidate_action_context(hero_action_label or "", ctx)
+    kind, groups = _answer_groups(eq_probs, str(candidate.get("kind") or ""))
+    if kind is None:
+        return dict(eq_probs), {"model": False, "reason": "no_answer_to_model"}
+    present = {answer: labels for answer, labels in groups.items() if labels}
+    info: dict[str, Any] = {
+        "kind": kind,
+        "equilibrium": {
+            answer: round(sum(max(0.0, float(eq_probs[label])) for label in labels), 4)
+            for answer, labels in present.items()
+        },
     }
+
+    def unchanged(reason: str) -> tuple[dict[str, float], dict[str, Any]]:
+        info.update({"model": False, "reason": reason})
+        return dict(eq_probs), info
+
+    reference = response_model.CLASSES[kind][0]
+    if reference not in present or len(present) < 2:
+        return unchanged("single_answer")
+    rv2 = ctx.get("range_v2") if isinstance(ctx.get("range_v2"), dict) else {}
+    if rv2.get("villain_is_robot"):
+        return unchanged("robot")
+    bucket_dist = rv2.get("bucket_dist")
+    if not isinstance(bucket_dist, dict) or not bucket_dist:
+        return unchanged("no_range")
+
+    size = 0.0
+    facing_raise = False
+    if kind == response_model.FACING_BET:
+        to_call = max(0.0, float(ctx.get("current_to_call_bb") or 0.0))
+        risk = max(0.0, float(candidate.get("risk_bb") or 0.0))
+        pot = max(0.0, float(ctx.get("current_pot_bb") or 0.0))
+        size = response_model.bet_size(to_call=risk - to_call, pot_with_bet=pot + risk)
+        facing_raise = to_call > 1e-9
+        if size <= 0.0:
+            return unchanged("no_size")
+        info["size"] = round(size, 4)
+    features = response_model.response_features(
+        kind=kind,
+        street=street_l,
+        size=size,
+        facing_raise=facing_raise,
+        in_position=hero_side == "oop",
+        own_actions=list(ctx.get("villain_actions") or ()),
+        opponent_actions=list(ctx.get("hero_actions") or ()),
+        bucket_dist=bucket_dist,
+        hands_seen=_profile_float(profile, "hands_seen", 0.0),
+        vpip=_profile_float(profile, "vpip", 0.0),
+        aggression_factor=_profile_float(profile, "af", 0.0),
+    )
+    predicted = response_model.predict(kind, street_l, features)
+    if predicted is None:
+        return unchanged("no_model")
+    if kind == response_model.FACING_BET and "raise" not in present and "call" in present:
+        # behind an all-in there is nothing left to raise: the hands that would have, call
+        predicted = dict(predicted, call=predicted["call"] + predicted["raise"])
+
+    mass = sum(predicted[answer] for answer in present)
+    adj = {label: 0.0 for label in eq_probs}
+    for answer, labels in present.items():
+        share = predicted[answer] / mass
+        eq_mass = sum(max(0.0, float(eq_probs[label])) for label in labels)
+        for label in labels:
+            adj[label] = share * (
+                max(0.0, float(eq_probs[label])) / eq_mass if eq_mass > 1e-12 else 1.0 / len(labels)
+            )
+    info.update({
+        "model": True,
+        "fitted": {answer: round(predicted[answer] / mass, 4) for answer in present},
+    })
+    return adj, info
 
 
 def _response_summary(
     child: dict[str, Any],
     profile: Any,
-    adjustments: dict[str, Any],
     street: str,
     *,
+    hero_side: str,
     hero_action_label: Optional[str] = None,
     line_context: Optional[dict[str, Any]] = None,
-    numeric_prior: Optional[NumericOpponentPrior] = None,
 ) -> Optional[dict[str, Any]]:
+    """The opponent's answers to one of hero's actions, for the diagnostics and the log."""
     eq_probs = _node_weighted_strategy(child)
     if not eq_probs:
         return None
-    adj_probs = _adjust_response_probs(
+    adj_probs, info = _expected_response_probs(
         eq_probs,
-        profile,
-        adjustments,
-        street,
-        hero_action_label=hero_action_label,
+        street=street,
+        hero_side=hero_side,
+        hero_action_label=hero_action_label or "",
+        profile=profile,
         line_context=line_context,
-        numeric_prior=numeric_prior,
     )
+    return _summary_of(eq_probs, adj_probs, info, hero_action_label, line_context)
+
+
+def _summary_of(
+    eq_probs: dict[str, float],
+    adj_probs: dict[str, float],
+    info: dict[str, Any],
+    hero_action_label: Optional[str],
+    line_context: Optional[dict[str, Any]],
+) -> dict[str, Any]:
     candidate = _candidate_action_context(hero_action_label or "", line_context or {})
     return {
         "eq": {k: round(v, 6) for k, v in eq_probs.items()},
@@ -1978,7 +1954,128 @@ def _response_summary(
             for k, v in candidate.items()
             if k in {"kind", "risk_bb", "pot_ratio", "all_in"}
         },
+        "response": info,
     }
+
+
+def _river_strengths(result: dict[str, Any], side: str, board: Sequence[str], cache: Optional[dict[str, Any]]) -> list:
+    """(strength, card, card) of every hand in ``side``'s solver range on a full board;
+    None for a hand that shares a card with the board."""
+    key = f"river_strengths:{side}"
+    if cache is not None and key in cache:
+        return cache[key]
+    hands = result.get("ip_hands") if side == "ip" else result.get("oop_hands")
+    board_set = set(board)
+    board_cards = [Card.from_str(card) for card in board]
+    out: list = []
+    for hand in list(hands or []):
+        text = str(hand)
+        c1, c2 = text[:2], text[2:4]
+        if len(text) < 4 or c1 in board_set or c2 in board_set:
+            out.append(None)
+            continue
+        try:
+            strength = HandEvaluator.eval_int([Card.from_str(c1), Card.from_str(c2)] + board_cards)
+        except Exception:
+            out.append(None)
+            continue
+        out.append((strength, c1, c2))
+    if cache is not None:
+        cache[key] = out
+    return out
+
+
+def _river_call_value_shift(
+    result: dict[str, Any],
+    child: dict[str, Any],
+    *,
+    hero_combo: str,
+    hero_side: str,
+    eq_probs: dict[str, float],
+    adj_probs: dict[str, float],
+    call_value_bb: float,
+    risk_bb: float,
+    line_context: Optional[dict[str, Any]],
+    cache: Optional[dict[str, Any]],
+) -> Optional[dict[str, Any]]:
+    """How hero's value when called changes once the opponent calls more or less often.
+
+    The solver's value for "the opponent calls" is the value against its own calling
+    range.  An opponent who calls less often than that does not call with the same
+    hands less often; he drops the weak end of them, and what is left beats hero more
+    often.  On the river a call ends the hand, so the value against the resized range
+    can be worked out exactly from the solver's own hands, weights and strategy
+    (``response_model.shifted_call_win_share``).  ``call_value_bb`` is the solver's value
+    when called, net of the chips hero adds; ``risk_bb`` those chips.
+
+    Returns None when there is nothing to resize or the solver's data is not there; a
+    record with ``skipped`` when hero's share against the equilibrium callers, rebuilt
+    here, does not reproduce the solver's value (then nothing is changed).
+    """
+    ctx = line_context or {}
+    board = [str(card) for card in list(ctx.get("board") or [])]
+    actions = [str(a) for a in list(child.get("actions") or [])]
+    if len(board) != 5 or "Call" not in actions or "Fold" not in actions:
+        return None
+    change = float(adj_probs.get("Call", 0.0)) - float(eq_probs.get("Call", 0.0))
+    if abs(change) < 1e-6:
+        return None
+    hero_cards = _cards_from_combo(hero_combo)
+    if len(hero_cards) != 2:
+        return None
+    strategy = list(child.get("strategy") or [])
+    weights = list(child.get("weights") or [])
+    villain_side = "ip" if hero_side == "oop" else "oop"
+    strengths = _river_strengths(result, villain_side, board, cache)
+    try:
+        num_hands = int(child.get("num_hands") or 0)
+        hero_strength = HandEvaluator.eval_int(
+            [Card.from_str(card) for card in hero_cards] + [Card.from_str(card) for card in board]
+        )
+    except Exception:
+        return None
+    if num_hands <= 0 or len(strengths) < num_hands or len(weights) < num_hands:
+        return None
+    fold_at, call_at = actions.index("Fold"), actions.index("Call")
+    if len(strategy) < (max(fold_at, call_at) + 1) * num_hands:
+        return None
+    hands = []
+    for idx in range(num_hands):
+        entry = strengths[idx]
+        if entry is None or entry[1] in hero_cards or entry[2] in hero_cards:
+            continue
+        weight = max(0.0, float(weights[idx] or 0.0))
+        if weight <= 0.0:
+            continue
+        hands.append((
+            entry[0], weight,
+            float(strategy[fold_at * num_hands + idx] or 0.0),
+            float(strategy[call_at * num_hands + idx] or 0.0),
+        ))
+    shares = response_model.shifted_call_win_share(hands, hero_strength, change)
+    if shares is None:
+        return None
+    share_eq, share_new = shares
+    pot_bb = max(0.0, float(ctx.get("current_pot_bb") or 0.0))
+    to_call_bb = max(0.0, float(ctx.get("current_to_call_bb") or 0.0))
+    final_pot = pot_bb + 2.0 * risk_bb - to_call_bb
+    rake = RAKE_RATE * final_pot
+    if RAKE_CAP_BB > 0.0:
+        rake = min(rake, RAKE_CAP_BB)
+    win_value = final_pot - rake
+    if win_value <= 1e-9:
+        return None
+    solver_share = (float(call_value_bb) + risk_bb) / win_value
+    record = {
+        "share_eq": round(share_eq, 4),
+        "share_new": round(share_new, 4),
+        "solver_share": round(solver_share, 4),
+    }
+    if abs(solver_share - share_eq) > 0.05:
+        record["skipped"] = "share_mismatch"
+        return record
+    record["delta_bb"] = round((share_new - share_eq) * win_value, 4)
+    return record
 
 
 def _response_adjusted_ev_detail_from_result(
@@ -1988,12 +2085,19 @@ def _response_adjusted_ev_detail_from_result(
     hero_combo: str,
     hero_side: str,
     profile: Any,
-    adjustments: dict[str, Any],
     street: str,
     hero_action_label: Optional[str] = None,
     line_context: Optional[dict[str, Any]] = None,
-    numeric_prior: Optional[NumericOpponentPrior] = None,
+    cache: Optional[dict[str, Any]] = None,
 ) -> Optional[dict[str, Any]]:
+    """The value of one of hero's actions when the opponent answers as he is expected to
+    (``_expected_response_probs``) instead of as the equilibrium does.
+
+        value = solver value + sum over answers of (expected - equilibrium frequency) x value after that answer
+
+    Returns None when there is no opponent decision behind the action or the solver's
+    values after it cannot be trusted; the action then keeps its solver value.
+    """
     if not child:
         return None
     hero_player = 1 if hero_side == "ip" else 0
@@ -2013,13 +2117,25 @@ def _response_adjusted_ev_detail_from_result(
     eq_probs = _node_weighted_strategy(child)
     if not eq_probs:
         return None
-    # The child-node EVs are conditional on hero's combo reaching that node.
-    # When the equilibrium (almost) never takes this action with this combo,
-    # the reach weight is ~0 and the solver's normalised EVs are numerically
-    # meaningless (replay showed +400bb "call" EVs in a 36bb pot). Require a
-    # minimum equilibrium frequency and check that the equilibrium-weighted
-    # response EV reproduces the action's own EV before trusting them.
+    # The solver reports hero's value after each answer with the chips he adds by this
+    # action still counted as his (a bet that makes the opponent fold is worth the pot
+    # *plus* the bet), while the value of the action itself is net of them. Until
+    # 2026-11-19 the two were compared as they are, so every bet and raise failed the
+    # check below and only a check ever got its answers re-weighted.
+    candidate = _candidate_action_context(hero_action_label or "", line_context or {})
+    risk_bb = (
+        max(0.0, float(candidate.get("risk_bb") or 0.0))
+        if candidate.get("kind") in {"Bet", "Raise", "AllIn"}
+        else 0.0
+    )
+    response_evs = {label: value - risk_bb for label, value in response_evs.items()}
+    # The values after an answer are conditional on hero's combo reaching that node.
+    # When the equilibrium (almost) never takes this action with this combo they have
+    # been numerically meaningless (replay showed +400bb "call" EVs in a 36bb pot).
+    # Require a minimum equilibrium frequency and check that the equilibrium-weighted
+    # values reproduce the action's own EV before trusting them.
     hero_node = result.get("node") or {}
+    gto_ev: Optional[float] = None
     if hero_action_label is not None:
         hero_strategy = _node_hand_values(hero_node, "strategy", hero_idx)
         reach_prob = float(hero_strategy.get(hero_action_label, 0.0)) * 10.0
@@ -2027,72 +2143,64 @@ def _response_adjusted_ev_detail_from_result(
             return None
         gto_evs = _node_hand_values(hero_node, "evs", hero_idx)
         gto_ev = gto_evs.get(hero_action_label)
-        if gto_ev is not None:
-            eq_total = sum(
-                max(0.0, float(eq_probs.get(label, 0.0))) * ev
-                for label, ev in response_evs.items()
-            )
-            eq_mass = sum(max(0.0, float(eq_probs.get(label, 0.0))) for label in response_evs)
-            if eq_mass > 1e-9:
-                pot_bb = max(0.0, float((line_context or {}).get("current_pot_bb") or 0.0))
-                tolerance = max(0.5, 0.05 * pot_bb)
-                if abs(eq_total / eq_mass - float(gto_ev)) > tolerance:
-                    return None
-    adj_probs = _adjust_response_probs(
-        eq_probs,
-        profile,
-        adjustments,
-        street,
-        hero_action_label=hero_action_label,
-        line_context=line_context,
-        numeric_prior=numeric_prior,
+    eq_total = sum(
+        max(0.0, float(eq_probs.get(label, 0.0))) * ev
+        for label, ev in response_evs.items()
     )
-    total = 0.0
-    weight_sum = 0.0
+    eq_mass = sum(max(0.0, float(eq_probs.get(label, 0.0))) for label in response_evs)
+    if eq_mass <= 1e-9:
+        return None
+    eq_value = eq_total / eq_mass
+    if gto_ev is not None:
+        pot_bb = max(0.0, float((line_context or {}).get("current_pot_bb") or 0.0))
+        tolerance = max(0.5, 0.05 * pot_bb)
+        if abs(eq_value - float(gto_ev)) > tolerance:
+            return None
+
+    adj_probs, info = _expected_response_probs(
+        eq_probs,
+        street=street,
+        hero_side=hero_side,
+        hero_action_label=hero_action_label or "",
+        profile=profile,
+        line_context=line_context,
+    )
+    adj_evs = dict(response_evs)
+    summary = _summary_of(eq_probs, adj_probs, info, hero_action_label, line_context)
+    if info.get("model") and str(street).lower() == "river" and risk_bb > 0.0 and "Call" in adj_evs:
+        shift = _river_call_value_shift(
+            result,
+            child,
+            hero_combo=hero_combo,
+            hero_side=hero_side,
+            eq_probs=eq_probs,
+            adj_probs=adj_probs,
+            call_value_bb=adj_evs["Call"],
+            risk_bb=risk_bb,
+            line_context=line_context,
+            cache=cache,
+        )
+        if shift is not None:
+            summary["call_range"] = shift
+            adj_evs["Call"] += float(shift.get("delta_bb") or 0.0)
+    adj_total = 0.0
+    adj_mass = 0.0
     for label, prob in adj_probs.items():
-        if label not in response_evs:
+        if label not in adj_evs:
             continue
         p = max(0.0, float(prob))
-        total += p * response_evs[label]
-        weight_sum += p
-    if weight_sum <= 1e-12:
+        adj_total += p * adj_evs[label]
+        adj_mass += p
+    if adj_mass <= 1e-12:
         return None
+    anchor = float(gto_ev) if gto_ev is not None else eq_value
     return {
-        "ev": total / weight_sum,
+        "ev": anchor + adj_total / adj_mass - eq_value,
         "eq_probs": eq_probs,
         "adj_probs": adj_probs,
-        "response_evs": response_evs,
+        "response_evs": adj_evs,
+        "summary": summary,
     }
-
-
-def _response_adjusted_ev_from_result(
-    result: dict[str, Any],
-    child: Optional[dict[str, Any]],
-    *,
-    hero_combo: str,
-    hero_side: str,
-    profile: Any,
-    adjustments: dict[str, Any],
-    street: str,
-    hero_action_label: Optional[str] = None,
-    line_context: Optional[dict[str, Any]] = None,
-    numeric_prior: Optional[NumericOpponentPrior] = None,
-) -> Optional[float]:
-    detail = _response_adjusted_ev_detail_from_result(
-        result,
-        child,
-        hero_combo=hero_combo,
-        hero_side=hero_side,
-        profile=profile,
-        adjustments=adjustments,
-        street=street,
-        hero_action_label=hero_action_label,
-        line_context=line_context,
-        numeric_prior=numeric_prior,
-    )
-    if detail is None:
-        return None
-    return float(detail["ev"])
 
 
 def _hero_range_action_probs(result: dict[str, Any], hero_side: str, label: str) -> dict[int, float]:
@@ -2122,6 +2230,53 @@ def _hero_range_action_probs(result: dict[str, Any], hero_side: str, label: str)
             continue
         out[idx] = max(0.0, float(strategy[pos] or 0.0))
     return out
+
+
+def _solver_values_unavailable(result: dict[str, Any], hero_side: str, hero_combo: str) -> Optional[str]:
+    """Why the solver has no values for hero's combo at the located node, or None.
+
+    A hand's EV at a node is its counterfactual value divided by the opponent's
+    reach weight that is compatible with the hand. The solver reports 0 for
+    every action when it cannot do that division. Those zeros are a marker,
+    not EVs: read as EVs they make every action look equal, so the exploit
+    nudges alone pick the action and no EV-gap guard can fire (live
+    2026-11-17: the nut flush folded to an 11.8bb all-in into a 59.8bb pot).
+
+    * Current solver binding (node carries ``opponent_weights``): the EVs are
+      undefined only when no opponent hand reaches the node, i.e. the
+      opponent's action has frequency 0 for his whole range in the solved
+      equilibrium. The node's strategy never converged either
+      (``solver_node_unreached``). Hero's own reach no longer matters.
+    * Older binding (only ``weights``, hero's own reach times the opponent's):
+      the zeros also appear when hero's own earlier action on this street has
+      frequency 0 for this combo, because another engine or the exploit layer
+      chose it (``hero_combo_unreached``).
+    Either way the solver cannot price hero's actions here. Returns None when
+    the output carries no reach weights at all.
+    """
+    node = result.get("node") or {}
+    idx = _hand_index(result, hero_side, hero_combo)
+    if idx is None:
+        return None
+    opponent = node.get("opponent_weights")
+    if isinstance(opponent, list) and opponent:
+        if idx >= len(opponent):
+            return None
+        try:
+            return None if float(opponent[idx] or 0.0) > 0.0 else "solver_node_unreached"
+        except (TypeError, ValueError):
+            return None
+    weights = node.get("weights")
+    if not isinstance(weights, list) or not weights or idx >= len(weights):
+        return None
+    try:
+        own = float(weights[idx] or 0.0)
+        total = sum(max(0.0, float(w or 0.0)) for w in weights)
+    except (TypeError, ValueError):
+        return None
+    if own > 0.0:
+        return None
+    return "solver_node_unreached" if total <= 0.0 else "hero_combo_unreached"
 
 
 def _hand_index(result: dict[str, Any], side: str, combo: str) -> Optional[int]:
@@ -2203,53 +2358,6 @@ def _node_weighted_strategy(node: dict[str, Any]) -> dict[str, float]:
     return {label: value / norm for label, value in out.items()}
 
 
-def _adjust_response_probs(
-    eq_probs: dict[str, float],
-    profile: Any,
-    adjustments: dict[str, Any],
-    street: str,
-    *,
-    hero_action_label: Optional[str] = None,
-    line_context: Optional[dict[str, Any]] = None,
-    numeric_prior: Optional[NumericOpponentPrior] = None,
-) -> dict[str, float]:
-    if not eq_probs:
-        return {}
-    fold_bias, sticky_bias, raise_bias = _response_biases(
-        profile,
-        adjustments,
-        street,
-        numeric_prior=numeric_prior,
-    )
-    line_mults = _line_response_multipliers(
-        street,
-        hero_action_label or "",
-        line_context or {},
-    )
-    range_v2_mults = _range_v2_response_multipliers(
-        street,
-        hero_action_label or "",
-        line_context or {},
-    )
-    scaled: dict[str, float] = {}
-    for label, prob in eq_probs.items():
-        kind = _action_kind(label)
-        mult = 1.0
-        if kind == "Fold":
-            mult += fold_bias
-        elif kind in {"Call", "Check"}:
-            mult += sticky_bias
-        elif kind in {"Bet", "Raise", "AllIn"}:
-            mult += raise_bias
-        mult *= float(line_mults.get(kind, 1.0))
-        mult *= float(range_v2_mults.get(kind, 1.0))
-        scaled[label] = max(0.0, float(prob)) * _clamp(mult, 0.20, 2.50)
-    total = sum(scaled.values())
-    if total <= 1e-12:
-        return dict(eq_probs)
-    return {label: value / total for label, value in scaled.items()}
-
-
 def _response_biases(
     profile: Any,
     adjustments: dict[str, Any],
@@ -2271,16 +2379,21 @@ def _direct_exploit_delta(
     numeric_prior: Optional[NumericOpponentPrior] = None,
     hero_made_rank: Any = None,
 ) -> float:
+    """Nudge for a call or a fold, which no opponent decision follows inside the tree:
+    how much more or less a call is worth against this opponent than against the
+    equilibrium bettor. A bet, raise or check without usable answers keeps its solver
+    value (0.0 here)."""
+    kind = _action_kind(label)
+    if kind not in {"Call", "Fold"}:
+        return 0.0
     prior = numeric_prior or build_numeric_prior(profile, adjustments, street)
-    fold_bias, sticky_bias, raise_bias = _response_biases(
+    _fold_bias, _sticky_bias, raise_bias = _response_biases(
         profile,
         adjustments,
         street,
         numeric_prior=prior,
     )
-    street_l = str(street).lower()
     line_context = line_context or {}
-    line_signal = _line_signal_strength(street_l, line_context, hero_action_label=label)
     price = _call_price_features(line_context)
     cheap_made_overvalue = (
         price["cheapness"]
@@ -2292,20 +2405,6 @@ def _direct_exploit_delta(
     # with the pot so a 60bb river pot does not get a 0.35bb nudge that is
     # noise there, nor a 3bb pot a nudge that dominates its EVs.
     pot_scale = _clamp(max(0.0, float(line_context.get("current_pot_bb") or 0.0)) / 10.0, 0.5, 4.0)
-    kind = _action_kind(label)
-    if kind in {"Bet", "Raise", "AllIn"}:
-        return pot_scale * (
-            0.45 * fold_bias
-            - 0.25 * sticky_bias
-            - 0.15 * max(0.0, raise_bias)
-            - 0.35 * line_signal
-            + _range_v2_direct_delta(
-                label,
-                street=street,
-                line_context=line_context,
-                hero_made_rank=hero_made_rank,
-            )
-        )
     if kind == "Call":
         bluff_signal = 0.35 if adjustments.get("river_bluff_likely") else 0.0
         value_signal = 0.35 if adjustments.get("river_bet_rare") else 0.0
@@ -2494,27 +2593,6 @@ def _normalize_bucket_dist(raw: Any) -> dict[str, float]:
     if total <= 1e-12:
         return {}
     return {key: value / total for key, value in out.items()}
-
-
-def _line_response_multipliers(
-    street: str,
-    hero_action_label: str,
-    line_context: dict[str, Any],
-) -> dict[str, float]:
-    strength = _line_signal_strength(street, line_context, hero_action_label=hero_action_label)
-    if strength <= 1e-9:
-        return {}
-    candidate = _candidate_action_context(hero_action_label, line_context)
-    if candidate.get("kind") not in {"Bet", "Raise", "AllIn"}:
-        return {}
-    return {
-        "Fold": _clamp(1.0 - 0.50 * strength, 0.25, 1.0),
-        "Call": _clamp(1.0 + 0.72 * strength, 1.0, 2.10),
-        "Check": _clamp(1.0 + 0.72 * strength, 1.0, 2.10),
-        "Bet": _clamp(1.0 + 0.24 * strength, 1.0, 1.45),
-        "Raise": _clamp(1.0 + 0.24 * strength, 1.0, 1.45),
-        "AllIn": _clamp(1.0 + 0.24 * strength, 1.0, 1.45),
-    }
 
 
 def _line_signal_strength(

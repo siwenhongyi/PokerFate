@@ -203,7 +203,7 @@ async def _do_inject(
         "pb.EnterRoomREQ",
         "pb.QuickStartREQ",
         "pb.RebyREQ",
-        "pb.ShowMyCardREQ",
+        "pb.SetRebyREQ",
     ):
         log.warning(
             "[BOT→S] %s 使用 room_id=0，服务器通常会忽略；"
@@ -218,18 +218,6 @@ async def _do_inject(
     except Exception as exc:
         log.warning("[BOT→S] inject send failed: %s", exc)
         bot.notify_inject_failed(inject_type)
-
-
-def _make_entertainment_sender(server_ws):
-    async def _send(type_name: str, fields: dict, room_id: int) -> None:
-        pb_body = codec.encode(type_name, fields)
-        if pb_body is None:
-            raise RuntimeError(f"{type_name} encode failed")
-        wire = encode_frame(type_name, int(room_id), pb_body)
-        log.info("[ENT→S] %s room_id=%s %s", type_name, room_id, fields)
-        await server_ws.send(wire)
-
-    return _send
 
 
 async def _c2s_analysis_worker(
@@ -298,16 +286,9 @@ async def _s2c_analysis_worker(
                         heartbeat.summary(),
                     )
             bot.submit_room_seen(session_id=session_id, room_id=frame.room_id)
-            ent_msg = None
-            if _entertainment is not None:
-                _entertainment.note_room_id(frame.room_id)
-                if frame.type_name in _entertainment.watched_s2c_types:
-                    ent_msg = codec.decode(frame.type_name, frame.pb_body)
-                    if ent_msg is not None:
-                        _entertainment.observe_s2c(frame.type_name, ent_msg)
             if frame.type_name not in WATCH_S2C:
                 continue
-            msg = ent_msg if ent_msg is not None else codec.decode(frame.type_name, frame.pb_body)
+            msg = codec.decode(frame.type_name, frame.pb_body)
             if msg is None:
                 log.warning("[S→C] %s  (decode failed — run pf_intercept/tools/gen_pb2.sh first)", frame.type_name)
                 continue
@@ -447,9 +428,7 @@ async def _run_wss_pair(client_ws, server_ws, session_id: int) -> None:
     inject_queue = bot.register_session(session_id)
     ent_token = None
     if _entertainment is not None:
-        ent_token = _entertainment.attach_session(
-            _make_entertainment_sender(server_ws)
-        )
+        ent_token = _entertainment.attach_session()
     tasks: dict[asyncio.Task, str] = {}
     lag_task = asyncio.create_task(_event_loop_lag_watch(session_id))
     inject_task = asyncio.create_task(
@@ -700,8 +679,6 @@ def _load_bark_key_from_file() -> None:
 async def main(
     max_auto_rebuy: int = 1,
     profit_lock_bb: int | None = None,
-    entertainment_web_host: str | None = config.ENTERTAINMENT_WEB_HOST,
-    entertainment_web_port: int | None = config.ENTERTAINMENT_WEB_PORT,
 ) -> None:
     global _bot, _entertainment
     archive_runtime_logs_on_startup(_PROJECT_ROOT / "pokerfate" / "logs")
@@ -720,16 +697,8 @@ async def main(
     await _bot.start()
     start_calibration_spool_worker()
     _entertainment = EntertainmentRuntime(
-        web_host=entertainment_web_host,
-        web_port=entertainment_web_port,
-    )
-    _entertainment.set_bot_settings_handlers(
-        _bot.runtime_settings,
-        lambda payload: _bot.update_runtime_settings(
-            profit_lock_bb=payload.get("profit_lock_bb"),
-            decision_engine=payload.get("decision_engine"),
-            preflop_sticky_pool_adjust=payload.get("preflop_sticky_pool_adjust"),
-        ),
+        web_host=config.ENTERTAINMENT_WEB_HOST,
+        web_port=config.ENTERTAINMENT_WEB_PORT,
     )
     _entertainment.set_bot_dashboard_handler(_bot.bankroll_dashboard)
     await _entertainment.start()
@@ -753,9 +722,8 @@ async def main(
         f"[proxy] 心跳监控  wss_gap_warn={_WSS_GAP_WARN_SEC:.1f}s  "
         f"loop_lag_warn={_EVENT_LOOP_LAG_WARN_SEC:.1f}s"
     )
-    if entertainment_web_host is not None and entertainment_web_port is not None:
-        urls = _entertainment.status_data().get("web_urls", [])
-        print(f"[proxy] 娱乐游戏 Web {', '.join(urls) or '-'}")
+    urls = _entertainment.status_data().get("web_urls", [])
+    print(f"[proxy] 牌局 Web {', '.join(urls) or '-'}")
 
     server_ssl = _make_server_ssl()
 
@@ -821,22 +789,6 @@ def _parse_proxy_args() -> argparse.Namespace:
         metavar="BB",
         help=f"盈利锁仓阈值（大盲倍数），达到后离桌再以 100BB 进房（默认用 pf_intercept.config 的值 {config.PROFIT_LOCK_BB_THRESHOLD}）",
     )
-    p.add_argument(
-        "--entertainment-web-host",
-        default=config.ENTERTAINMENT_WEB_HOST,
-        help=f"娱乐小游戏 Web 监听地址（默认 {config.ENTERTAINMENT_WEB_HOST}）",
-    )
-    p.add_argument(
-        "--entertainment-web-port",
-        type=int,
-        default=config.ENTERTAINMENT_WEB_PORT,
-        help=f"娱乐小游戏 Web 监听端口（默认 {config.ENTERTAINMENT_WEB_PORT}）",
-    )
-    p.add_argument(
-        "--no-entertainment-web",
-        action="store_true",
-        help="不启动娱乐小游戏 Web",
-    )
     return p.parse_args()
 
 
@@ -846,11 +798,5 @@ if __name__ == "__main__":
         main(
             max_auto_rebuy=_args.max_auto_rebuy,
             profit_lock_bb=_args.profit_lock_bb,
-            entertainment_web_host=(
-                None if _args.no_entertainment_web else _args.entertainment_web_host
-            ),
-            entertainment_web_port=(
-                None if _args.no_entertainment_web else _args.entertainment_web_port
-            ),
         )
     )

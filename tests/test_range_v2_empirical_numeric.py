@@ -154,20 +154,6 @@ def test_empirical_action_likelihood_uses_numeric_neighbors(monkeypatch):
     assert dist["air"] > dist["strong"]
 
 
-def test_empirical_preflop_prior_uses_numeric_neighbors(monkeypatch):
-    _install_model(monkeypatch, _numeric_model())
-
-    dist, blend, key, n = em.empirical_preflop_bucket_prior(
-        "BTN",
-        _profile(hands_seen=20),
-    )
-
-    assert key.startswith("knn:BTN")
-    assert n > 0
-    assert blend > 0
-    assert dist["air"] > dist["strong"]
-
-
 def test_empirical_action_likelihood_falls_back_to_global_without_labels(monkeypatch):
     _install_model(monkeypatch, {
         "schema": "range_v2_empirical_model_v2",

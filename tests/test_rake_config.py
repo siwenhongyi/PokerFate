@@ -4,7 +4,6 @@ import pytest
 
 from pokerfate.core import config
 from pokerfate.core.config import RAKE_KEEP, RAKE_RATE, rake_keep, required_equity
-from pokerfate.strategy.v3 import alpha_gate
 
 
 def test_required_equity_includes_rake():
@@ -25,11 +24,6 @@ def test_rake_cap_lowers_effective_rate_when_configured(monkeypatch):
     monkeypatch.setattr(config, "RAKE_CAP_BB", 3.0)
     assert config.rake_keep(100.0) == pytest.approx(0.97)
     assert config.rake_keep(10.0) == pytest.approx(0.91)
-
-
-def test_bluff_breakeven_accounts_for_rake():
-    assert alpha_gate.alpha_from_frac(1.0, rake_keep=1.0) == pytest.approx(0.5)
-    assert alpha_gate.alpha_from_frac(1.0) == pytest.approx(1.0 / (1.0 + RAKE_KEEP))
 
 
 def test_realtime_cfr_solver_args_charge_rake():

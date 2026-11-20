@@ -24,6 +24,44 @@ def test_session_totals_survive_room_changes_and_ignore_replayed_settlements():
     assert LiveTableObserver(my_uid=42).snapshot()["session_pnl_chips"] == 0
 
 
+def test_session_result_in_big_blinds_counts_each_hand_at_its_own_blind():
+    obs = LiveTableObserver(my_uid=42)
+    enter = lambda bb: obs.observe("pb.EnterRoomRSP", {"roomid": 7, "room_info": {"bb": str(bb), "sb": str(bb // 2)}})
+    enter(20000)
+    obs.observe("pb.DealerInfoRSP", {"gameid": "a"})
+    obs.observe("pb.WinnerRSP", {"profit": [{"uid": "42", "chips": "-600000"}]})        # -30BB at 20000
+    enter(5000)                                                                          # table selection moved us
+    obs.observe("pb.DealerInfoRSP", {"gameid": "b"})
+    obs.observe("pb.WinnerRSP", {"profit": [{"uid": "42", "chips": "50000"}]})          # +10BB at 5000
+    snap = obs.snapshot()
+    assert (snap["session_pnl_chips"], snap["session_pnl_bb"]) == (-550000, -20.0)
+    # a hand settled before any blind was seen: no big-blind total is claimed
+    obs = LiveTableObserver(my_uid=42)
+    obs.observe("pb.DealerInfoRSP", {"gameid": "a"})
+    obs.observe("pb.WinnerRSP", {"profit": [{"uid": "42", "chips": "-750"}]})
+    assert obs.snapshot()["session_pnl_bb"] is None and obs.snapshot()["session_pnl_chips"] == -750
+
+
+def test_feed_lines_result_and_settlement_carry_the_blind_they_were_played_at():
+    obs = LiveTableObserver(my_uid=42)
+    enter = lambda bb: obs.observe("pb.EnterRoomRSP", {"roomid": 7, "room_info": {"bb": str(bb), "sb": str(bb // 2)}})
+    enter(20000)
+    obs.observe("pb.DealerInfoRSP", {"gameid": "a"})
+    obs.observe("pb.ActionBRC", {"seatid": 1, "action_type": 3, "chips": "70000", "hand_chips": "1930000"})
+    obs.observe("pb.WinnerRSP", {"winner": [{"seatid": 1, "chips": "27000"}], "profit": [{"uid": "42", "chips": "-10000"}]})
+    obs.observe("pb.LeaveRoomRSP", {})
+    enter(5000)
+    obs.observe("pb.DealerInfoRSP", {"gameid": "b"})
+    obs.observe("pb.ActionBRC", {"seatid": 1, "action_type": 3, "chips": "45000", "hand_chips": "455000"})
+    snap = obs.snapshot()
+    assert len(snap["feed"]) == len(snap["feed_bb"])
+    by_line = dict(zip(snap["feed"], snap["feed_bb"]))
+    assert by_line[next(t for t in snap["feed"] if t.endswith(" 70000"))] == 20000
+    assert by_line[next(t for t in snap["feed"] if t.startswith("▸"))] == 20000
+    assert by_line[next(t for t in snap["feed"] if t.endswith(" 45000"))] == 5000
+    assert snap["settlement"]["bb"] == 20000 and snap["result_bb"] == 20000
+
+
 def test_hero_leave_clears_table_and_reenter_replaces_snapshot(observer):
     observer.set_connected(True)
     observer.observe("pb.HandCardRSP", {"card1": 1037, "card2": 267})

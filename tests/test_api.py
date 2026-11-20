@@ -488,10 +488,6 @@ class TestAPILifecycle:
         captured = capsys.readouterr()
         assert "PokerFate" in captured.out
 
-    def test_parse_cards_utility(self):
-        cards = PokerFateAPI.parse_cards(["Ac", "Kd", "Qh"])
-        assert len(cards) == 3
-
     def test_multiple_hands(self):
         api = make_api()
         for _ in range(10):
@@ -649,18 +645,6 @@ class TestStackTracking:
         )
         mystery = api._get_player(5)
         assert mystery.stack == 100.0 * api.big_blind
-
-    def test_stack_update_mid_hand(self):
-        api = make_api()
-        api.new_hand(
-            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "Opp", 200.0)],
-            dealer_id=0,
-        )
-        api.notify_stack_update(player_id=1, new_stack=150.0)
-        # Should update both in-hand state and session registry
-        player = api._get_player(1)
-        assert player.stack == 150.0
-        assert api._session_stacks[1] == 150.0
 
     def test_same_name_different_uid_does_not_migrate_model(self):
         """Display name is not identity; only uid/player_id preserves stats."""
@@ -967,23 +951,10 @@ class TestBugFixes:
 
 
 class TestSeatManagement:
-    """Tests for notify_player_left and seat-change opponent model isolation."""
-
-    def test_notify_player_left_clears_session_data(self):
-        """notify_player_left removes player from session stacks and players list."""
-        api = make_api()
-        api.new_hand(
-            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "Opp", 200.0)],
-            dealer_id=0,
-        )
-        api.hand_over(winner_ids=[0], pot=3.0, final_stacks={0: 202.0, 1: 198.0})
-
-        api.notify_player_left(player_id=1)
-
-        assert 1 not in api._session_stacks
+    """Seat changes keep opponent models isolated by player_id."""
 
     def test_new_player_after_left_gets_fresh_opponent_model(self):
-        """After notify_player_left, a new player at same physical seat gets clean stats."""
+        """A new player at the same physical seat (different id) gets clean stats."""
         api = make_api()
         api.new_hand(
             players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "OldPlayer", 200.0)],
@@ -999,7 +970,6 @@ class TestSeatManagement:
         assert old_fold_count > 0
 
         # OldPlayer leaves; NewPlayer sits in same seat (but different id)
-        api.notify_player_left(player_id=1)
         api.notify_player_joined(player_id=2, name="NewPlayer", stack=200.0)
 
         # NewPlayer's stats should be fresh
@@ -1022,13 +992,12 @@ class TestSeatManagement:
         saved_folds = api._bot.opponent_model.get(1).fold_count
         assert saved_folds > 0
 
-        api.notify_player_left(player_id=1)
         api.notify_player_joined(player_id=9, name="Veteran", stack=200.0)
 
         restored = api._bot.opponent_model.get(9)
         assert restored.fold_count == 0
 
-    def test_notify_player_left_then_rejoin_same_id(self):
+    def test_rejoin_same_id_keeps_stats(self):
         """Player leaves and rejoins at same id — stats are preserved via archive restore."""
         api = make_api()
         api.new_hand(
@@ -1041,7 +1010,6 @@ class TestSeatManagement:
 
         raise_count_before = api._bot.opponent_model.get(3).raise_count
 
-        api.notify_player_left(player_id=3)
         # Same player rejoins at same id and name
         api.notify_player_joined(player_id=3, name="Player3", stack=200.0)
 

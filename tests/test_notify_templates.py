@@ -10,6 +10,17 @@ def test_gamedata_messages_separate_auth_failure_from_empty_history():
     assert "code=-2" not in body and "小号" not in body and "激进" not in body
 
 
+def test_table_leave_names_the_cause_and_carries_only_the_running_result() -> None:
+    title, body, icon = format_bark_message("table_leave", {"reason": "no_humans", "session_delta_chips": -235_066})
+    assert title == "选桌离桌 · 桌上没有真人了"
+    assert body == "本次启动盈亏: -235.07k（筹码）"
+    assert icon and icon.endswith("robot_3d.png")
+    assert format_bark_message("table_leave", {"reason": "outnumbered", "session_delta_chips": 164_376}) == (
+        "选桌离桌 · 真人少于人机", "本次启动盈亏: +164.38k（筹码）", icon)
+    assert format_bark_message("table_leave", {"reason": "retry"})[0] == "选桌离桌"
+    assert format_bark_options("table_leave", {}) == {}
+
+
 def test_hand_swing_includes_start_chips_bb_note() -> None:
     title, body, _ = format_bark_message(
         "hand_swing",
@@ -105,3 +116,27 @@ def test_bark_options_wss_uses_single_updatable_notice() -> None:
         "id": "pokerfate-wss-disconnected",
         "delete": 1,
     }
+
+
+def test_bust_rebuy_and_loss_stop_name_the_net_loss_cap() -> None:
+    title, body, _ = format_bark_message("auto_rebuy", {
+        "nth": 2, "rebuy_chips": 2_000_000, "rebuy_window_sec": 60, "session_delta_chips": -2_536_220,
+        "loss_cap_chips": 6_000_000})
+    assert title == "筹码清零 · 自动买入"
+    assert body == ("第 2 次自动续入\n续入筹码: 2000000\nrebuy 窗口: 60 秒\n"
+                    "本次启动盈亏: -2.54m（筹码）\n净亏损上限: -6.00m")
+    title, body, icon = format_bark_message("loss_stop", {
+        "what": "破产买入", "session_delta_chips": -6_000_000, "loss_cap_chips": 6_000_000, "buyins": 3})
+    assert title == "净亏损到上限 · 已停止"
+    assert body == ("本次启动盈亏: -6.00m（筹码）\n净亏损上限: -6.00m（3 个 100BB 买入）\n"
+                    "放不下破产买入，已停在大厅，不再买入。重启后恢复。")
+    assert icon and format_bark_options("loss_stop", {}) == {}
+
+
+def test_top_up_says_what_was_added_what_is_on_the_table_and_the_running_result() -> None:
+    title, body, icon = format_bark_message("topup", {
+        "added_chips": 300_000, "stack_chips": 953_000, "big_blind": 10_000, "nth": 2, "session_delta_chips": -47_000})
+    assert title == "桌上补码"
+    assert body == "补充筹码: 300000（30BB），本次启动第 2 次\n桌上筹码: 953000（95BB）\n本次启动盈亏: -47.00k（筹码）"
+    assert icon and icon.endswith("coin_3d.png")
+    assert format_bark_options("topup", {}) == {}

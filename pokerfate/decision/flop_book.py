@@ -98,17 +98,6 @@ class FlopBook:
         self._db: dict[str, sqlite3.Connection] = {}
         self._row_cache: dict[str, dict[frozenset[int], int]] = {}
 
-    def check_consistency(
-        self,
-        abstraction_hash: Optional[str] = None,
-        range_hash: Optional[str] = None,
-    ) -> bool:
-        if abstraction_hash and self.meta.get("abstraction_hash") != abstraction_hash:
-            return False
-        if range_hash and self.meta.get("range_hash") != range_hash:
-            return False
-        return True
-
     def close(self) -> None:
         for conn in self._db.values():
             try:

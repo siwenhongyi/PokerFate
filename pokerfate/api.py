@@ -47,6 +47,8 @@ from pokerfate.calibration import (
 from pokerfate.core.card import Card
 from pokerfate.core.config import MIN_HANDS_FOR_CLASSIFICATION
 from pokerfate.core.position import relabel_positions_by_button
+from pokerfate.core.seating import derive_seating
+from pokerfate.core.robots import table_verdict
 from pokerfate.core.game_state import Action, ActionType, GameState, Player, Street
 from pokerfate.core.hand_evaluator import HandEvaluator, HandRank
 from pokerfate.data import init as _init_data
@@ -412,8 +414,14 @@ class PokerFateAPI:
         # Hand state: rebuilt each hand
         self._players: List[Player] = []
         # House robots dealt into the current hand (PlayerInfo.is_robot). They are played
-        # against as usual; every learning / collection path below leaves them out.
+        # against as usual, and what is learned from the hand follows the table rule:
+        #   - a hand at a table the bot would leave (no human, or fewer humans than robots,
+        #     ``table_verdict``) teaches nothing — no rows, no samples, no statistics for anyone;
+        #   - at a table it stays at, the humans are learned from as usual, the robots are not,
+        #     and nothing that depends on a robot's cards (hero equity, river value sizing)
+        #     is sampled while a robot is still in the pot.
         self._hand_robot_ids: set = set()
+        self._hand_skip_learning = False
         self._hand_seat_indices: Dict[int, int] = {}
         self._dealer_seat_index: Optional[int] = None
         self._hole_cards: List[Card] = []
@@ -450,23 +458,9 @@ class PokerFateAPI:
             # 挂到 tracker：每次权重更新会回调 calibrator.record_prediction
             tracker = self._bot._range_tracker
             def _prediction_hook_filtered(**kwargs):
-                # 不记录 hero 自己的 calibration 预测；只看对手
-                pid = kwargs.get("player_id")
-                if pid == self.my_player_id:
-                    return
-                # 人机的行动不携带牌力信息（且会看真人底牌）：不为它记录校准预测，
-                # 也就不会产生训练行、不会更新 hero 胜率自校准器。
-                if pid in self._hand_robot_ids:
-                    return
-                # tracker._weights 里包括 hero 自己，active_weights 把 hero
-                # 也塞进去会让"多人池 hero eq"错误地把 hero 当成对手，并且
-                # 摊牌校准时 hero 不在 _shown_cards → 永远算不出"实全场"。
-                aw = kwargs.get("active_weights")
-                if aw:
-                    kwargs["active_weights"] = {
-                        p: w for p, w in aw.items() if p != self.my_player_id
-                    }
-                self._calibrator.record_prediction(**kwargs)
+                kept = self.learnable_prediction(kwargs)
+                if kept is not None:
+                    self._calibrator.record_prediction(**kept)
             tracker._prediction_hook = _prediction_hook_filtered
             tracker._name_resolver = lambda pid: self._session_names.get(pid, str(pid))
             self._runtime_calibration_recorder = RuntimeCalibrationRecorder()
@@ -477,6 +471,32 @@ class PokerFateAPI:
             self._runtime_collection_enabled = True
         else:
             self._calibrator = None
+
+    def learnable_prediction(self, kwargs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """A range prediction as it may be recorded for learning, or None when it may not.
+
+        Shared by live play and by the training-row extractor, so both write rows for exactly
+        the same hands and players.
+        """
+        # 不记录 hero 自己的 calibration 预测；只看对手
+        pid = kwargs.get("player_id")
+        if pid == self.my_player_id:
+            return None
+        # 需要离桌的牌局整手不记；留桌的牌局里人机自己不记
+        # （它的行动不带牌力信息）：不产生训练行，也不更新 hero 胜率自校准器。
+        if self._hand_skip_learning or pid in self._hand_robot_ids:
+            return None
+        # tracker._weights 里包括 hero 自己，active_weights 把 hero
+        # 也塞进去会让"多人池 hero eq"错误地把 hero 当成对手，并且
+        # 摊牌校准时 hero 不在 _shown_cards → 永远算不出"实全场"。
+        aw = kwargs.get("active_weights")
+        if aw:
+            kwargs = dict(kwargs, active_weights={p: w for p, w in aw.items() if p != self.my_player_id})
+            # 池里还有人机没弃牌：hero 的"实际胜率"由人机的牌决定，
+            # 这条预测仍记训练行，但不作为胜率自校准的样本。
+            if any(p in self._hand_robot_ids for p in aw):
+                kwargs["hero_eq_sample"] = False
+        return kwargs
 
     def _apply_spooled_calibration_updates(self) -> None:
         """Consume worker-produced calibration updates without blocking WSS."""
@@ -568,10 +588,6 @@ class PokerFateAPI:
         resolved["PF_CFR_FLOP_BOOK_ENABLED"] = self._flop_book_requested
         cfr_options = getattr(self._realtime_cfr_engine, "options", None)
         if cfr_options is not None:
-            resolved["PF_CFR_VALUE_BET_FLOOR"] = bool(cfr_options.value_bet_floor_enabled)
-            resolved["PF_CFR_VALUE_BET_FLOOR_MIN_BET_FREQ"] = float(cfr_options.value_bet_floor_min_bet_freq)
-            resolved["PF_CFR_VALUE_BET_FLOOR_MIN_SHOWDOWN"] = float(cfr_options.value_bet_floor_min_showdown_value)
-            resolved["PF_CFR_VALUE_BET_FLOOR_MAX_POT_RATIO"] = float(cfr_options.value_bet_floor_max_pot_ratio)
             resolved["PF_CFR_CHEAP_CALL_POT_TOLERANCE"] = float(cfr_options.cheap_call_pot_tolerance)
             resolved["PF_CFR_CHEAP_CALL_MIN_SHOWDOWN"] = float(cfr_options.cheap_call_min_showdown_value)
         resolved["PF_G5_SHADOW_ENABLED"] = self._g5_observer_enabled
@@ -1036,6 +1052,8 @@ class PokerFateAPI:
     def _record_g5_action_model_hand(self) -> None:
         if self._g5_action_model is None or not self._g5_model_path:
             return
+        if self._hand_skip_learning:
+            return
         try:
             skip = {stable_player_name(pid) for pid in self._hand_robot_ids}
             changed = self._g5_action_model.record_hand(
@@ -1155,6 +1173,9 @@ class PokerFateAPI:
         t0 = time.perf_counter()
         timing: dict[str, float] = {}
         out: dict[str, Any] = {}
+        if int(villain_id) in self._hand_robot_ids:
+            # the fitted response model is about humans; it stays out of the way for a robot
+            out["villain_is_robot"] = True
         board = list(gs.board or [])
         try:
             bucket_t0 = time.perf_counter()
@@ -1805,7 +1826,7 @@ class PokerFateAPI:
     ) -> None:
         if not self._runtime_collection_enabled:
             return
-        if self._range_compare_collector is None:
+        if self._range_compare_collector is None or self._hand_skip_learning:
             return
         g5_ranges = self._g5_ranges_by_pid(g5_result)
         if not g5_ranges:
@@ -1936,6 +1957,32 @@ class PokerFateAPI:
         return " | ".join(parts)
 
     @staticmethod
+    def _compact_response_summaries(summaries: Any) -> dict[str, Any]:
+        """For the decision log: what the opponent is expected to answer to each of hero's
+        actions, by answer class - the solver's equilibrium frequencies (``eq``) and the fitted
+        ones (``fit``), or why the model stayed out (``why``). Together with what he then does,
+        this is what the response model is checked against."""
+        out: dict[str, Any] = {}
+        if not isinstance(summaries, dict):
+            return out
+        for label, summary in summaries.items():
+            info = summary.get("response") if isinstance(summary, dict) else None
+            if not isinstance(info, dict) or not info.get("equilibrium"):
+                continue
+            entry: dict[str, Any] = {"eq": info.get("equilibrium")}
+            if info.get("model"):
+                entry["fit"] = info.get("fitted")
+            else:
+                entry["why"] = info.get("reason")
+            if info.get("size") is not None:
+                entry["size"] = info.get("size")
+            call_range = summary.get("call_range")
+            if isinstance(call_range, dict):
+                entry["call_range"] = call_range
+            out[str(label)] = entry
+        return out
+
+    @staticmethod
     def _realtime_cfr_safety_summary(result: dict[str, Any]) -> str:
         exploit = result.get("exploit")
         if not isinstance(exploit, dict):
@@ -1952,7 +1999,6 @@ class PokerFateAPI:
             "calloff_risk": "calloff",
             "sticky_aggression": "sticky",
             "overvalue_cheap_call_guard": "overvalue-call",
-            "value_bet_floor": "value-floor",
             "gto_ev_floor": "gto-floor",
             "defense_mdf": "mdf",
         }
@@ -2127,6 +2173,11 @@ class PokerFateAPI:
             int(p.player_id) for p in players
             if getattr(p, "is_robot", False) and p.player_id != self.my_player_id
         }
+        humans = sum(1 for p in players if p.player_id != self.my_player_id) - len(self._hand_robot_ids)
+        self._hand_skip_learning = bool(self._hand_robot_ids) and (
+            table_verdict(humans, len(self._hand_robot_ids)) != "stay"
+        )
+        self._bot.opponent_model.frozen = self._hand_skip_learning
         for p in players:
             # Resolve stack: explicit > session history > default
             stack = p.stack
@@ -2171,14 +2222,30 @@ class PokerFateAPI:
             player_seats=dict(self._hand_seat_indices),
             dealer_seat=self._dealer_seat_index,
         )
-        for p in self._players:
-            if not self._hand_positions.get(p.player_id):
-                self._hand_positions[p.player_id] = position_state.position_of(p)
-        # Upstream counts seats forwards from the BB ('UTG', 'UTG+1', ...);
-        # charts, range tables, tracker priors and the flop book are keyed on
-        # button-relative 6-max positions. Relabel once here so every
-        # consumer (preflop charts, villain opener position, Range V2 priors,
-        # flop-book scenario, CFR hero range) sees the same seat.
+        unlabelled = [p for p in self._players if not self._hand_positions.get(p.player_id)]
+        if unlabelled:
+            seats_known = self._dealer_seat_index is not None and all(
+                int(p.player_id) in self._hand_seat_indices for p in self._players
+            )
+            if seats_known:
+                # Same derivation the bridge uses (it also knows the blind
+                # seats; a caller that sends no labels gets the undisturbed
+                # layout).
+                by_seat = derive_seating(
+                    self._hand_seat_indices.values(), self._dealer_seat_index,
+                ).labels
+                for p in unlabelled:
+                    self._hand_positions[p.player_id] = by_seat.get(
+                        self._hand_seat_indices[int(p.player_id)], ''
+                    )
+            else:
+                for p in unlabelled:
+                    self._hand_positions[p.player_id] = position_state.position_of(p)
+        # The bridge sends 6-max labels from `core.seating`. Other callers may
+        # send forward-counted names ('UTG+1', 'LJ', ...) and `position_of`
+        # produces them too; charts, range tables, tracker priors and the flop
+        # book are keyed on button-relative 6-max positions. Relabel once here
+        # (a no-op on 6-max labels) so every consumer sees the same seat.
         self._hand_positions_raw: Dict[int, str] = dict(self._hand_positions)
         self._hand_positions = relabel_positions_by_button(self._hand_positions)
         self._g5_hand_start_players = [
@@ -2372,11 +2439,10 @@ class PokerFateAPI:
         self._action_history.append((event.player_id, action, street_key))
 
         # Feed into opponent model with correct spot context.
-        # bet_ratio for sizing_adj: 也给 raise_over 喂一个可用的 ratio。
-        # 2026-04-25 修复：之前 raise_over 传 0 → SIZING_CATEGORY_ADJ 直接跳过 →
-        # tracker 对 whale 4.2x pot check-raise 和 0.5x bet 的桶间 likelihood 比例
-        # 完全一致。这导致 S2·20 / S3·57 等 hero 面对 whale 大 raise 仍认为
-        # villain range 有大量 air 的灾难。
+        # bet_ratio（似然模型的下注尺寸特征）：也给 raise_over 喂一个可用的 ratio。
+        # 2026-04-25 修复：之前 raise_over 传 0 → tracker 对 whale 4.2x pot
+        # check-raise 和 0.5x bet 的桶间 likelihood 比例完全一致。这导致 S2·20 /
+        # S3·57 等 hero 面对 whale 大 raise 仍认为 villain range 有大量 air 的灾难。
         #
         # 估算：pot_at_action = _last_known_pot + 本街已累积 current_bet。
         # 对首次下注这个就是 _last_known_pot。对 raise_over，我们加上桌上其他
@@ -2469,37 +2535,6 @@ class PokerFateAPI:
 
         # Check for newly significant opponent patterns and surface them
         self._maybe_log_opponent_pattern(event.player_id, name)
-
-    def notify_stack_update(self, player_id: int, new_stack: float) -> None:
-        """Update a player's stack at any point (e.g. after side-pot resolution).
-
-        Also persists to the session registry for future hands.
-        """
-        player = self._get_player(player_id)
-        if player:
-            player.stack = new_stack
-        self._session_stacks[player_id] = new_stack
-
-    def notify_player_left(self, player_id: int) -> None:
-        """Notify that a player has vacated their seat mid-session.
-
-        Call this when a StandUpBRC / OtherLeaveRoomBRC arrives and
-        a player is confirmed gone. This ensures the next player to
-        occupy the same seat (player_id / seatid) does NOT inherit
-        the departed player's opponent-model data.
-
-        Parameters
-        ----------
-        player_id : int
-            The departing player's ID (same value used in new_hand / notify_action).
-        """
-        self._session_stacks.pop(player_id, None)
-        self._session_names.pop(player_id, None)
-        self._bot.opponent_model.unregister_seat(player_id)
-        # Remove from current hand's active player list if mid-hand
-        self._players = [p for p in self._players if p.player_id != player_id]
-        if self.verbose:
-            self._log.raw({"event": "player_left", "player_id": player_id})
 
     def notify_player_joined(
         self,
@@ -3003,6 +3038,7 @@ class PokerFateAPI:
                             }
                         else:
                             safety_summary[str(guard)] = items
+                responses = self._compact_response_summaries(exploit.get("response_summaries"))
                 extra["realtime_cfr"] = {
                     "status": cfr.get("status"),
                     "hero_side": cfr.get("hero_side"),
@@ -3019,6 +3055,7 @@ class PokerFateAPI:
                     "exploit_confidence": exploit.get("confidence"),
                     "final_action_evs_bb": _round_map(exploit.get("final_action_evs_bb")),
                     "safety": safety_summary or None,
+                    "responses": responses or None,
                 }
             elif decision_source == "flop_book":
                 fb = diag.get("flop_book") or {}
@@ -3084,8 +3121,9 @@ class PokerFateAPI:
             return
 
         primary_opp_id = int(diag.get("primary_opp_id") or -1)
-        # 这份数据学的是"真人怎样应对河牌价值下注"；只要还有人机没弃牌就不记。
-        if any(
+        # 这份数据学的是"真人怎样应对河牌价值下注"：需要离桌的牌局不记，
+        # 留桌的牌局里只要还有人机没弃牌也不记。
+        if self._hand_skip_learning or any(
             p.player_id in self._hand_robot_ids
             for p in self._players
             if p.player_id != self.my_player_id and not p.is_folded
@@ -3351,13 +3389,6 @@ class PokerFateAPI:
             sorted_cards = sorted(cards, key=lambda c: (counts[c.rank.value], c.rank.value), reverse=True)
         return ' '.join(_push_card_text(c) for c in sorted_cards)
 
-    # Server hand type int → Chinese name (from PKHelper.lua)
-    _SERVER_HAND_TYPE_CN = {
-        1: '高牌',
-        2: '一对', 3: '两对', 4: '三条', 5: '顺子',
-        6: '同花', 7: '葫芦', 8: '四条', 9: '同花顺', 10: '皇家同花顺',
-    }
-
     @staticmethod
     def _server_hand_type_rank(type_int: int | None) -> Optional[HandRank]:
         if type_int is None:
@@ -3546,12 +3577,15 @@ class PokerFateAPI:
         )
         if self._range_compare_collector is not None and self._runtime_collection_enabled:
             try:
-                self._range_compare_collector.record_showdown(
-                    shown_cards=showdown_hands or {},
-                    final_board=self._board,
-                    hero_cards=self._hole_cards,
-                )
-                self._range_compare_collector.finalize_hand()
+                if self._hand_skip_learning:
+                    self._range_compare_collector.discard_hand()
+                else:
+                    self._range_compare_collector.record_showdown(
+                        shown_cards=showdown_hands or {},
+                        final_board=self._board,
+                        hero_cards=self._hole_cards,
+                    )
+                    self._range_compare_collector.finalize_hand()
             except Exception:
                 traceback.print_exc()
         self._record_g5_action_model_hand()
@@ -3643,9 +3677,6 @@ class PokerFateAPI:
                             rec.predicted_hero_eq_multi is not None
                             and r.actual_hero_eq_street_multi is not None
                             and rec.hero_bucket
-                            # 池里有人机时，hero 的"实际胜率"由人机的随机牌决定，不拿来校准。
-                            and not any(int(a) in self._hand_robot_ids
-                                        for a in (rec.active_player_ids or []))
                         ):
                             self._bot._hero_eq_calibrator.record(
                                 bucket=rec.hero_bucket,
@@ -3846,38 +3877,6 @@ class PokerFateAPI:
         return text[:max_chars] + "~"
 
     # ------------------------------------------------------------------
-    # Convenience: parse card strings
-    # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
-
-    def save_opponent_data(self, filepath: str) -> None:
-        """Persist opponent model to disk."""
-        self._bot.opponent_model.save(filepath)
-        self._log.raw({"event": "model_saved", "path": filepath})
-
-    def load_opponent_data(self, filepath: str) -> None:
-        """Load previously saved opponent data from disk (no-op if file missing)."""
-        self._bot.opponent_model = self._bot.opponent_model.__class__.load(filepath)
-        self._log.raw({"event": "model_loaded", "path": filepath,
-                       "known_opponents": len(self._bot.opponent_model._stats)})
-
-    def opponent_summary(self) -> str:
-        """Return a readable summary of all known opponents."""
-        return self._bot.opponent_model.summary()
-
-    # ------------------------------------------------------------------
-    # Convenience: parse card strings
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def parse_cards(card_strings: List[str]) -> List[Card]:
-        """Utility: convert card strings to Card objects."""
-        return [Card.from_str(c) for c in card_strings]
-
-    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
@@ -3998,16 +3997,6 @@ class PokerFateAPI:
             if act.action_type == ActionType.RAISE:
                 return pid != event.player_id
         return False
-
-    def _last_aggressor_on_street(self, street: str) -> Optional[int]:
-        sk = street.lower()
-        for item in reversed(self._action_history):
-            if len(item) < 3 or item[2] != sk:
-                continue
-            pid, act = item[0], item[1]
-            if act.action_type == ActionType.RAISE:
-                return pid
-        return None
 
     def _build_game_state(
         self,

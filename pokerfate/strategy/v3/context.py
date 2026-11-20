@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from pokerfate.core.card import Card
 
@@ -135,6 +135,10 @@ class DecisionCtx:
     #   pessimistic_eq = equity_range - equity_uncertainty 做决策，避免被
     #   偏差拖入灾难性 call。poker_bot 按 bucket_dist 熵 / vs_random 差 /
     #   polar_idx / 多人池 加权填充。
+    # Equity if some opponent always holds a hand that beats hero's right now
+    # (RangeEquityCalculator.equity_when_behind). Filled only where it is used:
+    # facing an all-in before the river. None = not computed / not measurable.
+    equity_when_behind: Optional[float] = None
     compression: float = 1.0                    # equity_range / equity_mc
     nut_advantage: float = 0.0
     draw: DrawProfile = field(default_factory=DrawProfile)
@@ -223,4 +227,3 @@ class DecisionCtx:
     # === RNG ===
     rng: random.Random = field(default_factory=random.Random)
     seed: int = 0
-    decision_key: str = ''

@@ -273,27 +273,36 @@ def test_close_drains_inflight_claim_and_sends_no_followup(tmp_path):
     asyncio.run(run())
 
 
-def test_reward_accounting_never_subtracts_from_older_wallet():
+def test_poker_pnl_is_the_settled_hands_and_nothing_else():
     from pf_intercept.bot import BotBridge
     b = BotBridge()
-    b.handle('pb.UserValueRSP', {'type': rw.GOLD, 'value': 1000, '_reward_chips_at_request': 0})
+    b._my_uid = '7'
+    b.handle('pb.UserValueRSP', {'type': rw.GOLD, 'value': 1000})
+    # A reward reaches the wallet, a side-game round is lost, another round's result is unknown:
+    # none of it is poker.
     b.record_reward_credit(100)
-    assert b.bankroll_dashboard()['rewards_pending']
-    assert b.bankroll_dashboard()['session_delta_chips'] is None
-    b.handle('pb.UserValueRSP', {'type': rw.GOLD, 'value': 1000, '_reward_chips_at_request': 0})
+    b.handle('pb.UserValueRSP', {'type': rw.GOLD, 'value': 1100})
+    b.record_sidegame_result(-30)
+    b.record_reward_credit(0, uncertain=True)
+    assert b.bankroll_dashboard()['session_delta_chips'] == 0
     assert b.bankroll_dashboard()['samples'][-1]['delta_chips'] == 0
-    # An older request can be processed by the server after the claim. Neither
-    # interpretation of that wallet response should show the reward as profit.
-    b.handle('pb.UserValueRSP', {'type': rw.GOLD, 'value': 1100, '_reward_chips_at_request': 0})
-    assert b.bankroll_dashboard()['session_delta_chips'] is None
-    b.handle('pb.UserValueRSP', {'type': rw.GOLD, 'value': 1130, '_reward_chips_at_request': 100})
+
+    won = {'winner': [], 'profit': [{'uid': '7', 'chips': '250'}, {'uid': '8', 'chips': '-250'}]}
+    b._current_gameid = 'g1'
+    b.handle('pb.WinnerRSP', won)
+    b.handle('pb.WinnerRSP', won)                                         # replayed after a reconnect
+    b._current_gameid = 'g2'
+    b.handle('pb.WinnerRSP', {'winner': [], 'profit': [{'uid': '7'}]})    # broke even: field left out
+    b._current_gameid = 'g3'
+    b.handle('pb.WinnerRSP', {'winner': [], 'profit': [{'uid': '8', 'chips': '90'}]})   # not in the hand
+    b._current_gameid = 'g4'
+    b.handle('pb.WinnerRSP', {'winner': [], 'profit': [{'uid': '7', 'chips': '-40'}]})
+
     d = b.bankroll_dashboard()
-    assert d['reward_chips'] == 100
-    assert d['session_delta_chips'] == 30
-    assert d['samples'][-1]['delta_chips'] == 30
-    b.record_reward_credit(0, True)
-    assert b.bankroll_dashboard()['session_delta_chips'] is None
-    assert b.bankroll_dashboard()['rewards_uncertain']
+    assert d['session_delta_chips'] == 210
+    assert (d['reward_chips'], d['sidegame_net_chips'], d['rewards_uncertain']) == (100, -30, True)
+    b.handle('pb.UserValueRSP', {'type': rw.GOLD, 'value': 5000})         # whatever the wallet says
+    assert b.bankroll_dashboard()['samples'][-1]['delta_chips'] == 210
 
 
 @pytest.mark.parametrize('result', [
@@ -312,4 +321,40 @@ def test_malformed_success_is_uncertain_not_zero_reward(tmp_path, result):
             await s.check_tasks()
         assert credits == [(0, True)]
         assert s.claims == 0
+    asyncio.run(run())
+
+
+def test_retry_delay_doubles_to_the_cap_per_check(tmp_path):
+    s, _, _ = service(tmp_path, ScriptedHTTP([]))
+    assert [s._retry_delay("fund") for _ in range(8)] == [30, 60, 120, 240, 480, 960, 1800, 1800]
+    assert s._retry_delay("tasks") == 30
+
+
+def test_failing_checks_back_off_and_unexpected_errors_reach_the_journal(tmp_path, monkeypatch):
+    async def run():
+        monkeypatch.setattr(rw, "RETRY_SEC", .02)
+        monkeypatch.setattr(rw, "RETRY_MAX_SEC", .08)
+        s, ready, _ = service(tmp_path, ScriptedHTTP([]))
+        task_passes = []
+
+        async def rejected():
+            raise rw.RewardAPIError("/activity/rebateStatus", 500)
+
+        async def broken_twice():
+            task_passes.append(1)
+            if len(task_passes) <= 2:
+                raise KeyError("status")
+
+        s.check_fund, s.check_tasks = rejected, broken_twice
+        ready.set()
+        s.start()
+        await asyncio.sleep(.5)
+        await s.close()
+        rows = [json.loads(line) for line in (tmp_path / "rewards.jsonl").read_text().splitlines()]
+        fund = [r for r in rows if r["event"] == "check_failed" and r["kind"] == "fund"]
+        tasks = [r for r in rows if r["event"] == "check_failed" and r["kind"] == "tasks"]
+        assert 3 <= len(fund) <= 12                 # every 20ms without back-off: about 25
+        assert fund[0]["code"] == 500
+        assert [r["error"] for r in tasks] == ["KeyError", "KeyError"]
+        assert len(task_passes) == 3 and "tasks" not in s._failures      # success resets the back-off
     asyncio.run(run())

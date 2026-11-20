@@ -49,6 +49,19 @@ def _uid(value) -> str:
     return str(value).strip()
 
 
+def table_verdict(humans: int, robots: int) -> str:
+    """stay / empty / no_humans / outnumbered, counting everybody but us.
+
+    One rule for two questions: the table policy leaves unless this says "stay", and a hand
+    dealt at a table it would leave teaches the strategy nothing.
+    """
+    if humans <= 0:
+        return "empty" if robots <= 0 else "no_humans"
+    if humans < robots:
+        return "outnumbered"
+    return "stay"
+
+
 class RobotRegistry:
     """Persistent uid -> proven label, plus the derived suspect blocks."""
 
@@ -119,9 +132,6 @@ class RobotRegistry:
     def is_robot(self, uid, *, include_suspect: bool = True) -> bool:
         status = self.status(uid)
         return status == ROBOT or (include_suspect and status == SUSPECT)
-
-    def is_human(self, uid) -> bool:
-        return self.label(uid) == HUMAN
 
     def robots(self) -> Set[str]:
         return {u for u, r in self._labels.items() if r["label"] == ROBOT}
@@ -235,10 +245,6 @@ class RoomRobotTracker:
             return
         self.members.add(key)
         self.joined.add(key)
-
-    def stood_up(self, uid) -> None:
-        # A player who stands up stays in the room and keeps counting towards num / rb_num.
-        return None
 
     def entered(self, uid, num, rb_num, *, ts: Optional[float] = None) -> None:
         key = _uid(uid)
@@ -364,11 +370,3 @@ def default_registry() -> RobotRegistry:
         if _default is None:
             _default = RobotRegistry(os.environ.get("PF_ROBOT_REGISTRY") or None)
         return _default
-
-
-def load_robot_uids(path: Optional[os.PathLike] = None, *, include_suspect_of: Iterable = ()) -> Set[str]:
-    """For offline filters: proven robots, plus those of the given uids that are suspect."""
-    registry = RobotRegistry(path, autosave=False)
-    out = set(registry.robots())
-    out.update(_uid(u) for u in include_suspect_of if registry.is_robot(u))
-    return out

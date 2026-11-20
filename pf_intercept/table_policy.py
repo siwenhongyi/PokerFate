@@ -33,6 +33,8 @@ import random
 from dataclasses import dataclass, field
 from typing import Optional
 
+from pokerfate.core.robots import table_verdict
+
 # Lobby cash levels the bot may use: official minimum up to the user's cap.  The practice room
 # is a different game type and can never be reached with these blinds.
 ALLOWED_STAKES = (1000, 2000, 5000, 10000, 20000)
@@ -121,13 +123,7 @@ class Step:
 NONE = Step()
 
 
-def verdict(humans: int, robots: int) -> str:
-    """stay / empty / no_humans / outnumbered."""
-    if humans <= 0:
-        return "empty" if robots <= 0 else "no_humans"
-    if humans < robots:
-        return "outnumbered"
-    return "stay"
+verdict = table_verdict
 
 
 class TablePolicy:

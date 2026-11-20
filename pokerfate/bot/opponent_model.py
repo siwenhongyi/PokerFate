@@ -258,6 +258,10 @@ class OpponentModel:
         self._name_archive: Dict[str, OpponentStats] = {}
         # Showdown calibrator data loaded from file (passed back to caller).
         self._showdown_data: dict = {}
+        # True while the hand in progress is at a table the bot would leave (no human, or fewer
+        # humans than robots): nothing that happens in it is recorded, for anybody.  Set per
+        # hand by PokerFateAPI.new_hand.
+        self.frozen = False
 
     def register_name(self, uid: int, name: str) -> None:
         """Associate a stable uid with a display name and migrate legacy name data."""
@@ -268,50 +272,61 @@ class OpponentModel:
             self._stats[uid] = self._name_archive.pop(name)
         self._id_to_name[uid] = name
 
-
-    def unregister_seat(self, player_id: int) -> None:
-        """Compatibility no-op: seat lifecycle is not persisted in the uid model."""
-        return
-
     def get(self, player_id: int) -> OpponentStats:
         if player_id not in self._stats:
             self._stats[player_id] = OpponentStats()
         return self._stats[player_id]
 
     def record_hand_start(self, player_id: int):
+        if self.frozen:
+            return
         self.get(player_id).hands_seen += 1
 
     def record_vpip(self, player_id: int):
+        if self.frozen:
+            return
         self.get(player_id).vpip_count += 1
 
     def record_pfr(self, player_id: int):
+        if self.frozen:
+            return
         self.get(player_id).pfr_count += 1
 
     def record_3bet_opportunity(self, player_id: int, did_3bet: bool):
+        if self.frozen:
+            return
         s = self.get(player_id)
         s.three_bet_opportunities += 1
         if did_3bet:
             s.three_bet_count += 1
 
     def record_fold_to_3bet(self, player_id: int, folded: bool):
+        if self.frozen:
+            return
         s = self.get(player_id)
         s.fold_to_3bet_opps += 1
         if folded:
             s.fold_to_3bet_count += 1
 
     def record_fold_to_cbet(self, player_id: int, folded: bool):
+        if self.frozen:
+            return
         s = self.get(player_id)
         s.fold_to_cbet_opps += 1
         if folded:
             s.fold_to_cbet_count += 1
 
     def record_river_facing_bet(self, player_id: int, folded: bool):
+        if self.frozen:
+            return
         s = self.get(player_id)
         s.river_facing_bet_opps += 1
         if folded:
             s.river_facing_bet_fold_count += 1
 
     def record_action(self, player_id: int, action_type: str, street: str = ''):
+        if self.frozen:
+            return
         s = self.get(player_id)
         if action_type == 'fold':
             s.fold_count += 1
@@ -346,10 +361,14 @@ class OpponentModel:
 
     def record_flop_seen(self, player_id: int) -> None:
         """Call when a player sees the flop (not folded preflop). Used for WTSD denominator."""
+        if self.frozen:
+            return
         self.get(player_id).flop_seen_count += 1
 
     def record_showdown(self, player_id: int, won: bool) -> None:
         """Call when a player reaches showdown. Used for WTSD and WMSD."""
+        if self.frozen:
+            return
         s = self.get(player_id)
         s.showdown_count += 1
         if won:
@@ -397,6 +416,8 @@ class OpponentModel:
         board_hand_type : int, optional
             公牌自身牌型整数（1=高牌, 2=一对, ...），用于判断赢家是否只靠公牌牌力赢。
         """
+        if self.frozen:
+            return
         if not had_aggression:
             return
         s = self.get(player_id)

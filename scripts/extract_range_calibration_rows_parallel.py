@@ -226,6 +226,7 @@ def _task_signature(task: dict[str, Any]) -> dict[str, Any]:
         "seed": int(task["seed"]),
         "equity_iterations": int(task["equity_iterations"]),
         "sample_scale": float(task["sample_scale"]),
+        "opponents_model": str(task.get("opponents_model") or ""),
     }
 
 
@@ -271,17 +272,45 @@ def _attach_inline_calibrator(api: Any, calibrator: Any) -> None:
     Neither belongs in a replay: the spool never returns rows to this process
     and the recorder would pollute the live training set (it did, 2026-11-11).
     """
-    hero_id = api.my_player_id
     tracker = api._bot._range_tracker
 
     def _hook(**kwargs: Any) -> None:
-        if kwargs.get("player_id") == hero_id:
+        # The strategy's own filter: no rows about hero or house robots, none at all from a
+        # hand at a table the bot would leave.
+        kept = api.learnable_prediction(kwargs)
+        if kept is None:
             return
-        aw = kwargs.get("active_weights")
-        if aw:
-            kwargs["active_weights"] = {p: w for p, w in aw.items() if p != hero_id}
-        calibrator.record_prediction(**kwargs)
+        calibrator.record_prediction(**kept)
+        # Bucket-mode rows also keep the tracker's per-layer trace of the update that produced
+        # them (bucket shares before the action, after the likelihood, after floor mixing) and
+        # the features the likelihood saw: what scripts/fit_likelihood_model.py fits on and
+        # python -m analysis.range_layers reports.
+        trigger = str(kept.get("trigger") or "")
+        if trigger.startswith("action:") and trigger != "action:fold_other":
+            stored = (getattr(calibrator, "_hand_predictions", {}) or {}).get(kept.get("player_id")) or []
+            trace = getattr(tracker, "last_update_trace", None) or {}
+            last = stored[-1] if stored else None
+            if (isinstance(last, dict) and trace.get("layers")
+                    and last.get("trigger") == trigger and last.get("street") == kept.get("street")):
+                last["layers"] = {name: dict(masses) for name, masses in trace["layers"].items()}
+                last["floor_lambda"] = trace.get("lam")
+                if kept.get("street") == "preflop":
+                    last["preflop_label"] = trace.get("preflop_label") or ""
+                last["features"] = dict(trace.get("features") or {})
+                # For pots won without showdown (analysis/type_truth.py): the player's last
+                # action of the hand, with the weights the update started from.
+                if (kept.get("street") != "preflop" and tracker.last_update_weights is not None
+                        and trace.get("features") is not None):
+                    api._last_kept_actions[kept.get("player_id")] = {
+                        "street": kept.get("street"), "label": trigger.split(":", 1)[1],
+                        "features": dict(trace["features"]), "lam": trace.get("lam"),
+                        "bet_ratio": trace.get("bet_ratio"),
+                        "board": [str(c) for c in (kept.get("board") or [])],
+                        "pre_weights": tracker.last_update_weights,
+                    }
 
+    tracker.keep_update_weights = True
+    api._last_kept_actions = {}
     tracker._prediction_hook = _hook
     tracker._name_resolver = lambda pid: api._session_names.get(pid, str(pid))
     api._calibrator = calibrator
@@ -313,6 +342,11 @@ def _bucket_only_collector(source: str):
     ShowdownCalibrator = _sc.ShowdownCalibrator
     Card = importlib.import_module("pokerfate.core.card").Card
     hcat = importlib.import_module("pokerfate.strategy.range_v2.hand_categorizer")
+    formula_fit = importlib.import_module("pokerfate.strategy.range_v2.formula_fit")
+    hcm = importlib.import_module("pokerfate.strategy.range_v2.hand_combo_map")
+    fitted = importlib.import_module("pokerfate.strategy.range_v2.fitted_likelihood")
+    # Preflop strength of every combo in ten equal steps (0 = weakest tenth of hands).
+    strength_decile = np.minimum((np.asarray(hcm.STRENGTH_PCT) * 10).astype(int), 9)
 
     class BucketOnlyCollector:
         def __init__(self) -> None:
@@ -320,12 +354,14 @@ def _bucket_only_collector(source: str):
             self._hand_id = 0
             self._hand_predictions: dict[int, list[dict[str, Any]]] = {}
             self._shown_cards: dict[int, list[Any]] = {}
+            self._flop_entry: dict[int, Any] = {}
             self.rows: list[dict[str, Any]] = []
 
         def start_hand(self, hand_id: int) -> None:
             self._hand_id = int(hand_id)
             self._hand_predictions = {}
             self._shown_cards = {}
+            self._flop_entry = {}
 
         def record_prediction(
             self,
@@ -343,6 +379,9 @@ def _bucket_only_collector(source: str):
             if total <= 1e-15:
                 return
             bucket_dist = ShowdownCalibrator._compute_bucket_dist(weights / total, board)
+            if trigger == "board:flop":
+                # The range the preflop layer hands over, before any flop action.
+                self._flop_entry[player_id] = np.array(weights, dtype=np.float64) / total
             threshold = (1.0 / 1326) * 0.1
             range_pct = float(((weights / total) > threshold).sum()) / 1326
             # Same hero-side fields as the full calibrator, so bucket-mode rows
@@ -370,6 +409,7 @@ def _bucket_only_collector(source: str):
                 "active_player_count": len(active_weights or {}),
                 "player_profile": dict(meta.get("player_profile") or {}),
                 "source": self.source,
+                "formula_fit": formula_fit.fingerprint(),
                 "hand": self._hand_id,
                 "street": street,
                 "player_uid": str(player_id),
@@ -405,10 +445,26 @@ def _bucket_only_collector(source: str):
             actual_cards = self._shown_cards.get(player_id)
             if not actual_cards:
                 return []
+            entry = self._flop_entry.get(player_id)
+            a, b = sorted(hcm.card_to_int(c) for c in actual_cards[:2])
+            idx = hcm.COMBO_TO_IDX[(a, b)]
             for rec in self._hand_predictions.get(player_id, []):
                 board = [Card.from_str(s) for s in rec["board"]]
                 actual_bucket = hcat.categorize_cards(actual_cards, board if board else [])
                 bucket_dist = rec["bucket_dist"]
+                if rec["street"] == "preflop" and rec.get("layers"):
+                    # A preflop action: the truth is the preflop strength bin of the cards shown.
+                    rec = dict(rec, actual_bin=fitted.PREFLOP_BINS[int(fitted.preflop_bin_index()[idx])])
+                if entry is not None and rec["trigger"] == "board:flop":
+                    live = entry > 0
+                    rec = dict(rec, flop_entry={
+                        "decile_mass": [round(float(v), 5) for v in np.bincount(strength_decile, weights=entry, minlength=10)],
+                        "decile_live": [int(v) for v in np.bincount(strength_decile[live], minlength=10)],
+                        "actual_decile": int(strength_decile[idx]),
+                        "actual_strength": round(float(hcm.STRENGTH_PCT[idx]), 4),
+                        "p_actual": float(entry[idx]),
+                        "live_combos": int(live.sum()),
+                    })
                 self.rows.append({
                     **rec,
                     "actual_cards": [str(c) for c in actual_cards],
@@ -474,6 +530,7 @@ def _run_task(task: dict[str, Any]) -> dict[str, Any]:
         PokerFateAPI = importlib.import_module("pokerfate.api").PokerFateAPI
         load_hero_names = importlib.import_module("scripts.hero_name").load_hero_names
         replay_mod = importlib.import_module("scripts.replay_and_compare")
+        type_truth = importlib.import_module("analysis.type_truth")
         _hero_id = replay_mod._hero_id
         _replay_hand = replay_mod._replay_hand
     except Exception as exc:
@@ -544,6 +601,9 @@ def _run_task(task: dict[str, Any]) -> dict[str, Any]:
                         decision_seed=seed + line_idx + 1,
                     )
                     api._log._console = False
+                    if task.get("opponents_model"):
+                        # Read-only: autosave_path is None, hand_over never writes it back.
+                        api._load_persisted_model(str(task["opponents_model"]))
                     if mode == "full":
                         logger = FullRowsLogger(str(replay_path))
                         ShowdownCalibrator = importlib.import_module(
@@ -556,8 +616,14 @@ def _run_task(task: dict[str, Any]) -> dict[str, Any]:
                     last_session = session
                     last_big_blind = table_bb
 
+                api._last_kept_actions = {}
                 _replay_hand(api, hand, hero_id)
                 played += 1
+                if mode == "bucket" and bucket_collector is not None:
+                    won = type_truth.winner_row(hand, api._bot._range_tracker, api._last_kept_actions,
+                                                str(replay_path))
+                    if won is not None:
+                        bucket_collector.rows.append(won)
                 if mode == "full" and logger is not None and logger.rows:
                     row_count += _write_jsonl_rows(part_file, logger.rows)
                     logger.rows = []
@@ -670,6 +736,10 @@ def main() -> None:
     ap.add_argument("--sample-scale", type=float, default=0.20,
                     help="full mode MC scale; 0.20 is a good sweep speed default")
     ap.add_argument("--progress-every", type=int, default=0)
+    ap.add_argument("--opponents-model", type=Path, default=None,
+                    help="opponents.json to start every session from (read-only).  Without it every "
+                         "session starts knowing nobody, unlike the live bot, which carries its "
+                         "opponent profiles from session to session.")
     args = ap.parse_args()
 
     tasks: list[dict[str, Any]] = []
@@ -701,6 +771,7 @@ def main() -> None:
                 "sample_scale": args.sample_scale,
                 "progress_every": args.progress_every,
                 "resume": not args.no_resume,
+                "opponents_model": str(args.opponents_model) if args.opponents_model else "",
             })
             task_id += 1
 

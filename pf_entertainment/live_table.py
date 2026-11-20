@@ -112,9 +112,17 @@ class LiveTableObserver:
         self.my_uid = str(my_uid) if my_uid is not None else None
         self._reward_source = reward_source
         self._session_pnl_chips = 0
+        # The same result in big blinds, each hand at the blind it was played at (table selection
+        # can change stakes).  None once a hand settled with no blind known: the page then reads
+        # the chip total at the current table's blind instead.
+        self._session_pnl_bb: float | None = 0.0
         self._settled_games: set[str] = set()
         self._lock = threading.Lock()
         self._feed: deque[str] = deque(maxlen=log_size)
+        # The blind each feed line was played at: the page shows its amounts in big blinds, and
+        # table selection can change stakes between two lines.  Same for the last result.
+        self._feed_bb: deque[int] = deque(maxlen=log_size)
+        self._result_bb = 0
         self._seats: dict[int, dict] = {}
         # The last result is independent of the live table. A profit-lock
         # leave/re-entry must not erase it before the viewer can read it.
@@ -297,7 +305,7 @@ class LiveTableObserver:
         self._room_id = 0
         self._sb = self._bb = 0
         self._result = "已离桌，当前在大厅"
-        self._feed.append("已离桌，当前在大厅")
+        self._say("已离桌，当前在大厅")
 
     def _h_location(self, msg: dict) -> None:
         if _chip(msg.get("roomid"), 0) == 0:
@@ -422,7 +430,11 @@ class LiveTableObserver:
             who += "〔人机〕"
         if label and at not in _BLIND_ACTIONS:
             amt = f" {chips}" if chips > 0 and at not in _FOLD_ACTIONS else ""
-            self._feed.append(f"{who} {label}{amt}")
+            self._say(f"{who} {label}{amt}")
+
+    def _say(self, line: str) -> None:
+        self._feed.append(line)
+        self._feed_bb.append(int(self._bb or 0))
 
     def _h_action_notify(self, msg: dict) -> None:
         self._action_seat = _chip(msg.get("seatid"), 0)
@@ -518,6 +530,7 @@ class LiveTableObserver:
             "id": self._hand_token, "game_id": self._game_id, "hand_no": self._hand_no,
             "ended_at": existing["ended_at"] if existing else time.time(),
             "reveal_seconds": 2.5, "board": list(self._board), "winners": list(merged.values()),
+            "bb": int(self._bb or 0),
             "hero": {"seatid": self._my_seat, "hole": list(self._my_hole),
                      "folded": self._seats.get(self._my_seat, {}).get("folded", False),
                      "group": hand_group(self._my_hole, self._board)},
@@ -561,10 +574,13 @@ class LiveTableObserver:
             if game not in self._settled_games:
                 self._settled_games.add(game)
                 self._session_pnl_chips += d
+                if self._session_pnl_bb is not None:
+                    self._session_pnl_bb = (self._session_pnl_bb + d / self._bb) if self._bb else None
             tail = f"  本手 {'+' if d >= 0 else ''}{d}"
         self._result = ("  |  ".join(names) + tail).strip()
+        self._result_bb = int(self._bb or 0)
         if self._result:
-            self._feed.append("▸ " + self._result)
+            self._say("▸ " + self._result)
         self._action_seat = None
         self._save_settlement(winners)
 
@@ -599,6 +615,7 @@ class LiveTableObserver:
             robots = sum(1 for x in others if x.get("kind") in ("robot", "suspect"))
             return {
                 "session_pnl_chips": self._session_pnl_chips,
+                "session_pnl_bb": None if self._session_pnl_bb is None else round(self._session_pnl_bb, 2),
                 "session_reward_chips": rewards,
                 "session_rewards_uncertain": uncertain,
                 "humans": len(others) - robots,
@@ -620,7 +637,9 @@ class LiveTableObserver:
                 "action_seat": self._action_seat,
                 "seats": seats,
                 "feed": list(self._feed),
+                "feed_bb": list(self._feed_bb),
                 "result": self._result,
+                "result_bb": self._result_bb,
                 "settlement": copy.deepcopy(self._settlement),
             }
 
@@ -639,12 +658,6 @@ class _HeadlessRuntime:
             "mode": "headless",
             "bot_dashboard": self._bankroll_source() if self._bankroll_source else None,
         }
-
-    def bot_settings_data(self) -> dict:
-        return {}
-
-    def update_bot_settings(self, payload: dict) -> dict:
-        return {}
 
 
 async def start_live_web(

@@ -1,4 +1,4 @@
-"""Entertainment side-game Web runtime for the MITM proxy."""
+"""Poker dashboard Web runtime for the MITM proxy."""
 
 __all__ = ["EntertainmentRuntime"]
 

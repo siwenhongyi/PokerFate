@@ -178,15 +178,6 @@ class TestSummary:
 class TestSeatReuse:
     """Tests for pure uid archive and legacy name_archive migration."""
 
-    def test_unregister_seat_is_noop_for_uid_model(self):
-        model = OpponentModel()
-        model.register_name(1, "Alice")
-        model.get(1).hands_seen = 42
-        model.unregister_seat(1)
-
-        assert model.get(1).hands_seen == 42
-        assert model._id_to_name[1] == "Alice"
-
     def test_same_uid_name_change_keeps_stats(self):
         model = OpponentModel()
         model.register_name(1, "OldPlayer")
@@ -196,12 +187,11 @@ class TestSeatReuse:
         assert model.get(1).hands_seen == 99
         assert model._id_to_name[1] == "NewPlayer"
 
-    def test_same_name_different_uid_after_unregister_starts_fresh(self):
+    def test_same_name_different_uid_starts_fresh(self):
         model = OpponentModel()
         model.register_name(1, "Alice")
         model.get(1).hands_seen = 50
         model.get(1).fold_count = 20
-        model.unregister_seat(1)
 
         model.register_name(3, "Alice")
         assert model.get(3).hands_seen == 0
@@ -296,11 +286,6 @@ class TestSeatReuse:
                 os.unlink(out_path)
         finally:
             os.unlink(path)
-
-    def test_unregister_unknown_id_is_noop(self):
-        """unregister_seat on an unknown player_id must not raise."""
-        model = OpponentModel()
-        model.unregister_seat(999)  # Should not raise
 
     def test_same_player_same_id_reregistration_is_stable(self):
         """register_name called twice with same id+name is idempotent."""

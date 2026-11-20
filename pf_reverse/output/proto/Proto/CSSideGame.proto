@@ -127,3 +127,41 @@ message PinballActionRSP
     optional int32 code = 1;
     optional PinballActionResult action_result = 2;
 }
+
+message ThrowDiceREQ
+{
+    optional int32 multiple = 1; //倍数
+}
+
+message ThrowDiceRSP
+{
+    optional int32 code = 1;
+    optional int32 index = 2;        //格子排序
+    optional int32 multiple = 3;     //倍数
+    optional int32 all_cost_num =  4;//骰子消耗总数
+}
+
+message GetProgressRewardREQ
+{
+
+}
+
+message GetProgressRewardRSP
+{
+    optional int32 code = 1;
+    optional int32 progress = 2;//已领取的进度
+}
+
+message GetMonopolyActDataREQ
+{
+
+}
+
+message GetMonopolyActDataRSP
+{
+    optional int32 code = 1;
+    optional int32 index = 2;          //格子排序
+    optional int32 all_cost_num =  3;  //骰子消耗总数
+    optional int32 progress = 4;       //已领取的进度
+    optional int32 act_id = 5;         //当前活动id
+}

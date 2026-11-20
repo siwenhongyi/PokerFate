@@ -23,7 +23,16 @@ from pokerfate.strategy.postflop import (
     BoardTexture,
     PostflopStrategy,
 )
-from pokerfate.strategy.preflop import PreflopStrategy, _3BET_VALUE, _hand_category
+from pokerfate.strategy.preflop import (
+    SHOWDOWN_MAX_DEPTH_TO_POT,
+    PreflopStrategy,
+    ShowdownPrice,
+    continue_outcomes,
+    showdown_call_ev,
+    showdown_continue_rate,
+    _3BET_VALUE,
+    _hand_category,
+)
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
 from pokerfate.strategy.range_v2.action_model import ActionContext, ActionModel, PlayerProfile
 from pokerfate.strategy.range_v2.bayesian_range_tracker import BayesianRangeTracker
@@ -47,6 +56,27 @@ from pokerfate.strategy.range_v2.hand_categorizer import (
 from pokerfate.strategy.v3.exploit import aggregate_villain_stats
 
 log = logging.getLogger(__name__)
+
+# A call priced at showdown is decided by a few points of equity: sample enough
+# for the estimate to be good to about one point, whatever the table setting.
+_SHOWDOWN_EQUITY_SAMPLES = 2000
+# Each way the players still to act can split gets its share of those samples,
+# and at least this many.
+_SHOWDOWN_OUTCOME_MIN_SAMPLES = 400
+
+
+def _strongest_share(weights: np.ndarray, share: float) -> np.ndarray:
+    """The strongest ``share`` of a range by preflop strength, the rest zeroed:
+    what a player comes along with behind a raise."""
+    w = np.asarray(weights, dtype=np.float64)
+    total = float(w.sum())
+    if total <= 0.0 or share >= 1.0:
+        return w
+    order = np.argsort(-np.asarray(hcm.STRENGTH_PCT), kind='stable')
+    cut = int(np.searchsorted(np.cumsum(w[order]) / total, share)) + 1
+    kept = np.zeros_like(w)
+    kept[order[:cut]] = w[order[:cut]]
+    return kept
 
 
 class PokerBot:
@@ -218,6 +248,10 @@ class PokerBot:
             )
             self._last_equity = pf_range_eq
             self._last_equity_mode = "range_v2"
+        showdown_price = (
+            self._preflop_showdown_price(gs, player, to_call, pot)
+            if opp_ids and facing_action in ('open', '3bet', '4bet') else None
+        )
 
         # Historical name is "is_bb_option", but the upstream signal really
         # means "hero can check for free" (e.g. forced-post entry spots).  It
@@ -273,6 +307,7 @@ class PokerBot:
                 self._human_open_effective_bb(gs, player, preflop_aggressor_id)
                 if facing_action == 'open' else 0.0
             ),
+            showdown_price=showdown_price,
         )
 
         self._last_reasoning = self._preflop_reasoning(
@@ -299,6 +334,14 @@ class PokerBot:
             'equity_mc': raw_mc,
             'equity_range': self._last_equity,
             'equity_mode': self._last_equity_mode,
+            'effective_to_call': to_call,
+            'contestable_pot': pot,
+            'showdown_price': {
+                'ev': showdown_price.ev,
+                'equity': showdown_price.equity,
+                'need': showdown_price.need,
+                'pending': showdown_price.pending,
+            } if showdown_price is not None else None,
             'facing_action': facing_action,
             'action': action_str,
             'amount': amount,
@@ -320,6 +363,87 @@ class PokerBot:
         return self._to_action(
             action_str, amount, raw_to_call, stack, current_bet=player.current_bet,
         )
+
+    def _preflop_showdown_price(
+        self, gs: GameState, player: Player, to_call: float, pot: float,
+    ) -> Optional[ShowdownPrice]:
+        """Price of calling the raise hero faces when the call ends the betting; else None.
+
+        The betting is over when, after the call, hero or every player already
+        in for the raise has at most ``SHOWDOWN_MAX_DEPTH_TO_POT`` of the pot
+        left.  ``to_call`` and ``pot`` are the capped call and the pot hero can
+        win (``_effective_call_context``).  A player still to act comes along
+        at the rate measured for the raise size and for what he did earlier in
+        the hand, with the top of his range; every way they can split is priced
+        (``continue_outcomes`` / ``showdown_call_ev``).
+        """
+        others = [p for p in gs.active_players if p.player_id != player.player_id]
+        if to_call <= 0 or not others or len(player.hole_cards) < 2:
+            return None
+        level = float(gs.current_bet or 0.0)
+        in_for_it = [
+            o for o in others
+            if not o.can_act() or float(o.stack or 0.0) <= 0.0 or float(o.current_bet or 0.0) >= level - 1e-9
+        ]
+        if not in_for_it:
+            return None
+        behind = max(0.0, float(player.stack or 0.0) - to_call)
+        deepest = max(max(0.0, float(o.stack or 0.0)) for o in in_for_it)
+        if min(behind, deepest) > SHOWDOWN_MAX_DEPTH_TO_POT * (pot + to_call):
+            return None
+
+        pending = [o for o in others if o not in in_for_it]
+        samples = max(int(self.equity_iterations), _SHOWDOWN_EQUITY_SAMPLES)
+        ranges = {o.player_id: self._range_tracker.get_distribution(o.player_id) for o in others}
+
+        def equity_against(weights: list, label: str, n: int = samples) -> float:
+            return self._range_equity_calc.weighted_equity_multi(
+                player.hole_cards, [], weights, n, seed=self._seed_for(label),
+            )
+
+        committed = [ranges[o.player_id] for o in in_for_it]
+        equity = equity_against(committed, 'preflop_showdown')
+        outcomes = []
+        if pending:
+            raise_to_bb = level / gs.big_blind if gs.big_blind > 0 else 0.0
+            rates = [
+                showdown_continue_rate(raise_to_bb, self._preflop_earlier_action(gs, o.player_id))
+                for o in pending
+            ]
+            tops = [_strongest_share(ranges[o.player_id], rate) for o, rate in zip(pending, rates)]
+            hero_level = float(player.current_bet or 0.0) + to_call
+            chips = [
+                min(max(0.0, hero_level - float(o.current_bet or 0.0)), max(0.0, float(o.stack or 0.0)))
+                for o in pending
+            ]
+            for probability, who in continue_outcomes(rates):
+                against = equity if not who else equity_against(
+                    committed + [tops[i] for i in who],
+                    'preflop_showdown_joined_' + '_'.join(str(pending[i].player_id) for i in who),
+                    max(_SHOWDOWN_OUTCOME_MIN_SAMPLES, int(round(samples * probability))),
+                )
+                outcomes.append((probability, against, sum(chips[i] for i in who)))
+        return ShowdownPrice(
+            ev=showdown_call_ev(call=to_call, pot=pot, equity=equity, outcomes=outcomes),
+            call=to_call,
+            equity=equity,
+            need=required_equity(to_call, pot),
+            pending=len(pending),
+            big_blind=float(gs.big_blind or 0.0),
+        )
+
+    @staticmethod
+    def _preflop_earlier_action(gs: GameState, player_id: int) -> str:
+        """What a player has done so far in this preflop round: 'raised', 'called' or 'none'."""
+        earlier = 'none'
+        for item in gs.action_history:
+            if len(item) < 3 or item[2] != 'preflop' or item[0] != player_id:
+                continue
+            if item[1].action_type == ActionType.RAISE:
+                return 'raised'
+            if item[1].action_type == ActionType.CALL:
+                earlier = 'called'
+        return earlier
 
     def _classify_preflop_action(self, gs: GameState, player: Player):
         """Returns (facing_action_str, open_raise_amount).
@@ -837,6 +961,21 @@ class PokerBot:
         # preflop 最后一次动作如果是 raise 则 hero 是 PFR，否则不是（call/check/fold 均非）。
         hero_is_pfr = self._my_street_actions.get('preflop') == 'raise'
 
+        # Facing an all-in before the river the engine marks the range equity
+        # down by its uncertainty; give it the floor that mark-down must respect
+        # (see V3Engine._legacy_blended_eq). Its own seed, so no other draw moves.
+        equity_when_behind = None
+        if (
+            facing_bet and to_call >= stack and 3 <= len(board) < 5
+            and self._last_equity_mode == "range_v2"
+        ):
+            equity_when_behind = self._range_equity_calc.equity_when_behind(
+                player.hole_cards, board,
+                [self._range_tracker.get_distribution(pid) for pid in opp_ids],
+                self.equity_iterations,
+                seed=self._seed_for('postflop_behind'),
+            )
+
         action_str, amount = self.postflop.decide(
             equity=equity,
             pot=pot,
@@ -889,6 +1028,7 @@ class PokerBot:
             equity_mc=raw_mc,
             equity_range=equity,
             decision_seed=engine_seed,
+            equity_when_behind=equity_when_behind,
         )
         cd_after = self.postflop._last_cbet_detail or {}
         river_relative_assessment = self._river_relative_assessment(
@@ -1381,7 +1521,6 @@ class PokerBot:
             'double_barrel': '二连发',
             'triple_barrel': '三连发',
             'stop_and_go': 'stop-and-go',
-            'small_pressure_bet': '小注压力',
         }
         cd = self.postflop._last_cbet_detail or {}
         purpose = str(cd.get('purpose', '?')).split("→", 1)[0]
@@ -1973,7 +2112,7 @@ class PokerBot:
         profile = self._build_player_profile(player_id)
         # bet_ratio is only meaningful for first-bets with a clean pot
         # snapshot (see api.py docstring). Otherwise caller passes 0 and
-        # SIZING_CATEGORY_ADJ becomes a no-op.
+        # the fitted likelihood sees "no size" (fitted_likelihood: size_none).
         bet_ratio = bet_amount / pot if (pot > 0 and bet_amount > 0) else 0.0
         observed_preflop_type = self._preflop_action_type(
             act,

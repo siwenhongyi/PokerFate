@@ -371,10 +371,6 @@ def made_hand_info(hole: List[Card], board: List[Card]) -> MadeHandInfo:
     )
 
 
-def made_hand_subtype(hole: List[Card], board: List[Card]) -> str:
-    return made_hand_info(hole, board).subtype
-
-
 def _preflop_bucket(hole: List[Card]) -> str:
     """Rough preflop bucket (used when no board available)."""
     r1, r2 = hole[0].rank, hole[1].rank

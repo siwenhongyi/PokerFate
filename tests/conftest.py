@@ -34,3 +34,24 @@ def _isolate_robot_registry(tmp_path_factory, monkeypatch):
     monkeypatch.delenv("PF_ROBOT_REGISTRY", raising=False)
     monkeypatch.setattr(robots, "_default", robots.RobotRegistry(root / "robots.json", autosave=False))
     monkeypatch.setattr(bridge_mod, "_TABLE_LOG_PATH", root / "table_select.jsonl")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_opponent_library(tmp_path_factory, monkeypatch):
+    """The exploit layer's numeric prior takes its pool rates and neighbours from the opponent
+    library, which the live bot rewrites all day: with it, a test's outcome moves with the day's
+    play.  Tests see no library (the built-in pool rates) unless they bring one of their own."""
+    import pokerfate.decision.opponent_numeric_prior as numeric_prior
+
+    monkeypatch.setattr(numeric_prior, "MODEL_DIR", tmp_path_factory.mktemp("local_models"))
+    numeric_prior._load_model.cache_clear()
+    yield
+    numeric_prior._load_model.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _formula_layer_without_fitted_corrections(monkeypatch):
+    """Tests run without the fitted postflop likelihood — it is data that changes with every
+    refit — so postflop actions do not move ranges unless a test points PF_FORMULA_FIT_PATH at
+    a model of its own (tests/test_fit_likelihood_model.py covers the fit and the deployed file)."""
+    monkeypatch.setenv("PF_FORMULA_FIT_PATH", "off")

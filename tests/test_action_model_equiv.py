@@ -1,17 +1,9 @@
-"""ActionModel.batch_likelihood 优化前后等价性测试。
+"""ActionModel.batch_likelihood over a fixed batch of inputs.
 
-设计：用一批固定的 (action, street, ctx, profile, board, hero_cards) 输入跑
-batch_likelihood，断言输出 numpy 数组**完全相同**（atol/rtol 1e-12）。
-
-任何对 action_model.py 的优化必须不破坏这个测试 —— 行为一致性是硬约束。
-
-样本覆盖:
-  - 翻前: vpip/pfr/3bet 各档位
-  - 翻后: 干板/湿板/同花板各几个,各 action,各 street
-  - 边界: hands_seen=0 / 极少 / 常规对手
-  - 大注: bet_ratio 各档位
-  - 极性 raise_over: turn/river polar narrow 路径
-  - hero blocker: 含/不含 hero_cards
+Preflop / postflop, dry / wet / paired boards, every action, known and unknown opponents,
+every bet size, with and without hero cards.  Postflop the likelihood is the fitted model
+looked up by each combo's strength bucket; this pins that lookup down against a plain loop,
+and that there is no update at all where the model has nothing to say.
 """
 from __future__ import annotations
 
@@ -135,42 +127,75 @@ def _make_inputs():
     return cases
 
 
-@pytest.fixture(scope='module')
-def legacy_outputs():
-    """金标准:用 _postflop_batch_legacy（保留的原循环版本）跑全套用例。
+_MODEL = {"likelihood_model": {"features": ["size_pot"], "actions": {
+    "bet": {"base": {st: {"nuts": 0.0, "strong": -0.3, "medium": -1.0, "draw": -0.5, "weak_draw": -1.5, "air": -2.0}
+                     for st in ("flop", "turn", "river")},
+            "weights": {"size_pot": {"nuts": 0.6, "air": 0.2}}},
+    "call": {"base": {st: {"nuts": -0.2, "strong": 0.0, "medium": -0.4, "draw": -0.1, "weak_draw": -1.2, "air": -2.5}
+                      for st in ("flop", "turn", "river")}, "weights": {}},
+}}}
 
-    任何对向量化 _postflop_batch 的改动必须保证输出与 legacy 数值一致。
-    preflop 路径只有 _preflop_batch（未参与向量化），通过 batch_likelihood
-    自然走到，与 legacy 比较时直接复用。
-    """
+
+@pytest.fixture()
+def fitted(tmp_path, monkeypatch):
+    import json
+    path = tmp_path / "fit.json"
+    path.write_text(json.dumps(_MODEL), encoding="utf-8")
+    monkeypatch.setenv("PF_FORMULA_FIT_PATH", str(path))
+
+
+@pytest.fixture()
+def outputs(fitted):
     am = ActionModel()
     out = {}
     for label, action, street, ctx, prof, board, hero in _make_inputs():
-        if street == 'preflop':
-            # preflop 没有 legacy/vectorized 区分，直接用一次输出当 baseline
-            result = am.batch_likelihood(action, street, ctx, prof, board, hero_cards=hero)
-        else:
-            # 强制走 legacy 实现
-            result = am._postflop_batch_legacy(action, street, ctx, prof, board, hero)
-        out[label] = np.array(result, copy=True)
+        if street != 'preflop':
+            ctx.likelihood_features = {"size_pot": 1.0 if ctx.bet_ratio > 0.8 else 0.0}
+        out[label] = np.array(am.batch_likelihood(action, street, ctx, prof, board, hero_cards=hero), copy=True)
     return out
 
 
-def test_vectorized_matches_legacy(legacy_outputs):
-    """新（向量化）batch_likelihood 必须和 legacy 实现逐元素一致。"""
+def test_postflop_likelihood_is_the_model_of_each_combos_bucket(outputs):
+    from pokerfate.strategy.range_v2 import hand_categorizer as hcat
+    from pokerfate.strategy.range_v2 import hand_combo_map as hcm
     am = ActionModel()
+    checked = 0
     for label, action, street, ctx, prof, board, hero in _make_inputs():
-        result = am.batch_likelihood(action, street, ctx, prof, board, hero_cards=hero)
-        np.testing.assert_allclose(
-            result, legacy_outputs[label],
-            atol=1e-12, rtol=1e-10,
-            err_msg=f"vectorized != legacy on case '{label}'",
-        )
+        if street == 'preflop':
+            continue
+        spec = _MODEL["likelihood_model"]["actions"].get(
+            {'raise': 'raise_over' if ctx.is_raise_over else 'bet'}.get(action, action))
+        if spec is None:                                   # check, fold, raise over a bet: no model
+            assert np.all(outputs[label] == 1.0), label
+            continue
+        size_pot = 1.0 if ctx.bet_ratio > 0.8 else 0.0     # what the fixture put in the context
+        score = {cat: base + spec["weights"].get("size_pot", {}).get(cat, 0.0) * size_pot
+                 for cat, base in spec["base"][street].items()}
+        top = max(score.values())
+        board_ints = {hcm.card_to_int(c) for c in board}
+        for idx in range(0, 1326, 7):
+            c1, c2 = hcm.ALL_COMBOS[idx]
+            if c1 in board_ints or c2 in board_ints:
+                continue
+            cat = hcat.categorize_cards([hcm.int_to_card(c1), hcm.int_to_card(c2)], board)
+            if street == 'river' and cat in ('draw', 'weak_draw'):
+                cat = 'air'
+            assert outputs[label][idx] == pytest.approx(np.exp(score[cat] - top)), (label, idx, cat)
+            checked += 1
+    assert checked > 2000
 
 
-def test_batch_likelihood_shape_and_finite(legacy_outputs):
+def test_without_a_model_postflop_actions_say_nothing():
+    am = ActionModel()                                     # conftest: PF_FORMULA_FIT_PATH=off
+    for label, action, street, ctx, prof, board, hero in _make_inputs():
+        if street != 'preflop':
+            ctx.likelihood_features = {"size_pot": 1.0}
+            assert np.all(am.batch_likelihood(action, street, ctx, prof, board, hero_cards=hero) == 1.0), label
+
+
+def test_batch_likelihood_shape_and_finite(outputs):
     """所有输出必须是 (1326,) 有限正数。"""
-    for label, arr in legacy_outputs.items():
+    for label, arr in outputs.items():
         assert arr.shape == (1326,), f"{label}: shape {arr.shape}"
         assert np.all(np.isfinite(arr)), f"{label}: non-finite values"
         assert np.all(arr >= 0.0), f"{label}: negative values"

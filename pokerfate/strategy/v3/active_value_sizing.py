@@ -101,9 +101,6 @@ def choose(
     return ActiveValueSizeChoice(frac=frac, reason=reason)
 
 
-RiverValueSizeChoice = ActiveValueSizeChoice
-
-
 def _candidate_fracs(
     ctx: DecisionCtx,
     base_frac: float,

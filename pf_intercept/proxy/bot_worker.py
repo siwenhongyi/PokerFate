@@ -126,12 +126,6 @@ def _handle_call(bridge, method: str, payload: dict[str, Any]) -> Any:
         return bridge.runtime_settings()
     if method == "bankroll_dashboard":
         return bridge.bankroll_dashboard()
-    if method == "update_runtime_settings":
-        return bridge.update_runtime_settings(
-            profit_lock_bb=payload.get("profit_lock_bb"),
-            decision_engine=payload.get("decision_engine"),
-            preflop_sticky_pool_adjust=payload.get("preflop_sticky_pool_adjust"),
-        )
     if method == "guard_current":
         guard = payload.get("guard")
         if guard is None:
@@ -194,8 +188,6 @@ def _bot_worker_main(to_worker, from_worker, options: dict[str, Any]) -> None:
                         dict(item.get("payload") or {}),
                     )
                     _queue_put(from_worker, {"kind": "response", "call_id": call_id, "result": result})
-                    if item.get("method") in {"update_runtime_settings"}:
-                        _queue_put_best_effort(from_worker, _snapshot_payload(bridge))
                 except Exception as exc:
                     log.exception("[BOT_WORKER] call failed method=%s", item.get("method"))
                     _queue_put(
@@ -416,27 +408,6 @@ class BotWorkerClient:
     def bankroll_dashboard(self) -> dict | None:
         return dict(self._dashboard_cache) if isinstance(self._dashboard_cache, dict) else None
 
-    def update_runtime_settings(
-        self,
-        *,
-        profit_lock_bb=None,
-        decision_engine=None,
-        preflop_sticky_pool_adjust=None,
-    ) -> dict:
-        result = self.call_sync(
-            "update_runtime_settings",
-            {
-                "profit_lock_bb": profit_lock_bb,
-                "decision_engine": decision_engine,
-                "preflop_sticky_pool_adjust": preflop_sticky_pool_adjust,
-            },
-            timeout=_BOT_CALL_TIMEOUT_SEC,
-        )
-        if isinstance(result, dict):
-            self._settings_cache = dict(result)
-            return result
-        raise RuntimeError("bot worker returned invalid settings")
-
     async def injection_guard_is_current(self, guard) -> bool:
         if guard is None:
             return True
@@ -482,21 +453,6 @@ class BotWorkerClient:
             return await asyncio.wait_for(fut, timeout=timeout)
         finally:
             self._pending.pop(call_id, None)
-
-    def call_sync(
-        self,
-        method: str,
-        payload: dict[str, Any] | None = None,
-        *,
-        timeout: float = _BOT_CALL_TIMEOUT_SEC,
-    ) -> Any:
-        if self._loop is None:
-            raise RuntimeError("bot worker is not started")
-        future = asyncio.run_coroutine_threadsafe(
-            self.call(method, payload, timeout=timeout),
-            self._loop,
-        )
-        return future.result(timeout=timeout + 0.5)
 
     def status(self) -> dict[str, Any]:
         exitcode = getattr(self._proc, "exitcode", None)

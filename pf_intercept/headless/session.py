@@ -21,7 +21,6 @@ import asyncio
 import logging
 import ssl
 import time
-from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -33,7 +32,9 @@ from pf_intercept import config
 from pf_intercept.bot import BotBridge
 from pf_intercept.headless.login import LoginResult, ServerEntry
 from pf_intercept.headless.network import configure_server_proxy_bypass
-from pf_intercept.headless.rewards import RewardService
+from pf_intercept.headless.rewards import RewardAPIError, RewardService
+from pf_intercept.headless.dispatch import Dispatch
+from pf_intercept.headless.excursion import Excursion
 from pf_intercept.wire import codec
 from pf_intercept.wire.framing import FrameBuffer, encode_frame
 
@@ -45,6 +46,8 @@ LOGIN_RSP_TIMEOUT_SEC = 15.0
 LOGIN_QUEUE_CODE = 1002               # LOGIN_ERR_ENTER_QUEUE
 LOBBY_HOLDEM_GAME_TYPE = 10010101     # GAME_GAME_TYPE.LOBBY_HOLDEM_GAME
 _INJECT_TTL_SEC = 20.0
+_ACTIVITY_REPLY_TIMEOUT_SEC = 8.0
+_ACTIVITY_LATE_REPLY_SEC = 60.0      # how long a timed-out activity reply is still awaited
 STATE_TIMEOUT_SEC = 15.0
 ROOM_SYNC_TIMEOUT_SEC = 45.0
 
@@ -102,6 +105,7 @@ class HeadlessSession:
         client_version: str = str(config.GAME_HTTP_VERSION),
         max_auto_rebuy: int = 1,
         auto_rewards: bool = True,
+        auto_dispatch: bool = True,
         reconnect_enabled: bool = False,
         on_frame: Callable[[str, dict], Awaitable[None] | None] | None = None,
         table_policy=None,
@@ -130,10 +134,11 @@ class HeadlessSession:
         self._pending_hb = 0
         self._tasks: list[asyncio.Task] = []
         self._auto_rewards = auto_rewards
+        self._auto_dispatch = auto_dispatch
         self._rewards: RewardService | None = None
         self._bankroll_ready = asyncio.Event()
-        self._reward_chips = 0
-        self._wallet_requests: deque[tuple[int, int]] = deque()
+        self._activity_pending: dict[str, asyncio.Future] = {}
+        self._activity_late: dict[str, float] = {}   # reply type -> until when a timed-out reply is awaited
         self._bankroll_snapshot: dict = {}
         self._stopping = False
         self._wire_turn = 0
@@ -173,16 +178,10 @@ class HeadlessSession:
 
     async def _on_reward_credit(self, chips: int, uncertain: bool) -> None:
         async with self._bridge_lock:
-            self._reward_chips += chips
             self.bridge.record_reward_credit(chips, uncertain)
             self._refresh_bankroll_snapshot()
         if self.connected:
             await self.send("pb.UserValueREQ", {"type": int(config.PROFIT_LOCK_FALLBACK_LOBBY_COIN)})
-
-    async def _on_reward_claim_state(self, in_flight: bool) -> None:
-        async with self._bridge_lock:
-            self.bridge.set_reward_claim_inflight(in_flight)
-            self._refresh_bankroll_snapshot()
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
@@ -212,7 +211,6 @@ class HeadlessSession:
         self._room_code = None
         self._restoring = self.reconnect_enabled
         self._wire_room_id = None
-        self._wallet_requests.clear()
         self._bridge_queue = asyncio.Queue()
         servers = self.login.servers
         if not servers:
@@ -235,8 +233,10 @@ class HeadlessSession:
                 http_base=http_base,
                 chnl=self.chnl, version=self.client_version,
                 on_credit=self._on_reward_credit, ready=self._bankroll_ready,
-                on_claim_state=self._on_reward_claim_state,
             )
+            self._rewards.excursion = Excursion(self._rewards, self)
+            if self._auto_dispatch:
+                self._rewards.dispatch = Dispatch(self._rewards, self)
         elif self._rewards is not None:
             self._rewards.set_http_base(http_base)
         host, port = _split_wss(self._server.server_host)
@@ -321,6 +321,11 @@ class HeadlessSession:
         if self._closed.is_set():
             return
         self.disconnect_reason = reason
+        for future in self._activity_pending.values():
+            if not future.done():
+                future.set_exception(RewardAPIError("activity socket disconnected"))
+        self._activity_pending.clear()
+        self._activity_late.clear()
         self._closed.set()
         self._wire_turn += 1
         self._generation += 1
@@ -418,8 +423,6 @@ class HeadlessSession:
         if type_name != "pb.HeartBeatREQ":
             log.info("[C→S] %s room_id=%s %s", type_name, rid, fields)
         try:
-            if type_name == "pb.UserValueREQ":
-                self._wallet_requests.append((int(fields.get("type", 0)), self._reward_chips))
             await self._ws.send(encode_frame(type_name, rid, body))
         except Exception as exc:
             log.warning("[C→S] send failed %s: %s", type_name, exc)
@@ -427,9 +430,69 @@ class HeadlessSession:
             return False
         return True
 
+    async def activity_request(self, name, fields, room=None):
+        """One request / reply pair on the game socket, for the reward worker.
+
+        Replies carry no request id, so one request per reply type may be
+        outstanding. After a timeout the type stays reserved for
+        ``_ACTIVITY_LATE_REPLY_SEC`` so that a late reply is dropped instead of
+        answering the next request; a reply still missing by then is lost.
+        ``RewardAPIError.code`` is None only if the request may have reached the
+        server.
+        """
+        reply_name = f"pb.{name}RSP"
+        if self._stopping or not self.connected or not self._bankroll_ready.is_set():
+            raise RewardAPIError(name, "offline")
+        if reply_name in self._activity_pending:
+            if time.monotonic() < self._activity_late.get(reply_name, float("inf")):
+                raise RewardAPIError(name, "waiting for late response")
+            del self._activity_pending[reply_name]
+        self._activity_late.pop(reply_name, None)
+        if codec.encode(f"pb.{name}REQ", fields) is None:
+            raise RewardAPIError(name, "encode failed")
+        future = asyncio.get_running_loop().create_future()
+        self._activity_pending[reply_name] = future
+        try:
+            if not await self.send(f"pb.{name}REQ", fields, self.current_room_id() if room is None else room):
+                # Nothing is on the wire, or the socket is gone: no reply to wait for.
+                if self._activity_pending.get(reply_name) is future:
+                    del self._activity_pending[reply_name]
+                raise RewardAPIError(name)
+            reply = await asyncio.wait_for(future, timeout=_ACTIVITY_REPLY_TIMEOUT_SEC)
+        except asyncio.TimeoutError:
+            if self._activity_pending.get(reply_name) is future:
+                self._activity_late[reply_name] = time.monotonic() + _ACTIVITY_LATE_REPLY_SEC
+            raise RewardAPIError(name) from None
+        finally:
+            if future.done() and not future.cancelled():
+                future.exception()
+        if int(reply.get("code", 0)) != 0:
+            raise RewardAPIError(name, reply["code"])
+        return reply
+
+    def activity_table(self):
+        room = self.current_room_id()
+        if not room or self.bridge.room_id_for_c2s(0) != room:
+            return 0, None
+        return room, self.bridge.activity_emoji_target()
+
+    async def on_sidegame_result(self, net):
+        async with self._bridge_lock:
+            self.bridge.record_sidegame_result(net)
+            self._refresh_bankroll_snapshot()
+        if self.connected:
+            await self.send("pb.UserValueREQ", {"type": int(config.PROFIT_LOCK_FALLBACK_LOBBY_COIN)})
+
     async def quick_start(self, *, big_blind: int, buyin_bb: int = 100, wait_blind: bool = False) -> bool:
         """Ask the lobby for a cash table (LobbyByinDialog StartButton)."""
         fields = self._match_fields(big_blind=big_blind, buyin_bb=buyin_bb, wait_blind=wait_blind)
+        # The buy-in sent may be smaller than the configured one: the loss cap of this start.
+        cap = getattr(self.bridge, "cap_match_buyin", None)
+        if callable(cap):
+            fields = cap(fields)
+            if int(fields.get("byin_chips", 0) or 0) <= 0:
+                log.warning("[MATCH] 净亏损上限下放不下买入，不匹配")
+                return False
         ok = await self.send("pb.QuickStartREQ", fields, room_id=0)
         note = getattr(self.bridge, "note_match_sent", None)
         if ok and callable(note):
@@ -501,6 +564,17 @@ class HeadlessSession:
                 if msg is not None:
                     self._rewards.observe_server_time(msg.get("server_timestamp"))
             return
+        future = self._activity_pending.pop(type_name, None)
+        if future is not None:
+            self._activity_late.pop(type_name, None)
+            reply = codec.decode(type_name, pb_body)
+            if not future.done():
+                if reply is None:
+                    future.set_exception(RewardAPIError(type_name))
+                else:
+                    future.set_result(reply)
+            if type_name not in config.WATCH_S2C and type_name not in _SESSION_TYPES:
+                return
         if type_name not in _SESSION_TYPES and type_name not in config.WATCH_S2C:
             return
         msg = codec.decode(type_name, pb_body)
@@ -553,19 +627,10 @@ class HeadlessSession:
 
         if type_name not in config.WATCH_S2C:
             return
-        if type_name == "pb.UserValueRSP":
-            prop_type = int(msg.get("type", config.PROFIT_LOCK_FALLBACK_LOBBY_COIN))
-            # Replies on this socket correspond to requests in order per coin.
-            # Preserve the watermark of older requests crossing a reward claim.
-            for pending in self._wallet_requests:
-                if pending[0] == prop_type:
-                    msg = dict(msg, _reward_chips_at_request=pending[1])
-                    self._wallet_requests.remove(pending)
-                    break
-            if self._restoring:
-                # Wallet + stale table chips is not a valid bankroll sample.
-                # Query again after the authoritative location/table snapshot.
-                return
+        if type_name == "pb.UserValueRSP" and self._restoring:
+            # Wallet + stale table chips is not a valid bankroll sample.
+            # Query again after the authoritative location/table snapshot.
+            return
         self.stats.frames_bot += 1
         # Hand off to the bridge worker: handlers (CFR / equity, and the post-
         # showdown learning after WinnerRSP, which took 10s+ live) can be slow,
@@ -629,7 +694,7 @@ class HeadlessSession:
         if generation is not None and generation != self._generation:
             self.stats.injects_dropped += 1
             return
-        if self._stopping and type_name in {"pb.QuickStartREQ", "pb.EnterRoomREQ", "pb.RebyREQ", "pb.SitDownREQ"}:
+        if self._stopping and type_name in {"pb.QuickStartREQ", "pb.EnterRoomREQ", "pb.RebyREQ", "pb.SetRebyREQ", "pb.SitDownREQ"}:
             self.stats.injects_dropped += 1
             return
         if type_name == "pb.ActionREQ" and (

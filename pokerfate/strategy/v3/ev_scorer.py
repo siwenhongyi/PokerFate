@@ -122,30 +122,3 @@ def score(
         reason=reason,
         components=components,
     )
-
-
-def robust_select(ctx: DecisionCtx, scored: list[ScoredCandidate]) -> tuple[ScoredCandidate, float, str]:
-    ordered = sorted(scored, key=lambda s: s.ev, reverse=True)
-    value_jams = [s for s in ordered if s.purpose == "value_jam" and s.jammed]
-    if value_jams and ordered and value_jams[0].ev >= ordered[0].ev - max(value_jams[0].margin, 0.04 * max(float(ctx.pot or 0.0), 1.0)):
-        ordered = [value_jams[0]] + [s for s in ordered if s is not value_jams[0]]
-    if not ordered:
-        fallback = ScoredCandidate("fold" if ctx.facing_bet else "check", "fold" if ctx.facing_bet else "check", 0.0, 0.0, "fallback", 0.0, 0.0)
-        return fallback, 0.0, "fallback"
-    top = ordered[0]
-    second = ordered[1] if len(ordered) > 1 else None
-    gap = top.ev - (second.ev if second else 0.0)
-    passive = next((s for s in ordered if s.action in {"check", "fold"}), None)
-    if top.action in {"bet", "raise", "call"} and passive is not None:
-        required = max(top.margin, passive.margin, 0.0)
-        meta = top.components.get("metadata") or {}
-        exploit_weight = float(meta.get("exploit_weight", 1.0) or 1.0)
-        if exploit_weight < 1.0:
-            required *= 1.0 + min(1.0, 1.0 - exploit_weight)
-        elif exploit_weight > 1.0:
-            required *= max(0.65, 1.0 - min(1.0, exploit_weight - 1.0) * 0.25)
-        if top.action == "call" and ctx.raw_pot_odds <= 0.30:
-            required *= 0.35
-        if top.ev < passive.ev + required:
-            return passive, passive.ev - top.ev, "robust_margin"
-    return top, gap, "deterministic"

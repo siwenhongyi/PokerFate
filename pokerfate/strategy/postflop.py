@@ -27,7 +27,6 @@ from pokerfate.core.config import required_equity
 from pokerfate.strategy.v3 import (
     BlockerSet, DecisionCtx, DecisionOutput, DrawProfile, V3Engine, VillainStats,
 )
-from pokerfate.strategy.v3 import engine as _v3_engine
 from pokerfate.strategy.v3 import bluff_context as _v3_bluff_context
 from pokerfate.strategy.v3 import early_relative as _v3_early_relative
 from pokerfate.strategy.v3 import purposes_active as _v3_active
@@ -70,7 +69,7 @@ def _compute_equity_uncertainty(
         # 6-bucket 均匀分布 H_max ≈ log(6) ≈ 1.79
         u += min(0.12, H / 14.9)  # H=1.79 → +0.12, H=0 → 0
 
-    # 信号 2: villain 偏被动（polarization_index 低 → GTO 表适配性差）
+    # 信号 2: villain 偏被动
     # 用 AF 和 VPIP 做连续 proxy；越 loose、越 passive，uncertainty 越高。
     af = villain_stats.af or 1.5
     vpip = villain_stats.vpip or 0.25
@@ -228,45 +227,6 @@ def _candidate_ids(out: DecisionOutput) -> set[str]:
     return {str(p) for p, _ in (out.candidates or [])}
 
 
-def _fold_override_note(ctx: DecisionCtx, out: DecisionOutput) -> str | None:
-    if not ctx.facing_bet:
-        return None
-    reason = out.reason or ''
-    if out.purpose != 'fold_override_call' and 'fold-only guard' not in reason:
-        return None
-    gap = max(0.0, ctx.pot_odds - ctx.equity_range)
-    nuts = float((ctx.villain_bucket_dist or {}).get('nuts', 0.0) or 0.0)
-    tag = 'ok' if out.purpose == 'fold_override_call' else '-'
-    if 'range_gap' in reason:
-        tag = f"gap>{_pct(_v3_engine._FOLD_OVERRIDE_FOLD_ONLY_MAX_RANGE_GAP)}"
-    elif 'bucket=' in reason:
-        tag = 'bucket'
-    elif 'low_spr' in reason:
-        tag = f"spr<={_v3_engine._FOLD_OVERRIDE_LOW_SPR_DISABLE:.1f}"
-    elif 'stack_commit' in reason:
-        tag = f"commit>{_pct(_v3_engine._FOLD_OVERRIDE_STACK_COMMIT_DISABLE)}"
-    elif 'fold_prob' in reason:
-        tag = f"fold>{_pct(_v3_engine._FOLD_OVERRIDE_MAX_FOLD_PROB_WITH_CALL)}"
-    elif 'river strong_mass' in reason:
-        tag = f"strong>{_pct(_v3_engine._FOLD_OVERRIDE_RIVER_STRONG_MAX)}"
-    elif 'rel_loss_dominant' in reason:
-        tag = 'rel_loss'
-    elif 'fragile_rel_eq' in reason:
-        tag = 'rel_eq'
-    elif 'fragile_rel_price' in reason:
-        tag = 'rel_price'
-    elif 'early_rel_risk' in reason:
-        tag = 'early_rel'
-    elif 'fragile ' in reason:
-        tag = f"fragile>{_pct(_v3_engine._FOLD_OVERRIDE_FRAGILE_STRONG_MAX)}"
-    elif 'blended_eq' in reason and out.purpose != 'fold_override_call':
-        tag = 'blend<need'
-    return (
-        f"FO-{tag} eq={_pct(ctx.equity_range)} mc={_pct(ctx.equity_mc)} "
-        f"po={_pct(ctx.pot_odds)} gap={_pct(gap)} nuts={_pct(nuts)}"
-    )
-
-
 def _protection_raise_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
     active = out.purpose == 'protection_raise' or 'protection_raise' in ids
     pressure = _draw_pressure(ctx)
@@ -404,7 +364,7 @@ def _early_relative_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
     if call_add <= 0:
         return None
     if out.purpose not in {
-        'bluff_catch_call', 'fold_override_call', 'fold',
+        'bluff_catch_call', 'fold',
     }:
         return None
     desc = _v3_early_relative.describe(ctx)
@@ -467,7 +427,6 @@ def _bluff_context_note(ctx: DecisionCtx, out, ids: set[str]) -> str | None:
 def _strategy_gate_notes(ctx: DecisionCtx, out: DecisionOutput) -> list[str]:
     ids = _candidate_ids(out)
     notes = [
-        _fold_override_note(ctx, out),
         _protection_raise_note(ctx, out, ids),
         _overbet_raise_jam_note(ctx, out, ids),
         _protection_bet_note(ctx, out, ids),
@@ -557,6 +516,7 @@ class PostflopStrategy:
         equity_mc: Optional[float] = None,
         equity_range: Optional[float] = None,
         decision_seed: Optional[int] = None,
+        equity_when_behind: Optional[float] = None,
     ) -> Tuple[str, float]:
         """Wrap legacy kwargs → DecisionCtx → v3 engine.
 
@@ -596,6 +556,7 @@ class PostflopStrategy:
             equity_mc=equity_mc,
             equity_range=equity_range,
             decision_seed=decision_seed,
+            equity_when_behind=equity_when_behind,
         )
 
         out = self._engine.decide(ctx)
@@ -698,6 +659,7 @@ class PostflopStrategy:
         equity_mc: Optional[float] = None,
         equity_range: Optional[float] = None,
         decision_seed: Optional[int] = None,
+        equity_when_behind: Optional[float] = None,
     ) -> DecisionCtx:
         hole = list(hole_cards) if hole_cards else []
         board_list = list(board)
@@ -825,6 +787,7 @@ class PostflopStrategy:
             equity_mc=eq_mc,
             equity_range=eq_range,
             equity_uncertainty=equity_uncertainty,
+            equity_when_behind=equity_when_behind,
             compression=compression,
             nut_advantage=nut_advantage,
             draw=draw_profile,

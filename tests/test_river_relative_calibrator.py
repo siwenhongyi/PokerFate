@@ -1,5 +1,4 @@
 from pokerfate.strategy.range_v2.river_relative_calibrator import (
-    action_ctx_from_decision,
     clamp_equity_to_bounds,
     clamp_relation_to_bounds,
     exact_relation_bounds,
@@ -10,15 +9,6 @@ from pokerfate.core.card import Card
 
 def _cards(*names):
     return [Card.from_str(name) for name in names]
-
-
-def test_action_context_treats_raise_over_as_raise():
-    assert action_ctx_from_decision(
-        facing_bet=True,
-        to_call=1,
-        pot=100,
-        observed_action="raise_over",
-    ) == "raise"
 
 
 def test_exact_lock_hand_is_bounded():

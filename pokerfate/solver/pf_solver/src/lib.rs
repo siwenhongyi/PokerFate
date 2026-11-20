@@ -51,6 +51,10 @@ struct NodeOut {
     evs: Vec<f32>,         // 当前玩家每个动作/手牌的 EV，shape 同 strategy
     #[serde(skip_serializing_if = "Vec::is_empty")]
     weights: Vec<f32>,     // 当前节点当前玩家归一化 reach weights
+    // 当前玩家每手牌：对手到达本节点、且与该手牌不冲突的权重和。> 0 时这手牌的 evs 有定义，
+    // 与它自己按均衡是否走得到本节点无关；= 0 表示对手没有任何手牌到达，evs 填 0（不是数值）。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    opponent_weights: Vec<f32>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     opponent_evs: Vec<f32>, // 当前玩家每个动作后，对手每手牌 EV；action-major
     #[serde(skip_serializing_if = "is_zero")]
@@ -104,12 +108,14 @@ fn walk(
     let num_hands = strategy.len() / actions.len();
     let mut evs = Vec::new();
     let mut weights = Vec::new();
+    let mut opponent_weights = Vec::new();
     let mut opponent_evs = Vec::new();
     let mut opponent_num_hands = 0;
     if include_evs {
         game.cache_normalized_weights();
         evs = game.expected_values_detail(player);
         weights = game.normalized_weights(player).to_vec();
+        opponent_weights = game.opponent_weights(player).to_vec();
         let opponent = player ^ 1;
         opponent_num_hands = game.private_cards(opponent).len();
         for action in 0..actions.len() {
@@ -130,6 +136,7 @@ fn walk(
         strategy,
         evs,
         weights,
+        opponent_weights,
         opponent_evs,
         opponent_num_hands,
     });

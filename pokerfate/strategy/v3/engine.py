@@ -7,7 +7,7 @@ import struct
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Tuple
 
-from pokerfate.strategy.v3 import active_value_sizing, alpha_gate, calibrator, ev_scorer, exploit, hard_guards
+from pokerfate.strategy.v3 import active_value_sizing, alpha_gate, calibrator, ev_scorer, exploit
 from pokerfate.strategy.v3.candidates import ActionCandidate
 from pokerfate.strategy.v3.context import DecisionCtx
 from pokerfate.strategy.v3.purpose import Purpose
@@ -32,32 +32,28 @@ _VOTE_LEVERAGE_DETERMINISTIC = os.environ.get("PF_V3_VOTE_LEVERAGE_DETERMINISTIC
 # aggression that is paid for by fold equity the pool does not give (flop:
 # 32% fold heads-up, ~23% for two opponents) without touching value bets with
 # strong/nuts hands. PF_V3_EV_VETO=0 disables it for A/B replays.
+#
+# The opposite direction (fold -> call, "ev_promote") was deleted on
+# 2026-11-18. It let this formula overrule a fold of the purpose vote, and
+# over 15,187 human-table hands those 146 calls made -260bb against folding
+# (-1.8 +/- 4.2 each) while the 231 calls the vote chose itself made +2,235bb
+# (+9.7 +/- 4.8). The hands the vote rejects realised 18.5% of the pot share
+# where the formula estimated 43.5% (flop); a bigger estimated edge did not
+# earn more, and the "committed, low SPR" rescues it was written for were its
+# worst cases (12 calls, 3 of 11 showdowns won, -267bb). The formula prices a
+# call as if it bought a showdown and has none of what the triggers know
+# (made-hand subtype, the opponent's line, texture), so an override that only
+# acts where the two disagree collects the formula's own errors. Facing a
+# bet the vote alone decides call or fold; all-in calls keep their price rule
+# in ``_decide_all_in``. Evidence: docs/candidates/local_engine_audit_2026-11-17.
 _EV_VETO_ENABLED = os.environ.get("PF_V3_EV_VETO", "1").lower() not in {
     "0", "false", "no", "off"
 }
 _EV_VETO_EXEMPT_BUCKETS = {"strong", "nuts"}
-# Legacy fold->call override (blended-equity rules) is superseded by the EV
-# layer's promotion below; keep it reachable for A/B with
-# PF_V3_LEGACY_FOLD_OVERRIDE=1.
-_LEGACY_FOLD_OVERRIDE_ENABLED = os.environ.get("PF_V3_LEGACY_FOLD_OVERRIDE", "0").lower() in {
-    "1", "true", "yes", "on"
-}
 # A bet whose equity beats the average share 1/(n+1) by this edge is value /
 # protection, not a bluff: it is not paid for by fold equity, so it is not
 # priced by the veto (the one-caller EV model understates multiway value).
 _EV_VETO_VALUE_EDGE = 0.08
-_SMALL_PRESSURE_MED_FRAC = 0.33
-_SMALL_PRESSURE_HIGH_FRAC = 0.50
-_SMALL_PRESSURE_HIGH_EQ = 0.40
-_FRAGILE_FOLD_OVERRIDE_SUBTYPES = {
-    "top_pair_weak_kicker",
-    "board_pair_kicker",
-    "board_pair_hero_pair",
-    "board_pair_pocket_underpair",
-    "board_two_pair",
-    "trips_weak_kicker",
-    "board_trips_kicker",
-}
 _BET_FOLD_BUDGET_PURPOSES = {
     "default_stab",
     "thick_value_bet",
@@ -144,6 +140,10 @@ class V3Engine:
     def _decide_all_in(self, ctx: DecisionCtx, seed: int) -> DecisionOutput:
         blended_eq = self._legacy_blended_eq(ctx)
         flags = self._leverage_flags(ctx) or ["all_in"]
+        behind_note = (
+            f" behind_eq={ctx.equity_when_behind:.2f}"
+            if ctx.equity_when_behind is not None else ""
+        )
         if blended_eq >= ctx.pot_odds:
             return DecisionOutput(
                 action="call",
@@ -155,7 +155,7 @@ class V3Engine:
                 leverage_flags=flags,
                 reason=(
                     f"all-in robust call blended_eq={blended_eq:.2f} "
-                    f">= pot_odds={ctx.pot_odds:.2f}"
+                    f">= pot_odds={ctx.pot_odds:.2f}{behind_note}"
                 ),
             )
         return DecisionOutput(
@@ -168,7 +168,7 @@ class V3Engine:
             leverage_flags=flags,
             reason=(
                 f"all-in robust fold blended_eq={blended_eq:.2f} "
-                f"< pot_odds={ctx.pot_odds:.2f}"
+                f"< pot_odds={ctx.pot_odds:.2f}{behind_note}"
             ),
         )
 
@@ -184,25 +184,6 @@ class V3Engine:
             else self._vote_select_active(ctx, candidates)
         )
         blocked: list[dict[str, Any]] = []
-        if ctx.facing_bet and chosen.action == "fold":
-            if _LEGACY_FOLD_OVERRIDE_ENABLED:
-                override, _override_reason = self._legacy_fold_override(ctx, candidates)
-                if override is not None:
-                    chosen = override
-                    mode = mode + "_override"
-                    gap = max(gap, 0.0)
-            elif _EV_VETO_ENABLED:
-                promoted = self._ev_promote(ctx, chosen)
-                if promoted is not None:
-                    chosen, detail = promoted
-                    blocked.append({
-                        "label": "fold",
-                        "purpose": "fold",
-                        "reasons": ["ev_promote"],
-                        "ev": detail,
-                    })
-                    mode = mode + "_ev_promote"
-                    gap = max(gap, 0.0)
         alpha_checks: list[dict[str, Any]] = []
         blocked_alpha = None
         stackoff_guard = self._selected_stackoff_guard(ctx, chosen)
@@ -263,7 +244,7 @@ class V3Engine:
                 )
                 mode = mode + "_alpha"
                 chosen_alpha = None
-        if _EV_VETO_ENABLED and chosen.source != "override":
+        if _EV_VETO_ENABLED:
             veto = self._ev_veto(ctx, chosen)
             if veto is not None:
                 replacement, detail = veto
@@ -372,51 +353,6 @@ class V3Engine:
             "ev_veto": detail,
         })
         return replacement, detail
-
-    def _ev_promote(
-        self,
-        ctx: DecisionCtx,
-        chosen: ActionCandidate,
-    ) -> tuple[ActionCandidate, dict[str, Any]] | None:
-        """Fold -> call when the EV layer prices the call clearly positive.
-
-        Mirror image of ``_ev_veto`` and the replacement for the legacy
-        blended-equity override: one EV formula (rake, blended equity, risk
-        premiums, implied odds) decides every call/fold flip. The call must
-        clear its own risk margin and pass ``hard_guards`` (fragile relative
-        equity, dominant value mass, weak all-in calls), which are the
-        structural reasons the legacy override also refused to call.
-        """
-        if chosen.action != "fold" or not ctx.facing_bet:
-            return None
-        if ctx.to_call <= 0 or ctx.to_call >= ctx.stack:
-            return None
-        call = ActionCandidate(
-            "ev_promote_call", "call", min(ctx.to_call, ctx.stack), 0.0, "ev_promote_call", "override",
-            jammed=ctx.to_call >= ctx.stack,
-        )
-        ok, reasons = hard_guards.allowed(ctx, call)
-        if not ok:
-            return None
-        sc = ev_scorer.score(ctx, call, conservative=False, range_only=True)
-        # The risk premium inside sc.ev is the margin; requiring ev > margin
-        # on top would charge it twice.
-        if sc.ev <= 0.0:
-            return None
-        detail = {
-            "selected": "call",
-            "mode": "ev_gain",
-            "call_ev": round(float(sc.ev), 2),
-            "margin": round(float(sc.margin), 2),
-            "raw_ev": round(float(sc.raw_ev), 2),
-            "risk": round(float(sc.risk), 2),
-            "reason": sc.reason,
-        }
-        call = replace(call, metadata={
-            "block_reason": f"ev_promote fold->call ev={sc.ev:.1f} > margin={sc.margin:.1f}",
-            "ev_promote": detail,
-        })
-        return call, detail
 
     @staticmethod
     def _selected_stackoff_guard(ctx: DecisionCtx, cand: ActionCandidate) -> str:
@@ -576,27 +512,9 @@ class V3Engine:
                 return match
         return None
 
-    def _legacy_fold_override(self, ctx: DecisionCtx, candidates: list[ActionCandidate]) -> tuple[ActionCandidate | None, str]:
-        if ctx.hero_bucket not in {"medium", "strong", "nuts"}:
-            return None, "bucket"
-        blended_eq = self._legacy_blended_eq(ctx)
-        allowed, reason = self._legacy_fold_override_allowed(ctx, candidates, blended_eq)
-        if not allowed or blended_eq < ctx.pot_odds:
-            return None, reason
-        return ActionCandidate(
-            "fold_override_call",
-            "call",
-            min(ctx.to_call, ctx.stack),
-            0.0,
-            "fold_override_call",
-            "override",
-            jammed=ctx.to_call >= ctx.stack,
-            metadata={"override_reason": reason, "blended_eq": blended_eq},
-        ), reason
-
     @staticmethod
     def _legacy_blended_eq(ctx: DecisionCtx) -> float:
-        """Pessimistic range equity used by the all-in and fold-override checks.
+        """Pessimistic range equity used by the all-in check.
 
         2026-11-10: removed the former ``equity_mc - penalty`` floor.
         ``equity_mc`` is hero's equity against a *random* hand; letting it
@@ -606,98 +524,22 @@ class V3Engine:
         range equity 0.21 vs the bettor's range, floor gave 0.83). Equity vs
         a random hand is not an estimate of equity vs the actual betting
         range, so only the range estimate, widened by its uncertainty, counts.
+
+        2026-11-18: the uncertainty is about *which* hands the opponents hold,
+        so it cannot take away equity hero has against the hands that beat
+        him. ``equity_when_behind`` is the estimate if they always hold one of
+        those; the pessimistic value never goes below it (nor above the point
+        estimate). Without it a nut flush draw on the turn (live 2026-11-18
+        hand 374: real chance 26%, price 18%) was marked down from 0.25 to
+        0.06 and folded. Bluff-catchers are unaffected: their equity when
+        behind is small.
         """
-        return max(
-            0.0,
-            float(ctx.equity_range or 0.0) - float(ctx.equity_uncertainty or 0.0),
-        )
-
-    def _legacy_fold_override_allowed(
-        self,
-        ctx: DecisionCtx,
-        candidates: list[ActionCandidate],
-        blended_eq: float,
-    ) -> tuple[bool, str]:
-        dist = ctx.villain_bucket_dist or {}
-        nut_prob = float(dist.get("nuts", 0.0) or 0.0)
-        strong_mass = nut_prob + float(dist.get("strong", 0.0) or 0.0)
-        range_edge = float(ctx.equity_range or 0.0) - float(ctx.pot_odds or 0.0)
-        stack_commit = ctx.to_call / ctx.stack if ctx.stack > 0 else 0.0
-        fragile = (ctx.hero_made_subtype or "") in _FRAGILE_FOLD_OVERRIDE_SUBTYPES
-        if fragile and ctx.hero_made_subtype in {"board_pair_kicker", "board_two_pair"} and ctx.street != "river":
-            fragile = False
-        if fragile:
-            fragile_high_leverage = (
-                stack_commit >= 0.25
-                or ctx.raw_pot_odds >= 0.25
-                or ctx.spr <= 1.5
-            )
-            if (
-                fragile_high_leverage
-                and (
-                    strong_mass >= 0.55
-                    or range_edge < 0.08
-                    or blended_eq < ctx.pot_odds + 0.08
-                )
-            ):
-                return False, (
-                    f"fragile {ctx.hero_made_subtype} "
-                    f"edge {range_edge:.2f} strong {strong_mass:.2f}"
-                )
-        cheap_range_call = (
-            ctx.raw_pot_odds <= 0.30
-            and ctx.equity_range >= ctx.pot_odds
-            and range_edge >= 0.08
-        )
-        commit_base = (
-            stack_commit >= 0.35
-            and ctx.street != "river"
-            and 0 < ctx.spr <= 1.00
-            and nut_prob < 0.40
-            and strong_mass < 0.60
-        )
-        standard_commit_call = (
-            commit_base
-            and range_edge >= 0.12
-            and blended_eq >= ctx.pot_odds + 0.12
-        )
-        cheap_commit_call = (
-            commit_base
-            and cheap_range_call
-            and blended_eq >= ctx.pot_odds + 0.08
-        )
-        commit_range_call = standard_commit_call or cheap_commit_call
-
-        if stack_commit >= 0.35 and not commit_range_call:
-            return False, "stack_commit"
-        if 0 < ctx.spr <= 1.00 and not (cheap_range_call or commit_range_call):
-            return False, "low_spr"
-
-        total = sum(max(0.0, self._vote_weight(c)) for c in candidates if c.source == "purpose")
-        if total > 0:
-            fold_prob = sum(
-                max(0.0, self._vote_weight(c))
-                for c in candidates
-                if c.source == "purpose" and c.purpose == "fold"
-            ) / total
-            has_call = any(
-                c.source == "purpose" and c.action == "call" and self._vote_weight(c) > 0
-                for c in candidates
-            )
-            if has_call and fold_prob > 0.80 and range_edge <= 0.15 and not cheap_range_call:
-                return False, "fold_prob"
-
-        if max(0.0, ctx.pot_odds - ctx.equity_range) > 0.03:
-            return False, "range_gap"
-        if ctx.street == "river" and strong_mass >= 0.55 and not cheap_range_call:
-            return False, "river_strong_mass"
-        if blended_eq < ctx.pot_odds:
-            return False, "blended_eq"
-        if cheap_range_call:
-            return True, "cheap_range_call"
-        if commit_range_call:
-            return True, "commit_range_call"
-        return True, "fold_only_extra_margin"
+        point = float(ctx.equity_range or 0.0)
+        pessimistic = max(0.0, point - float(ctx.equity_uncertainty or 0.0))
+        behind = ctx.equity_when_behind
+        if behind is not None:
+            pessimistic = max(pessimistic, min(point, float(behind)))
+        return pessimistic
 
     def _vote_choose_group(self, ctx: DecisionCtx, groups: list[tuple[str, float]]):
         total = sum(max(0.0, float(weight or 0.0)) for _purpose, weight in groups)
@@ -766,13 +608,6 @@ class V3Engine:
 
     def _vote_reason(self, ctx: DecisionCtx, chosen: ActionCandidate, mode: str) -> str:
         weight = self._vote_weight(chosen)
-        if chosen.source == "override":
-            meta = chosen.metadata or {}
-            return (
-                f"{chosen.label}: legacy fold→call override "
-                f"blended_eq={float(meta.get('blended_eq') or 0.0):.2f} "
-                f"reason={meta.get('override_reason', '')} | {mode}"
-            )
         if chosen.source == "fallback" and (chosen.metadata or {}).get("block_reason"):
             return f"{chosen.label}: {(chosen.metadata or {}).get('block_reason')} | {mode}"
         if chosen.source == "baseline":
@@ -919,63 +754,6 @@ class V3Engine:
         )
         return (dangerous_board or pressure_range) and poor_continue
 
-    def _small_pressure_fracs(self, ctx: DecisionCtx) -> list[float]:
-        if ctx.facing_bet:
-            return []
-        if ctx.num_opponents > 3:
-            return []
-        exploit_weight = self._exploit_weight(ctx, "small_pressure_bet")
-        if exploit_weight <= 0.35:
-            return []
-        if exploit.no_fold_equity(ctx) and ctx.hero_bucket in {"air", "weak", "weak_draw"}:
-            return []
-        if self._small_pressure_blocked_by_live_limits(ctx):
-            return []
-        if ctx.hero_bucket in {"air", "weak", "weak_draw"}:
-            if exploit_weight < 0.85:
-                return []
-            has_semibluff = ctx.draw.flush_draw or ctx.draw.oesd or ctx.draw.gutshot or ctx.draw.backdoor_flush or ctx.blockers.count() > 0
-            range_spot = ctx.is_pfr and (ctx.is_ip or ctx.board_sig.is_dry) and max(ctx.equity_range, ctx.equity_mc) >= 0.20
-            if not (has_semibluff or range_spot):
-                return []
-            eq_need = 0.24 if ctx.num_opponents <= 1 else 0.32
-            if max(ctx.equity_range, ctx.equity_mc) < eq_need and ctx.blockers.count() <= 0:
-                return []
-        if ctx.num_opponents > 1 and ctx.board_sig.is_wet and ctx.hero_bucket in {"air", "weak", "weak_draw"}:
-            return []
-        return [self._small_pressure_frac(ctx)]
-
-    @staticmethod
-    def _small_pressure_frac(ctx: DecisionCtx) -> float:
-        equity = max(0.0, min(1.0, float(ctx.equity_range or 0.0)))
-        if equity >= _SMALL_PRESSURE_HIGH_EQ:
-            return _SMALL_PRESSURE_HIGH_FRAC
-        return _SMALL_PRESSURE_MED_FRAC
-
-    def _small_pressure_blocked_by_live_limits(self, ctx: DecisionCtx) -> bool:
-        equity = max(0.0, min(1.0, float(ctx.equity_range or 0.0)))
-        if self._is_big_blind_level(ctx, 10_000) and equity < 0.20:
-            return True
-        if not self._is_big_blind_level(ctx, 50_000):
-            return False
-        if equity < 0.30:
-            return True
-        if 0.30 <= equity < 0.40 and ctx.street in {"turn", "river"}:
-            return self._had_called_flop_bet(ctx) or ctx.prev_bet_called_count > 0
-        return False
-
-    @staticmethod
-    def _is_big_blind_level(ctx: DecisionCtx, target: float) -> bool:
-        bb = float(ctx.big_blind or 0.0)
-        return target * 0.90 <= bb <= target * 1.10
-
-    @staticmethod
-    def _had_called_flop_bet(ctx: DecisionCtx) -> bool:
-        return (
-            ctx.my_prev_actions.get("flop") in {"bet", "raise"}
-            and ctx.opp_prev_actions.get("flop") == "call"
-        )
-
     def _defensive_candidates(self, ctx: DecisionCtx) -> list[ActionCandidate]:
         out: list[ActionCandidate] = [
             ActionCandidate("fold", "fold", 0.0, 0.0, "fold", "baseline"),
@@ -1058,39 +836,3 @@ class V3Engine:
             return ctx.stack
         size = max(ctx.to_call * 2.8, ctx.to_call + ctx.pot * 0.75)
         return min(size, ctx.stack)
-
-    def _apply_guards(
-        self,
-        ctx: DecisionCtx,
-        candidates: list[ActionCandidate],
-    ) -> tuple[list[ActionCandidate], list[dict[str, Any]], list[dict[str, Any]], Any]:
-        kept: list[ActionCandidate] = []
-        blocked: list[dict[str, Any]] = []
-        alpha_checks: list[dict[str, Any]] = []
-        blocked_alpha = None
-        for cand in candidates:
-            ok, reasons = hard_guards.allowed(ctx, cand)
-            if not ok:
-                blocked.append({"label": cand.label, "purpose": cand.purpose, "reasons": reasons})
-                continue
-            alpha = self._alpha_for_candidate(ctx, cand)
-            if alpha is not None:
-                summary = self._alpha_summary(alpha)
-                alpha_checks.append({"label": cand.label, "purpose": cand.purpose, **summary})
-                meta = dict(cand.metadata or {})
-                meta["alpha"] = summary
-                cand = replace(cand, metadata=meta)
-                if not alpha.passed and alpha.direction == "over_bluff":
-                    blocked.append({
-                        "label": cand.label,
-                        "purpose": cand.purpose,
-                        "reasons": ["alpha_over_bluff"],
-                        "alpha": summary,
-                    })
-                    if blocked_alpha is None:
-                        blocked_alpha = alpha
-                    continue
-            kept.append(cand)
-        if not kept:
-            kept.append(ActionCandidate("fold" if ctx.facing_bet else "check", "fold" if ctx.facing_bet else "check", 0.0, 0.0, "fallback", "fallback"))
-        return kept, blocked, alpha_checks, blocked_alpha

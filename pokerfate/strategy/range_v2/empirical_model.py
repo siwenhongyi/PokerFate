@@ -81,7 +81,6 @@ _KNN_MAX_NEIGHBORS = 50
 _KNN_DISTANCE_SCALE = 0.75
 _KNN_MIN_ACTION_N = 4.0
 _KNN_MIN_ACTION_CTX_N = 8.0
-_KNN_MIN_PREFLOP_N = 6.0
 
 
 @dataclass
@@ -272,31 +271,6 @@ def _global_action_likelihood_from_table(
     return None
 
 
-def _global_preflop_prior_from_table(
-    table: Dict[str, Any],
-    pos: str,
-) -> Optional[Tuple[Dict[str, float], float, str, int]]:
-    for key in (f"{pos}|*", "*|*"):
-        rec = table.get(key)
-        if not rec:
-            continue
-        dist = rec.get("dist") or {}
-        n = int(rec.get("n", 0) or 0)
-        blend = float(rec.get("blend", 0.0) or 0.0)
-        if n <= 0 or blend <= 0.0:
-            continue
-        clean = {
-            cat: _clamp(float(dist.get(cat, 0.0) or 0.0), 0.0, 1.0)
-            for cat in CAT_ORDER
-            if cat in dist
-        }
-        total = sum(clean.values())
-        if total <= 1e-12:
-            continue
-        return {cat: value / total for cat, value in clean.items()}, _clamp(blend, 0.0, 0.35), key, n
-    return None
-
-
 def empirical_action_likelihood(
     action: str,
     street: str,
@@ -321,35 +295,6 @@ def empirical_action_likelihood(
     size = _bet_size_bucket(float(ctx.bet_ratio or 0.0))
     rr = "1" if is_rr else "0"
     return _global_action_likelihood_from_table(table, street_s, label, size, rr)
-
-
-def empirical_preflop_bucket_prior(
-    position: str,
-    profile: Any,
-) -> Optional[Tuple[Dict[str, float], float, str, int]]:
-    """Return a gentle bucket-level prior for cold/small-sample players."""
-    if profile is None or not str(getattr(profile, "name", "") or "").strip():
-        return None
-    hands = int(getattr(profile, "hands_seen", 0) or 0)
-    if hands >= 80:
-        return None
-
-    numeric = _numeric_preflop_prior(position, profile, hands)
-    if numeric is not None:
-        return numeric
-
-    model = load_empirical_model()
-    table = model.get("preflop_bucket_priors") or {}
-    if not table:
-        return None
-
-    pos = str(position or "CO")
-    global_prior = _global_preflop_prior_from_table(table, pos)
-    if global_prior is None:
-        return None
-    clean, blend, key, n = global_prior
-    sample_discount = max(0.15, 1.0 - min(hands, 80) / 80.0)
-    return clean, _clamp(blend * sample_discount, 0.0, 0.35), key, n
 
 
 def _numeric_action_likelihood(
@@ -432,71 +377,6 @@ def _numeric_action_likelihood(
             base_key = f":base={global_key}"
         if blend > 1e-4:
             return clean, blend, f"knn:{ctx_key}:{label}:contributors={contributors}{base_key}", int(round(n_action))
-    return None
-
-
-def _numeric_preflop_prior(
-    position: str,
-    profile: Any,
-    hands: int,
-) -> Optional[Tuple[Dict[str, float], float, str, int]]:
-    index = _numeric_index()
-    if not index.rows or not index.preflop_counts:
-        return None
-    scored, query_conf = _knn_scores(profile, index)
-    if not scored:
-        return None
-
-    pos = str(position or "CO")
-    raw_model = load_empirical_model()
-    global_rec = _global_preflop_prior_from_table(
-        raw_model.get("preflop_bucket_priors") or {},
-        pos,
-    )
-    for pos_key in (pos, "*"):
-        counts = {cat: 0.0 for cat in CAT_ORDER}
-        contributors = 0
-        for dist, row in scored:
-            rec = index.preflop_counts.get(row.uid, {}).get(pos_key)
-            if not rec:
-                continue
-            sim = math.exp(-dist / _KNN_DISTANCE_SCALE)
-            contributors += 1
-            for cat in CAT_ORDER:
-                counts[cat] += sim * float(rec.get(cat, 0.0) or 0.0)
-            if contributors >= _KNN_MAX_NEIGHBORS:
-                break
-        n = sum(counts.values())
-        if n < _KNN_MIN_PREFLOP_N:
-            continue
-        dist = {cat: _clamp(counts[cat] / n, 0.0, 1.0) for cat in CAT_ORDER}
-        total = sum(dist.values())
-        if total <= 1e-12:
-            continue
-        dist = {cat: value / total for cat, value in dist.items()}
-        sample_discount = max(0.15, 1.0 - min(hands, 80) / 80.0)
-        conf_scale = _clamp(0.25 + query_conf, 0.25, 1.0)
-        blend = min(0.12, n / (n + 600.0)) * conf_scale * sample_discount
-        base_key = ""
-        if global_rec is not None:
-            global_dist, global_blend, global_key, _global_n = global_rec
-            neighbor_weight = _clamp(0.20 + 0.60 * query_conf, 0.20, 0.80)
-            neighbor_weight *= _clamp(n / (n + 30.0), 0.15, 1.0)
-            dist = {
-                cat: (
-                    neighbor_weight * dist.get(cat, global_dist.get(cat, 0.0))
-                    + (1.0 - neighbor_weight) * global_dist.get(cat, dist.get(cat, 0.0))
-                )
-                for cat in CAT_ORDER
-                if cat in dist or cat in global_dist
-            }
-            total = sum(dist.values())
-            if total > 1e-12:
-                dist = {cat: value / total for cat, value in dist.items()}
-            blend = max(blend, global_blend * sample_discount * 0.75)
-            base_key = f":base={global_key}"
-        if blend > 1e-4:
-            return dist, blend, f"knn:{pos_key}:contributors={contributors}{base_key}", int(round(n))
     return None
 
 
@@ -660,32 +540,6 @@ def _knn_scores(profile: Any, index: _NumericIndex) -> tuple[list[tuple[float, _
     _KNN_CACHE[key] = (scored, query_conf)
     if len(_KNN_CACHE) > _KNN_CACHE_MAX:
         _KNN_CACHE.popitem(last=False)
-    return scored, query_conf
-
-
-def _knn_scores_reference(profile: Any, index: _NumericIndex) -> tuple[list[tuple[float, _FeatureVector]], float]:
-    """Pre-vectorisation scalar implementation, kept for the equivalence test."""
-    current = _profile_vector(profile, index)
-    query_conf = _query_confidence(current)
-    if query_conf <= 0.03:
-        return [], query_conf
-    scored: list[tuple[float, _FeatureVector]] = []
-    for row in index.rows:
-        dist = 0.0
-        weight_sum = 0.0
-        for name in FEATURES:
-            cur_rel = current.reliability.get(name, 0.0)
-            row_rel = row.reliability.get(name, 0.0)
-            if cur_rel <= 0.04 or row_rel <= 0.04:
-                continue
-            weight = FEATURE_WEIGHTS[name] * cur_rel * row_rel
-            delta = current.z.get(name, 0.0) - row.z.get(name, 0.0)
-            dist += weight * delta * delta
-            weight_sum += weight
-        if weight_sum <= 0.12:
-            continue
-        scored.append((dist / weight_sum, row))
-    scored.sort(key=lambda item: item[0])
     return scored, query_conf
 
 

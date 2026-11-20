@@ -122,13 +122,3 @@ def test_bridge_passes_book_switch_to_api(monkeypatch):
     assert status["realtime_cfr"] is True
 
 
-@pytest.mark.parametrize("engine", ["realtime_cfr", "realtime-cfr"])
-def test_bridge_rejects_removed_mode_without_changing_engine(monkeypatch, engine):
-    from pf_intercept import config
-    from pf_intercept.bot.bridge import BotBridge
-
-    monkeypatch.setattr(config, "DECISION_ENGINE", "cfr")
-    bridge = BotBridge(max_auto_rebuy=0)
-    with pytest.raises(ValueError, match="must be local, g5, g5_all, or cfr"):
-        bridge.update_runtime_settings(decision_engine=engine)
-    assert config.DECISION_ENGINE == "cfr"

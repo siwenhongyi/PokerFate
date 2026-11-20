@@ -36,17 +36,11 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from pf_intercept import config
-from pf_intercept.game_api.http import (
-    GAME_HTTP_SSL_CTX,
-    load_auth_token,
-    sign_request,
-    signed_post_json,
-)
+from pf_intercept.game_api.http import signed_post_json
 from pokerfate.bot.opponent_model import OpponentStats
 
 log = logging.getLogger("pf_gamedata")
 
-_SSL_CTX = GAME_HTTP_SSL_CTX
 _AFQ_TO_AF_CALL_SHARE = 0.3109
 
 
@@ -56,18 +50,6 @@ class GameDataHTTPContext:
     http_base: str
     chnl: int
     version: str
-
-
-# ── Signing ───────────────────────────────────────────────────────────────────
-
-def _sign(rand: str, ts: str) -> str:
-    """Compatibility wrapper for older imports."""
-    return sign_request(rand, ts)
-
-
-def _load_token() -> Optional[str]:
-    """Compatibility wrapper for older imports."""
-    return load_auth_token()
 
 
 # ── HTTP fetch (sync, run in executor) ───────────────────────────────────────

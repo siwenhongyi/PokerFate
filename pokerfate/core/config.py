@@ -11,7 +11,6 @@ higher-level packages (bot/, strategy/) to avoid circular imports.
 #   - pwi() returns 0 below this
 #   - exploit_adjustments() returns {} below this
 #   - range_v2 prior blending uses GTO defaults below this
-#   - range_v2 polarization_index returns mid (0.5) below this
 #   - logger tag prints "数据不足N手" below this
 #
 # 2026-04-21: dropped from 20 → 10 so short-sample opponents get partial

@@ -104,8 +104,8 @@ def test_bot_worker_process_start_stop() -> None:
             assert status["alive"] is True
             assert isinstance(status["pid"], int)
             settings = client.runtime_settings()
-            assert isinstance(settings, dict)
-            assert settings["decision_engine"]
+            # the bridge state the proxy reads arrives with the worker's "ready" message
+            assert settings == {"tournament_passthrough": False}
         finally:
             await client.stop()
         assert client.status()["alive"] is False

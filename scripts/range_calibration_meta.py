@@ -101,7 +101,9 @@ def drop_robot_rows(rows: list[dict[str, Any]], registry=None) -> tuple[list[dic
     """Remove rows whose subject is a house robot (proven, or inside a robot UID block).
 
     Robots' actions carry no hand-strength information, so their showdowns would teach the
-    models noise.  Returns ``(kept_rows, dropped_count)``.
+    models noise.  Hands at tables the bot would leave (no human, or fewer humans than robots)
+    never produce rows: the strategy skips them when rows are written, live and in replays
+    (``PokerFateAPI._hand_skip_learning``).  Returns ``(kept_rows, dropped_count)``.
     """
     if registry is None:
         from pokerfate.core.robots import RobotRegistry

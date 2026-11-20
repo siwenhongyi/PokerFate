@@ -45,7 +45,6 @@ from pf_intercept.proxy import _parse_proxy_args, main as proxy_main
 log = logging.getLogger(__name__)
 
 _IS_WIN = platform.system() == "Windows"
-_IS_MAC = platform.system() == "Darwin"
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # mitmweb 默认参数

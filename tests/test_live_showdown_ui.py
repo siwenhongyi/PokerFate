@@ -50,6 +50,11 @@ now=2501;timers.forEach(f=>f());
 assert(ids["live-settlement"].innerHTML.includes("最佳五张牌"));
 assert(ids["live-settlement"].innerHTML.includes("from-hole"));
 assert(ids["live-settlement"].innerHTML.includes("已弃牌"));
+// what the winner got: chips while no blind is known, big blinds at the blind of that hand
+assert(ids["live-settlement"].innerHTML.includes("获得 150 <b>"));
+render({...data, settlement:{...result, bb:50}});
+assert(ids["live-settlement"].innerHTML.includes("获得 3BB <b>"));
+render(data);
 // Same settlement arriving with the next hand must not reset its timer.
 data={...data,hand_no:2,board:[],seats:[{seatid:0,name:"hero",cards:["7s","8d"],folded:false}]};
 render(data);
@@ -105,9 +110,55 @@ assert(node(3).innerHTML.includes(">CO<"));
 assert(!node(4).innerHTML.includes("s-pos") && !node(4).className.split(" ").includes("robot"));
 assert(node(0).innerHTML.includes('class="s-pos bb"') && node(0).innerHTML.includes("·我"));
 assert(node(5).className.includes("empty"));
+// without a blind the stack stays in chips
+assert(node(1).innerHTML.includes('<div class="s-stack">1,000</div>'));
 // in the lobby there is no table to count
 window.PFLiveTable.render({connected:true,__available:true,seats:[],board:[],feed:[]});
 assert.strictEqual(ids["live-mix"].textContent, "-");
+// with the blind known every stack, ours included, is shown in big blinds, chips in the tooltip
+ids["live-pnl"]=element();
+const table = {connected:true,__available:true,room_id:7,sb:10000,bb:20000,board:[],feed:[],seat_num:6,my_seat:0,
+  seats:[seat(0,{is_me:true,stack:1967500}), seat(1,{stack:2000000}), seat(2,{stack:0}), seat(3,{stack:37654321})]};
+window.PFLiveTable.render({...table, session_pnl_chips:2346808});
+assert(node(0).innerHTML.includes('<div class="s-stack" title="1,967,500 筹码">98.4BB</div>'));
+assert(node(1).innerHTML.includes('<div class="s-stack" title="2,000,000 筹码">100BB</div>'));
+assert(node(2).innerHTML.includes('>0BB</div>') && node(3).innerHTML.includes('>1,882.7BB</div>'));
+// the running result: chips and big blinds together; an older bot sends chips only
+assert.strictEqual(ids["live-pnl"].textContent, "+2,346,808 筹码（+117.3BB）");
+window.PFLiveTable.render({...table, session_pnl_chips:-550000, session_pnl_bb:-20});
+assert.strictEqual(ids["live-pnl"].textContent, "-550,000 筹码（-20BB）");
+window.PFLiveTable.render({...table, session_pnl_chips:0, session_pnl_bb:0});
+assert.strictEqual(ids["live-pnl"].textContent, "0 筹码（0BB）");
+window.PFLiveTable.render({...table, bb:0, session_pnl_chips:-1250, session_pnl_bb:null});
+assert.strictEqual(ids["live-pnl"].textContent, "-1,250 筹码");
+// bets, the pot, action amounts and winnings are in big blinds as well, chips in the tooltips
+const hand = {...table, pot:187000, result:"p1 赢 27000  |  p3 赢 400  本手 -10000",
+  seats:[seat(0,{is_me:true,stack:1967500,bet:45000,last:"加注 45000"}), seat(1,{stack:2000000,bet:10000,last:"小盲 10000"}),
+         seat(2,{last:"弃牌"})],
+  feed:["p1 跟注 70000","玩家 123 弃牌","p9 加注 45000","▸ p1 赢 27000  本手 +0","已离桌，当前在大厅"]};
+window.PFLiveTable.render(hand);
+assert.strictEqual(ids["live-pot"].textContent, "9.35BB");
+assert.strictEqual(ids["live-pot"].title, "187,000 筹码");
+assert.strictEqual(ids["live-potc"].textContent, "底池 9.35BB");
+assert.strictEqual(ids["live-result"].textContent, "p1 赢 1.35BB  |  p3 赢 0.02BB  本手 -0.5BB");
+assert(node(0).innerHTML.includes('<div class="s-bet" title="45,000 筹码">2.25BB</div>'));
+assert(node(0).innerHTML.includes('<div class="s-last">加注 2.25BB</div>'));
+assert(node(1).innerHTML.includes('>0.5BB</div>') && node(1).innerHTML.includes("小盲 0.5BB"));
+assert(node(2).innerHTML.includes('<div class="s-last">弃牌</div>') && !node(2).innerHTML.includes("s-bet"));
+let lines = ids["live-feed"].innerHTML;
+for (const t of ["p1 跟注 3.5BB", "玩家 123 弃牌", "p9 加注 2.25BB", "▸ p1 赢 1.35BB  本手 0BB", "已离桌，当前在大厅"]) assert(lines.includes(">" + t + "<"), t);
+// a line from a table at another stake is read at the blind it was played at
+window.PFLiveTable.render({...hand, feed_bb:[20000,20000,5000,5000,0], result_bb:5000});
+lines = ids["live-feed"].innerHTML;
+for (const t of ["p1 跟注 3.5BB", "p9 加注 9BB", "▸ p1 赢 5.4BB  本手 0BB"]) assert(lines.includes(">" + t + "<"), t);
+assert.strictEqual(ids["live-result"].textContent, "p1 赢 5.4BB  |  p3 赢 0.08BB  本手 -2BB");
+// no blind (lobby, or before the first table): everything stays in chips
+window.PFLiveTable.render({...hand, bb:0});
+assert.strictEqual(ids["live-pot"].textContent, "187,000");
+assert.strictEqual(ids["live-pot"].title, "");
+assert.strictEqual(ids["live-result"].textContent, hand.result);
+assert(node(0).innerHTML.includes('<div class="s-bet">45,000</div>') && node(0).innerHTML.includes("加注 45000"));
+assert(ids["live-feed"].innerHTML.includes(">p1 跟注 70000<"));
 // a snapshot from an older publisher (no pos / kind) still renders
 window.PFLiveTable.render({connected:true,__available:true,room_id:7,seats:[seat(1,{})],board:[],feed:[]});
 assert(node(1).innerHTML.includes("p1") && !node(1).innerHTML.includes("s-pos"));

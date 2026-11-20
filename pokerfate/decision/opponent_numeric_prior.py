@@ -235,16 +235,6 @@ def build_numeric_prior(
     )
 
 
-def numeric_feature_confidence(
-    profile: Any,
-    street: str,
-) -> float:
-    model = _load_model()
-    current = _profile_vector(profile, model)
-    _final_values, _source, knn_conf = _combine_features(current, model)
-    return _clamp(0.60 * _query_confidence(current) + 0.40 * knn_conf, 0.0, 1.0)
-
-
 def _combine_features(
     current: _FeatureVector,
     model: _NumericModel,

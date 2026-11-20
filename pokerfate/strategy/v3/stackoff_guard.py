@@ -256,16 +256,3 @@ def stackoff_guard_reason(
             return 'paired_two_pair:' + ','.join(bits)
 
     return None
-
-
-def stackoff_guard_params() -> str:
-    return (
-        f"mode={_MODE} trips_eq={_NON_NUT_TRIPS_RAISE_MAX_EQ:.2f} "
-        f"trips_k={_NON_NUT_TRIPS_MIN_KICKER} pair_eq={_PAIRED_UNDERPAIR_VALUE_JAM_MAX_EQ:.2f} "
-        f"pair_early={_PAIRED_UNDERPAIR_EARLY_VALUE_JAM_MAX_EQ:.2f} "
-        f"wcall={_RIVER_VALUE_JAM_MIN_WORSE_CALL:.2f} nuts={_RIVER_RAISE_MAX_VILLAIN_NUTS:.2f} "
-        f"spr={_PAIRED_BOARD_SPR_MAX:.1f} "
-        f"flush_eq={_NON_FLUSH_STACKOFF_MIN_EQ:.2f} flush_nuts={_NON_FLUSH_STACKOFF_MAX_NUTS:.2f} "
-        f"flush_loss={_NON_FLUSH_STACKOFF_MAX_REL_LOSS:.2f} "
-        f"4str_eq={_FOUR_STRAIGHT_FRAGILE_MIN_EQ:.2f} 4str_nuts={_FOUR_STRAIGHT_MAX_NUTS:.2f}"
-    )
