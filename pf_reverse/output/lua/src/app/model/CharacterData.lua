@@ -10,6 +10,7 @@ function P:setData(data)
     self.level_info = data.level_info
     self.name = data.name
     self.is_star = data.is_star
+    self.expire_time = data.expire_time
 
     self.locked = data.locked
 
@@ -28,7 +29,46 @@ function P:isAwaken()
 end
 
 function P:isCanAwaken()
+    if self.expire_time and self.expire_time > 0 then
+        -- 试用角色不可觉醒
+        return false
+    end
     return self:getBondLevel() == Config.AWAKEN_LEVEL
+end
+
+-- 是否为试用角色
+function P:isTrial()
+    if self:isExpired() then
+        return false
+    end
+    return self.expire_time and self.expire_time > 0
+end
+
+-- 是否已过期
+function P:isExpired()
+    if not self.expire_time then
+        return false
+    end
+    if self.expire_time == 0 then
+        return false
+    end
+    if self.expire_time - bee.getServerTime() <= 0 then
+        self.locked = true
+        return true
+    else
+        return false
+    end
+end
+
+function P:getExpireTime()
+    return self.expire_time
+end
+
+function P:getLeftTime()
+    if not self:getExpireTime() or self:getExpireTime() == 0 then
+        return -1
+    end
+    return self.expire_time - bee.getServerTime()
 end
 
 -- 是否可二次契约
@@ -70,7 +110,18 @@ end
 
 function P:addSkin(skin_id)
     if self.skin_info then
-        table.insert(self.skin_info.owned_skin_ids, skin_id)
+        local isIn = false
+        if self.skin_info.owned_skin_ids then
+            for _, v in ipairs(self.skin_info.owned_skin_ids) do
+                if v == skin_id then
+                    isIn = true
+                    break
+                end
+            end
+        end
+        if not isIn then
+            table.insert(self.skin_info.owned_skin_ids, skin_id)
+        end
     end
 end
 

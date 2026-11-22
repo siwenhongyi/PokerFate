@@ -120,7 +120,8 @@ function P:onClickExchange()
 	
 	if consumeCount > ownCount then
 		UiManager:showToast(_F("LAB_SHOP_COMMON_24", _T(tpl_props[consumeId].name)))
-		UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(consumeId, true)})
+		-- UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(consumeId, true)})
+		ShopModel:showTicketDressShop()
 		return
 	end
 	Game:playSound("ui_button_confirm")

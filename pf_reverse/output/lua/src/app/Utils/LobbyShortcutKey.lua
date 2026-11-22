@@ -5,6 +5,9 @@ function P:onStart()
 end
 
 function P:onUpdate()
+    if not bee.isPc then
+        return
+    end
     if CU.Input.GetKeyDown(CU.KeyCode.F1) then
         if self:checkShowable() then
             self.lobbyLayer:ShortcutSetting()

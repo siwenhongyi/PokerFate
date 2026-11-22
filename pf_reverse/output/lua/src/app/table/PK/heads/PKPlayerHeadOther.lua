@@ -25,6 +25,9 @@ function P:onAwake()
 	self.TextChipPurple:SetActive(false)
 	self.TextChip = self.TextChipGreen
 
+	self.BgHunterPosition = self.BgHunter.transform.localPosition
+	self.BgKOPosition = self.BgKO.transform.localPosition
+
 	self.ImageObserve = self:find("ImageObserve")
 	self.ImageObserve:SetActive(false)
 
@@ -39,8 +42,14 @@ function P:setShowIndex(index, self_index, infoIndex)
 	local pos = self.ImageObserve.transform.localPosition
 	if index >= self.self_index then
 		self.ImageObserve.transform.localPosition = bee.v3(-math.abs(pos.x), pos.y, pos.z)
+
+		self.BgHunter.transform.localPosition = self.BgHunterPosition
+		self.BgKO.transform.localPosition = self.BgKOPosition
 	else
 		self.ImageObserve.transform.localPosition = bee.v3(math.abs(pos.x), pos.y, pos.z)
+
+		self.BgHunter.transform.localPosition = bee.v3(-self.BgHunterPosition.x, self.BgHunterPosition.y, self.BgHunterPosition.z)
+		self.BgKO.transform.localPosition = bee.v3(-self.BgKOPosition.x, self.BgKOPosition.y, self.BgKOPosition.z)
 	end
 end
 

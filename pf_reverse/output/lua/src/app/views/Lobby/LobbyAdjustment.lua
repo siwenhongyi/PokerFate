@@ -12,6 +12,7 @@ function P:onAwake()
 
 	local LeftButton = self:find("LeftButton", Left)
 	self.CharacterButton = self:find("CharacterButton", LeftButton)
+	self.CharacterTimeTag = self:find("CharacterTimeTag", self.CharacterButton)
 	self.GarmentButton = self:find("GarmentButton", LeftButton)
 
 	self.SceneImg = self:find("SceneImg", AnimRoot)
@@ -23,6 +24,7 @@ function P:onAwake()
 
 	self.AvatarCont = self:find("AvatarCont", self.MainCtrl)
 	self.AvatarIcon = self:find("AvatarFrame/avatar_frame_01_mask/icon", self.AvatarCont)
+	self.AvatarTimeTag = self:find("AvatarTimeTag", self.AvatarCont)
 	self.TitleCont = self:find("TitleCont", self.MainCtrl)
 	self.TitleDefIcon = self:find("defIcon", self.TitleCont)
 	self.TitleIcon = self:find("icon", self.TitleCont)
@@ -310,6 +312,30 @@ function P:setCharacterShow(skinId, isReset)
 	bee.setText(self.RotateCurSizeText, self._character_rot .. "°")
 	
 	-- self:setSceneShow(self._scene_id)
+
+	if self._characterTimeTag then
+		scheduler:removeTag(self._characterTimeTag)
+		self._characterTimeTag = nil
+	end
+
+	local role = CharacterModel:getRole(self.skinCfg.role)
+	local leftTime = role:getLeftTime()
+	if leftTime > 0 then
+		self.CharacterTimeTag:SetActive(true)
+		bee.setText(self:find("TimeText", self.CharacterTimeTag), ItemModel:getPropItemTimeStr(leftTime))
+		self._characterTimeTag = self:schedule(1, function()
+			leftTime = role:getLeftTime()
+			bee.setText(self:find("TimeText", self.CharacterTimeTag), ItemModel:getPropItemTimeStr(leftTime))
+			if leftTime <= 0 then
+				bee.emit("evt_characterTimeEnd", {role_id = self.skinCfg.role})
+				scheduler:removeTag(self._characterTimeTag)
+				self._characterTimeTag = nil
+				self:refreshTrialRole()
+			end
+		end)
+	else
+		self.CharacterTimeTag:SetActive(false)
+	end
 end
 
 function P:setAvatarShow(avatarId)
@@ -318,6 +344,31 @@ function P:setAvatarShow(avatarId)
 	end
 	local avatarCfg = tpl_props[avatarId]
 	bee.setIconInAtlas(self.AvatarIcon, avatarCfg.icon)
+
+	if self._avatarTimeTag then
+		scheduler:removeTag(self._avatarTimeTag)
+		self._avatarTimeTag = nil
+	end
+
+	-- 角色试用
+	local d = ItemModel:getItem(avatarId)
+	if d and d.deadline and d.deadline > 0 then
+		self.AvatarTimeTag:SetActive(true)
+		local dt = d.deadline - bee.getServerTime()
+		bee.setText(self:find("TimeText", self.AvatarTimeTag), ItemModel:getPropItemTimeStr(dt))
+		self._avatarTimeTag = self:schedule(1, function()
+			dt = dt - 1
+			bee.setText(self:find("TimeText", self.AvatarTimeTag), ItemModel:getPropItemTimeStr(dt))
+			if dt <= 0 then
+				bee.emit("evt_characterTimeEnd", {role_id = tpl_character_skin[self._skin_id].role})
+				scheduler:removeTag(self._avatarTimeTag)
+				self._avatarTimeTag = nil
+				self:refreshTrialAvatar()
+			end
+		end)
+	else
+		self.AvatarTimeTag:SetActive(false)
+	end
 end
 
 function P:setTitleShow(titleId)
@@ -454,6 +505,7 @@ function P:onClickCharacterButton()
 	params.closeCb = function()
 		self:setCharacterShow(self._skin_id)
 	end
+	params.scheme_id = self._scheme_id
 	UiManager:showUI("LobbyDecorationSelect", params)
 end
 
@@ -671,6 +723,35 @@ function P:setPropItemShow(item, data)
 	end
 end
 function P:setAvatarItemShow(item, data)
+	-- 限时试用
+    if not self._itemTimeTags then
+        self._itemTimeTags = {}
+    end
+    if self._itemTimeTags[item] then
+        scheduler:removeTag(self._itemTimeTags[item])
+        self._itemTimeTags[item] = nil
+    end
+
+    local TimeTag = self:find("TimeTag", item)
+    local propData = ItemModel:getItem(data.id)
+    local leftTime = propData.deadline - bee.getServerTime()
+    if leftTime > 0 then
+        TimeTag:SetActive(true)
+        bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+        self._itemTimeTags[item] = self:schedule(1, function()
+            leftTime = propData.deadline - bee.getServerTime()
+            bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+            if leftTime <= 0 then
+            	local skinCfg = tpl_character_skin[tpl_props[data.id].mapId]
+                bee.emit("evt_characterTimeEnd", {role_id = skinCfg.role})
+                scheduler:removeTag(self._itemTimeTags[item])
+                self._itemTimeTags[item] = nil
+            end
+        end)
+    else
+        TimeTag:SetActive(false)
+    end
+
 	local isSlt = data.id == self._avatar_cache_id
 	self:find("decoration_avatar_selected", item):SetActive(isSlt)
 	bee.setIconInAtlas(self:find("avatar_frame_01_mask/icon", item), tpl_props[data.id].icon)
@@ -909,6 +990,13 @@ function P:cancleEvent()
 	self.itemScroll:moveToYItem(1, false)
 	self.itemScroll:clear()
 	-- self.itemScroll:clearCaches()
+
+	if self._itemTimeTags then
+        for k, v in pairs(self._itemTimeTags) do
+        	scheduler:removeTag(v)
+        end
+        self._itemTimeTags = nil
+    end
 end
 function P:confirmEvent()
 	if self.sltedType == self.ItemType.Scene then
@@ -952,6 +1040,13 @@ function P:confirmEvent()
 	self:switchView(true)
 	self.itemScroll:clear()
 	self.itemScroll:clearCaches()
+
+	if self._itemTimeTags then
+        for k, v in pairs(self._itemTimeTags) do
+        	scheduler:removeTag(v)
+        end
+        self._itemTimeTags = nil
+    end
 end
 
 function P:onMusicRandomToCircle()
@@ -1193,6 +1288,40 @@ end
 
 function P:evt_gameBlur(flag, name)
     self:evt_uiBlur(flag, name)
+end
+
+function P:evt_lobbySchemeChange(msg)
+	if msg and msg.scheme_id then
+		if msg.scheme_id == self._scheme_id then
+			self:refreshTrialRole()
+			self:refreshTrialAvatar()
+		end
+	end
+end
+
+function P:refreshTrialRole()
+	if not CharacterModel:getRoleIsOwn(tpl_character_skin[self._skin_id].role) then
+		local schemeInfo = DecorationModel:getLobbySchemeInfoById(self._scheme_id, true)
+		self._skin_id = schemeInfo.skin_id
+		-- 当前展示角色未拥有，重置位置
+		self._character_x = self._oriPosX
+    	self._character_y = self._oriPosY
+    	self._character_size = self._oriSize
+
+    	self._character_rot = self._oriRot
+    	self.CharacterImage.transform.localEulerAngles = bee.v3(0, 0, 0)
+		bee.setText(self.RotateCurSizeText, "0°")
+		bee.setSliderValue(self.RotateSlider, 0.5)
+		self:setCharacterShow(self._skin_id)
+	end
+end
+
+function P:refreshTrialAvatar()
+	if not CharacterModel:getRoleIsOwn(tpl_character_skin[tpl_props[self._avatar_id].mapId].role) then
+		local schemeInfo = DecorationModel:getLobbySchemeInfoById(self._scheme_id, true)
+		self._avatar_id = schemeInfo.avatar
+		self:setAvatarShow(self._avatar_id)
+	end
 end
 
 return P

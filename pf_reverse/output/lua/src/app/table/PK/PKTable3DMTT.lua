@@ -206,6 +206,9 @@ function P:evt_AddonBRC(msg)
         local player = self.data:getPlayer(seatid)
         if player then
             self.seatController[seatid]:refreshChip(player)
+            if msg.bounty > 0 then
+                self.seatController[seatid]:emitFunc("refreshHunterBounty")
+            end
         end
 	end
 end

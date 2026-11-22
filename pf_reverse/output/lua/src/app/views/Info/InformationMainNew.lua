@@ -337,7 +337,7 @@ function P:onShow()
     bee.setText(self.TextUID, "UID:" .. self._uid)
     self.CopyButton:SetActive(self._uid == PlayerModel:getUid())
     if self._uid == PlayerModel:getUid() then
-        bee.setText(self.TextName, PlayerModel:getName())
+        GF.setPlayerName(self.TextName, PlayerModel:getName())
         bee.setText(self.TextLevel, PlayerModel:getCurLevel())
         self:find("Name/information_frame_02", self.Info1):SetActive(true)
         self:find("Name/information_frame_02_1", self.Info1):SetActive(false)
@@ -364,7 +364,7 @@ function P:onShow()
         for _, v in ipairs(self.TextCollects) do
             bee.setText(v, 0)
         end
-        bee.setText(self.TextCollects[1], CharacterModel:getRoleTotalNum())
+        bee.setText(self.TextCollects[1], CharacterModel:getRoleTotalRealNum())
         bee.setText(self.TextCollects[2], CharacterModel:getSkinTotalNum())
         bee.setText(self.TextCollects[3], ItemModel:getItemDecorationNum())
         bee.setText(self.TextCollects[4], ItemModel:getItemTotalNumByKind(GPropKind.Title))
@@ -891,12 +891,14 @@ end
 
 function P:evt_GetOtherDetailInfoRSP(msg)
     if msg.brief.uid == self._uid then
-        bee.setText(self.TextName, GF.getOtherName(msg.brief.name))
+        GF.setPlayerName(self.TextName, GF.getOtherName(msg.brief.name), msg.brief.switch)
         bee.setText(self.TextLevel, msg.brief.level)
         self:find("Rank/icon_rank_01", self.Info1):SetActive(true)
         bee.setIcon(self:find("Rank/icon_rank_01", self.Info1), tpl_level[msg.brief.level].icon)
 
-        local vipSwitch = (msg.switch % 10) == 1
+        local sw = bee.toBinary(msg.switch)
+        local vipSwitch = sw:sub(-1) == "1"
+        -- local vipSwitch = (msg.switch % 10) == 1
         self.VIPFrame:SetActive(vipSwitch)
         bee.setIcon(self:find("Icon", self.VIPFrame), string.format("Information[information_vip_icon_lv_%02d]", msg.vip_level))
 
@@ -948,6 +950,7 @@ function P:evt_GetOtherDetailInfoRSP(msg)
                     register_time = msg.register_time,
                     auth_cert_time = msg.auth_cert_time,
                     auth_cert_url = msg.auth_cert_url,
+                    switch = msg.brief.switch,
                 }
                 UiManager:showUI("SevenDayTaskCertification", {info = info, isFromTable = self._fromTable})
             end)
@@ -988,7 +991,7 @@ end
 
 function P:evt_refreshName()
     if self._uid == PlayerModel:getUid() then
-        bee.setText(self.TextName, PlayerModel:getName())
+        GF.setPlayerName(self.TextName, PlayerModel:getName(), nil, 176)
     end
 end
 
@@ -1119,14 +1122,15 @@ function P:ClickBlock()
             end
         })
     else
-        UiManager:showTip({
-            text = _F("LAB_FRIENDS_26", playerName),
-            onSure = function()
-                FriendModel:blockFriend(self._uid, function ()
-                    UiManager:showToast(_T("LAB_FRIENDS_27"))
-                end)
-            end
-        })
+        FriendModel:checkBlockFriend(playerName, self._uid)
+        -- UiManager:showTip({
+        --     text = _F("LAB_FRIENDS_26", playerName),
+        --     onSure = function()
+        --         FriendModel:blockFriend(self._uid, function ()
+        --             UiManager:showToast(_T("LAB_FRIENDS_27"))
+        --         end)
+        --     end
+        -- })
     end
 end
 

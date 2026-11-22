@@ -81,12 +81,14 @@ message ChangeFrameRSP
 message ChangeIllustrationREQ
 {
     optional int32 item_id = 1; // 新插画配置id
+    optional int32 type = 2;    //0或空是加载界面 1是登录界面
 }
 
 message ChangeIllustrationRSP
 {
     optional int32 code = 1;
     optional int32 item_id = 2; // 新插画配置id
+    optional int32 type = 3;    //0或空是加载界面 1是登录界面
 }
 
 message ChangeTitleREQ

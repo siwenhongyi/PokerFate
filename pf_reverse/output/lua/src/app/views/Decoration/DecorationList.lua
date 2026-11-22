@@ -11,11 +11,11 @@ function P:onAwake()
 
     local Tab = self:find("TAB/TabToggle", self.Left)
     self.firEnter = true
+
     self.LobbyToggle = self:find("Tab01Toggle", Tab)
-    
     self.LobbyText = self:find("Text", self.LobbyToggle)
+
     self.InGameToggle = self:find("Tab02Toggle", Tab)
-    
     self.InGameText = self:find("Text", self.InGameToggle)
 
     self.TipButton = self:find("common_button_info_07", self.Center)
@@ -36,6 +36,8 @@ function P:onAwake()
     self.InGameItem = self:find("Item1", self.InGameScroll)
     self.InGameItem:SetActive(false)
     self.InGameList = nil
+
+    self.BottomTip = self:find("BottomTip", self.Center)
 
     --当前选中的方案类型
     self.curToggle = nil
@@ -78,6 +80,7 @@ function P:onAwake()
 end
 
 function P:onStart()
+    ItemModel:requestRefreshItem()
     self:initScrollList()
 
     bee.onCheck(self.LobbyToggle, function(isOn) self:setLobbyData(isOn) end)
@@ -614,11 +617,14 @@ function P:createLobbyShowData()
     end
     local listCount = #scheme
     local limitCount, maxCount = self:getVipLimitData(SchemeTag.Lobby)
-    bee.setText(self.LobbyText, _F("LAB_DECOR_PLAN_2", listCount, limitCount))
+    -- bee.setText(self.LobbyText, _T("TAB_SHOP_THEME_4"))
 	if listCount < maxCount and next(scheme[listCount]) then
 		table.insert(scheme, {})
 	end
     self.LobbyList:setDatas(scheme)
+
+    local vipStr = VipModel:getVipLevelData()
+    bee.setText(self.BottomTip, _F("LAB_VIP_TEXT_35", vipStr, listCount .. "/" .. limitCount))
 end
 
 function P:evt_updateInGameScheme()
@@ -632,11 +638,14 @@ function P:createInGameShowData()
     local scheme = clone(schemeBase)
     local listCount = #scheme
     local limitCount, maxCount = self:getVipLimitData(SchemeTag.Ingame)
-    bee.setText(self.InGameText, _F("LAB_DECOR_PLAN_3", listCount, limitCount))
+    -- bee.setText(self.InGameText, _T("TAB_SHOP_THEME_5"))
 	if listCount < maxCount and next(scheme[listCount]) then
 		table.insert(scheme, {})
 	end
     self.InGameList:setDatas(scheme)
+
+    local vipStr = VipModel:getVipLevelData()
+    bee.setText(self.BottomTip, _F("LAB_VIP_TEXT_35", vipStr, listCount .. "/" .. limitCount))
 end
 
 --获取Vip数据
@@ -714,12 +723,23 @@ end
 
 --刷新方案数量与上限
 function P:refreshDecorationCount()
-    local lobbySchemes = DecorationModel:getLobbySchemeList()
-    local lobbyLimitCount = self:getVipLimitData(SchemeTag.Lobby)
-    bee.setText(self.LobbyText, _F("LAB_DECOR_PLAN_2", #lobbySchemes, lobbyLimitCount))
-    local ingameSchemes = DecorationModel:getInGameSchemeList()
-    local ingameLimitCount = self:getVipLimitData(SchemeTag.Ingame)
-    bee.setText(self.InGameText, _F("LAB_DECOR_PLAN_3", #ingameSchemes, ingameLimitCount))
+    -- local lobbySchemes = DecorationModel:getLobbySchemeList()
+    -- local lobbyLimitCount = self:getVipLimitData(SchemeTag.Lobby)
+    -- bee.setText(self.LobbyText, _T("TAB_SHOP_THEME_4", #lobbySchemes, lobbyLimitCount))
+    -- local ingameSchemes = DecorationModel:getInGameSchemeList()
+    -- local ingameLimitCount = self:getVipLimitData(SchemeTag.Ingame)
+    -- bee.setText(self.InGameText, _T("TAB_SHOP_THEME_5", #ingameSchemes, ingameLimitCount))
+    
+    local vipStr = VipModel:getVipLevelData()
+    if self.curToggle == SchemeTag.Lobby then
+        local lobbySchemes = DecorationModel:getLobbySchemeList()
+        local lobbyLimitCount = self:getVipLimitData(SchemeTag.Lobby)
+        bee.setText(self.BottomTip, _F("LAB_VIP_TEXT_35", vipStr, #lobbySchemes .. "/" .. lobbyLimitCount))
+    else
+        local ingameSchemes = DecorationModel:getInGameSchemeList()
+        local ingameLimitCount = self:getVipLimitData(SchemeTag.Ingame)
+        bee.setText(self.BottomTip, _F("LAB_VIP_TEXT_35", vipStr, #ingameSchemes .. "/" .. ingameLimitCount))
+    end
 end
 
 function P:evt_refreshVipLevel()

@@ -70,6 +70,13 @@ local TagLinks =
         "Pinball",
     },
     Soccer = {},
+    BattlePass = {
+        BattlePassReward = {},
+        BattlePassTask = {
+            "BattlePassWeekly",
+            "BattlePassPeriod",
+        },
+    },
 
     ------------------ 角色 ------------------
     Character = {   -- 角色
@@ -132,12 +139,22 @@ local TagLinks =
     Fantasy = {
         FantasyTask = {},   --任务奖励
     },
+    ------------------ 活动 万圣节 ------------------
+    Halloween = {
+        HalloweenTask = {},   --任务奖励
+    },
 
     ------------------ 活动 新春 ------------------
     SpringFestival = {
         SpringFestivalRedPacket = {},    -- 红包
         SpringFestivalTask = {},    -- 任务奖励
     },
+    ------------------ 活动 大富翁 ------------------
+    Monopoly = {
+        MonopolyTask = {},    -- 任务奖励
+    },
+
+
     ------------------ 更新提示 ------------------
     UpdateTag = {},
 

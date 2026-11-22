@@ -8,6 +8,9 @@ local completeCbs = {}
 
 -- 点击特效
 bee.on("evt_onMouseButtonDown", function(info)
+	if ResManager and ResManager:IsLoadingScene() then
+		return
+	end
 	local eff = AnimationMgr:playUIEffect("Prefab/Eff_poker_click", UiManager:getUiRoot().transform, nil, 0.7)
 	eff.transform.position = bee.v3(info.worldPos.x, info.worldPos.y, 0)
 	eff.transform.localScale = bee.v3(1, 1, 1)

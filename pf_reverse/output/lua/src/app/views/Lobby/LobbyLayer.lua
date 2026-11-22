@@ -25,9 +25,10 @@ function P:onAwake()
     self.BubbleParent = self:find("BubbleParent", self.Center)
     self.BubbleItem = self:find("BubbleItem", self.BubbleParent)
 
-    self.ShopPushButton = self:find("Left/ShopPushButton", LeftTop)
+    self.LeftTop_Top = self:find("Top", LeftTop)
+    self.ShopPushButton = self:find("Top/ShopPushButton", LeftTop)
     self.SevenDayTaskButton = self:find("Left/SevenDayTaskButton", LeftTop)
-    self.UpdateButton = self:find("Top/UpdateButton", LeftTop)
+    self.UpdateButton = self:find("UpdateButton", RightTop)
     self.ActivityButton = self:find("Left/ActivityButton", LeftTop)
     self.TaskButton = self:find("Left/TaskButton", LeftTop)
     self.ActButton = self:find("Left/ActButton", LeftTop)
@@ -36,12 +37,34 @@ function P:onAwake()
     self.SoccerButton = self:find("Left2/SoccerButton", LeftTop)
     self.DispatchButton = self:find("Left2/DispatchButton", LeftTop)
     self.ThemeButtonPoint = self:find("Left2/ThemeButtonPoint", LeftTop)
+    self.MonopolyButtonPoint = self:find("Left2/MonopolyButtonPoint", LeftTop)
     self.DispatchButton:SetActive(DispatchModel:isOpenDispatch())
+    self.BattlePassButton = self:find("Left2/BattlePassButton", LeftTop)
 
-    self.SpringFestivalButton = self:find("Left2/SpringFestivalButton", LeftTop)
+    self.SpringFestivalButton = self:find("Top/SpringFestivalButton", LeftTop)
 
-    self.QuickByButton = self:find("Left2/QuickByButton", LeftTop)
-    self.LimitPackageButton = self:find("Left2/LimitPackageButton", LeftTop)
+    self.Left2 = self:find("Left2", LeftTop)
+    self.QuickByButton = self:find("Top/QuickByButton", LeftTop)
+    self.LimitPackageButton = self:find("Top/LimitPackageButton", LeftTop)
+    self.VipPackageButton = self:find("Top/VipPackageButton", LeftTop)
+    self.GiftsButton = self:find("Top/GiftsButton", LeftTop)
+    bee.addClick(self.GiftsButton, function ()
+        self:switchGiftRoot()
+    end)
+
+    self.GiftRoot = self:find("LeftGifts", LeftTop)
+    self.GiftButtons = {
+        self.QuickByButton,
+        self.LimitPackageButton,
+        self.VipPackageButton,
+    }
+    self.GiftButtonOrigins = {}
+    for _,v in ipairs(self.GiftButtons) do
+        table.insert(self.GiftButtonOrigins, {
+            siblingIndex = v.transform:GetSiblingIndex(),
+        })
+    end
+    self.giftTag = nil
 
     self.Character = self:find("Character", LeftTop)
     self.TextLevel = self:find("TextLevel", self.Character)
@@ -226,6 +249,15 @@ function P:onAwake()
         UiManager:showUI("DispatchMain")
     end)
 
+    bee.addClick(self.BattlePassButton, function()
+        Game:playSound("ui_button_confirm")
+        self:stopRoleInteraction()
+        bee.logEvent("battle-pass-entrance", BattlePassModel:getCurPassId())
+        UiManager:showUI("SpiritCatStyleMain")
+    end)
+    RedManager:bind(self:find("RedPoint", self.BattlePassButton), RedTag.BattlePass)
+    self.BattlePassButton:SetActive(BattlePassModel:isOpenPass())
+
     bee.addClick(self.SpringFestivalButton, function()
         Game:playSound("ui_button_confirm")
         self:stopRoleInteraction()
@@ -335,12 +367,7 @@ function P:onAwake()
 
     self.UpdateButton:SetActive(false)
     self.ThemeButtonPoint:SetActive(false)
-    -- self.HotspringButton:SetActive(false)
-    -- self.GalaSeasonButton:SetActive(false)
-    -- self.SchoolButton:SetActive(false)
-    -- self.BunnyGirlButton:SetActive(false)
-    -- self.SportsButton:SetActive(false)
-    -- self.SayakaButton:SetActive(false)
+    self.MonopolyButtonPoint:SetActive(false)
     self.SpringFestivalButton:SetActive(false)
 
     self.ShopPushButton:SetActive(true)
@@ -362,17 +389,9 @@ function P:onStart()
     end)
 
     -- 每秒检查限时活动图标是否显示或关闭
-    -- self._limitButtons = {
-    --     [self.HotspringButton] = ActivityId.HotSpring,
-    --     [self.GalaSeasonButton] = ActivityId.GalaSeason,
-    --     [self.SchoolButton] = ActivityId.School,
-    --     [self.BunnyGirlButton] = ActivityId.BunnyGirl,
-    --     [self.SportsButton] = ActivityId.Sports,
-    --     [self.SayakaButton] = ActivityId.Sayaka,
-    --     [self.MatsuriButton] = ActivityId.Matsuri,
-    -- }
     self:schedule(1, function()
         self:checkActivityButtons()
+        self:checkMonopolyButtons()
     end)
 end
 
@@ -409,6 +428,7 @@ function P:onShow()
     self:refreshColorGame()
     self:refreshDevelopmentfund()
     self:checkActivityButtons()
+    self:checkMonopolyButtons()
 
 	if GuideManager:isInGuide() then
 		UiManager:showUI("GameGuide", {guide = GuideManager.curGuide.guide, data = GuideManager.curGuide})
@@ -419,6 +439,8 @@ function P:onShow()
 
     QuickByModel:addButtonItem(self.uiName, self.QuickByButton)
     QuickByModel:addLimitButtonItem(self.uiName, self.LimitPackageButton)
+    QuickByModel:addVipButtonItem(self.uiName, self.VipPackageButton)
+    self:checkShowGifts()
 
     -- 进入大厅后请求角色数据
     CharacterModel:requestGetSkinGameDetail()
@@ -438,6 +460,136 @@ function P:checkActivityButtons()
     if sfStatus then
         local timeText = self:find("CountDown/Text", self.SpringFestivalButton)
         SpringFestivalModel:getRemainTime(timeText, self.node)
+    end
+end
+
+function P:checkMonopolyButtons()
+    local monopolyId = MonopolyModel:getAcitvityId()
+    if monopolyId == nil or monopolyId == 0 then
+        self.monopolyId = nil
+        self:clearMonopolyButton()
+        return
+    end
+    if self.monopolyId == monopolyId then
+        return
+    else
+        self.monopolyId = monopolyId
+        self:clearMonopolyButton()
+    end
+
+    local isOpen = ActivityManager:isActivityOpen(ActivityId.Monopoly, MonopolyModel:getAcitvityId())
+    self.MonopolyButtonPoint:SetActive(isOpen)
+
+    if not isOpen then
+        return
+    end
+
+    self.monopolyButton = bee.createObj("views/Monopoly/LobbyMonopoly")
+    if not self.monopolyButton then
+        return
+    end
+    self.monopolyButton.transform:SetParent(self.MonopolyButtonPoint.transform, false)
+    self.monopolyButton.transform.localPosition = bee.v3(0, 0)
+    bee.addClick(self.monopolyButton, function()
+        Game:playSound("ui_button_confirm")
+        if not MonopolyModel:isActivityOpen() then
+            UiManager:showToast(_T("LAB_EVENT_CHECK_IN_1"))
+            self.monopolyButton:SetActive(false)
+            return
+        end
+        self:stopRoleInteraction()
+        UiManager:showUI("MonopolyMain")
+        bee.logEvent("monopoly-entrance")
+    end, true)
+
+    RedManager:bind(self:find("Reddot", self.monopolyButton), RedTag.Monopoly)
+end
+function P:clearMonopolyButton()
+    if self.monopolyButton then
+        bee.destroy(self.monopolyButton)
+        self.monopolyButton = nil
+    end
+end
+
+function P:switchGiftRoot()
+    local isActive = self.GiftRoot.activeSelf
+    self.GiftRoot:SetActive(not isActive)
+    if not isActive then
+        self.GiftRoot.transform.position = self.GiftsButton.transform.position
+        local giftTran = self.GiftRoot.transform
+        giftTran.localPosition = giftTran.localPosition + bee.v3(150, 40, 0)
+        if giftTran.localPosition.y - giftTran.sizeDelta.y < -900 then
+            giftTran.localPosition = bee.v3(giftTran.localPosition.x, -(900 - giftTran.sizeDelta.y), 0)
+        end
+    end
+end
+
+function P:evt_LobbyCheckGifts()
+    --1105
+    --self:checkShowGifts()
+end
+function P:checkShowGifts()
+    local now = bee.getServerTime()
+    local activeCount = 0
+    local limitTime = 0
+    if QuickByModel.endTime > now then
+        activeCount = activeCount + 1
+        if limitTime ~= 0 and limitTime > QuickByModel.endTime then
+            limitTime = QuickByModel.endTime
+        end
+    end
+    if QuickByModel.limit_endTime > now then
+        activeCount = activeCount + 1
+        if limitTime ~= 0 and limitTime > QuickByModel.limit_endTime then
+            limitTime = QuickByModel.limit_endTime
+        end
+    end
+    if QuickByModel.vip_endTime > now then
+        activeCount = activeCount + 1
+        if limitTime ~= 0 and limitTime > QuickByModel.vip_endTime then
+            limitTime = QuickByModel.vip_endTime
+        end
+    end
+
+    local showGiftRoot = activeCount > 4
+    local targetParent = showGiftRoot and self.GiftRoot.transform or self.LeftTop_Top.transform
+    local buttonsToRestore = {}
+    for k,v in ipairs(self.GiftButtons) do
+        local transform = v.transform
+        if transform.parent ~= targetParent then
+            transform:SetParent(targetParent, false)
+        end
+
+        if not showGiftRoot then
+            table.insert(buttonsToRestore, {
+                transform = transform,
+                origin = self.GiftButtonOrigins[k],
+            })
+        end
+    end
+
+    table.sort(buttonsToRestore, function(a, b)
+        return a.origin.siblingIndex < b.origin.siblingIndex
+    end)
+    for _,v in ipairs(buttonsToRestore) do
+        v.transform:SetSiblingIndex(v.origin.siblingIndex)
+    end
+
+    -- self.GiftRoot:SetActive(showGiftRoot)
+    self.GiftsButton:SetActive(showGiftRoot)
+
+    local giftTimeText = self:find("CountDown/Text", self.GiftsButton)
+    local retime = 0
+    scheduler:removeTag(self.giftTag)
+    if limitTime > 0 then
+        self.giftTag = bee.schedule(1, function ()
+            retime = limitTime - bee.getServerTime()
+            if retime > 0 then
+                bee.setText(giftTimeText, ShopModel:getShopTimeText2(retime))
+            else
+                scheduler:removeTag(self.giftTag)
+            end
+        end)
     end
 end
 
@@ -475,6 +627,11 @@ function P:afterShow()
 end
 
 function P:tryAutoPop()
+    if GameModel:consumeSkipLobbyAutoPop() then
+        self.RaycastMask:SetActive(false)
+        return
+    end
+
     SettingModel:checkAutoPop()
     if GameModel.over_bond_settle_info and GameModel.over_bond_settle_info.add_over_bond_inc > 0 then
         if GameModel.over_bond_settle_info.tpl_over_bond_inc and GameModel.over_bond_settle_info.tpl_over_bond_inc > 0 then
@@ -590,6 +747,9 @@ function P:initThemeButton()
         return
     end
     self.themeButton = bee.createObj(themeData.path .. "/" .. themeData.lobbybtn)
+    if not self.themeButton then
+        return
+    end
     self.themeButton.transform:SetParent(self.ThemeButtonPoint.transform, false)
     self.themeButton.transform.localPosition = bee.v3(0, 0)
     bee.addClick(self.themeButton, function()
@@ -625,7 +785,7 @@ function P:evt_refreshTopInfo()
 end
 
 function P:evt_refreshName()
-    bee.setText(self.TextName, PlayerModel:getName())
+    GF.setPlayerName(self.TextName, PlayerModel:getName())
 end
 
 function P:evt_refreshAvatar()
@@ -665,6 +825,14 @@ function P:evt_backgroundBlur(flag, name)
 
             self.transform:SetParent(bee.find("UIRoot/UiCanvaPost").transform, false)
             local camera = bee.find("UIRoot/CameraRoot/UiCameraPost")
+
+			local layer = camera:GetComponent("PostProcessLayer")
+			local volume = camera:GetComponent("PostProcessVolume")
+			if layer and volume then
+				layer.enabled = true
+				volume.enabled = true
+			end
+
             CS.Utils.SetPostKawaseBlur(camera, 0, 5, 1, 10, 0.25)
             
             -- self.MaskFront:SetActive(true)
@@ -685,17 +853,26 @@ function P:evt_backgroundBlur(flag, name)
                 self._isInBlur = false
 
                 self.MaskFront:SetActive(true)
+                local camera = bee.find("UIRoot/CameraRoot/UiCameraPost")
                 bee.setOpacity(self.MaskFront, 0)
                 bee.tween(self.MaskFront)
                 : predelay(0.1)
                 : call(function()
-                    local camera = bee.find("UIRoot/CameraRoot/UiCameraPost")
                     CS.Utils.SetPostKawaseBlur(camera, 5, 0, 10, 1, 0.25)
                 end)
                 : to(0.25, {opacity = 0})
                 : onComplete(function()
                     self.transform:SetParent(UiManager:getUiRoot().transform, false)
                     self.MaskFront:SetActive(false)
+                    
+                    if not self._isInBlur then
+                        local layer = camera:GetComponent("PostProcessLayer")
+                        local volume = camera:GetComponent("PostProcessVolume")
+                        if layer and volume then
+                            layer.enabled = false
+                            volume.enabled = false
+                        end
+                    end
                 end)
                 : link()
                 : setTarget()
@@ -713,7 +890,7 @@ end
 function P:evt_SelfUserInfoRSP(msg)
     self:evt_refreshTopInfo()
     self:evt_refreshLevel()
-    bee.setText(self.TextName, PlayerModel:getName())
+    GF.setPlayerName(self.TextName, PlayerModel:getName())
 
     SettingModel:checkNewUnlockSys()
 end
@@ -1082,6 +1259,13 @@ end
 
 function P:getUIVisibleSign()
     return self.UIVisibleSign
+end
+
+function P:evt_updateBattlePass()
+    if not self.BattlePassButton then
+        return
+    end
+    self.BattlePassButton:SetActive(BattlePassModel:isOpenPass())
 end
 ----------快捷键------------
 

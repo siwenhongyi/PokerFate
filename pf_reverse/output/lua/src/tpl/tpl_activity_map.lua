@@ -8,7 +8,8 @@ local function _initData()
 {10006,"SayakaPackage","SayakaShop",nil,"gacha_sayaka_button_gift"},
 {10007,"MatsuriPackage","MatsuriShop",nil,"gacha_matsuri_button_gift"},
 {10008,"RacingPackage",nil,"RacingLottery","gacha_racing_button_gift"},
-{10009,"FantasyPackage","FantasyShop",nil,"gacha_fantasy_button_gift"}
+{10009,"FantasyPackage","FantasyShop",nil,"gacha_fantasy_button_gift"},
+{10010,"HalloweenPackage","HalloweenShop",nil,"gacha_hallowee_button_gift"}
 }
     for _, v in pairs(bodys) do
         local m = {}

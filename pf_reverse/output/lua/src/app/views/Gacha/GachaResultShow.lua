@@ -26,6 +26,10 @@ function P:onAwake()
 	self.NewIcon = self:find("NewIcon", self.RoleCont)
 	self.TipsText = self:find("TipsText/TipsText", self.RoleCont)
 	self.TipsTextPos = self:find("TipsText/TipsTextPos", self.RoleCont)
+	self.TrialPeriodCont = self:find("TrialPeriodCont", self.RoleCont)
+	self.TimeText = self:find("Time/TimeText", self.TrialPeriodCont)
+	self.TrialInfoButton = self:find("TrialInfoButton", self.TrialPeriodCont)
+	self.CharacterClickMask = self:find("CharacterClickMask", self.RoleCont)
 
 	self.SkinCont = self:find("SkinCont", self.Center)
 	self.ImgTitle1 = self:find("Title/ImgTitle1", self.SkinCont)
@@ -58,6 +62,9 @@ function P:onAwake()
 		Game:playSound("ui_button_confirm")
 		self:onClickNext()
 	end)
+	bee.addClick(self.CharacterClickMask, function()
+		self:onClickNext()
+	end)
 
 	bee.addClick(self.SkipButton, function()
 		if bee.checkCd("gacharesult_skip", 1) then
@@ -68,6 +75,10 @@ function P:onAwake()
 
 	bee.addClick(self.ShareButton, function()
 		UiManager:showUI("ShareMain", {id = 2})
+	end)
+
+	bee.addClick(self.TrialInfoButton, function()
+		UiManager:showUI("CommonRules", {text = _F("LAB_CHAR_136", ItemModel:getPropItemTimeStr(tpl_constdata.Skin_Character_Trial_Duration)), title = _T("LAB_CHAR_133")})
 	end)
 
 	self.ShareCont:SetActive(not GuideManager:isInGuide())
@@ -116,6 +127,7 @@ end
 function P:setCharacterShow()
 	self._isShowCharacter = true
 	self.ClickMask:SetActive(false)
+	self.CharacterClickMask:SetActive(false)
 	Game:playSound("sound_recruit_character")
 	self:showAnim(self.RoleCont, function()
 
@@ -152,8 +164,18 @@ function P:setCharacterShow()
 			self:showTextCont()
 			Game:playRoleOutVoice(roleCfg.id, roleCfg.salute_voice)
 			self._playingVoice = true
-			self.ClickMask:SetActive(true)
+			-- self.ClickMask:SetActive(true)
+			self.CharacterClickMask:SetActive(true)
 		end)
+
+		if self._curShow.isTrail then
+			self.ShareCont:SetActive(false)
+			self.TrialPeriodCont:SetActive(true)
+			bee.setText(self.TimeText, ItemModel:getPropItemTimeStr(tpl_constdata.Skin_Character_Trial_Duration))
+		else
+			self.ShareCont:SetActive(true)
+			self.TrialPeriodCont:SetActive(false)
+		end
 	end)
 end
 

@@ -10,7 +10,7 @@ function P:onAwake()
     self.Content = self:find("Viewport/Content", self.RuleList)
 
     self.VideoTip = self:find("AnimRoot/LeftTop/VideoTip")
-    self.VideoTip:SetActive(false)
+    self.VideoTip:SetActive(true)
 
     bee.addClick(self:find("AnimRoot/RightTop/CloseButton"), function()
         self:hideUI()
@@ -55,7 +55,9 @@ function P:evt_hideUiWhenAction(isVisible)
 end
 
 function P:videoEvent()
-    CU.Application.OpenURL("https://www.pokerfate.com/")
+    local lan = LanguageManager:getLanguage()
+    local url = TutorialVideoPaths[3][lan]
+    CU.Application.OpenURL(url)
 end
 
 return P

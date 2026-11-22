@@ -79,6 +79,11 @@ bee.on("evt_load_scene_suc", function(d)
     end
 end)
 
+bee.on("evt_load_scene_fail", function(d)
+    _sceneWaitName, _sceneWaitParams = nil, nil
+    UiManager._showingScene = nil
+end)
+
 bee.getSceneParams = function(noClear)
     local ret = _sceneParams
     if not noClear then
@@ -106,7 +111,7 @@ end
 
 bee.createObj = function(name, params)
     local obj = ResManager:InstantiateObject(name .. ".prefab")
-    if params then
+    if obj and params then
 		local cls = ObjectPool:getCls(obj)
         if cls then
             cls:setParams(params)
@@ -119,7 +124,7 @@ bee.createPrefabObj = function(name, params)
     local prefab = bee.getPrefab(name)
     if prefab then
         local obj = CU.GameObject.Instantiate(prefab)
-        if params then
+        if obj and params then
             local cls = ObjectPool:getCls(obj)
             if cls then
                 cls:setParams(params)
@@ -877,6 +882,15 @@ bee.getDownloadImage = function (obj, url)
             end
         end
         obj:GetComponent("LoadImage"):DownloadImages({nurl, url})
+    end
+end
+
+bee.logError = function(...)
+    local msg = table.concat({...}, " ") .. "\n" .. debug.traceback()
+    CU.Debug.LogError(msg)
+
+    if __G__TRACKBACK__ then
+        __G__TRACKBACK__(msg)
     end
 end
 

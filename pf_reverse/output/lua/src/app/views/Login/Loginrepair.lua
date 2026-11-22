@@ -54,8 +54,6 @@ function P:onAwake()
                 LocalStore:deleteValueForKey("app_full_version")
                 LocalStore:deleteValueForKey("app_update_version")
                 LocalStore:deleteValueForKey("load_slient_result")
-                CS.FileUtils.DeleteDirectory(CS.AppLoader.GetAddressWritePath());
-                CS.FileUtils.DeleteDirectory(CS.AppLoader.GetAddressWriteTempPath());
 
                 self:once(0.1, function()
                     UiManager:showTip({
@@ -67,6 +65,13 @@ function P:onAwake()
                         end,
                     })
                 end)
+                
+                -- 运行中部分 bundle 仍被占用，DeleteDirectory 内部按文件尽力删除，
+                -- 删不掉的文件会在下次启动（Addressables 初始化前）再次清理
+                if bee.checkVersion("1.7.2") then
+                    CS.FileUtils.DeleteDirectory(CS.AppLoader.GetAddressWritePath());
+                    CS.FileUtils.DeleteDirectory(CS.AppLoader.GetAddressWriteTempPath());
+                end
             end,
             onCancel = function(isClose)
                 if isClose then

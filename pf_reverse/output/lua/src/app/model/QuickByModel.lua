@@ -25,6 +25,15 @@ function P:ctor()
     self.popupData = nil
     self.popupSign = false
     --#endregion
+
+    --#region vip礼包
+    self.vip_gift_id = 0
+    self.vip_endTime = 0
+
+    self.vip_btnDic = {}
+    self.vip_tag = nil
+
+    --#endregion
 end
 
 function P:afterInit()
@@ -161,6 +170,7 @@ function P:showButtons()
     end
     self:countDown()
     self:switchBtns()
+    self:refreshLobbyGiftLayout()
 end
 function P:hideButton(obj)
     if obj.activeSelf then
@@ -238,6 +248,7 @@ function P:clearTime()
     self.curLv = 0
     self.endTime = 0
     self:hideButtons()
+    self:refreshLobbyGiftLayout()
 end
 
 --#endregion
@@ -252,14 +263,16 @@ function P:reqLimitPack()
 end
 
 function P:evt_PushRoomGiftRSP(msg)
-    self:limitClearTime()
-    if next(msg) == nil or msg == nil or (msg and msg.code ~= 0) then
+    self:limitClearTime(true)
+    if msg == nil or next(msg) == nil or msg.code ~= 0 then
         if self.limit_isLogin then
             self.limit_isLogin = false
         end
+        self:refreshLobbyGiftLayout()
         return
     end
     if msg.end_time < bee.getServerTime() then
+        self:refreshLobbyGiftLayout()
         return
     end
 
@@ -336,12 +349,16 @@ function P:showLimitButtons()
         end
     end
     self:limitCountDown()
+    self:refreshLobbyGiftLayout()
 end
 
-function P:limitClearTime()
+function P:limitClearTime(silent)
     self.limit_gift_id = 0
     self.limit_endTime = 0
     self:hideLimitButtons()
+    if not silent then
+        self:refreshLobbyGiftLayout()
+    end
 end
 
 function P:hideLimitButton(obj)
@@ -377,5 +394,116 @@ function P:checkLimitPop()
 end
 
 --#endregion
+
+--#region Vip礼包
+
+--vip礼包
+
+--请求礼包
+function P:requestVipGift(inShop)
+    --1105
+    -- Net:post("shop/vipQuickPurchase", {from_shop = inShop or false}, function (data)
+	-- 	if data.code ~= 0 then
+    --         return
+    --     end
+
+    --     if data.vipitem and data.vipitem.purchase_end_time > bee.getServerTime() then
+    --         self.vip_gift_id = data.vipitem.shop_id
+    --         self.vip_endTime = data.vipitem.purchase_end_time
+    --         self:showVipButtons()
+    --     else
+    --         self:vipClearTime()
+    --     end
+	-- end)
+end
+
+function P:addVipButtonItem(uiName, object)
+    if bee.isNull(object) then
+        return
+    end
+
+    local item = {}
+    item.go = object
+    item.time = object.transform:Find("CountDown/Text")
+    bee.addClick(item.go, function()
+        UiManager:showUI("ShopVipPackage")
+    end)
+    self.vip_btnDic[uiName] = item
+    
+    if self.vip_endTime > 0 then
+        item.go.gameObject:SetActive(true)
+        bee.setText(item.time, ShopModel:getShopTimeText2(self.vip_endTime - bee.getServerTime()))
+    else
+        item.go.gameObject:SetActive(false)
+    end
+end
+
+function P:showVipButtons()
+    for k,v in pairs(self.vip_btnDic) do
+        if bee.isNull(v.go) then
+            self.vip_btnDic[k] = nil
+        else
+            v.go:SetActive(true)
+            bee.setText(v.time, ShopModel:getShopTimeText2(self.vip_endTime - bee.getServerTime()))
+        end
+    end
+    self:vipCountDown()
+    self:refreshLobbyGiftLayout()
+end
+
+function P:vipCountDown()
+    if self.vip_tag ~= nil then
+        return
+    end
+
+    local retime = 0
+    self.vip_tag = bee.schedule(1, function ()
+        retime = self.vip_endTime - bee.getServerTime()
+        if retime > 0 then
+            self:updateVipButtons(retime)
+        else
+            self:vipClearTime()
+        end
+    end)
+end
+
+function P:updateVipButtons(retime)
+    for k,v in pairs(self.vip_btnDic) do
+        if bee.isNull(v.go) then
+            self.vip_btnDic[k] = nil
+        else
+            bee.setText(v.time, ShopModel:getShopTimeText2(retime))
+        end
+    end
+end
+
+function P:vipClearTime()
+    self.vip_gift_id = 0
+    self.vip_endTime = 0
+    self:hideVipButtons()
+    self:refreshLobbyGiftLayout()
+end
+
+function P:hideVipButtons()
+    for k,v in pairs(self.vip_btnDic) do
+        if bee.isNull(v.go) then
+            self.vip_btnDic[k] = nil
+        else
+            v.go:SetActive(false)
+        end
+    end
+    scheduler:removeTag(self.vip_tag)
+    self.vip_tag = nil
+end
+
+--#endregion
+
+function P:refreshLobbyGiftLayout()
+    bee.emit("evt_LobbyCheckGifts")
+    local lobby = UiManager:getUI("LobbyLayer")
+    if lobby and lobby.checkShowGifts then
+        lobby:checkShowGifts()
+    end
+end
 
 return P

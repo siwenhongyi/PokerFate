@@ -223,9 +223,9 @@ function P:setPlayerItem(item, data)
 	local LikeCount = self:find("Number/LikeCount", LikeCont)
 
 	if data.name == "" then
-		bee.setText(NameText, _T("LAB_LEADERBOARD_1"))
+		GF.setPlayerName(NameText, _T("LAB_LEADERBOARD_1"), data.switch)
 	else
-		bee.setText(NameText, GF.getOtherName(data.name, nil, data.uid))
+		GF.setPlayerName(NameText, GF.getOtherName(data.name, nil, data.uid), data.switch)
 	end
 	
 	bee.setText(PointTitle, _T(tpl_leaderboard_info[self._clickId].name))

@@ -60,7 +60,7 @@ function P:bindCurUi(clsName)
 			end
 		end)
 		if err then
-			printError("[UiManager] bindCurUi error", clsName, err)
+			bee.logError("[UiManager] bindCurUi error", clsName, node.name, err)
 		end
 	end
 end

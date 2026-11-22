@@ -359,6 +359,9 @@ function P:refreshUI()
             self:find("Icon", curItem):SetActive(false) 
         end
     end
+    
+    self:find("ImageKO", self.Item):SetActive(1 == self._data.mtt_mode)
+    self:find("ImagePKO", self.Item):SetActive(2 == self._data.mtt_mode)
 end
 
 function P:refreshPlayerNum()

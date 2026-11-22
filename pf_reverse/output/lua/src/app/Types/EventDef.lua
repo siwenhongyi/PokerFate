@@ -13,6 +13,8 @@ local P = {
 	"evt_serverTimeCrossDay",--跨天消息
 	
 	"evt_onAdjustId",--adjust获取成功返回
+	"evt_deepLink",--深链参数已解析（含 Adjust deferred deeplink）
+	"evt_inviteCode",--邀请码到达
     -- 登录数据
 	"evt_faceBookLogin",--fb登录
 	"evt_doLogin",   --开始登录

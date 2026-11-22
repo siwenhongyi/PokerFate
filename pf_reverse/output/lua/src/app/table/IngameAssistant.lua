@@ -340,7 +340,7 @@ function P:addPotNode(data)
 end
 
 function P:refreshActionItem(data, item)
-    bee.setTextCut(self:find("TextName", item), self:getName(data), 176)
+    GF.setPlayerName(self:find("TextName", item), self:getName(data), self:getPlayerSwitch(data), 176)
     bee.setText(self:find("Balance/TextChip", item), self:getBetChipsStr(data.left_hand_chips or 0))
     bee.setIcon(self:find("Action/ImageTag", item), POKER_RECORD_TAGS[data.action_type])
     bee.setText(self:find("Action/TextAction", item), _T(POKER_ACTION_TAGS[data.action_type].name))
@@ -353,7 +353,7 @@ function P:refreshActionItem(data, item)
 end
 
 function P:refreshShowItem(data, item)
-    bee.setTextCut(self:find("TextName", item), self:getName(data), 176)
+    GF.setPlayerName(self:find("TextName", item), self:getName(data), self:getPlayerSwitch(data), 176)
     local cards, cardType = nil, nil
     if not data.hand_type or data.hand_type == 0 then
         if not data.hand_cards or #data.hand_cards == 0 then
@@ -426,7 +426,7 @@ function P:refreshShowItem(data, item)
 end
 
 function P:refreshPotItem(data, item)
-    bee.setTextCut(self:find("TextName", item), self:getName(data), 176)
+    GF.setPlayerName(self:find("TextName", item), self:getName(data), self:getPlayerSwitch(data), 176)
     bee.setText(self:find("TextPot", item), self:getBetChipsStr(data.chips))
     self:find("ingame_assistant_detailes_action_bg_03", item):SetActive(data.uid == PlayerModel:getUid())
 end
@@ -463,6 +463,22 @@ function P:getName(data)
         return GF.getOtherName(self._users[data.uid], self._users[data.uid].seatid + 1)
     end
     return ""
+end
+
+function P:getPlayerSwitch(data)
+    if self._inGame then
+        local info, i = GameModel.data:getPlayerByUid(data.uid)
+        if info then
+            return info.switch
+        end
+    end
+    if data.switch then
+        return data.switch
+    end
+    if self._users and self._users[data.uid] then
+        return self._users[data.uid].switch
+    end
+    return 0
 end
 
 function P:isOmaha()

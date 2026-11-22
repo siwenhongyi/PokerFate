@@ -83,6 +83,16 @@ function P:onAwake()
 	bee.addClick(self.PurchaseButton, function()
 		Game:playSound("ui_button_confirm")
 		self:refreshRedTag(self._selectIndex)
+
+		local cfg = self._skins[self._selectIndex].cfg
+		local pri = cfg.pri[2]
+		local ownCount = ItemModel:getItemNumById(cfg.pri[1])
+		if ownCount < pri then
+	    	UiManager:showToast(_T("LAB_COMMON_TIPS_1"))
+			ShopModel:showTicketDressShop()
+			return
+		end
+
 		UiManager:showUI("ShopPurchase", {info = self._skins[self._selectIndex]})
 	end)
 	bee.addClick(self.PurchaseGreyButton, function()
@@ -112,6 +122,13 @@ function P:onAwake()
 	end)
 	bee.addClick(self.GiftsPurchaseGreyButton, function()
 		UiManager:showToast(_T("LAB_SKIN_GIFTS_5"))
+	end)
+
+	bee.addClick(self:find("TrialInfoButton", self.PurchaseCont1), function()
+		UiManager:showUI("CommonRules", {text = _F("LAB_CHAR_136", ItemModel:getPropItemTimeStr(tpl_constdata.Skin_Character_Trial_Duration)), title = _T("LAB_CHAR_133")})
+	end)
+	bee.addClick(self:find("TrialInfoButton", self.PurchaseCont2), function()
+		UiManager:showUI("CommonRules", {text = _F("LAB_CHAR_136", ItemModel:getPropItemTimeStr(tpl_constdata.Skin_Character_Trial_Duration)), title = _T("LAB_CHAR_133")})
 	end)
 end
 
@@ -324,6 +341,9 @@ function P:refreshSelectSkinInfo()
 		self.PurchaseCont1:SetActive(false)
 		self.PurchaseCont2:SetActive(true)
 
+		self:find("TrailText", self.PurchaseCont2):SetActive(false)
+		self:find("TrialInfoButton", self.PurchaseCont2):SetActive(false)
+
 		if skinInfo.isOwn then
 			self.SkinPurchaseButton:SetActive(false)
 			self.SkinPurchaseGreyButton:SetActive(true)
@@ -363,6 +383,15 @@ function P:refreshSelectSkinInfo()
 			else
 				self.Discount:SetActive(false)
 			end
+
+			local skinCfg = tpl_character_skin[cfg.role_skin]
+			local role = CharacterModel:getRole(skinCfg.role)
+			if not CharacterModel:getRoleIsOwn(skinCfg.role) or role:isTrial() then
+				self:find("TrailText", self.PurchaseCont2):SetActive(true)
+				self:find("TrialInfoButton", self.PurchaseCont2):SetActive(true)
+
+				bee.setText(self:find("TrailText", self.PurchaseCont2), _F("LAB_SHOP_COMMON_53", _T(tpl_character[skinCfg.role].name)))
+			end
 		end
 
 		if giftCfg.time_end then
@@ -380,6 +409,9 @@ function P:refreshSelectSkinInfo()
 	else
 		self.PurchaseCont1:SetActive(true)
 		self.PurchaseCont2:SetActive(false)
+
+		self:find("TrailText", self.PurchaseCont1):SetActive(false)
+		self:find("TrialInfoButton", self.PurchaseCont1):SetActive(false)
 
 		if skinInfo.isOwn then
 			self.DiscountTag:SetActive(false)
@@ -399,6 +431,15 @@ function P:refreshSelectSkinInfo()
 			else
 				self.DiscountTag:SetActive(false)
 				self.PurchaseTips:SetActive(false)
+			end
+
+			local skinCfg = tpl_character_skin[cfg.role_skin]
+			local role = CharacterModel:getRole(skinCfg.role)
+			if not CharacterModel:getRoleIsOwn(skinCfg.role) or role:isTrial() then
+				self:find("TrailText", self.PurchaseCont1):SetActive(true)
+				self:find("TrialInfoButton", self.PurchaseCont1):SetActive(true)
+
+				bee.setText(self:find("TrailText", self.PurchaseCont1), _F("LAB_SHOP_COMMON_53", _T(tpl_character[skinCfg.role].name)))
 			end
 		end
 	end

@@ -94,7 +94,7 @@ function P:playSign(signId, pos)
     local signs = {"Story[story_button_chat]"}
     self._sign = bee.createObj("views/Story/StorySign")
     if self._sign then
-        bee.setIcon(self._sign, signs[signId] or signsp[1])
+        bee.setIcon(self._sign, signs[signId] or signs[1])
         self._sign.transform:SetParent(self.node.transform, false)
         self._sign.transform.localPosition = bee.v3(pos.x, pos.y)
         CU.GameObject.Destroy(self._sign, 3)
@@ -224,6 +224,9 @@ function P:playAnim(anim, skin, face, onComplete, loop)
                 sp:removeAttachment(v)
             end
         end
+        if self._hide_effects then
+            bee.spine(self.Spine): hideSlots(self._hide_effects)
+        end
     end
 end
 
@@ -286,11 +289,15 @@ function P:setHideAttachments(role_id)
     local d = tpl_character_spine_setting[role_id]
     if d then
         self._hide_attachments = d.hide_attachments
+        self._hide_effects = d.hide_effects
         if self._hide_attachments then
             local sp = bee.spine(self.Spine)
             for _, v in ipairs(self._hide_attachments) do
                 sp:removeAttachment(v)
             end
+        end
+        if self._hide_effects then
+            bee.spine(self.Spine): hideSlots(self._hide_effects)
         end
     end
 end
@@ -319,6 +326,9 @@ function P:evt_onApplicationPause(paused)
                 for _, v in ipairs(self._hide_attachments) do
                     sp:removeAttachment(v)
                 end
+            end
+            if self._hide_effects then
+                bee.spine(self.Spine): hideSlots(self._hide_effects)
             end
         end
     end

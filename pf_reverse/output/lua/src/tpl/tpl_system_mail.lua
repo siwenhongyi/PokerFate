@@ -7,16 +7,21 @@ local function _initData()
     local bodys = {
 {1001,"LAB_MAIL_TITLE_2","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_2",nil,nil,nil,nil,nil},
 {1002,"LAB_MONTHLY_CARD_MAIL_TITLE_1","LAB_MAIL_SENDER_1",nil,"LAB_MONTHLY_CARD_MAIL_DEC_1",nil,nil,nil,nil,nil},
+{1003,"LAB_MAIL_TITLE_9","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_040",{20200014,1,20400009,1},1,nil,nil,nil},
+{1004,"LAB_MAIL_TITLE_10","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_041",nil,1,nil,nil,nil},
 {2001,"LAB_MAIL_TITLE_1","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_1",nil,nil,nil,nil,nil},
 {3001,"LAB_MAIL_TITLE_2","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_2",nil,nil,nil,1,nil},
 {4001,"LAB_MAIL_TITLE_3","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_3",nil,nil,nil,nil,1},
 {4002,"LAB_MAIL_TITLE_4","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_4",{10100001,2000,30200001,1},nil,nil,nil,1},
+{4003,"LAB_MAIL_TITLE_14","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_14",nil,nil,nil,nil,nil},
 {5001,"LAB_LEADERBOARD_MAIL_TITLE_1","LAB_MAIL_SENDER_1",nil,"LAB_LEADERBOARD_MAIL_DEC_101",nil,nil,nil,nil,nil},
 {5002,"LAB_LEADERBOARD_MAIL_TITLE_1","LAB_MAIL_SENDER_1",nil,"LAB_LEADERBOARD_MAIL_DEC_102",nil,nil,nil,nil,nil},
 {5011,"LAB_LEADERBOARD_MAIL_TITLE_2","LAB_MAIL_SENDER_1",nil,"LAB_LEADERBOARD_MAIL_DEC_201",nil,nil,nil,nil,nil},
 {5012,"LAB_LEADERBOARD_MAIL_TITLE_2","LAB_MAIL_SENDER_1",nil,"LAB_LEADERBOARD_MAIL_DEC_202",nil,nil,nil,nil,nil},
 {6001,"LAB_MAIL_TITLE_5","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_5",nil,nil,nil,nil,nil},
 {6002,"LAB_MAIL_TITLE_6","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_6",nil,nil,nil,nil,nil},
+{7001,"LAB_MAIL_TITLE_11","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_10",nil,nil,nil,nil,nil},
+{8001,"LAB_MAIL_TITLE_13","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_11",nil,nil,nil,nil,nil},
 {51001,"LAB_LEADERBOARD_MAIL_TITLE_3","LAB_MAIL_SENDER_1",nil,"LAB_LEADERBOARD_MAIL_DEC_1",nil,nil,nil,nil,nil},
 {51002,"LAB_LEADERBOARD_MAIL_TITLE_3","LAB_MAIL_SENDER_1",nil,"LAB_LEADERBOARD_MAIL_DEC_2",nil,nil,nil,nil,nil},
 {61001,"LAB_MAIL_030","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_031",nil,nil,nil,nil,nil},
@@ -29,7 +34,8 @@ local function _initData()
 {90002,"LAB_MAIL_TITLE_8","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_8",nil,nil,nil,nil,nil},
 {90003,"LAB_MAIL_TITLE_8","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_MAIN_TEXT_9",nil,nil,nil,nil,nil},
 {100001,"LAB_MAIL_036","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_037",nil,nil,nil,nil,nil},
-{110001,"LAB_MAIL_038","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_039",nil,nil,nil,nil,nil}
+{110001,"LAB_MAIL_038","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_039",nil,nil,nil,nil,nil},
+{120001,"LAB_MAIL_TITLE_12","LAB_MAIL_SENDER_1",nil,"LAB_MAIL_042",nil,nil,nil,nil,nil}
 }
     for _, v in pairs(bodys) do
         local m = {}

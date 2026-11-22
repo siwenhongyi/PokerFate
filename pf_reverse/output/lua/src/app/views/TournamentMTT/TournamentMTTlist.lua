@@ -83,6 +83,7 @@ function P:setDatas(datas)
             selfData.brief.frame = scheme.frame
             selfData.brief.title = scheme.title
             selfData.brief.name = PlayerModel:getName()
+            selfData.brief.switch = SettingModel:getSwitchValue()
             self:refreshRankItem(selfData, self.Self)
             break
         end
@@ -156,7 +157,7 @@ function P:refreshRankItem(data, item)
     else
         GF.setFrameImage(self:find("Avatar/ImageFrame", Information), data.brief.frame)
         GF.setTitleImage(self:find("ImageTitle", Information), data.brief.title)
-        bee.setText(self:find("TextName", Information), GF.getOtherName(data.brief.name, nil, data.brief.uid))
+        GF.setPlayerName(self:find("TextName", Information), GF.getOtherName(data.brief.name, nil, data.brief.uid), data.brief.switch)
         bee.setIcon(self:find("Avatar/avatar_frame_01_mask/ImageIcon", Information), PlayerModel:getAvatarIcon(data.brief.avatar))
     end
     
@@ -206,7 +207,7 @@ end
 function P:refreshUserInfo(node, data)
     GF.setFrameImage(self:find("Avatar/ImageFrame", node), data.frame)
     GF.setTitleImage(self:find("ImageTitle", node), data.title)
-    bee.setText(self:find("TextName", node), data.name)
+    GF.setPlayerName(self:find("TextName", node), data.name, data.switch)
     bee.setIcon(self:find("Avatar/avatar_frame_01_mask/ImageIcon", node), PlayerModel:getAvatarIcon(data.avatar))
 end
 

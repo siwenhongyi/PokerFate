@@ -132,7 +132,13 @@ local function _initData()
 {125,1022,"sweat","Emoji102201[emoji1022_sweat]",0},
 {126,1022,"happy","Emoji102201[emoji1022_happy]",0},
 {127,1022,"praise","Emoji102201[emoji1022_lie]",6},
-{128,1022,"yes","Emoji102201[emoji1022_finger]",6}
+{128,1022,"yes","Emoji102201[emoji1022_finger]",6},
+{129,1023,"mock","Emoji102301[emoji1023_mock]",0},
+{130,1023,"pain","Emoji102301[emoji1023_pain]",0},
+{131,1023,"jet","Emoji102301[emoji1023_jet]",0},
+{132,1023,"angry","Emoji102301[emoji1023_angry]",0},
+{133,1023,"shit","Emoji102301[emoji1023_shit]",6},
+{134,1023,"doll","Emoji102301[emoji1023_doll]",6}
 }
     for _, v in pairs(bodys) do
         local m = {}

@@ -32,8 +32,13 @@ bee.invoke = function(obj, funcName, ...)
 	end
 end
 
+local isNeedCheck = nil
+
 -- 发射全局事件
 bee.emit = function(name, params, p2, _t)
+	if nil == isNeedCheck then
+		isNeedCheck = bee.checkVersion("1.7.2")
+	end
 	if bee._emiting then
 		if not bee._waitEvts then
 			bee._waitEvts = {{name, params, p2, _t}}
@@ -48,11 +53,15 @@ bee.emit = function(name, params, p2, _t)
 	if bee._evts then
 		local evts = bee._evts[name]
 		if evts then
+			local isLoadingScene = isNeedCheck and ResManager:IsLoadingScene()
 			bee._emiting = name
 			if bee.isEditor then
 				for _, v in ipairs(evts) do
 					if v[2] then
-						v[1](v[2], params, p2)
+						if isLoadingScene and iskindof(v[2], "Object") then
+						else
+							v[1](v[2], params, p2)
+						end
 					else
 						v[1](params, p2)
 					end
@@ -61,7 +70,10 @@ bee.emit = function(name, params, p2, _t)
 				local _, err = pcall(function()
 					for _, v in ipairs(evts) do
 						if v[2] then
-							v[1](v[2], params, p2)
+							if isLoadingScene and iskindof(v[2], "Object") then
+							else
+								v[1](v[2], params, p2)
+							end
 						else
 							v[1](params, p2)
 						end

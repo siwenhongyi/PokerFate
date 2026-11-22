@@ -8,6 +8,9 @@ function P:onStart()
 end
 
 function P:onUpdate()
+    if not bee.isPc then
+        return
+    end
     if CU.Input.GetKeyDown(CU.KeyCode.A) then
         if self:checkShowable() then
             self.actionView:allinEvent()

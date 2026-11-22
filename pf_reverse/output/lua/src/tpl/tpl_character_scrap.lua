@@ -6,7 +6,8 @@ local function _initData()
     local keys = {'id','attach_name',}
     local bodys = {
 {102004,{"ImageFg/SpineHandcuff"}},
-{100606,{"Image/SpineBg","ImageFg/SpineFg"}}
+{100606,{"Image/SpineBg","ImageFg/SpineFg"}},
+{102304,{"Image/SpineShadow"}}
 }
     for _, v in pairs(bodys) do
         local m = {}

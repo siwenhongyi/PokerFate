@@ -297,6 +297,20 @@ end
 ---@param gameid string 牌局ID
 ---@param cb function
 function P:addCollect(gameid, cb, roomid, tid)
+    --非局内，vip等级未满，存储数量已满，提示升级
+    if PlayerModel:getCurRecord() >= PlayerModel:getRecordNum() then
+        if not bee.isInGame() and VipModel:getVipLevel() < VipModel:getMaxLevel() then
+            UiManager:showTip({
+                text = _T("LAB_VIP_TEXT_34"),
+                sureStr = _T("LAB_GAME_012"),
+                onSure = function()
+                    ItemModel:jumpView(105001)
+                end
+            })
+            return
+        end
+    end
+
     Net:post("/collCard/update", {
         add_id = gameid,
         lang = LAN:getLanguage(),

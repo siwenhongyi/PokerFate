@@ -49,7 +49,16 @@ function P:onAwake()
         self:find("Item3", self.RankList),
         self:find("Item4", self.RankList),
     }
+    self.ItemHunters = {
+        self:find("ItemHunter1", self.RankList),
+        self:find("ItemHunter2", self.RankList),
+        self:find("ItemHunter3", self.RankList),
+        self:find("ItemHunter4", self.RankList),
+    }
     for _, v in ipairs(self.RankItems) do
+        v:SetActive(false)
+    end
+    for _, v in ipairs(self.ItemHunters) do
         v:SetActive(false)
     end
 
@@ -112,6 +121,12 @@ function P:onAwake()
     self.ListRank = UiListEx:create(self.RankList)
     self.ListRank:setWidth(100)
     self.ListRank:setCreateFunc(function(data)
+        if GameModel.data:isMTTHunter() then
+            if data.rank <= 3 then
+                return CU.GameObject.Instantiate(self.ItemHunters[data.rank])
+            end
+            return CU.GameObject.Instantiate(self.ItemHunters[4])
+        end
         if data.rank <= 3 then
             return CU.GameObject.Instantiate(self.RankItems[data.rank])
         end
@@ -142,6 +157,10 @@ function P:onAwake()
     self.ListTables:setRefreshFunc(function(data, item)
         self:refreshTableItem(data, item)
     end)
+
+    self._nameLen = GameModel.data:isMTTHunter() and 150 or 230
+    self:find("Title", self.Views[2]):SetActive(not GameModel.data:isMTTHunter())
+    self:find("TitleHunter", self.Views[2]):SetActive(GameModel.data:isMTTHunter())
 end
 
 function P:onShow()
@@ -287,8 +306,11 @@ function P:refreshBlindItem(data, item)
 end
 
 function P:refreshRankItem(data, item)
-    bee.setTextCut(self:find("TextName", item), GF.getOtherName(data.brief, data.seat_index + 1), 230)
+    GF.setPlayerName(self:find("TextName", item), GF.getOtherName(data.brief, data.seat_index + 1), data.brief.switch, self._nameLen)
     bee.setText(self:find("TextGold", item), GameModel.data:getBetChipsStr(data.chips))
+    if GameModel.data:isMTTHunter() then
+        bee.setText(self:find("TextBounty", item), _N(data.bounty))
+    end
     if data.rank >= 4 then
         local BgNums = self:find("BgNums", item)
         BgNums.transform.localScale = data.rank >= 1000 and bee.v3(0.6, 0.6, 0.6) or bee.v3one

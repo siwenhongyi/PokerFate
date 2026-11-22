@@ -585,7 +585,7 @@ function P:getAllCharacters()
     local datas = self:getOwnedCharacters()
     
     for _, v in ipairs(self._defaultRoles) do
-        if not self._roleMap[v.role_id] then
+        if not self:getRoleIsOwn(v.role_id) then
             if not v.info.display_time or v.info.display_time <= bee.getServerTime() then
                 table.insert(datas, v)
             elseif bee.isDev or PlayerModel:isEventWhite() then
@@ -596,10 +596,19 @@ function P:getAllCharacters()
     return datas
 end
 
-function P:getOwnedCharacters()
+function P:getOwnedCharacters(noTrial)
     local datas = {}
     for _, v in ipairs(self._roles) do
-        table.insert(datas, v)
+        if noTrial then
+            -- 试用角色不显示
+            if not v:isTrial() then
+                table.insert(datas, v)
+            end
+        else
+            if not v:isExpired() then
+                table.insert(datas, v)
+            end
+        end
     end
     self:sortRoles(datas)
     return datas
@@ -608,7 +617,7 @@ end
 function P:getStarredCharacters()
     local datas = {}
     for _, v in ipairs(self._roles) do
-        if v.is_star then
+        if not v:isExpired() and v.is_star then
             table.insert(datas, v)
         end
     end
@@ -833,6 +842,16 @@ function P:getRoleTotalNum()
     return #self._roles
 end
 
+function P:getRoleTotalRealNum()
+    local count = 0
+    for k,v in pairs(self._roles) do
+        if not v:isTrial() and not v:isExpired() then
+            count = count + 1
+        end
+    end
+    return count
+end
+
 function P:getSkinTotalNum()
     local ret = 0
     for _, v in ipairs(self._roles) do
@@ -863,7 +882,14 @@ end
 
 -- 是否已拥有该角色
 function P:getRoleIsOwn(id)
-    return self:getRole(id) ~= nil
+    local role = self:getRole(id)
+    if not role then
+        return false
+    end
+    if role:isExpired() then
+        return false
+    end
+    return true
 end
 
 -- 获取角色的语音配置列表
@@ -1379,5 +1405,11 @@ function P:saveStory(id)
     self:refreshReddot(self._red_role_id)
 end
 
+function P:evt_characterTimeEnd(msg)
+    if not UiManager:getUI("CharacterTrialView") then
+        UiManager:showUI("CharacterTrialView", msg)
+    end
+    ItemModel:requestRefreshItem()
+end
 
 return P

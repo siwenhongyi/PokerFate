@@ -266,7 +266,7 @@ function P:setPlayerInfo(playerItem, showRoleSkin, index)
 
     self:setRoleImg(ImageRole, showRoleSkin, isMe, index)
     if isMe then
-        bee.setTextCut(TextName, PlayerModel:getName(), 460)
+        GF.setPlayerName(TextName, PlayerModel:getName(), nil, 460)
     else
         bee.setTextCut(TextName, _T("LAB_COMMON_1"), 460)
     end
@@ -317,7 +317,7 @@ function P:setPlayerInfo(playerItem, showRoleSkin, index)
     else
         ImageUerType:SetActive(false)
         if isMe then
-            bee.setTextCut(TextName, PlayerModel:getName(), 460)
+            GF.setPlayerName(TextName, PlayerModel:getName(), nil, 460)
             bee.setText(TextChip, _N2(PlayerModel:getGold()))
 			local eff, eff_bg = GameModel:getAllinEffectName(0, nameplateEffId)
             AnimationMgr:playUIEffect(eff, BgAllin.transform, nil, -1)
@@ -462,7 +462,7 @@ function P:onClickPlayButton()
 	self._isPlaying = true
 	bee.unPauseSound(self._playIndex)
 
-	if self._audioPath ~= self._playingPath then
+	if self.audioPath ~= self._playingPath then
 		self._playIndex = bee.playSound(self.audioPath)
 		self._playingPath = self.audioPath
 	end

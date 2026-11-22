@@ -116,6 +116,11 @@ function P:getTimeInZone(dt, zone)
     return t
 end
 
+-- 获取在目标时区的时间戳
+function P:getTimeStampInZone(dt, zone)
+    return (dt or os.time()) + ((zone or self.targetZone) - self:getTimeZone()) * 3600
+end
+
 --转回本地时区  dt 目标时区时间戳
 function P:getTimeInLocalZone(dt, zone)
     return (dt or os.time()) - ((zone or self.targetZone) - self:getTimeZone()) * 3600

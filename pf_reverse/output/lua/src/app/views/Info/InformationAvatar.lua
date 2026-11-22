@@ -180,6 +180,7 @@ function P:showList(index)
     self._showIndex = index
     self.PreviewButton:SetActive(false)
     self:refreshDecorationItem()
+    self:clearItemTimeTags()
     if 1 == index then
         self._reds = ItemModel:removeNewFrame(GPropKind.Avatar)
         self.AvatarList:SetActive(true)
@@ -355,6 +356,15 @@ function P:getDatas(kind)
     return datas
 end
 
+function P:clearItemTimeTags()
+    if self._itemTimeTags then
+        for k,v in pairs(self._itemTimeTags) do
+            scheduler:removeTag(v)
+        end
+        self._itemTimeTags = {}
+    end
+end
+
 function P:refreshAvatarItem(data, item)
     if not item then return end
     self:find("Locked", item):SetActive(data:isLocked())
@@ -385,7 +395,37 @@ function P:refreshAvatarItem(data, item)
             randomTag:SetActive(false)
         end
     end
-    
+
+    -- 限时试用
+    if not self._itemTimeTags then
+        self._itemTimeTags = {}
+    end
+    if self._itemTimeTags[item] then
+        scheduler:removeTag(self._itemTimeTags[item])
+        self._itemTimeTags[item] = nil
+    end
+
+    local TimeTag = self:find("TimeTag", item)
+    TimeTag:SetActive(false)
+    local propData = ItemModel:getItem(data.id)
+    if propData then
+        local leftTime = propData.deadline - bee.getServerTime()
+        if leftTime > 0 then
+            TimeTag:SetActive(true)
+            bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+            self._itemTimeTags[item] = self:schedule(1, function()
+                leftTime = propData.deadline - bee.getServerTime()
+                bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+                if leftTime <= 0 then
+                    local skinCfg = tpl_character_skin[tpl_props[data.id].mapId]
+                    bee.emit("evt_characterTimeEnd", {role_id = skinCfg.role})
+                    scheduler:removeTag(self._itemTimeTags[item])
+                    self._itemTimeTags[item] = nil
+                    self:showList(self._showIndex)
+                end
+            end)
+        end
+    end
 
     self:find("Reddot", item):SetActive(table.indexof(self._reds, data.id) ~= -1 and data ~= self._selectAvatar and ItemModel:getItemNumById(data.id, true) > 0)
     bee.setIcon(self:find("Avatar/Mask/ImageIcon", item), data.icon)
@@ -434,6 +474,36 @@ function P:refreshFrameItem(data, item)
         end
     end
 
+    -- 限时试用
+    if not self._itemTimeTags then
+        self._itemTimeTags = {}
+    end
+    if self._itemTimeTags[item] then
+        scheduler:removeTag(self._itemTimeTags[item])
+        self._itemTimeTags[item] = nil
+    end
+
+    local TimeTag = self:find("TimeTag", item)
+    TimeTag:SetActive(false)
+    local propData = ItemModel:getItem(data.id)
+    if propData then
+        local leftTime = propData.deadline - bee.getServerTime()
+        if leftTime > 0 then
+            TimeTag:SetActive(true)
+            bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+            self._itemTimeTags[item] = self:schedule(1, function()
+                leftTime = propData.deadline - bee.getServerTime()
+                bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+                if leftTime <= 0 then
+                    bee.setText(self:find("TimeText", TimeTag), _T("LAB_BACKPACK_DES_21"))
+                    scheduler:removeTag(self._itemTimeTags[item])
+                    self._itemTimeTags[item] = nil
+                    self:showList(self._showIndex)
+                end
+            end)
+        end
+    end
+
     self:find("Reddot", item):SetActive(table.indexof(self._reds, data.id) ~= -1 and data ~= self._selectFrame and ItemModel:getItemNumById(data.id, true) > 0)
     bee.setIcon(self:find("ImageIcon", item), data.icon)
     bee.addClick(item, function()
@@ -479,9 +549,39 @@ function P:refreshTitleItem(data, item)
             randomTag:SetActive(false)
         end
     end
+    
+    -- 限时试用
+    if not self._itemTimeTags then
+        self._itemTimeTags = {}
+    end
+    if self._itemTimeTags[item] then
+        scheduler:removeTag(self._itemTimeTags[item])
+        self._itemTimeTags[item] = nil
+    end
+
+    local TimeTag = self:find("TimeTag", item)
+    TimeTag:SetActive(false)
+    local propData = ItemModel:getItem(data.id)
+    if propData then
+        local leftTime = propData.deadline - bee.getServerTime()
+        if leftTime > 0 then
+            TimeTag:SetActive(true)
+            bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+            self._itemTimeTags[item] = self:schedule(1, function()
+                leftTime = propData.deadline - bee.getServerTime()
+                bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+                if leftTime <= 0 then
+                    bee.setText(self:find("TimeText", TimeTag), _T("LAB_BACKPACK_DES_21"))
+                    scheduler:removeTag(self._itemTimeTags[item])
+                    self._itemTimeTags[item] = nil
+                    self:showList(self._showIndex)
+                end
+            end) 
+        end
+    end
 
     self:find("Reddot", item):SetActive(table.indexof(self._reds, data.id) ~= -1 and data ~= self._selectTitle and ItemModel:getItemNumById(data.id, true) > 0)
-    bee.setIcon(self:find("ImageIcon", item), data.icon, true)
+    GF.setTitleImage(self:find("ImageIcon", item), data.id)
     bee.addClick(item, function()
         if self._selectTitle ~= data then
             local oldData = self._selectTitle
@@ -530,7 +630,7 @@ function P:setCurSelectItem(data)
             isInUse = DecorationModel:checkFrameInScheme(SchemeTag.Ingame, true, self._curSelectItem.id)
         end
     else
-        bee.setIcon(self.ImageTitle, data.icon, true)
+        GF.setTitleImage(self.ImageTitle, data.id)
         if self.DecSwitchDatas[3] == SchemeTag.Lobby and not DecorationModel:isLobbySchemeRandom() then
             isInUse = PlayerModel:getTitle() == self._curSelectItem.id
         end

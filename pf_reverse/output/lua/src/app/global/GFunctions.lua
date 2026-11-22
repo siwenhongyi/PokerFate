@@ -128,6 +128,10 @@ function M.isMTT(gameType)
 	return gameType == GAME_GAME_TYPE.MTT_HOLDEM_GAME or gameType == GAME_GAME_TYPE.MTT_OMAHA_GAME
 end
 
+function M.isMTTHunter(mtt_mode)
+	return mtt_mode == GAME_MTT_MODE.HUNTER or mtt_mode == GAME_MTT_MODE.HUNTER_2
+end
+
 function M.isTournament(gameType)
 	return M.isSNG(gameType) or M.isMTT(gameType)
 end
@@ -554,33 +558,60 @@ function M.startCheckUpdate(isWhite, cb)
     end)
 end
 
+-- 邀请码暂存：深链可能在登录前或首屏之后到达，等邀请界面打开时再取
+local pendingInviteCode = nil
+
+function M.getPendingInviteCode()
+	return pendingInviteCode
+end
+
+function M.clearPendingInviteCode()
+	pendingInviteCode = nil
+end
+
 function M.dealDeepLinkParams()
 	local DeepLinkParams = CS.SdkHelper.GetDeepLinkParams()
 	-- print("===== ggggggg dealDeepLinkParams", DeepLinkParams, debug.traceback())
-	if DeepLinkParams and DeepLinkParams~= "" and PlayerModel:isLogin() and Net:isConnected() then
-		local params = json.decode(DeepLinkParams)
-		if params then
-			if params["kind"] == "friendsgame" then
-				local nickname = params["nickname"]
-				local room_num = tonumber(params["room_num"] or "0")
-				if nickname and room_num and room_num > 0 then
-					if GameModel.data then
-						if GameModel.data:getRoomId() ~= room_num then
-							Net:sendReq("pb.LeaveRoomREQ", {
-								client_str = json.encode({
-									key = "invite",
-									roomid = room_num,
-								})
+	if not DeepLinkParams or DeepLinkParams == "" then
+		return
+	end
+	local params = json.decode(DeepLinkParams)
+	if not params then
+		return
+	end
+
+	-- 邀请码与登录态无关，收到就存，界面打开时取 GF.getPendingInviteCode()
+	if params["kind"] == "invite" then
+		local code = params["code"]
+		if code and code ~= "" then
+			pendingInviteCode = code
+			bee.emit("evt_inviteCode", code)
+		end
+		CS.SdkHelper.ClearDeepLinkParams()
+		return
+	end
+
+	if PlayerModel:isLogin() and Net:isConnected() then
+		if params["kind"] == "friendsgame" then
+			local nickname = params["nickname"]
+			local room_num = tonumber(params["room_num"] or "0")
+			if nickname and room_num and room_num > 0 then
+				if GameModel.data then
+					if GameModel.data:getRoomId() ~= room_num then
+						Net:sendReq("pb.LeaveRoomREQ", {
+							client_str = json.encode({
+								key = "invite",
+								roomid = room_num,
 							})
-						end
-					else
-						Net:sendReq("pb.JoinFriendRoomREQ", {
-							roomid = tonumber(room_num),
 						})
 					end
+				else
+					Net:sendReq("pb.JoinFriendRoomREQ", {
+						roomid = tonumber(room_num),
+					})
 				end
-			elseif params["kind"] == "payment" then
 			end
+		elseif params["kind"] == "payment" then
 		end
 		CS.SdkHelper.ClearDeepLinkParams()
 	end
@@ -633,17 +664,114 @@ function M.getShowSkinData(skin, showReal)
 end
 
 ---------------- ui 工具函数 ---------------------
+
+local VIP_HELPER_NAME = "TextNameVipHelper"
+local VIP_HELPER_MATERIAL = "effect/Material/Text/Text_01.mat"
+
+-- 称号特效节点引用（弱键：ImageTitle 销毁后自动回收）
+-- Destroy 延迟到帧末生效，按名字查找可能命中本帧待销毁的对象，导致新建的特效残留
+local titleEftRefs = setmetatable({}, { __mode = "k" })
+
+--- 设置玩家的名字显示，根据 switchValue 的第 2 位(hasVipHelper)决定是否显示名字特效
+function M.setPlayerName(TextName, name, switchValue, width)
+	if bee.isNull(TextName) then return end
+
+	if not switchValue then
+		switchValue = SettingModel:getSwitchValue()
+	end
+	-- 1. 先给 TextName 设置名字文本
+	if width then
+		bee.setTextCut(TextName, name, width)
+	else
+		bee.setText(TextName, name)
+	end
+
+	-- 特效是 TextName 的克隆子节点，直接按名字找：不能用 Lua 引用表记录，
+	-- xLua 的 userdata 被 GC 后同一个 TextName 会拿到新 userdata，弱键表会丢记录 -> 重复创建、旧的永远删不掉
+	local helper = bee.find(VIP_HELPER_NAME, TextName)
+
+	if not SettingModel:isHasVipHelper(switchValue) then
+		-- 没有 vipHelper，删除名字特效
+		if helper then
+			-- Destroy 延迟到帧末：先隐藏并脱父，否则同一帧内再 Instantiate(TextName) 会把待销毁的克隆一起复制下来，
+			-- 复制体是全新对象不会被销毁，旧名字特效就永久残留了
+			helper:SetActive(false)
+			helper.transform:SetParent(nil, false)
+			CU.GameObject.Destroy(helper)
+		end
+		return
+	end
+
+	if helper then
+		-- 已有特效，仅更新文本
+		bee.setText(helper, bee.getText(TextName))
+		return
+	end
+
+	-- 2. 复制一份 TextName 添加到 TextName 下
+	local clone = CU.GameObject.Instantiate(TextName, TextName.transform, false)
+	clone.name = VIP_HELPER_NAME
+	clone:SetActive(true)
+	clone.transform.localPosition = bee.v3zero
+	clone.transform.localScale = bee.v3one
+	clone.transform.localRotation = CU.Quaternion.identity
+
+	-- 关闭阴影、描边效果
+	local shadow = clone:GetComponent("Shadow")
+	if not bee.isNull(shadow) then
+		shadow.enabled = false
+	end
+	local outline = clone:GetComponent("Outline")
+	if not bee.isNull(outline) then
+		outline.enabled = false
+	end
+
+	-- 3. 给复制的 TextName 换用炫彩材质，特效直接作用于字形，避免 Mask 裁切导致的锯齿/糊边
+	local text = clone:GetComponent("Text")
+	local mat = ResManager:GetMaterial(VIP_HELPER_MATERIAL)
+	if not bee.isNull(text) and mat then
+		text.material = mat
+	end
+end
+
 function M.setTitleImage(ImageTitle, title, nativeSize, hide)
 	if not ImageTitle then return end
 	local d = tpl_props[title]
+
+	-- 先清掉旧特效（用引用，不按名字找：同帧多次刷新时按名字会删到待销毁的旧对象）
+	local oldEft = titleEftRefs[ImageTitle]
+	if oldEft then
+		titleEftRefs[ImageTitle] = nil
+		CU.GameObject.Destroy(oldEft)
+	end
+
 	if d then
+		local td = tpl_avatartitle[d.mapId or 0]
+		if td and td.eff and td.eff ~= "" then
+			local eft = bee.createObj(td.eff)
+			if eft then
+				eft.name = "TitleEff"
+				ImageTitle:SetActive(true)
+				bee.setOpacity(ImageTitle, 0)
+				eft.transform:SetParent(ImageTitle.transform, false)
+				eft.transform.localPosition = bee.v3zero
+				if not nativeSize then
+					local s = ImageTitle.transform.sizeDelta
+					eft.transform.localScale = bee.v3(s.x / 340, s.y / 60, 1)
+				end
+				titleEftRefs[ImageTitle] = eft
+				return
+			end
+		end
 		ImageTitle:SetActive(true)
+		bee.setOpacity(ImageTitle, 1)
 		bee.setIcon(ImageTitle, d.icon, nativeSize)
 	else
 		if hide then
 			ImageTitle:SetActive(false)
 		else
 			ImageTitle:SetActive(true)
+			bee.setOpacity(ImageTitle, 1)
 			bee.setIcon(ImageTitle, _I("avatartitle_non_01_tw"), nativeSize)
 		end
 	end

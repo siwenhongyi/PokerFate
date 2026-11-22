@@ -141,6 +141,7 @@ function P:setCharacterItem(item, data, isInit, index)
 	local SeniorNumText = self:find("Number/Senior/NumText", State)
 	local OrdinaryNumText = self:find("Number/Ordinary/NumText", State)
 	local AvatarIcon = self:find("Avatar/avatar_frame_01_mask/AvatarIcon", Ani_root)
+	local TimeTag = self:find("TimeTag", Ani_root)
 
     if isInit and index > 0 then
         self:once(0.1 * (index - 1), function()
@@ -251,7 +252,32 @@ function P:setCharacterItem(item, data, isInit, index)
 			Break:SetActive(false)
 			Leisure:SetActive(true)
 		end
+	end
 
+	-- 角色试用
+	if not self.trialTimeTag then
+		self.trialTimeTag = {}
+	end
+	if self.trialTimeTag[item] then
+		scheduler:removeTag(self.trialTimeTag[item])
+		self.trialTimeTag[item] = nil
+	end
+	local leftTime = role:getLeftTime()
+	if leftTime and leftTime > 0 then
+		TimeTag:SetActive(true)
+		bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+		self.trialTimeTag[TimeTag] = self:schedule(1, function()
+			leftTime = role:getLeftTime()
+			bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+			if leftTime <= 0 then
+				bee.emit("evt_characterTimeEnd", {role_id = role.role_id})
+				scheduler:removeTag(self.trialTimeTag[TimeTag])
+				self.trialTimeTag[TimeTag] = nil
+				self:setCharacterList()
+			end
+		end)
+	else
+		TimeTag:SetActive(false)
 	end
 
 	bee.removeAllClick(Dispatching)

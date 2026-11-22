@@ -22,6 +22,7 @@ function P:ctor()
         [ActivityId.Matsuri] = {path = "views/Matsuri", lobbybtn = "LobbyMatsuri", mainview = "MatsuriMain", reddot = "Matsuri", addition = "MatsuriAddition", reward = "MatsuriReward"},
         [ActivityId.Racing] = {path = "views/Racing", lobbybtn = "LobbyRacing", mainview = "RacingMain", reddot = "Racing", addition = "RacingAddition", reward = "RacingReward"},
         [ActivityId.Fantasy] = {path = "views/Fantasy", lobbybtn = "LobbyFantasy", mainview = "FantasyMain", reddot = "Fantasy", addition = "FantasyAddition", reward = "FantasyReward"},
+        [ActivityId.Halloween] = {path = "views/Halloween", lobbybtn = "LobbyHalloween", mainview = "HalloweenMain", reddot = "Halloween", addition = "HalloweenAddition", reward = "HalloweenReward"},
     }
 
     -- 礼服季剧情物品ID
@@ -324,6 +325,8 @@ function P:refreshReddot(onlyRefreshData)
         if not onlyRefreshData then
             bee.emit("evt_themeRefreshTask")
         end
+    elseif self:getConfId() == ActivityId.Halloween then
+        RedManager:addTagWithNum(taskNum, RedTag.HalloweenTask)
     end
 end
 
@@ -498,6 +501,13 @@ end
 function P:getThemeIcon()
     local itemId = self:getItemId()
     return tpl_props[itemId].icon
+end
+
+function P:getStartTime(subId)
+    if not subId or subId == self:getConfId() then
+        return self._start_time or 0
+    end
+    return 0
 end
 
 function P:getEndTime(subId)

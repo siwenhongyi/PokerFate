@@ -10,7 +10,8 @@ local function _initData()
 {3,"LAB_PROPS_NAME_101_1",2},
 {4,"LAB_PROPS_NAME_111_3",2},
 {5,"LAB_DISPATCH_01",2},
-{6,"LAB_VIP_TEXT_20",1}
+{6,"TAB_BATTLE_PASS_NAME_1",2},
+{7,"LAB_VIP_TEXT_20",1}
 }
     for _, v in pairs(bodys) do
         local m = {}

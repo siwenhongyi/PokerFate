@@ -18,6 +18,17 @@ function P:ctor()
 
     self:initStove()
     self.loginAction = nil
+    self._loginSeq = 0
+end
+
+-- 每次发起登录请求递增，用于丢弃迟到的旧请求回包
+function P:newLoginSeq()
+    self._loginSeq = self._loginSeq + 1
+    return self._loginSeq
+end
+
+function P:isLoginSeqValid(seq)
+    return not seq or seq == self._loginSeq
 end
 
 function P:doLogin(params)
@@ -28,9 +39,10 @@ function P:doLogin(params)
     params.lang = LanguageManager:getLanguage()
     params.adjust_id = SdkModel:getAdjustCache()
     
+    local seq = self:newLoginSeq()
     self.loginAction = function ()
         params.yidun_risk_check = YiDunHelper:getReportData()
-        Net:post("login", self:addLoginArgs(params), function (data) self:_onLoginSuccess(data, params) end, function() self:_onLoginFail() end)
+        Net:post("login", self:addLoginArgs(params), function (data) self:_onLoginSuccess(data, params, seq) end, function() self:_onLoginFail(seq) end)
     end
     YiDunHelper:setReportData(params.type, REGISTER_LOGIN__TYPE.LOGIN)
 end
@@ -55,10 +67,11 @@ function P:guestLoginTest(id)
     }
     args.verify = self:getCheckMd5(args.os .. args.imei)
     
+    local seq = self:newLoginSeq()
     self.loginAction = function ()
         args.yidun_risk_check = YiDunHelper:getReportData()
         local _onSuccess = function (data)
-            self:_onLoginSuccess(data, args)
+            self:_onLoginSuccess(data, args, seq)
         end
         Net:post("login", self:addLoginArgs(args), _onSuccess)
     end
@@ -77,14 +90,15 @@ function P:guestLogin()
     }
     args.verify = self:getCheckMd5(args.os .. args.imei)
 
+    local seq = self:newLoginSeq()
     self.loginAction = function ()
         args.yidun_risk_check = YiDunHelper:getReportData()
 
         local _onSuccess = function (data)
-            self:_onLoginSuccess(data, args)
+            self:_onLoginSuccess(data, args, seq)
         end
 
-        Net:post("login", self:addLoginArgs(args), _onSuccess, function() self:_onLoginFail() end)
+        Net:post("login", self:addLoginArgs(args), _onSuccess, function() self:_onLoginFail(seq) end)
     end
     YiDunHelper:setReportData(args.type, REGISTER_LOGIN__TYPE.LOGIN)
 end
@@ -101,10 +115,14 @@ function P:emailLogin(email, password, cb)
         verify = password,
     }
 
+    local seq = self:newLoginSeq()
     self.loginAction = function ()
         args.yidun_risk_check = YiDunHelper:getReportData()
 
         local _onSuccess = function (data)
+            if not self:isLoginSeqValid(seq) then
+                return
+            end
             if data.code == 0 or data.code == -6 then
                 PlayerModel:setLoginEmail(email)
                 PlayerModel:setLoginPw(password)
@@ -112,13 +130,13 @@ function P:emailLogin(email, password, cb)
             if data.code == -6 then
                 UiManager:showError(_T("HTTP_THIRD_RISK_VERIFY_WARNING"))
             end
-            self:_onLoginSuccess(data, args)
+            self:_onLoginSuccess(data, args, seq)
             if cb then
                 cb(data)
             end
         end
 
-        Net:post("login", self:addLoginArgs(args), _onSuccess, function() self:_onLoginFail() end, cb ~= nil)
+        Net:post("login", self:addLoginArgs(args), _onSuccess, function() self:_onLoginFail(seq) end, cb ~= nil)
     end
     YiDunHelper:setReportData(args.type, REGISTER_LOGIN__TYPE.LOGIN)
 end
@@ -214,14 +232,15 @@ function P:XLogin()
             verify = secret,
         }
 
+        local seq = self:newLoginSeq()
         self.loginAction = function ()
             args.yidun_risk_check = YiDunHelper:getReportData()
 
             local _onSuccess = function(data)
-                self:_onLoginSuccess(data, args)
+                self:_onLoginSuccess(data, args, seq)
             end
 
-            Net:post("login", self:addLoginArgs(args), _onSuccess, function() self:_onLoginFail() end)
+            Net:post("login", self:addLoginArgs(args), _onSuccess, function() self:_onLoginFail(seq) end)
         end
         YiDunHelper:setReportData(args.type, REGISTER_LOGIN__TYPE.LOGIN)
     end
@@ -238,11 +257,15 @@ function P:evt_XLogin(params)
         verify = params.verifier,
     }
 
+    local seq = self:newLoginSeq()
     self.loginAction = function ()
         args.yidun_risk_check = YiDunHelper:getReportData()
 
         local _onSuccess = function (data)
-            self:_onLoginSuccess(data, args)
+            if not self:isLoginSeqValid(seq) then
+                return
+            end
+            self:_onLoginSuccess(data, args, seq)
 
             if data.code == 0 then
                 PlayerModel:setXToken(data.x_token)
@@ -250,17 +273,23 @@ function P:evt_XLogin(params)
             end
         end
 
-        Net:post("login", self:addLoginArgs(args), _onSuccess, function() self:_onLoginFail() end)
+        Net:post("login", self:addLoginArgs(args), _onSuccess, function() self:_onLoginFail(seq) end)
     end
     YiDunHelper:setReportData(args.type, REGISTER_LOGIN__TYPE.LOGIN)
 end
 
 function P:evt_yidunTokenCallback()
-    self.loginAction()
+    local action = self.loginAction
     self.loginAction = nil
+    if action then
+        action()
+    end
 end
 
-function P:_onLoginSuccess(data, params)
+function P:_onLoginSuccess(data, params, seq)
+    if not self:isLoginSeqValid(seq) then
+        return
+    end
     PlayerModel:clearDatas()
     
     if data.code and data.code < 0 and data.code ~= -6 then
@@ -289,6 +318,7 @@ function P:_onLoginSuccess(data, params)
         return
     end
     
+    local oldUid = PlayerModel:getUid()
     PlayerModel:setUid(data.uid)
     PlayerModel:setLoginType(params.type)
     PlayerModel:setAutoLogin(true)
@@ -308,6 +338,12 @@ function P:_onLoginSuccess(data, params)
 
     UrlManager:setHosts(data.server.server)
     PlayerModel:setIsLogin(true)
+
+    if oldUid ~= data.uid then
+        -- 换号登录：当前连接上还是上一个账号的会话，必须断开后重新连接
+        Net:closeSocket()
+        self._connectRet = nil
+    end
 
     if PlayerModel:isDeleted() then
         UiManager:hideLoadingMask("Login")
@@ -387,7 +423,10 @@ function P:_onLoginSuccess(data, params)
     SdkHelper:sendFirebaseEvent("login")
 end
 
-function P:_onLoginFail()
+function P:_onLoginFail(seq)
+    if not self:isLoginSeqValid(seq) then
+        return
+    end
     UiManager:hideLoadingMask("Login")
     bee.emit(EventDef.evt_login_fail)
 end
@@ -550,14 +589,15 @@ function P:evt_faceBookLogin(token)
         lang = LanguageManager:getLanguage(),
     }
 
+    local seq = self:newLoginSeq()
     self.loginAction = function ()
         args.yidun_risk_check = YiDunHelper:getReportData()
 
         local _onSuccess = function (data)
-            self:_onLoginSuccess(data, args)
+            self:_onLoginSuccess(data, args, seq)
         end
 
-        Net:post("login", self:addLoginArgs(args), _onSuccess, function() self:_onLoginFail() end)
+        Net:post("login", self:addLoginArgs(args), _onSuccess, function() self:_onLoginFail(seq) end)
     end
     YiDunHelper:setReportData(args.type, REGISTER_LOGIN__TYPE.LOGIN)
 end
@@ -581,17 +621,21 @@ function P:evt_appleLogin(info)
         lang = LanguageManager:getLanguage(),
     }
 
+    local seq = self:newLoginSeq()
     self.loginAction = function ()
         args.yidun_risk_check = YiDunHelper:getReportData()
 
         local _onSuccess = function (data)
-            self:_onLoginSuccess(data, args)
+            if not self:isLoginSeqValid(seq) then
+                return
+            end
+            self:_onLoginSuccess(data, args, seq)
             if data.code == 0 then
                 PlayerModel:setLoginToken(args.token)
             end
         end
 
-        Net:post("login", self:addLoginArgs(args), _onSuccess, function() self:_onLoginFail() end)
+        Net:post("login", self:addLoginArgs(args), _onSuccess, function() self:_onLoginFail(seq) end)
     end
     YiDunHelper:setReportData(args.type, REGISTER_LOGIN__TYPE.LOGIN)
 end

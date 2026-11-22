@@ -71,7 +71,7 @@ function P:initGachaPoolList(force, checkIsNewPool)
             self._cosmetic_rate[v.pool_id] = v.cosmetic_rate
             self._item_rate[v.pool_id] = v.item_rate
 			self._cardPoolMap[v.pool_id] = self:setCardPoolList(v)
-            self._cardPoolSkin[v.pool_id] = v.character_skin_id
+            self._cardPoolSkin[v.pool_id] = {skin_id = v.character_skin_id, jump_id = v.jump_id}
 		end
 
         bee.emit("evt_gachaUpdate", {isNew = isNewCardPool})

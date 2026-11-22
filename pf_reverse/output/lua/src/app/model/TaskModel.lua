@@ -216,7 +216,7 @@ function P:getTaskActiveIsAllRewarded(task_cate)
 	return self:getTaskActiveIsRewarded(task_cate, pointData[maxId].id)
 end
 
-local _sortTaskList = function(list)
+function P:sortTaskList(list)
 	if not list then
 		return {}
 	end
@@ -250,12 +250,12 @@ end
 
 -- 获取每日任务列表
 function P:getDailyTaskList()
-	return _sortTaskList(self._daily_task_list)
+	return self:sortTaskList(self._daily_task_list)
 end
 
 -- 获取每周任务列表
 function P:getWeeklyTaskList()
-	return _sortTaskList(self._weekly_task_list)
+	return self:sortTaskList(self._weekly_task_list)
 end
 
 -- 获取挑战任务列表
@@ -263,7 +263,7 @@ function P:getChallengeTaskList()
 	if not self._challenge_task_list then
 		return {}
 	end
-	return _sortTaskList(self._challenge_task_list)
+	return self:sortTaskList(self._challenge_task_list)
 end
 
 -- 是否有挑战任务
@@ -283,6 +283,9 @@ function P:getTaskDesc(cfg, data)
 	local valCount = #value
 	if cfg.task_type == 311 then
 		return _T(cfg.dec)
+	elseif cfg.task_type == 312 then
+		local propCfg = tpl_props[value[1]]
+		return _F(cfg.dec, value[2], propCfg and _T(propCfg.name) or nil)
 	elseif cfg.task_type == 313 then
 		local propCfg = tpl_props[value[2]]
 		return _F(cfg.dec, value[3], propCfg and _T(propCfg.name) or nil)

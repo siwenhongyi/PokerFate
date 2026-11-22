@@ -50,6 +50,7 @@ function P:addSeatStatus(seatid, v)
             role_id = v and v.role_id,
             skin_id = v and v.skin_id,
             user_type = v and v.user_type,
+            switch = v and v.switch,
         },
         hand_chips = v and v.begin_chips,
         total_chips = v and v.begin_chips,
@@ -64,6 +65,7 @@ function P:addSeatStatus(seatid, v)
         card3 = 0,
         card4 = 0,
         hand_cards = v and v.hand_card,
+        mtt_bounty = v and v.begin_bounty,
     }
     return seat
 end
@@ -183,6 +185,12 @@ function P:onPreAction()
         for _, v in ipairs(act1.winner) do
             local player1 = GameModel.data:getPlayer(v.seatid + 1)
             player1.chips = player1.chips - v.chips
+        end
+        if act1.hunt_info then
+            for _, v in ipairs(act1.hunt_info) do
+                local player1 = GameModel.data:getPlayer(v.hunter_seatid + 1)
+                player1.mtt_bounty = player1.mtt_bounty - v.bounty_inc
+            end
         end
     end
     
@@ -458,13 +466,26 @@ function P:initResps()
             uid = v.uid,
         }
     end
+    if self.msg.hunt_record and #self.msg.hunt_record > 0 then
+        d.hunt_info = {}
+        for _, v in ipairs(self.msg.hunt_record) do
+            table.insert(d.hunt_info, {
+                hunter_uid = v.hunter_uid,
+                hunter_seatid = v.hunter_seatid,
+                prey_uid = v.prey_uid,
+                prey_seatid = v.prey_seatid,
+                bounty_reward = v.bounty_reward,
+                bounty_inc = v.bounty_inc,
+            })
+        end
+    end
     self:addResp(d)
 
     self.respIndex = 0
 end
 
 function P:addShowHandRSP()
-    if self.msg.show_hand_info and #self.msg.show_hand_info > 0 and not self._isAddShowHand then
+    if not self._isAddShowHand then
         self._isAddShowHand = true
         
         -- 检查玩家主动亮牌
@@ -498,22 +519,24 @@ function P:addShowHandRSP()
             self:addResp(sd)
         end
 
-        -- 系统亮牌
-        local d = {
-            info = {},
+        if self.msg.show_hand_info and #self.msg.show_hand_info > 0 then
+            -- 系统亮牌
+            local d = {
+                info = {},
 
-            _evt = "ShowHandRSP",
-        }
-        for _, v in ipairs(self.msg.show_hand_info) do
-            d.info[#d.info + 1] = {
-                seatid = v.seatid,
-                card1 = v.hand_card[1],
-                card2 = v.hand_card[2],
-                card3 = v.hand_card[3],
-                card4 = v.hand_card[4],
+                _evt = "ShowHandRSP",
             }
+            for _, v in ipairs(self.msg.show_hand_info) do
+                d.info[#d.info + 1] = {
+                    seatid = v.seatid,
+                    card1 = v.hand_card[1],
+                    card2 = v.hand_card[2],
+                    card3 = v.hand_card[3],
+                    card4 = v.hand_card[4],
+                }
+            end
+            self:addResp(d)
         end
-        self:addResp(d)
     end
 end
 

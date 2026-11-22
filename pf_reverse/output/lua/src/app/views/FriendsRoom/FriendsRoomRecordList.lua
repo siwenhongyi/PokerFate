@@ -153,7 +153,7 @@ end
 
 function P:refreshItem(data, item)
     self:find("TextDissolve", item):SetActive(data.offline_room_over)
-    bee.setTextCut(self:find("TextName", item), data.creater.name, 217)
+    GF.setPlayerName(self:find("TextName", item), data.creater.name, data.creater.switch, 217)
     bee.setIcon(self:find("Avatar/Mask/ImageIcon", item), PlayerModel:getAvatarIcon(data.creater.avatar))
     GF.setFrameImage(self:find("Avatar/ImageFrame", item), data.creater.frame)
 

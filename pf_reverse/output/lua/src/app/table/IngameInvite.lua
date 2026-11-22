@@ -54,7 +54,7 @@ function P:refreshItem(data, item)
     if not name or name == "" then
         name = data.nickname
     end
-    bee.setTextCut(self:find("TextName", item), name, 215)
+    GF.setPlayerName(self:find("TextName", item), name, data.switch, 215)
     bee.setText(self:find("Rank/TextLevel", item), data.level)
     if data.level > 0 then
         bee.setIcon(self:find("Rank/icon_rank_01", item), tpl_level[data.level].icon)

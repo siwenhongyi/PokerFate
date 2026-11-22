@@ -103,7 +103,7 @@ function P:refreshUI(info)
         if not includeSelf then
             includeSelf = v.brief.uid == PlayerModel:getUid()
         end
-        bee.setTextCut(self:find("TextName", item), GF.getOtherName(v.brief.name, v.seatid + 1, v.brief.uid), 230)
+        GF.setPlayerName(self:find("TextName", item), GF.getOtherName(v.brief.name, v.seatid + 1, v.brief.uid), v.brief.switch, 230)
         bee.setText(self:find("Rank/TextLevel", item), v.brief.level)
         bee.setIcon(self:find("Rank/icon_rank_01", item), (tpl_level[v.brief.level] or tpl_level[1]).icon)
         GF.setTitleImage(self:find("ImageTitle", item), v.brief.title, true)

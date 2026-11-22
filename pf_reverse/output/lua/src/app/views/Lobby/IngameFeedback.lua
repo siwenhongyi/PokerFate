@@ -122,6 +122,7 @@ function P:evt_GetUserBondInfoRSP(msg)
     if 0 == msg.code then
         -- PlayerModel:setTodayHands(msg.hands)
         local str = ""
+        local vipLv = " (" .. _F("LAB_VIP_TEXT_1", VipModel:getVipLevel()) .. ")"
         if self._params and self._params.info.from == "Dispatch" then
             if TimeHelp:isInToday(self._params.info.start_ts) then
                 if DispatchModel:getBondCount() < VipModel:getFriendshipDispatch() then
@@ -129,7 +130,7 @@ function P:evt_GetUserBondInfoRSP(msg)
                 else
                     str = string.format("<color=#c00036>%d/%d %s</color>", DispatchModel:getBondCount(), VipModel:getFriendshipDispatch(), _T("LAB_GAME_009"))
                 end
-                bee.setText(self.TextTip, _T("LAB_VIP_TEXT_30") .. " " .. str)
+                bee.setText(self.TextTip, _T("LAB_VIP_TEXT_30") .. " " .. str .. vipLv)
             else
                 bee.setText(self.TextTip, "")
             end
@@ -143,7 +144,7 @@ function P:evt_GetUserBondInfoRSP(msg)
                 self.TextFull:SetActive(false)
                 self.BoostButton:SetActive(true)
             end
-            bee.setText(self.TextTip, _T("LAB_VIP_TEXT_25") .. " " .. str)
+            bee.setText(self.TextTip, _T("LAB_VIP_TEXT_25") .. " " .. str .. vipLv)
         else
             if msg.hands < VipModel:getFriendshipHands() then
                 str = string.format("<color=#1b8b05>%d/%d</color>", msg.hands, VipModel:getFriendshipHands())
@@ -154,7 +155,7 @@ function P:evt_GetUserBondInfoRSP(msg)
                 self.TextFull:SetActive(false)
                 self.BoostButton:SetActive(true)
             end
-            bee.setText(self.TextTip, _T("LAB_VIP_TEXT_15") .. " " .. str)
+            bee.setText(self.TextTip, _T("LAB_VIP_TEXT_15") .. " " .. str .. vipLv)
         end
     end
 end

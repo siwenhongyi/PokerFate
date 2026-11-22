@@ -17,6 +17,7 @@ local function _initData()
 {1003,"LAB_CHAR_NAME_1003",1,"RoleSpine/1003_1/Role1003_1",nil,nil},
 {100304,"LAB_CHAR_NAME_1003",1,"RoleSpine/1003_2/Role1003_2",nil,nil},
 {100305,"LAB_CHAR_NAME_1003",1,"RoleSpine/1003_3/Role1003_3",nil,nil},
+{100306,"LAB_CHAR_NAME_1003",1,"RoleSpine/1003_6/Role1003_6",nil,nil},
 {1004,"LAB_CHAR_NAME_1004",1,"RoleSpine/1004_1/Role1004_1",nil,nil},
 {100404,"LAB_CHAR_NAME_1004",1,"RoleSpine/1004_2/Role1004_2",nil,nil},
 {100405,"LAB_CHAR_NAME_1004",1,"RoleSpine/1004_3/Role1004_3",nil,nil},
@@ -25,6 +26,7 @@ local function _initData()
 {100504,"LAB_CHAR_NAME_1005",1,"RoleSpine/1005_2/Role1005_2",nil,nil},
 {100505,"LAB_CHAR_NAME_1005",1,"RoleSpine/1005_3/Role1005_3",nil,nil},
 {100506,"LAB_CHAR_NAME_1005",1,"RoleSpine/1005_6/Role1005_6",nil,nil},
+{100507,"LAB_CHAR_NAME_1005",1,"RoleSpine/1005_7/Role1005_7",nil,nil},
 {1006,"LAB_CHAR_NAME_1006",1,"RoleSpine/1006_1/Role1006_1",nil,nil},
 {100604,"LAB_CHAR_NAME_1006",1,"RoleSpine/1006_2/Role1006_2",nil,nil},
 {100605,"LAB_CHAR_NAME_1006",1,"RoleSpine/1006_5/Role1006_5",nil,nil},
@@ -55,6 +57,7 @@ local function _initData()
 {1014,"LAB_CHAR_NAME_1014",1,"RoleSpine/1014_1/Role1014_1",nil,nil},
 {101404,"LAB_CHAR_NAME_1014",1,"RoleSpine/1014_4/Role1014_4",nil,nil},
 {101405,"LAB_CHAR_NAME_1014",1,"RoleSpine/1014_5/Role1014_5",nil,nil},
+{101406,"LAB_CHAR_NAME_1014",1,"RoleSpine/1014_6/Role1014_6",nil,nil},
 {1015,"LAB_CHAR_NAME_1015",1,"RoleSpine/1015_1/Role1015_1",nil,nil},
 {101504,"LAB_CHAR_NAME_1015",1,"RoleSpine/1015_4/Role1015_4",nil,nil},
 {101505,"LAB_CHAR_NAME_1015",1,"RoleSpine/1015_5/Role1015_5",nil,nil},
@@ -79,7 +82,10 @@ local function _initData()
 {102105,"LAB_CHAR_NAME_1021",1,"RoleSpine/1021_5/Role1021_5",nil,nil},
 {1022,"LAB_CHAR_NAME_1022",1,"RoleSpine/1022_1/Role1022_1",nil,nil},
 {102204,"LAB_CHAR_NAME_1022",1,"RoleSpine/1022_4/Role1022_4",nil,nil},
-{102205,"LAB_CHAR_NAME_1022",1,"RoleSpine/1022_5/Role1022_5",nil,nil}
+{102205,"LAB_CHAR_NAME_1022",1,"RoleSpine/1022_5/Role1022_5",nil,nil},
+{1023,"LAB_CHAR_NAME_1023",1,"RoleSpine/1023_1/Role1023_1",nil,nil},
+{102304,"LAB_CHAR_NAME_1023",1,"RoleSpine/1023_4/Role1023_4",nil,nil},
+{102305,"LAB_CHAR_NAME_1023",1,"RoleSpine/1023_5/Role1023_5",nil,nil}
 }
     for _, v in pairs(bodys) do
         local m = {}

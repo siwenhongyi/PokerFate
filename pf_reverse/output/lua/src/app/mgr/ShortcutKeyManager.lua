@@ -94,7 +94,7 @@ function P:InputEscape()
 		end
 
 		--围观
-		if GameModel.data:isInObserve() then
+		if GameModel.data and GameModel.data:isInObserve() then
             if uiName == "IngameSpectate" or uiName == "FriendsRoomOutlook" then
                 bee.emit("evt_shortcutOpenMenu")
                 return

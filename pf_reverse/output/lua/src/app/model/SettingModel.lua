@@ -556,8 +556,8 @@ function P:addVipLevelUpPop(oldLevel)
         LocalStore:setIntegerForKey("vip_level_up_old_level" .. PlayerModel:getUid(), oldLevel)
         return
     end
-    bee.showUiTask("VIPUpgrade", {oldLevel = oldLevel}, POP_TAG.Reward)
-    bee.runTask()
+    bee.showUiTask("VIPUpgrade", {oldLevel = oldLevel}, POP_TAG.Reward, LOBBY_POP_PRIORITY.VipUpLobby)
+    bee.runTask(POP_TAG.Reward)
 end
 
 function P:addLevelUpPop()
@@ -836,8 +836,8 @@ function P:evt_onApplicationPause(paused)
 end
 
 function P:setVipHide(value)
-    local v = value % 10
-    self._vipHideValue = v == 0
+    self._switchValue = value
+    self._vipHideValue = not self:isVipHide(value)
 end
 
 function P:changeVipHide(value)
@@ -848,6 +848,26 @@ end
 
 function P:getVipHide()
     return self._vipHideValue
+end
+
+function P:getSwitchValue()
+    return self._switchValue
+end
+
+-- 判断 switchValue 的第 pos 位(从 1 开始)是否为 1
+local function _checkBit(switchValue, pos)
+    if not switchValue then
+        return false
+    end
+    return math.floor(switchValue / 2 ^ (pos - 1)) % 2 == 1
+end
+
+function P:isVipHide(switchValue)
+    return _checkBit(switchValue or self._switchValue, 1)
+end
+
+function P:isHasVipHelper(switchValue)
+    return _checkBit(switchValue or self._switchValue, 2)
 end
 
 return P

@@ -100,6 +100,10 @@ function P:onBtConfirm()
                         PlayerModel:setBindEmail(email)
                         UiManager:showToast(_T("LAB_SETTINGS_068"))
                         bee.emit("evt_refreshBindEmail")
+
+                        PlayerModel:setAutoLogin(false)
+                        PlayerModel:setLoginType(false)
+
                         self:hideUI()
                     end
                 end)

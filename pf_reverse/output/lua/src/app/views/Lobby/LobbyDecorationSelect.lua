@@ -99,19 +99,63 @@ function P:setRoleItem(item, data)
 	local skinCfg = role:getSkinData()
 	bee.setIconInAtlas(CharacterAvatar, tpl_props[skinCfg.avatar].icon)
 
+    -- 限时试用
+    if not self._itemTimeTags then
+        self._itemTimeTags = {}
+    end
+    if self._itemTimeTags[item] then
+        scheduler:removeTag(self._itemTimeTags[item])
+        self._itemTimeTags[item] = nil
+    end
+
+    local TimeTag = self:find("TimeTag", item)
+    local role = CharacterModel:getRole(info.id)
+    local leftTime = role:getLeftTime()
+    if leftTime > 0 then
+        TimeTag:SetActive(true)
+        bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+        self._itemTimeTags[item] = self:schedule(1, function()
+            leftTime = role:getLeftTime()
+            bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+            if leftTime <= 0 then
+                bee.emit("evt_characterTimeEnd", {role_id = info.id})
+                scheduler:removeTag(self._itemTimeTags[item])
+                self._itemTimeTags[item] = nil
+                self:refreshTrialRole()
+            end
+        end)
+    else
+        TimeTag:SetActive(false)
+    end
+
 	bee.removeAllClick(item)
 	bee.addClick(item, function()
 		if self._selected == info.id then
 			return
 		end
-		if self._clickCb then
-			self._clickCb(info.id)
-		end
+		-- if self._clickCb then
+		-- 	self._clickCb(info.id)
+		-- end
 		self._selected = info.id
 		self.ConfirmButton:SetActive(self._selected ~= self._curUsing)
 		self.ConfirmButton2:SetActive(not self.ConfirmButton.activeSelf)
 		self:refreshRoleItem()
 	end)
+end
+
+function P:evt_lobbySchemeChange()
+	self:refreshTrialRole()
+end
+
+function P:refreshTrialRole()
+	if self._select_type ~= GMajorType.ROLE then
+		return
+	end
+	if not CharacterModel:getRoleIsOwn(self._selected) then
+		local schemeInfo = DecorationModel:getLobbySchemeInfoById(self._params.scheme_id, true)
+		self._selected = tpl_character_skin[schemeInfo.skin_id].role
+	end
+	self:setRoleList()
 end
 
 function P:setSceneItem(item, data)
@@ -130,9 +174,9 @@ function P:setSceneItem(item, data)
 		if self._selected == data.item_id then
 			return
 		end
-		if self._clickCb then
-			self._clickCb(data.item_id)
-		end
+		-- if self._clickCb then
+		-- 	self._clickCb(data.item_id)
+		-- end
 		self._selected = data.item_id
 		self.ConfirmButton:SetActive(self._selected ~= self._curUsing)
 		self.ConfirmButton2:SetActive(not self.ConfirmButton.activeSelf)

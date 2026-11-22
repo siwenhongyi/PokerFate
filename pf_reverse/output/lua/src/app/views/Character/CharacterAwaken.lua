@@ -29,6 +29,8 @@ function P:initUI()
     self.Item1 = self:find("Item1", AwakenMaterial)
     self.Item1:SetActive(false)
 
+    self.character_awaken_button_lock = self:find("AwakenButton/character_awaken_button_lock", AwakenMaterial)
+
     self.RewardItems = {
         self:find("Item1/item01", AwakenReward),
         self:find("Item1/item02", AwakenReward),
@@ -61,7 +63,11 @@ function P:initUI()
         else
             self.ImageRole.transform.localScale = bee.v3one
         end
-        if self._role:getBondLevel() < Config.AWAKEN_LEVEL then
+        if self._role:isTrial() then
+            -- 试用角色不可觉醒
+            UiManager:showToast(_T("LAB_CHAR_138"))
+            return
+        elseif self._role:getBondLevel() < Config.AWAKEN_LEVEL then
             UiManager:showToast(_T("LAB_CHAR_069"))
             if bee.isDev then
                 self:doAwakeAnim()
@@ -187,6 +193,8 @@ function P:onShow()
             v:SetActive(false)
         end
     end
+
+    self.character_awaken_button_lock:SetActive(self._role:isTrial())
 end
 
 function P:getAwakenItems()

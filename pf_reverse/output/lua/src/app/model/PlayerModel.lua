@@ -225,6 +225,10 @@ function P:setName(name)
     self._name = name
 end
 
+function P:getSwitch()
+    return SettingModel:getSwitchValue()
+end
+
 function P:getAvatar()
     local scheme = DecorationModel:getCurScheme()
     return scheme.avatar
@@ -362,7 +366,8 @@ function P:setInfo(msg)
     self._register_time = msg.register_time
     self._auth_cert_url = msg.auth_cert_url
     self._auth_cert_time = msg.auth_cert_time
-    self:setIllustration(msg.using_illustration)
+    self:setIllustration(msg.using_illustration, 0)
+    self:setIllustration(msg.using_illustration2, 1)
     ShopModel:setMonthlyCardLeftTime(msg.monthly_card_exp)
 
     if self._scheme_list then
@@ -682,12 +687,49 @@ function P:setGameRoomNewPoint()
     self:onSave()
 end
 
-function P:setIllustration(id)
-    self._using_illustration = id
+function P:setIllustration(id, subType)
+    if id <= 0 then
+        return
+    end
+    if subType and subType == 1 then
+        self._using_illustration2 = id
+        CU.PlayerPrefs.SetString("using_illustration2_id", id)
+        self:refreshIllustration2Time(ItemModel:getItem(id))
+    else
+        self._using_illustration = id
+    end
+end
+
+function P:refreshIllustration2Time(item)
+    if not item then
+        return
+    end
+    if not CU.PlayerPrefs.HasKey("using_illustration2_id") then
+        return
+    end
+    if item.item_id == tonumber(CU.PlayerPrefs.GetString("using_illustration2_id")) then
+        if item.deadline and item.deadline > 0 then
+            CU.PlayerPrefs.SetString("using_illustration2_Time", item.deadline)
+        end
+    end
 end
 
 function P:getIllustrationId()
     return self._using_illustration or ItemModel:getDefaultDecoration(GPropKind.Illustration)
+end
+
+function P:getIllustrationId2()
+    if CU.PlayerPrefs.HasKey("using_illustration2_id") then
+        if CU.PlayerPrefs.HasKey("using_illustration2_Time") then
+            local time = TimeHelp:getTimeStampInZone(7)
+            if time >= tonumber(CU.PlayerPrefs.GetString("using_illustration2_Time")) then
+                return ItemModel:getDefaultDecoration(GPropKind.Illustration)
+            end
+        else
+            return tonumber(CU.PlayerPrefs.GetString("using_illustration2_id"))
+        end
+    end
+    return self._using_illustration2 or ItemModel:getDefaultDecoration(GPropKind.Illustration)
 end
 
 return P

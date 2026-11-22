@@ -12,7 +12,9 @@ local SubView = {
 	[20001] = {view = "views/Matsuri/MatsuriPackageBase", pos = {0, 0}},	-- 夏日祭活动礼包
 	[20002] = {view = "views/Racing/RacingPackageBase", pos = {165, 0}},	-- 赛车祭活动礼包
 	[20003] = {view = "views/Fantasy/FantasyPackageBase", pos = {160, -82}},	-- 日幻活动礼包
+	[20004] = {view = "views/Halloween/HalloweenPackageBase", pos = {197, 0}},	-- 万圣节活动礼包
 	[30001] = {view = "views/Shop/ShopBestsellerSkin", pos = {0, 0}},		-- 服饰复刻
+	[40001] = {view = "views/SpiritCatStylePass/SpiritCatStyleHotSell", pos = {0, 0}}		-- 通行证
 }
 
 function P:onAwake()
@@ -120,6 +122,14 @@ function P:setTabToggle(item, data)
 
 	data = data.cfg
 
+	self:find("On", Ani_root):SetActive(data.id == self._selectSideTab)
+	self:find("Off", Ani_root):SetActive(data.id ~= self._selectSideTab)
+	if data.id == self._selectSideTab then
+		Ani_root.transform.localPosition = bee.v3(25, 0, 0)
+	else
+		Ani_root.transform.localPosition = bee.v3(0, 0, 0)
+	end
+
 	self:find("Mask/ImageCD", Ani_root):SetActive(data.time_limited == 1)
 	bee.setIconInAtlas(ToggleIcon, data.tag_image, true)
 	bee.setText(NameText, _T(data.name))
@@ -145,18 +155,17 @@ function P:setTabToggle(item, data)
 end
 
 function P:refreshTabToggle()
-	for k, v in pairs(self.tabtoggleList:getDatas()) do
-		if v.node then
-			if v.data.cfg.id == self._selectSideTab then
-				-- self:playToggleInto(v.node)
-				self:find("Ani_root", v.node).transform.localPosition = bee.v3(25, 0, 0)
-				self:find("Ani_root/On", v.node):SetActive(true)
-				self:find("Ani_root/Off", v.node):SetActive(true)
+	for k, v in pairs(self.tabtoggleList:getShows()) do
+		local item = self.tabtoggleList:getNode(v)
+		if item then
+			if self.tabtoggleList:getData(v).cfg.id == self._selectSideTab then
+				self:find("Ani_root", item).transform.localPosition = bee.v3(25, 0, 0)
+				self:find("Ani_root/On", item):SetActive(true)
+				self:find("Ani_root/Off", item):SetActive(true)
 			else
-				-- self:playToggleIdle2(v.node)
-				self:find("Ani_root", v.node).transform.localPosition = bee.v3(0, 0, 0)
-				self:find("Ani_root/On", v.node):SetActive(false)
-				self:find("Ani_root/Off", v.node):SetActive(true)
+				self:find("Ani_root", item).transform.localPosition = bee.v3(0, 0, 0)
+				self:find("Ani_root/On", item):SetActive(false)
+				self:find("Ani_root/Off", item):SetActive(true)
 			end
 		end
 	end

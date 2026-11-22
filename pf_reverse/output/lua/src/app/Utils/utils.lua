@@ -245,6 +245,19 @@ bee.checkInputField = function(inputItem, title, maxCount, isPassword)
 	end
 end
 
+function bee.toBinary(n)
+    if n == 0 then
+        return "0"
+    end
+
+    local result = ""
+    while n > 0 do
+        result = tostring(n % 2) .. result
+        n = math.floor(n / 2)
+    end
+    return result
+end
+
 _N = bee.getShortNumber2
 _N1 = bee.getShortNumber1
 _N2 = bee.getShortNumber2

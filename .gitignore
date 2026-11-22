@@ -54,3 +54,6 @@ pokerfate/g5/src/DecisionMaking/*.o
 # PokerFate reverse local workspace
 pf_reverse/local/
 pf_reverse/poker_chase/
+
+# 热更新层：运行时从 CDN 同步（pf_reverse/hotupdate.py），不入库；入库的 output/ 只放安装包解出的文件
+pf_reverse/remote_res/

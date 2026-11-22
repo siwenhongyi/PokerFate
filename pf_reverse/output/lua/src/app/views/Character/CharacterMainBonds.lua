@@ -32,6 +32,8 @@ function P:onAwake()
     self.Pledged = self:find("Pledged", self.Right)
     self.AvailableButton = self:find("AvailableButton", self.Right)
 
+    self.TrialTime = self:find("TrialTime", self.RightTop)
+
     self.HeartView = self:find("HeartView", self.Bottom)
     self.HeartSlider = self:find("HeartSlider", self.HeartView)
     self.character_bond_heart_line_fg = self:find("character_bond_heart_line_fg", self.HeartSlider)
@@ -105,6 +107,10 @@ function P:onAwake()
 
     bee.addClick(self.GiftButton, function()
         Game:playSound("ui_button_confirm")
+        if self._role.locked then
+            UiManager:showToast(_T("ERR_ROLE_NOT_OWNED"))
+            return
+        end
         if self._selectGift.num <= 0 then
             if not ShopModel:autoShowCharacterGift(self._role.role_id) and not GuideManager:isInGuide() then
                 UiManager:showUI("BackpackDetail", {data = self._selectGift, characterId = self._role.role_id})
@@ -200,6 +206,13 @@ function P:onShow()
     self:refreshUI()
     
     self:playOpenAnim()
+end
+
+function P:evt_characterTimeEnd(msg)
+    if msg and msg.role_id == self._role.role_id then
+        self:refreshLeftRight()
+        self:refreshUI()
+    end
 end
 
 function P:onHide()
@@ -384,6 +397,8 @@ function P:refreshInfos(isAmin)
     end
 
     if not CharacterModel:getRole(self._role.role_id) then
+        self.PackageButton:SetActive(false)
+    elseif self._role:isTrial() or self._role:isExpired() then
         self.PackageButton:SetActive(false)
     elseif not self._role:isAwaken() and ShopModel:getCharacterGiftCfg(self._role.role_id) then
         self.PackageButton:SetActive(true)

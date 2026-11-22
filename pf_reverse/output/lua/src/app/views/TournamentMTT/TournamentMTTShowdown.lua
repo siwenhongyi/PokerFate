@@ -78,7 +78,7 @@ function P:onShow()
     self.ObserveButton:SetActive(self._data.rank > 2)
     
     local skin = tpl_character_skin[self._data.skin_id or 0]
-    bee.setTextCut(self.TextName, PlayerModel:getNameIngame(), 460)
+    GF.setPlayerName(self.TextName, PlayerModel:getNameIngame(), nil, 460)
     bee.setText(self.TextLevel, PlayerModel:getCurLevel())
     if PlayerModel:getCurLevel() > 0 then
         bee.setIcon(self:find("Rank/icon_rank_01", self.Player), tpl_level[PlayerModel:getCurLevel()].icon)
@@ -114,6 +114,14 @@ function P:onShow()
     end
     if #reward > 3 then
         BgView01 = self:find("ViewItems/Viewport/Content", Rewards01)
+    end
+    if GameModel.data:isMTTHunter() and self._data.mtt_bounty_reward > 0 then
+        for _, v in ipairs(reward) do
+            if v.item_id == GPropId.Gold then
+                v.item_num = v.item_num + self._data.mtt_bounty_reward
+                break
+            end
+        end
     end
     flag01 = #reward > 0
     GF.addItemsToParent(BgView01, Item1, reward, #reward > 3 and {} or nil)

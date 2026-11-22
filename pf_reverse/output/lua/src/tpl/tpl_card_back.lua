@@ -28,6 +28,8 @@ local function _initData()
 {1021,"Card[card_back_activity_07_02]","BackGround/Card/card_back_activity_07_02.png"},
 {1022,"Card[card_back_activity_08_02]","BackGround/Card/card_back_activity_08_02.png"},
 {1023,"Card[card_back_activity_09_02]","BackGround/Card/card_back_activity_09_02.png"},
+{1024,"Card[card_back_activity_10_02]","BackGround/Card/card_back_activity_10_02.png"},
+{1025,"Card[card_back_ranking_01]","BackGround/Card/card_back_ranking_01.png"},
 {2001,"Card[card_back_activity_01_02]","BackGround/Card/card_back_activity_01_02.png"},
 {2002,"Card[card_back_activity_02_01]","BackGround/Card/card_back_activity_02_01.png"},
 {2003,"Card[card_back_activity_03_01]","BackGround/Card/card_back_activity_03_01.png"},
@@ -38,7 +40,8 @@ local function _initData()
 {2008,"Card[card_back_activity_07_01]","BackGround/Card/card_back_activity_07_01.png"},
 {2009,"Card[card_back_activity_08_01]","BackGround/Card/card_back_activity_08_01.png"},
 {2010,"Card[card_back_activity_09_01]","BackGround/Card/card_back_activity_09_01.png"},
-{3001,"Card[card_back_ranking_01]","BackGround/Card/card_back_ranking_01.png"}
+{2011,"Card[card_back_activity_10_01]","BackGround/Card/card_back_activity_10_01.png"},
+{3001,"Card[card_back_seasonpass_01_01]","BackGround/Card/card_back_seasonpass_01_01.png"}
 }
     for _, v in pairs(bodys) do
         local m = {}

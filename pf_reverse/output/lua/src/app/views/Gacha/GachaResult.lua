@@ -353,7 +353,8 @@ function P:onClickRecruit()
     -- 数量不足跳转获取
     if not next(costList) then
         -- 跳转提示
-        UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(GPropId.DrawTicket, true)})
+        -- UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(GPropId.DrawTicket, true)})
+        ShopModel:showDrawShop()
         UiManager:showToast(_T("LAB_COMMON_TIPS_1"))
         if self._recruitNum == 1 then
         	bee.logEvent("recruit-click", self._params.pool_id, 0)

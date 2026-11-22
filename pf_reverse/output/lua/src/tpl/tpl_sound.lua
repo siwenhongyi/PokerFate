@@ -39,6 +39,7 @@ local function _initData()
 {"ui_button_disabled","sound/sound/ui_button_disabled.ogg",nil,2,nil},
 {"ui_tab_switch_1","sound/sound/ui_tab_switch_2.ogg",nil,2,nil},
 {"ui_tab_switch_2","sound/sound/ui_tab_switch_2.ogg",nil,2,nil},
+{"ui_tab_switch_1_1","sound/sound/ui_tab_switch_1.ogg",nil,2,nil},
 {"ui_close","sound/sound/ui_button_disabled.ogg",nil,2,nil},
 {"ui_toast_message","sound/sound/ui_toast_message.ogg",nil,2,nil},
 {"ui_reward_gain","sound/sound/ui_reward_gain.ogg",nil,2,nil},
@@ -93,7 +94,17 @@ local function _initData()
 {"sound_Colorgame_high","sound/sidegame/sound_Colorgame_high.ogg",nil,2,nil},
 {"sound_Colorgame_middle","sound/sidegame/sound_Colorgame_middle.ogg",nil,2,nil},
 {"sound_Colorgame_lwo","sound/sidegame/sound_Colorgame_lwo.ogg",nil,2,nil},
-{"sound_bust_back","sound/sound/sound_bust_back.ogg",nil,2,nil}
+{"sound_bust_back","sound/sound/sound_bust_back.ogg",nil,2,nil},
+{"sound_balatro_enter","sound/balatro/sound_balatro_enter.ogg",nil,2,nil},
+{"sound_balatro_score","sound/balatro/sound_balatro_score.ogg",nil,2,nil},
+{"sound_balatro_add","sound/balatro/sound_balatro_add.ogg",nil,2,nil},
+{"sound_balatro_mult","sound/balatro/sound_balatro_mult.ogg",nil,2,nil},
+{"sound_balatro_fire","sound/balatro/sound_balatro_fire.ogg",nil,2,nil},
+{"ui_card_turn","sound/sound/ui_card_turn.ogg",nil,2,nil},
+{"sound_sugoroku_dice","sound/sugoroku/sound_sugoroku_dice.ogg",nil,2,nil},
+{"sound_sugoroku_move","sound/sugoroku/sound_sugoroku_move.ogg",nil,2,nil},
+{"sound_sugoroku_reward","sound/sugoroku/sound_sugoroku_reward.ogg",nil,2,nil},
+{"sound_sugoroku_prize","sound/sugoroku/sound_sugoroku_prize.ogg",nil,2,nil}
 }
     for _, v in pairs(bodys) do
         local m = {}

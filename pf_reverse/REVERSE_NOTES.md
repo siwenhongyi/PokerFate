@@ -271,6 +271,15 @@ pf_reverse/output/
 
 ---
 
+## 安装包和热更新分两层（2026-11-26 起）
+
+- `output/`：只放安装包解出的文件（`extract_resources.py <apk>`），入库。当前是 1.7.5 安装包（versionCode 35）。
+- `remote_res/`：热更新层，git 忽略。`python -m pf_reverse.hotupdate` 从 CDN 同步，只放和安装包内容不同的文件，
+  上游删掉的记在 `remote_res/manifest.json` 的 `removed`。
+- 读表用 `pf_reverse/tables.py`（热更新层优先）。2026-11-26 核对：1.7.5 安装包 + CDN 1.7.7 热更新层，
+  和之前入库的 1.7.7 合并结果 813 个文件逐字节一致；另有 2 个文件（`ActivityRetentionSurvey*.lua`）上游已删，旧做法没跟着删。
+- 换了新安装包：先重建 `output/`，再 `python -m pf_reverse.hotupdate --rebuild`。
+
 ## 新版本更新流程
 
 1. `extract_resources.py <新 apk> [<remote_res 目录>]` 重建 `output/`，`git diff` 看 proto/lua 变化。

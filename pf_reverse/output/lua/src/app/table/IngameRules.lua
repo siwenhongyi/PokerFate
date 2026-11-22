@@ -12,7 +12,6 @@ function P:onAwake()
     self.RulesPoker = self:find("Rules", self.Content)
 
     self.VideoTip = self:find("AnimRoot/LeftTop/VideoTip")
-    self.VideoTip:SetActive(false)
 
     bee.addClick(self:find("AnimRoot/RightTop/CloseButton"), function()
         self:hideUI()
@@ -73,6 +72,12 @@ function P:onShow()
             self:find("Rules/TextList/TIPS2/ingame_rules_title_star2", self.Content):SetActive(true)
         end
     end
+
+
+    self.isPoker = false
+    self.isOmaha = false
+    self.isTournament = false
+    self:checkVideo()
 end
 
 function P:refreshUI()
@@ -84,9 +89,34 @@ function P:evt_hideUiWhenAction(isVisible)
     self:onUiBlur(not isVisible, "evt_hideUiWhenAction", true)
 end
 
+function P:checkVideo()
+    local gameType = self._params and self._params.gameType or 0
+    if GameModel.data then
+        gameType = GameModel.data:getGameType()
+    end
+
+    if GF.isPokerGame(gameType) or GF.isFriendPoker(gameType) then
+        self.isPoker = true
+    elseif GF.isOmahaGame(gameType) or GF.isFriendOmaha(gameType) then
+        self.isOmaha = true
+    elseif GF.isTournament(gameType) or GF.isFriendSNG(gameType) then
+        self.isTournament = true
+    end
+    self.VideoTip:SetActive(self.isPoker or self.isOmaha or self.isTournament)
+end
+
 function P:videoEvent()
-    local isOmaha = GameModel.data and GameModel.data:isOmaha()
-    CU.Application.OpenURL("https://www.pokerfate.com/")
+    local lan = LanguageManager:getLanguage()
+    if self.isPoker then
+        local url = TutorialVideoPaths[1][lan]
+        CU.Application.OpenURL(url)
+    elseif self.isOmaha then
+        local url = TutorialVideoPaths[2][lan]
+        CU.Application.OpenURL(url)
+    elseif self.isTournament then
+        local url = TutorialVideoPaths[3][lan]
+        CU.Application.OpenURL(url)
+    end
 end
 
 return P

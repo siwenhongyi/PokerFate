@@ -219,6 +219,9 @@ function P:addAutoEvent()
 		self:__addAutoEvent(parent, bindMap)
 		parent = parent.super
 	end
+	bindMap["evt_removeUiAutoEvent"] = true
+	bee.on("evt_removeUiAutoEvent", self["evt_removeUiAutoEvent"], self)
+	self._eventListeners[#self._eventListeners+1] = "evt_removeUiAutoEvent"
 
 	bee.popObjEmit(self.node, true)
 end
@@ -248,6 +251,12 @@ function P:removeAutoEvent()
 	end
 
 	bee.popObjEmit(self.node)
+end
+
+function P:evt_removeUiAutoEvent(uiName)
+	if not uiName or uiName == self.uiName or uiName == self.__cname then
+		self:removeAutoEvent()
+	end
 end
 
 ----------------继承重写---------------------

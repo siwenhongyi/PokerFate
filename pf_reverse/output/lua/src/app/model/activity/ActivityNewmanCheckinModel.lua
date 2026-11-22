@@ -10,6 +10,7 @@ local PopUpView = {
     [7] = "ActivityMatsuriCheckin_popup",
     [8] = "ActivityRacingCheckin_popup",
     [9] = "ActivityFantasyCheckin_popup",
+    [10] = "ActivityHalloweenCheckin_popup"
 }
 
 function P:ctor(logic)

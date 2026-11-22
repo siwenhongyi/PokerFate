@@ -219,6 +219,7 @@ function P:setCharacterItem(item, data)
 	local NumText = self:find("NumText", State)
 	local AvatarIcon = self:find("Avatar/avatar_frame_01_mask/AvatarIcon", item)
 	local Selected = self:find("Selected", item)
+	local TimeTag = self:find("TimeTag", item)
 
 	local role = data.role
 	local dispatchData = data.dispatchData
@@ -276,6 +277,32 @@ function P:setCharacterItem(item, data)
 
 	Selected:SetActive(self:_isInSelected(role.role_id))
 
+	-- 角色试用
+	if not self.trialTimeTag then
+		self.trialTimeTag = {}
+	end
+	if self.trialTimeTag[item] then
+		scheduler:removeTag(self.trialTimeTag[item])
+		self.trialTimeTag[item] = nil
+	end
+	local leftTime = role:getLeftTime()
+	if leftTime and leftTime > 0 then
+		TimeTag:SetActive(true)
+		bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+		self.trialTimeTag[TimeTag] = self:schedule(1, function()
+			leftTime = role:getLeftTime()
+			bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+			if leftTime <= 0 then
+				bee.emit("evt_characterTimeEnd", {role_id = role.role_id})
+				scheduler:removeTag(self.trialTimeTag[TimeTag])
+				self.trialTimeTag[TimeTag] = nil
+				self:refreshTrialRole()
+			end
+		end)
+	else
+		TimeTag:SetActive(false)
+	end
+
 	bee.removeAllClick(item)
 	bee.addClick(item, function()
 		Game:playSound("ui_button_confirm")
@@ -301,6 +328,17 @@ function P:setCharacterItem(item, data)
 		self:setDetailCont()
 		self:refreshRoleSelected()
 	end)
+end
+
+function P:refreshTrialRole()
+	for i = 1, 2 do
+		if self.selectedRoleList[i] and not CharacterModel:getRoleIsOwn(self.selectedRoleList[i]) then
+			self.selectedRoleList[i] = nil
+			self:setDetailCont()
+			self:refreshRoleSelected()
+		end
+	end
+	self:setCharacterList()
 end
 
 -- 当前已选人数

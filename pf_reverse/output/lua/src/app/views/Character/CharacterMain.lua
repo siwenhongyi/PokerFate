@@ -25,6 +25,9 @@ function P:onAwake()
     self.ImageBond = self:find("ImageBond", self.BondsToggle)
     self.TextBondLevel = self:find("TextBondLevel", self.ImageBond)
 
+    self.TrialCont = self:find("TrialCont", self.LeftBottom)
+    self.TrialInfoButton = self:find("TrialInfoButton", self.TrialCont)
+
     self.ReGuideButton = self:find("ReGuideButton", self.LeftTop)
     self:switchShowGuideButton()
 
@@ -54,6 +57,16 @@ function P:onAwake()
         Game:playSound("ui_button_confirm")
         UiManager:showUI("CharacterView", {data = self._role})
         bee.logEvent("character-preview-illustrator")
+    end)
+
+    bee.addClick(self.TrialInfoButton, function()
+        UiManager:showUI("CommonRules", {text = _F("LAB_CHAR_136", ItemModel:getPropItemTimeStr(tpl_constdata.Skin_Character_Trial_Duration)), title = _T("LAB_CHAR_133")})
+    end)
+    bee.addClick(self:find("ClaimButton", self.TrialCont), function()
+        if not self._role then
+            return
+        end
+        ItemModel:jumpView(self._role.info.accesses[1], self._role.info.id)
     end)
     
     -- bee.addClick(self:find("CharacteButton", self.Center), function()
@@ -361,6 +374,35 @@ function P:refreshCharacter(data, item)
     RedNew:SetActive(CharacterModel:isNewRole(data.role_id))
     local Reddot = self:find("Reddot", item)
     Reddot:SetActive(CharacterModel:isRoleHaveNewSkin(data.role_id) or CharacterModel:isRoleCanAwakenRed(data.role_id) or CharacterModel:isRoleSecondAwakenNewRed(data.role_id) or CharacterModel:isWaitSecondAwaken(data.role_id))
+
+    -- 限时试用
+    if not self._itemTimeTags then
+        self._itemTimeTags = {}
+    end
+    if self._itemTimeTags[item] then
+        scheduler:removeTag(self._itemTimeTags[item])
+        self._itemTimeTags[item] = nil
+    end
+
+    local TimeTag = self:find("TimeTag", item)
+    local leftTime = data:getLeftTime()
+    if leftTime > 0 then
+        TimeTag:SetActive(true)
+        bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+        self._itemTimeTags[item] = self:schedule(1, function()
+            leftTime = data:getLeftTime()
+            bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+            if leftTime <= 0 then
+                bee.emit("evt_characterTimeEnd", {role_id = data.role_id})
+                scheduler:removeTag(self._itemTimeTags[item])
+                self._itemTimeTags[item] = nil
+                self:showList(self._showIndex)
+            end
+        end)
+    else
+        TimeTag:SetActive(false)
+    end
+    
 
     local ToggleStar = self:find("ToggleStar", item)
     ToggleStar:SetActive(not data.locked)

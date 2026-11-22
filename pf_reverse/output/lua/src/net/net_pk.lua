@@ -4,6 +4,7 @@ net = net or {}
 -- BTN位信息
 function net:DealerInfoRSP(msg)
 	if not GameModel.data then return end
+	if net:isOtherTableMsg(msg) then return end
 	GameModel.data.table_status.gameid = msg.gameid
 	GameModel.data.table_status.is_wait_join = false
 	GameModel.data:setPlaying(true)
@@ -27,6 +28,7 @@ end
 -- 发手牌
 function net:HandCardRSP(msg)
 	if not GameModel.data then return end
+	if net:isOtherTableMsg(msg) then return end
 	GameModel.data:updateSelfCard(msg)
 	GameModel.data:begenDealCard()
 	local player = GameModel.data:getPlayer(msg.seatid + 1)
@@ -38,6 +40,7 @@ end
 -- 轮到某玩家行动
 function net:ActionNotifyBRC(msg)
 	if not GameModel.data then return end
+	if net:isOtherTableMsg(msg) then return end
 	if GameModel.data.setActionIndex then
 		GameModel.data:setActionIndex(msg.seatid)
 	end
@@ -56,6 +59,7 @@ end
 -- 某玩家做出行动
 function net:ActionBRC(msg)
 	if not GameModel.data then return end
+	if net:isOtherTableMsg(msg) then return end
 
 	GameModel.data:onActionBRC(msg)
 end
@@ -63,12 +67,15 @@ end
 -- 下注圈开始
 function net:RoundStartBRC(msg)
 	if not GameModel.data then return end
+	if net:isOtherTableMsg(msg) then return end
 	if GameModel.data.resetRoundInfo then
 		GameModel.data:resetRoundInfo()
 	end
 	GameModel.data:setRoundStage(msg.stage)
 	
-	if msg.board then
+	if msg.all_board and #msg.all_board > 0 then
+		GameModel.data:setBoardInfo(msg.all_board)
+	elseif msg.board then
 		GameModel.data:addBoardInfo(msg.board)
 	end
 
@@ -78,6 +85,7 @@ end
 -- 下注圈结束
 function net:RoundOverBRC(msg)
 	if not GameModel.data then return end
+	if net:isOtherTableMsg(msg) then return end
 	GameModel.data:setPotInfo(msg.pool)
 	GameModel.data:setHistoryPot(msg)
 end
@@ -85,6 +93,7 @@ end
 -- 手牌结算
 function net:WinnerRSP(msg)
 	if not GameModel.data then return end
+	if net:isOtherTableMsg(msg) then return end
 	GameModel.data:setWinnerRSP(msg)
 	GameModel.data:setPotInfo({})
 	GameModel.data:setRoundStage(POKER_ROUND.FINISH)
@@ -94,6 +103,7 @@ end
 
 -- 系统亮牌
 function net:ShowHandRSP(msg)
+	if net:isOtherTableMsg(msg) then return end
 	if GameModel.data then 
 		for _, v in ipairs(msg.info) do
 			local seatid = v.seatid + 1
@@ -123,6 +133,7 @@ function net:ShowMyCardRSP(msg)
 end
 
 function net:ShowMyCardBRC(msg)
+	if net:isOtherTableMsg(msg) then return end
 	if GameModel.data then 
 		for _, v in ipairs(msg.info) do
 			local seatid = v.seatid + 1
@@ -140,6 +151,7 @@ end
 
 -- 筹码从桌子返回到手里
 function net:ChipsBackBRC(msg)
+	if net:isOtherTableMsg(msg) then return end
 	if GameModel.data then 
 		local player = GameModel.data:getPlayer(msg.seatid + 1)
 		if player then
@@ -148,9 +160,17 @@ function net:ChipsBackBRC(msg)
 	end
 end
 
+-- 局内表情（显示逻辑在 UI 的 evt_EmojiBRC 里，这里只做牌桌归属校验）
+function net:EmojiBRC(msg)
+	if net:isOtherTableMsg(msg) then
+		return
+	end
+end
+
 -- 少于2人牌局中断
 function net:TableGameOverRSP(msg)
 	if not GameModel.data then return end
+	if net:isOtherTableMsg(msg) then return end
 	if msg.type == 3 then
 		GameModel.data.table_status.is_wait_join = true
 	end
@@ -176,6 +196,7 @@ end
 
 function net:AnteBRC(msg)
 	if not GameModel.data then return end
+	if net:isOtherTableMsg(msg) then return end
 	GameModel.data:setIsInAnte(true)
 end
 
@@ -256,6 +277,7 @@ end
 
 function net:NoticeRebyRSP(msg)
 	if not GameModel.data then return end
+	if net:isOtherTableMsg(msg) then return end
 
 	if GameModel.data:isSNG() then
 		return
@@ -272,10 +294,12 @@ end
 
 function net:RebyBRC(msg)
 	if not GameModel.data then return end
+	if net:isOtherTableMsg(msg) then return end
 	local player = GameModel.data:getPlayer(msg.seatid + 1)
 	if player then
 		player.chips = player.chips + msg.chips
 		player.reby_left_time, player.reby_left_time_st = 0, nil
+		player.mtt_bounty = msg.bounty
 	end
 end
 

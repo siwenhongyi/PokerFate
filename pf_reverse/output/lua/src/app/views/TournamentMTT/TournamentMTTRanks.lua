@@ -13,19 +13,37 @@ function P:onAwake()
         self:hideUI()
     end)
 
-    local RankList = self:find("Rank/RankList", self.SidePanel)
+    local Rank = self:find("Rank", self.SidePanel)
+    self.Title = self:find("Title", Rank)
+    self.TitleHunter = self:find("TitleHunter", Rank)
+    local RankList = self:find("RankList", Rank)
     self.Items = {
         self:find("Item1", RankList),
         self:find("Item2", RankList),
         self:find("Item3", RankList),
         self:find("Item4", RankList),
     }
+    self.ItemHunters = {
+        self:find("ItemHunter1", RankList),
+        self:find("ItemHunter2", RankList),
+        self:find("ItemHunter3", RankList),
+        self:find("ItemHunter4", RankList),
+    }
     for _, v in ipairs(self.Items) do
+        v:SetActive(false)
+    end
+    for _, v in ipairs(self.ItemHunters) do
         v:SetActive(false)
     end
     self.ListRank = UiListEx:create(RankList)
     self.ListRank:setWidth(100)
     self.ListRank:setCreateFunc(function(data)
+        if GF.isMTTHunter(self._params.data.mtt_mode) then
+            if data.rank <= 3 then
+                return CU.GameObject.Instantiate(self.ItemHunters[data.rank])
+            end
+            return CU.GameObject.Instantiate(self.ItemHunters[4])
+        end
         if data.rank <= 3 then
             return CU.GameObject.Instantiate(self.Items[data.rank])
         end
@@ -35,6 +53,8 @@ function P:onAwake()
         self:refreshRankItem(data, item)
     end)
 
+    self.TitleHunter:SetActive(false)
+    self._nameLen = 230
 end
 
 function P:onShow()
@@ -47,6 +67,12 @@ function P:onShow()
                 self.ListRank:setDatas(resp.rank_list)
             end
         end)
+
+        self.Title:SetActive(not GF.isMTTHunter(self._params.data.mtt_mode))
+        self.TitleHunter:SetActive(GF.isMTTHunter(self._params.data.mtt_mode))
+        if GF.isMTTHunter(self._params.data.mtt_mode) then
+            self._nameLen = 150
+        end
     else
         self.ListRank:setDatas({
             {rank = 1, __kind = 1, chips = 50, brief = {uid = PlayerModel:getUid(), name = PlayerModel:getName()}},
@@ -62,8 +88,11 @@ function P:onShow()
 end
 
 function P:refreshRankItem(data, item)
-    bee.setTextCut(self:find("Name", item), GF.getOtherName(data.brief.name, nil, data.brief.uid), 230)
+    GF.setPlayerName(self:find("Name", item), GF.getOtherName(data.brief.name, nil, data.brief.uid), data.brief.switch, self._nameLen)
     bee.setText(self:find("TextChips", item), _N(data.chips))
+    if GF.isMTTHunter(self._params.data.mtt_mode) then
+        bee.setText(self:find("TextBounty", item), _N(data.bounty))
+    end
     if data.rank >= 4 then
         local BgNums = self:find("BgNums", item)
         BgNums.transform.localScale = data.rank >= 1000 and bee.v3(0.6, 0.6, 0.6) or bee.v3one

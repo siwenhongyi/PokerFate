@@ -88,6 +88,7 @@ function P:evt_onApplicationPause(paused)
 						GameModel:reqGetRoomDataREQ()
 					end
 					GF.dealDeepLinkParams()
+				elseif BalBattleModel:inGame() then
 				else
 					bee.enterScene("MainScene")
 				end

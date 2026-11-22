@@ -671,6 +671,9 @@ function P:refreshMttItem(data, item)
     self:find("LockButton", Ani_root):SetActive(isLock)
 
     self:find("Seen", Ani_root):SetActive(data.open_observer)
+
+    self:find("ImageKO", Ani_root):SetActive(1 == data.mtt_mode)
+    self:find("ImagePKO", Ani_root):SetActive(2 == data.mtt_mode)
     
     if isShowEnter then
         bee.addClick(self:find("EnterButton", Ani_root), function()

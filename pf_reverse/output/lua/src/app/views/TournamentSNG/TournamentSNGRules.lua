@@ -12,7 +12,7 @@ function P:onAwake()
     self.League = self:find("League", self.Content)
 
     self.VideoTip = self:find("AnimRoot/LeftTop/VideoTip")
-    self.VideoTip:SetActive(false)
+    self.VideoTip:SetActive(true)
 
     self.avatartitle_sng_01 = self:find("avatartitle_sng_01", self.League)
 
@@ -101,7 +101,9 @@ function P:evt_hideUiWhenAction(isVisible)
 end
 
 function P:videoEvent()
-    CU.Application.OpenURL("https://www.pokerfate.com/")
+    local lan = LanguageManager:getLanguage()
+    local url = TutorialVideoPaths[3][lan]
+    CU.Application.OpenURL(url)
 end
 
 return P

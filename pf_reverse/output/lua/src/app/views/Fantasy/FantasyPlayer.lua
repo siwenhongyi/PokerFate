@@ -142,6 +142,10 @@ function P:onShow()
     end)
 end
 
+function P:evt_inGameSchemeChange()
+    self:onShow()
+end
+
 function P:refreshItem(data, item, index)
     local skinCfg = tpl_character_skin[data.skin_id]
     local RoleName = self:find("Name", item)
@@ -200,18 +204,46 @@ function P:refreshItem(data, item, index)
     bee.setIcon(ImageIcon, skinCfg.ui_avatar_1)
 
     local roleData = CharacterModel:getRoleData(data.role_id)
-    local isRoleLock = roleData.locked
-    local isSkinLock = not roleData:isOwnedSkin(data.skin_id)
+    local isRoleLock = not CharacterModel:getRoleIsOwn(data.role_id)
+    local isSkinLock = isRoleLock or not roleData:isOwnedSkin(data.skin_id)
     bee.setGrey(ImageIcon, isSkinLock)
     bee.setGrey(NormalFrame, isSkinLock)
     self:find("icon_lock_0", item):SetActive(isSkinLock)
     BackFrame:SetActive(not isSkinLock)
-    bee.setColor(RoleName, isSkinLock and bee.colorHex("#646464") or bee.colorHex("#16558B"), "Text")
+    bee.setColor(RoleName, isSkinLock and bee.colorHex("#646464") or bee.colorHex("#AA8B62"), "Text")
 
     bee.setText(self:find("Value", item), " +" .. data.add / 10 .. "%")
 
     local propIcon = self:find("icon_activity_s7_01", item)
 	bee.setIcon(propIcon, ThemeModel:getThemeIcon())
+
+    -- 限时试用
+    if not self._itemTimeTags then
+        self._itemTimeTags = {}
+    end
+    if self._itemTimeTags[item] then
+        scheduler:removeTag(self._itemTimeTags[item])
+        self._itemTimeTags[item] = nil
+    end
+
+    local TimeTag = self:find("TimeTag", item)
+    local leftTime = roleData:getLeftTime()
+    if leftTime > 0 then
+        TimeTag:SetActive(true)
+        bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+        self._itemTimeTags[item] = self:schedule(1, function()
+            leftTime = roleData:getLeftTime()
+            bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+            if leftTime <= 0 then
+                bee.emit("evt_characterTimeEnd", {role_id = data.role_id})
+                scheduler:removeTag(self._itemTimeTags[item])
+                self._itemTimeTags[item] = nil
+                self:onShow()
+            end
+        end)
+    else
+        TimeTag:SetActive(false)
+    end
 
     bee.addClick(item, function()
         self:refreshSelected(item, data.role_id, data.skin_id)
@@ -260,14 +292,13 @@ function P:refreshSelected(item, roleId, skinId, force)
             self.btn_use:SetActive(true)
             self.btn_scheme:SetActive(false)
         else
-            local roleData = CharacterModel:getRoleData(roleId)
-            local ownSkin = roleData:isOwnedSkin(skinId)
+            local ownSkin = CharacterModel:isOwnedSkin(skinId)
             if ownSkin then
                 self.title_limited:SetActive(false)
                 self.btn_to_get:SetActive(false)
                 self.btn_use:SetActive(false)
                 self.btn_scheme:SetActive(false)
-                if not roleData.locked then
+                if CharacterModel:getRoleIsOwn(roleId) then
                     self.btn_choose:SetActive(true)
                     self.btn_gray_choose:SetActive(false)
                 else
@@ -290,13 +321,12 @@ function P:refreshSelected(item, roleId, skinId, force)
             self.btn_use:SetActive(false)
             self.btn_scheme:SetActive(true)
         else
-            local roleData = CharacterModel:getRoleData(roleId)
-            local ownSkin = roleData:isOwnedSkin(skinId)
+            local ownSkin = CharacterModel:isOwnedSkin(skinId)
             if ownSkin then
                 self.title_limited:SetActive(false)
                 self.btn_to_get:SetActive(false)
                 self.btn_use:SetActive(false)
-                if not roleData.locked then
+                if CharacterModel:getRoleIsOwn(roleId) then
                     self.btn_choose:SetActive(false)
                     self.btn_gray_choose:SetActive(false)
                     self.btn_scheme:SetActive(true)

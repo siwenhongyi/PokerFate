@@ -140,9 +140,18 @@ function P:getEamilContent(data)
                         team2 = p3["en"]
                     end
                     ret = _F(d.main_text, p1, team1, team2)
+                elseif data.system_mail_id == 8001 then
+                    local p1 = ""
+                    local act = tpl_monopoly_activity[args[1]]
+                    if act then
+                        p1 = _T(act.name)
+                    end
+                    ret = _F(d.main_text, p1)
                 elseif data.system_mail_id == 90001 or data.system_mail_id == 90002 then
                     local name1 = args[1][LanguageManager:getLanguage()]
                     ret = _F(d.main_text, name1)
+                elseif data.system_mail_id == 4003 then
+                    ret = _F(d.main_text, _T(tpl_battle_pass_info[args[1]].name))
                 else
                     for k, v in ipairs(args) do
                         if type(v) == "table" then
@@ -230,10 +239,19 @@ function P:reqEmailList(mail_type, offset, cb, size)
             info.list = {}
         end
         if data.list then
-            table.append(info.list, data.list)
-            for _, v in ipairs(data.list) do
-                self._mail_infos[v.id] = v
-                v.mail_type = mail_type
+            local flag = true
+            for _, v in ipairs(info.list) do
+                if v.id == data.list[1].id then
+                    flag = false
+                    break
+                end
+            end
+            if flag then
+                table.append(info.list, data.list)
+                for _, v in ipairs(data.list) do
+                    self._mail_infos[v.id] = v
+                    v.mail_type = mail_type
+                end
             end
         end
         for k, v in ipairs(info.list) do

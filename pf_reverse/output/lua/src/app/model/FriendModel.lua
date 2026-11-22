@@ -1,4 +1,4 @@
-local P = class("ItemModel", BaseModel)
+local P = class("FriendModel", BaseModel)
 
 function P:ctor(logic)
 	self.saveData = {
@@ -66,7 +66,7 @@ function P:getOnlineFriends(cb)
 end
 
 -- 好友列表
-function P:requestFriendList(cb)
+function P:requestFriendList(cb, stopEvent)
 	Net:post("friend/list", nil, function(data)
 		if data.code ~= 0 then
 			return
@@ -116,7 +116,9 @@ function P:requestFriendList(cb)
 		if cb then
 			cb(data.list)
 		end
-		bee.emit("evt_friendList", FRIEND_LIST_TYPE.FRIEND)
+		if not stopEvent then
+			bee.emit("evt_friendList", FRIEND_LIST_TYPE.FRIEND)
+		end
 	end)
 end
 
@@ -139,14 +141,14 @@ function P:getFriendInfo(uid)
 	return nil
 end
 
-function P:getBlockedInfo(uid)
-	for k,v in pairs(self:getBlockedList()) do
-		if v.uid == uid then
-			return v
-		end
-	end
-	return nil
-end
+-- function P:getBlockedInfo(uid)
+-- 	for k,v in pairs(self:getBlockedList()) do
+-- 		if v.uid == uid then
+-- 			return v
+-- 		end
+-- 	end
+-- 	return nil
+-- end
 
 -- 好友申请列表
 function P:requestApplyFriendList(cb)
@@ -197,6 +199,10 @@ end
 
 function P:getBlockedList()
 	return self._blockedFriendList or {}
+end
+
+function P:getBlockedCount()
+	return #self:getBlockedList()
 end
 
 function P:getBlockedInfo(uid)
@@ -250,7 +256,21 @@ end
 
 function P:addFriend(uid, cb)
 	if self:getFriendCount() >= VipModel:getFriendLimit() then
-		UiManager:showToast(_T("LAB_FRIENDS_35"))
+		if VipModel:getVipLevel() < VipModel:getMaxLevel() then
+			if bee.isInGame() then
+				UiManager:showToast(_T("LAB_VIP_TEXT_31"))
+			else
+				UiManager:showTip({
+					text = _T("LAB_VIP_TEXT_31"),
+					sureStr = _T("LAB_GAME_012"),
+					onSure = function()
+						ItemModel:jumpView(105001)
+					end
+				})
+			end
+		else
+			UiManager:showToast(_T("LAB_FRIENDS_35"))
+		end
 		return
 	end
 
@@ -323,6 +343,36 @@ function P:deleteApply(uid)
 		end
 		self:requestApplyFriendList()
 	end)
+end
+
+function P:checkBlockFriend(name, uid, cb)
+	if self:getBlockedCount() >= VipModel:getBlacklistLimit() then
+		if VipModel:getVipLevel() < VipModel:getMaxLevel() then
+			if bee.isInGame() then
+				UiManager:showToast(_T("LAB_VIP_TEXT_32"))
+			else
+				UiManager:showTip({
+					text = _T("LAB_VIP_TEXT_32"),
+					sureStr = _T("LAB_GAME_012"),
+					onSure = function()
+						ItemModel:jumpView(105001)
+					end
+				})
+			end
+		else
+			UiManager:showToast(_T("LAB_VIP_TEXT_39"))
+		end
+	else
+		UiManager:showTip({
+		    text = _F("LAB_FRIENDS_26", name),
+		    onSure = function()
+		        self:blockFriend(uid)
+				UiManager:showToast(_T("LAB_FRIENDS_27"))
+				if cb then cb() end
+		    end
+		})
+	end
+	
 end
 
 function P:blockFriend(uid, cb)

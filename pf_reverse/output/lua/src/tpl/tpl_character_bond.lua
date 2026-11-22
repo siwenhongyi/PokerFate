@@ -131,7 +131,13 @@ local function _initData()
 {124,1022,3,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_3]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
 {125,1022,4,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_4]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
 {126,1022,5,nil,nil,{10800001,15,10700001,50},{20212201,20412201,20112204},"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
-{127,1022,6,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"}
+{127,1022,6,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{128,1023,1,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_1]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{129,1023,2,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_2]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{130,1023,3,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_3]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{131,1023,4,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_4]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{132,1023,5,nil,nil,{10800001,15,10700001,50},{20212301,20412301,20112304},"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"},
+{133,1023,6,nil,nil,nil,nil,"Character[character_profile_detail_attribute_fg_1002_5]","LAB_CHAR_ABILITY_100201","LAB_CHAR_ABILITY_100202","LAB_CHAR_ABILITY_100203","LAB_CHAR_ABILITY_100204"}
 }
     for _, v in pairs(bodys) do
         local m = {}

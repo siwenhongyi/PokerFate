@@ -95,7 +95,7 @@ function P:onShow()
 end
 
 function P:refreshItem(data, item)
-    bee.setTextCut(self:find("TextName", item), data.name, 190)
+    GF.setPlayerName(self:find("TextName", item), data.name, data.switch, 190)
     bee.setIcon(self:find("Avatar/Mask/ImageIcon", item), PlayerModel:getAvatarIcon(data.avatar))
     GF.setFrameImage(self:find("Avatar/ImageFrame", item), data.frame)
 

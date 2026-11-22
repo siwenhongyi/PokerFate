@@ -183,7 +183,7 @@ function P:setPlayerInfo(playerItem, showRoleSkin, index)
 
     self:setRoleImg(ImageRole, showRoleSkin, isMe, index)
     if isMe then
-        bee.setTextCut(TextName, PlayerModel:getName(), 460)
+        GF.setPlayerName(TextName, PlayerModel:getName(), nil, 460)
     else
         bee.setTextCut(TextName, _T("LAB_COMMON_1"), 460)
     end
@@ -192,7 +192,7 @@ function P:setPlayerInfo(playerItem, showRoleSkin, index)
 
     if self._cfg and self._cfg.type == GPropKind.Title then
         ImageTitle:SetActive(true)
-        bee.setIconInAtlas(ImageTitle, self._cfg.icon, true)
+        GF.setTitleImage(ImageTitle, self._cfg.id, true)
     else
         if self.noTitle then
             ImageTitle:SetActive(false)
@@ -238,7 +238,7 @@ function P:setPlayerInfo(playerItem, showRoleSkin, index)
     else
         ImageUerType:SetActive(false)
         if isMe then
-            bee.setTextCut(TextName, PlayerModel:getName(), 460)
+            GF.setPlayerName(TextName, PlayerModel:getName(), nil, 460)
             bee.setText(TextChip, _N2(PlayerModel:getGold()))
             local eff, eff_bg = GameModel:getAllinEffectName(0, nameplateEffId)
             AnimationMgr:playUIEffect(eff, BgAllin.transform, nil, -1)

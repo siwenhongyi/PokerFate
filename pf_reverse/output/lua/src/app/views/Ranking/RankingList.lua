@@ -228,9 +228,9 @@ function P:setRankItem(item, data, isInit, index)
 	local EffectRoot = self:find("EffectRoot", Ani_root)
 
 	if data.name == "" then
-		bee.setText(NameText, _T("LAB_LEADERBOARD_1"))
+		GF.setPlayerName(NameText, _T("LAB_LEADERBOARD_1"), data.switch, 400)
 	else
-		bee.setText(NameText, GF.getOtherName(data.name, nil, data.uid))
+		GF.setPlayerName(NameText, GF.getOtherName(data.name, nil, data.uid), data.switch, 400)
 	end
 
 	bee.setText(CountText, _N2(data.value))

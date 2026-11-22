@@ -3,13 +3,13 @@
 local P = {}
 local PL = {}
 local function _initData()
-    local keys = {'level','base_reward_up','time_reduce','reward_bonus','star_exp',}
+    local keys = {'level','base_reward_up','time_reduce','reward_bonus','star_exp','total_exp',}
     local bodys = {
-{1,0,0,0,0},
-{2,1200,500,0,15000},
-{3,3000,1000,0,45000},
-{4,5500,1500,100,135000},
-{5,8500,2000,200,360000}
+{1,0,0,0,0,0},
+{2,1200,500,0,15000,15000},
+{3,3000,1000,0,45000,60000},
+{4,5500,1500,100,135000,195000},
+{5,8500,2000,200,360000,555000}
 }
     for _, v in pairs(bodys) do
         local m = {}

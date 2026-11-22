@@ -15,6 +15,7 @@ local SubView = {
 		[7] = {view = "views/ActivityMatsuriCheckin/ActivityMatsuriCheckin"}, -- 夏日祭
 		[8] = {view = "views/ActivityRacingCheckin/ActivityRacingCheckin"},	-- 赛车季
 		[9] = {view = "views/ActivityFantasyCheckin/ActivityFantasyCheckin"},	-- 日幻
+		[10] = {view = "views/ActivityHalloweenCheckin/ActivityHalloweenCheckin"},	-- 万圣节
 	},
 	[ActivityId.RetentionSurvey] = {view = "views/Activity/ActivityRetentionSurvey"},
 

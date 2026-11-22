@@ -31,12 +31,14 @@ end
 
 function P:setThemeList()
 	self.themeList:setDatas(ShopModel:getThemeList())
-
 	if self._selelctItem then
 		for k, v in pairs(self.themeList:getDatas()) do
 			if v.data.id == self._selelctItem then
 				self.themeList:moveToYItem(k)
-				UiManager:showUI("ShopPurchaseTheme", {data = v.data})
+				self:once(0.5, function()
+					UiManager:showUI("ShopPurchaseTheme", {data = v.data})
+				end)
+				self._selelctItem = nil
 				return
 			end
 		end
@@ -151,6 +153,13 @@ function P:setThemeItem(item, data, isInit, index)
 			return
 		end
 		Game:playSound("ui_button_confirm")
+
+		local ownCount = ItemModel:getItemNumById(data.consumeId)
+		if ownCount < data.pri then
+			UiManager:showToast(_T("LAB_COMMON_TIPS_1"))
+			ShopModel:showTicketDressShop()
+			return
+		end
 		UiManager:showUI("ShopPurchaseTheme", {data = data})
 	end)
 
@@ -186,6 +195,10 @@ function P:setIncludeItem(item, data)
 end
 
 function P:selectItem(jumpTo)
+	if self._isInit then
+		return
+	end
+	self._isInit = true
 	if self.themeList then
 		for k,v in pairs(self.themeList:getDatas()) do
 			if v.data.id == jumpTo then

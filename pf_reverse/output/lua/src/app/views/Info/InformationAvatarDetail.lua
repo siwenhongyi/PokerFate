@@ -52,7 +52,7 @@ function P:onAwake()
 end
 
 function P:onShow()
-    self._datas = CharacterModel:getOwnedCharacters()
+    self._datas = CharacterModel:getOwnedCharacters(true)
     CharacterModel:sortRoles(self._datas)
     self.ListAvatar:setDatas(self._datas)
 

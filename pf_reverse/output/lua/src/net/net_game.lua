@@ -29,6 +29,7 @@ function net:UserLoginRSP(msg)
         ActivityManager:reqActivityData()
         QuickByModel:requireData()
         QuickByModel:reqLimitPack()
+        QuickByModel:requestVipGift()
         AchievementModel:requestAchTask()
         Net:sendReq("pb.SngMatchPlayerNumREQ", {})
 
@@ -71,6 +72,7 @@ function net:UserLocationRSP(msg)
     GameModel.roomid = msg.roomid
     if msg.roomid and msg.roomid > 0 then
         Net:sendReq("pb.EnterRoomREQ", msg)
+    elseif BalBattleModel:inGame() then
     elseif bee.isInGame() then
         if not GuideManager:isInGuide() then
             bee.enterScene("MainScene")
@@ -86,6 +88,7 @@ function net:UserLogoutRSP(msg)
     PlayerModel:setNotAutoLogin(true)
     ItemModel:clearItems()
     Net:closeSocket()
+    LoginModel._connectRet = nil
     ModelManager:afterLogout()
     if not bee.isInStart() then
         bee.enterScene("StartScene", {onEnter = function()
@@ -117,6 +120,25 @@ function net:ServerStopBRC(msg)
 end
 
 function net:SelfUserInfoRSP(msg)
+    local serverUid = msg.brief and tonumber(msg.brief.uid)
+    local localUid = tonumber(PlayerModel:getUid())
+    if serverUid and serverUid > 0 and localUid and localUid > 0 and serverUid ~= localUid then
+        -- 服务端会话账号与本地登录账号不一致（切号后旧连接/旧回包），强制重新登录
+        printError("[Net] SelfUserInfoRSP uid mismatch, server:", serverUid, "local:", localUid)
+        bee.logEvent("login_uid_mismatch", serverUid, localUid)
+        PlayerModel:setIsLogin(false)
+        PlayerModel:setNotAutoLogin(true)
+        ItemModel:clearItems()
+        Net:closeSocket()
+        LoginModel._connectRet = nil
+        if not bee.isInStart() then
+            bee.enterScene("StartScene", {onEnter = function()
+                UiManager:showUI("LoginNoNetwordDialog", {text = _T("HTTP_AUTHENTICATION_FAILED")})
+            end})
+        end
+        return
+    end
+
     Net:sendReq("pb.ItemListREQ", {})
     SettingModel:setUnlockSys(msg.unlock_modules)
     SettingModel:setVipHide(msg.switch)
@@ -200,6 +222,7 @@ function net:FriendRoomOwnerChangeBRC(msg)
     GameModel.data.friend_room_info.owner_name = msg.owner.name
     GameModel.data.friend_room_info.owner_avatar = msg.owner.avatar
     GameModel.data.friend_room_info.owner_frame = msg.owner.frame
+    GameModel.data.friend_room_info.owner_switch = msg.owner.switch
 end
 
 function net:NoticeBRC(msg)
@@ -318,6 +341,10 @@ function net:NoticeBRC(msg)
                 ShopModel:setMonthlyCardLeftTime(d.monthly_card_exp)
             end
         end
+    elseif msg.type == tpl_PushConsts.MONOPOLY_ACTIVITY_START.code then
+        MonopolyModel:reqActivityData()
+    elseif msg.type == tpl_PushConsts.MONOPOLY_TASK_REFRESH.code then
+        MonopolyModel:reqTaskList()
 	end
 end
 

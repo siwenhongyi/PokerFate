@@ -33,9 +33,8 @@ function printLog(tag, fmt, ...)
 end
 
 function printError(...)
-    CU.Debug.LogError(table.concat{...})
-    -- printLog("ERR", fmt, ...)
-    -- print(debug.traceback("", 2))
+    local msg = table.concat({...}, " ") .. "\n" .. debug.traceback()
+    CU.Debug.LogError(msg)
 end
 
 -- @function: 打印table的内容，递归

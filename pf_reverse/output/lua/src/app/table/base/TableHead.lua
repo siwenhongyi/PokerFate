@@ -159,7 +159,7 @@ function P:refreshName(info)
 	if not self._nameWidth then
 		self._nameWidth = 460
 	end
-	bee.setTextCut(self.TextName, GF.getOtherName(info, info:getSeatIndex()), self._nameWidth)
+	GF.setPlayerName(self.TextName, GF.getOtherName(info, info:getSeatIndex()), info.switch, self._nameWidth)
 	bee.setText(self.TextLevel, info.level)
 	local d = tpl_level[info.level] or tpl_level[1]
 	bee.setIcon(self:find("ImageLevel", self.BgName), d.icon)
@@ -226,7 +226,9 @@ function P:refreshChip(info, animDt, refreshWhenNoTween)
 		bee.setText(self.TextChip, self.data:getBetChipsStr(info.chips))
 	end
 	self._showChips = info.chips or 0
-	self.BgName:SetActive(true)
+	if not bee.isNull(self.BgName) then
+		self.BgName:SetActive(true)
+	end
 end
 
 function P:refreshFold()

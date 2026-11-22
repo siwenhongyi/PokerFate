@@ -176,7 +176,7 @@ end
 
 function P:refreshRankList(msg)
     for k, v in ipairs(msg.rank_list) do
-        bee.setTextCut(self:find("TextName", self.RankItems[k]), GF.getOtherName(v.brief.name, v.seat_index + 1, v.brief.uid), 210)
+        GF.setPlayerName(self:find("TextName", self.RankItems[k]), GF.getOtherName(v.brief.name, v.seat_index + 1, v.brief.uid), v.brief.switch, 210)
         bee.setText(self:find("TextGold", self.RankItems[k]), v.chips)
 
         self:find("tournament_ingame_rank_frame_04", self.RankItems[k]):SetActive(v.brief.uid == PlayerModel:getUid())

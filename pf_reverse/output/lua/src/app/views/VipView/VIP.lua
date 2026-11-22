@@ -55,9 +55,19 @@ function P:onAwake()
         ItemModel:jumpView(105001)
         bee.logEvent("vip-level-up")
     end)
-    bee.addClick(self:find("AssistantButton", shop_vip_bg_02), function()
+    local AssistantButton = self:find("AssistantButton", shop_vip_bg_02)
+    self:find("shop_vip_bg_assistant", AssistantButton):SetActive(VipModel:getVipExp() >= tpl_constdata.Assistant_Unlcok)
+    self:find("shop_vip_icon_assistant_lock", AssistantButton):SetActive(VipModel:getVipExp() < tpl_constdata.Assistant_Unlcok)
+    bee.addClick(AssistantButton, function()
         bee.logEvent("vip-assistant")
         Game:playSound("ui_button_confirm")
+
+        if VipModel:getVipExp() < tpl_constdata.Assistant_Unlcok then
+            UiManager:showToast(_F("LAB_VIP_ASSISTANT_1", tpl_constdata.Assistant_Unlcok))
+            -- UiManager:showUI("VIPExclusiveAssistant")
+        else
+            UiManager:showUI("VIPExclusiveAssistant")
+        end
     end)
     bee.addClick(self.ClaimButton, function()
         Game:playSound("ui_button_confirm")
@@ -113,6 +123,13 @@ function P:onAwake()
         UiManager:showUI("CommonItemTip", {data = ItemModel:getItem(tpl_vip_level[self._curLevel].title, true), target = self.ImageTitle})
     end)
 
+    --1105
+    -- self.Contrast = self:find("Contrast", self.Panel)
+    -- self.CurVipLvStr = self:find("Text", self.Contrast)
+    -- bee.setText(self.CurVipLvStr, _T("LAB_LEVEL_TEXT_11") .. ":")
+    -- self.CurVipVal = self:find("CurLv", self.Contrast)
+    -- self.NextVipVal = self:find("NextLv", self.Contrast)
+
     self.ShopVipList = self:find("ShopVipList/Viewport/Content", self.Panel)
     self.LevelAttrs = {
         daily_gift_counts = self:find('shop_vip_img_biao4/daily_gift_counts', self.ShopVipList),
@@ -131,10 +148,23 @@ function P:onAwake()
         exp_dispatch = self:find('shop_vip_img_biao13/exp_dispatch', self.ShopVipList),
         friendship_dispatch = self:find('shop_vip_img_biao14/friendship_dispatch', self.ShopVipList),
     }
-
-    if bee.isInTest then
-    end
-    self:find("AssistantButton", shop_vip_bg_02):SetActive(false)
+    --1105
+    -- self.CurLevelAttrs = {
+    --     daily_gift_counts = self:find('shop_vip_img_biao4/cur_daily_gift_counts', self.ShopVipList),
+    --     friend_limit = self:find('shop_vip_img_biao8/cur_friend_limit', self.ShopVipList),
+    --     blacklist_limit = self:find('shop_vip_img_biao9/cur_blacklist_limit', self.ShopVipList),
+    --     sheet_limit = self:find('shop_vip_img_biao7/cur_sheet_limit', self.ShopVipList),
+    --     exp_hands = self:find('shop_vip_img_biao2/cur_exp_hands', self.ShopVipList),
+    --     friendship_hands = self:find('shop_vip_img_biao3/cur_friendship_hands', self.ShopVipList),
+    --     vip_add = self:find('shop_vip_img_biao1/cur_vip_add', self.ShopVipList),
+    --     exp_tournament = self:find('shop_vip_img_biao5/cur_exp_tournament', self.ShopVipList),
+    --     friendship_tournament = self:find('shop_vip_img_biao6/cur_friendship_tournament', self.ShopVipList),
+    --     recent_history_limit = self:find('shop_vip_img_biao10/cur_recent_history_limit', self.ShopVipList),
+    --     lobby_limit = self:find('shop_vip_img_biao11/cur_lobby_limit', self.ShopVipList),
+    --     ingame_limit = self:find('shop_vip_img_biao12/cur_ingame_limit', self.ShopVipList),
+    --     exp_dispatch = self:find('shop_vip_img_biao13/cur_exp_dispatch', self.ShopVipList),
+    --     friendship_dispatch = self:find('shop_vip_img_biao14/cur_friendship_dispatch', self.ShopVipList),
+    -- }
 end
 
 function P:onShow()
@@ -199,6 +229,26 @@ function P:refreshAttrs()
         bee.setText(self.TextExp, string.format("%d/%d", VipModel:getVipExp(), exp))
         bee.setSliderValue(self.LevelSlider, VipModel:getVipExp() / exp)
     end
+
+    -- 1105
+    -- local showTip = false
+    -- if self._curLevel == VipModel:getVipLevel() + 1 then
+    --     showTip = true
+    --     bee.setText(self.CurVipVal, _F("LAB_VIP_TEXT_1", VipModel:getVipLevel()))
+    --     bee.setText(self.NextVipVal, _F("LAB_VIP_TEXT_1", self._curLevel))
+    --     local cfg = tpl_vip_level[VipModel:getVipLevel()]
+    --     for k, v in pairs(self.CurLevelAttrs) do
+    --         if "vip_add" == k then
+    --             bee.setText(v, tostring(cfg[k] / 10) .. "%")
+    --         else
+    --             bee.setText(v, tostring(cfg[k]))
+    --         end
+    --     end
+    -- end
+    -- self.Contrast:SetActive(showTip)
+    -- for _, v in pairs(self.CurLevelAttrs) do
+    -- v:SetActive(showTip)
+    -- end
 
     for k, v in pairs(self.LevelAttrs) do
         if "vip_add" == k then

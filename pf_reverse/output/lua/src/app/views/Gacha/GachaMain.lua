@@ -123,8 +123,12 @@ function P:onAwake()
         Game:playSound("ui_button_confirm")
         local showSkin = GachaModel:getCardPoolShowSkin(self._selectedCardPool)
         bee.logEvent("recruit-skin-timelimit", self._selectedCardPool, showSkin)
-        if showSkin and showSkin > 0 then
-            ItemModel:jumpView(102001, showSkin)
+        if showSkin then
+            local jumpId = 102001
+            if showSkin.jump_id and showSkin.jump_id > 0 then
+                jumpId = showSkin.jump_id
+            end
+            ItemModel:jumpView(jumpId, showSkin.skin_id)
         end
     end)
 end
@@ -369,15 +373,23 @@ function P:setCardPoolShow()
     end
 
     local showSkin = GachaModel:getCardPoolShowSkin(self._selectedCardPool)
-    if showSkin and showSkin > 0 and ItemModel:isCanJump(102001, showSkin) then
-        self.Skin:SetActive(true)
-        local skinCfg = tpl_character_skin[showSkin]
-        if skinCfg then
-            local avatarCfg = tpl_props[skinCfg.avatar]
-            bee.setIconInAtlas(self.AvatarImg, avatarCfg.icon)
-            bee.setText(self.SkinNameText, _T(skinCfg.name))
-            self.EffSr:SetActive(skinCfg.rank == 1)
-            self.EffSsr:SetActive(skinCfg.rank == 2)
+    if showSkin and showSkin.skin_id > 0 then
+        local jumpId = 102001
+        if showSkin.jump_id and showSkin.jump_id > 0 then
+            jumpId = showSkin.jump_id
+        end
+        if ItemModel:isCanJump(jumpId, showSkin.skin_id) then
+            self.Skin:SetActive(true)
+            local skinCfg = tpl_character_skin[showSkin.skin_id]
+            if skinCfg then
+                local avatarCfg = tpl_props[skinCfg.avatar]
+                bee.setIconInAtlas(self.AvatarImg, avatarCfg.icon)
+                bee.setText(self.SkinNameText, _T(skinCfg.name))
+                self.EffSr:SetActive(skinCfg.rank == 1)
+                self.EffSsr:SetActive(skinCfg.rank == 2)
+            end
+        else
+            self.Skin:SetActive(false)
         end
     else
         self.Skin:SetActive(false)
@@ -553,7 +565,8 @@ function P:onClickRecruitOne()
     -- 数量不足跳转获取
     if not next(costList) then
         -- 跳转提示
-        UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(GPropId.DrawTicket, true)})
+        -- UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(GPropId.DrawTicket, true)})
+        ShopModel:showDrawShop()
         UiManager:showToast(_T("LAB_COMMON_TIPS_1"))
         bee.logEvent("recruit-click", self._selectedCardPool, 0)
         return
@@ -598,7 +611,8 @@ function P:onClickRecruitTen()
     -- 数量不足跳转获取
     if not next(costList) then
         -- 跳转提示
-        UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(GPropId.DrawTicket, true)})
+        -- UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(GPropId.DrawTicket, true)})
+        ShopModel:showDrawShop()
         UiManager:showToast(_T("LAB_COMMON_TIPS_1"))
         bee.logEvent("recruit-click-10", self._selectedCardPool, 0)
         return

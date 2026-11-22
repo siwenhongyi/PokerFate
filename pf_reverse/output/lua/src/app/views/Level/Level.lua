@@ -10,9 +10,10 @@ function P:onAwake()
     self.AttrList = self:find("level_bg_frame_01/AttrList", self.LevelInfo)
     self.Content = self:find("Viewport/Content", self.AttrList)
 
-    self.TextHands = self:find("TextHands", self.Content)
-    self.TextSngHands = self:find("TextSngHands", self.Content)
-    self.TextExpRate = self:find("TextExpRate", self.Content)
+    self.TextHands = self:find("Increases daily EXP hands/Value", self.Content)
+    self.TextSngHands = self:find("Increases daily sng EXP hands/Value", self.Content)
+    self.TextExpRate = self:find("EXP Bonus/Value", self.Content)
+    self.TextAssHands = self:find("Assignments EXP hands/Value", self.Content)
     
     self.TextLevel = self:find("TextLevel", self.LevelInfo)
     self.TextExp = self:find("TextExp", self.LevelInfo)
@@ -346,6 +347,13 @@ function P:refreshTodayHands()
     end
     local str = string.format("%d<color=#61606e>/%d</color>", hands, VipModel:getExpTournament())
     bee.setText(self.TextSngHands, str)
+
+    hands = DispatchModel:getBondCount()
+    if hands >= VipModel:getFriendshipDispatch() then
+        hands = VipModel:getFriendshipDispatch()
+    end
+    local str = string.format("%d<color=#61606e>/%d</color>", hands, VipModel:getFriendshipDispatch())
+    bee.setText(self.TextAssHands, str)
 end
 
 function P:swFunTweener(running, id)

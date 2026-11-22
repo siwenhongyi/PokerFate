@@ -253,6 +253,13 @@ function P:changeEditor(type)
         v.slt:SetActive(k == type)
     end
 
+    if self._itemTimeTags then
+        for k, v in pairs(self._itemTimeTags) do
+            scheduler:removeTag(v)
+        end
+        self._itemTimeTags = nil
+    end
+
     self.itemScroll:moveToYItem(1, false)
     self.itemScroll:clear()
     -- self.itemScroll:clearCaches()
@@ -327,14 +334,7 @@ function P:onClickAvatar()
     self:setAvatarDatas()
 end
 function P:setAvatarDatas()
-    local ownedRoleList = CharacterModel:getOwnedCharacters()
-    local ownedList = {}
-    for _,v in pairs(ownedRoleList) do
-        for _,sv in pairs(v.skin_info.owned_skin_ids) do
-            local avatarId = tpl_character_skin[sv].avatar
-            table.insert(ownedList, {id = avatarId, __kind = "avatar"})
-        end
-    end
+    local ownedList = self:getDatas(GPropKind.Avatar)
     table.sort(ownedList, function(a, b) return a.id < b.id end)
     self.sltedId = self.scheme.avatar
 	self.itemScroll:setDatas(ownedList)
@@ -589,6 +589,35 @@ function P:setPropItemShow(item, data)
 end
 --角色
 function P:setRoleItemShow(item, data)
+    -- 限时试用
+    if not self._itemTimeTags then
+        self._itemTimeTags = {}
+    end
+    if self._itemTimeTags[item] then
+        scheduler:removeTag(self._itemTimeTags[item])
+        self._itemTimeTags[item] = nil
+    end
+
+    local TimeTag = self:find("TimeTag", item)
+    local role = CharacterModel:getRole(tpl_character_skin[data.id].role)
+    local leftTime = role:getLeftTime()
+    if leftTime > 0 then
+        TimeTag:SetActive(true)
+        bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+        self._itemTimeTags[item] = self:schedule(1, function()
+            leftTime = role:getLeftTime()
+            bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+            if leftTime <= 0 then
+                bee.emit("evt_characterTimeEnd", {role_id = role.role_id})
+                scheduler:removeTag(self._itemTimeTags[item])
+                self._itemTimeTags[item] = nil
+                self:refreshTrialRole()
+            end
+        end)
+    else
+        TimeTag:SetActive(false)
+    end
+    
     local icon = self:find("avatar_frame_01_mask/icon", item)
     bee.setIcon(icon, tpl_props[tpl_character_skin[data.id].avatar].icon)
     local slted = self:find("decoration_avatar_selected", item)
@@ -602,6 +631,18 @@ function P:setRoleItemShow(item, data)
             self:setItemName()
         end
     end, true)
+end
+-- 刷新过期角色
+function P:refreshTrialRole()
+    -- 刷新过期试用角色
+    if not CharacterModel:getRoleIsOwn(tpl_character_skin[self.scheme.skin_id[1]].role) then
+        self.scheme.skin_id = clone(self.baseScheme.skin_id)
+        self:refreshLeftUI()
+    end
+    -- 刷新列表
+    if self.sltedType == self.ItemType.Role then
+        self:changeEditor(self.ItemType.Role)
+    end
 end
 --标题
 function P:setTitleItemShow(item, data)
@@ -628,6 +669,37 @@ function P:setTitleItemShow(item, data)
 end
 --头像
 function P:setAvatarItemShow(item, data)
+    -- 限时试用
+    if not self._itemTimeTags then
+        self._itemTimeTags = {}
+    end
+    if self._itemTimeTags[item] then
+        scheduler:removeTag(self._itemTimeTags[item])
+        self._itemTimeTags[item] = nil
+    end
+
+    local TimeTag = self:find("TimeTag", item)
+    TimeTag:SetActive(false)
+    local propData = ItemModel:getItem(data.id)
+    if propData then
+        local leftTime = propData.deadline - bee.getServerTime()
+        if leftTime > 0 then
+            TimeTag:SetActive(true)
+            bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+            self._itemTimeTags[item] = self:schedule(1, function()
+                leftTime = leftTime - 1
+                bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+                if leftTime <= 0 then
+                    local skinCfg = tpl_character_skin[tpl_props[data.id].mapId]
+                    bee.emit("evt_characterTimeEnd", {role_id = skinCfg.role})
+                    scheduler:removeTag(self._itemTimeTags[item])
+                    self._itemTimeTags[item] = nil
+                    self:refreshTrialAvatar()
+                end
+            end)
+        end
+    end
+
     local icon = self:find("avatar_frame_01_mask/icon", item)
     bee.setIcon(icon, tpl_props[data.id].icon)
     local slted = self:find("selected", item)
@@ -640,6 +712,18 @@ function P:setAvatarItemShow(item, data)
             self:setAvatarDatas()
         end
     end, true)
+end
+-- 刷新过期头像
+function P:refreshTrialAvatar()
+    -- 刷新过期头像
+    if not ItemModel:getItem(self.scheme.avatar) then
+        self.scheme.avatar = self.baseScheme.avatar
+        self:refreshLeftUI()
+    end
+    -- 刷新列表
+    if self.sltedType == self.ItemType.Avatar then
+        self:changeEditor(self.ItemType.Avatar)
+    end
 end
 --头像框
 function P:setFrameItemShow(item, data)
@@ -789,6 +873,34 @@ function P:setMusicItemShow(item, data)
 end
 --表情
 function P:setEmojiItemShow(item, data)
+    -- 限时试用
+    if not self._itemTimeTags then
+        self._itemTimeTags = {}
+    end
+    if self._itemTimeTags[item] then
+        scheduler:removeTag(self._itemTimeTags[item])
+        self._itemTimeTags[item] = nil
+    end
+
+    local TimeTag = self:find("TimeTag", item)
+    local role = CharacterModel:getRole(tpl_emoji[data.id].role)
+    local leftTime = role:getLeftTime()
+    if leftTime > 0 then
+        TimeTag:SetActive(true)
+        bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+        self._itemTimeTags[item] = self:schedule(1, function()
+            leftTime = role:getLeftTime()
+            bee.setText(self:find("TimeText", TimeTag), ItemModel:getPropItemTimeStr(leftTime))
+            if leftTime <= 0 then
+                bee.emit("evt_characterTimeEnd", {role_id = tpl_emoji[data.id].role})
+                scheduler:removeTag(self._itemTimeTags[item])
+                self._itemTimeTags[item] = nil
+            end
+        end)
+    else
+        TimeTag:SetActive(false)
+    end
+
     local icon = self:find("icon", item)
     bee.setIcon(icon, tpl_emoji[data.id].emoji)
     local slted = self:find("decoration_emoji_selected", item)

@@ -36,6 +36,12 @@ local RecycleDropDown = {
 	[4] = {quality = 0, text = "LAB_BACKPACK_DES_37"},
 }
 
+-- 插画类型
+local IllSubType = {
+	Loading = 0,
+	Login = 1,
+}
+
 function P:onAwake()
 	local AnimRoot = self:find("AnimRoot")
 
@@ -125,6 +131,30 @@ function P:onAwake()
     self.DecInGameItem = self:find("InGameItem", self.DecorationSwitchItem)
     self.DecInGameButton = self:find("InGameButton", self.DecorationSwitchItem)
 	self.DecSwitchDatas = {{id = TabType.CardBack, type = SchemeTag.Ingame}, {id = TabType.CardFace, type = SchemeTag.Ingame}}
+
+	self.IllustrationSwitchItem = self:find("IllustrationSwitchItem", self.RightTop)
+	self.IllLoadingItem = self:find("IllLoadingItem", self.IllustrationSwitchItem)
+	self.IllLoginItem = self:find("IllLoginItem", self.IllustrationSwitchItem)
+	self._illSubType = IllSubType.Loading
+
+	bee.addClick(self.IllLoadingItem, function()
+		if self._illSubType == IllSubType.Loading then
+			return
+		end
+		self._illSubType = IllSubType.Loading
+		self:refreshIllustrationSwitchItem()
+		self:setItemListShow()
+		self:setDisplayPropDetailShow()
+	end)
+	bee.addClick(self.IllLoginItem, function()
+		if self._illSubType == IllSubType.Login then
+			return
+		end
+		self._illSubType = IllSubType.Login
+		self:refreshIllustrationSwitchItem()
+		self:setItemListShow()
+		self:setDisplayPropDetailShow()
+	end)
 
 	self.Quantity = self:find("Quantity", self.ItemDetail)
 	self.MinButton = self:find("MinButton", self.Quantity)
@@ -452,6 +482,7 @@ function P:initToggleItem(data)
 			self:logEventById(data.id)
 			self.DecorationSchemeItem:SetActive(data.id == 4)
 			self.DecorationSwitchItem:SetActive(data.id == 4)
+			self.IllustrationSwitchItem:SetActive(data.id == 23)
 			-- Animroot:GetComponent("Animator"):Play("UI_1_BackpackMain_ToggleScrollView_into")
 		else
 			bee.emit("evt_backpackToggleOff")
@@ -1335,7 +1366,11 @@ function P:_getCurDisplay(checkType)
 		elseif checkType == GPropKind.AllinShowEff then
 			curDisplay = self:_getIngameDisplay("open_card")
 		elseif checkType == GPropKind.Illustration then
-			curDisplay = tpl_props[PlayerModel:getIllustrationId()].mapId
+			if self._illSubType == IllSubType.Loading then
+				curDisplay = tpl_props[PlayerModel:getIllustrationId()].mapId
+			else
+				curDisplay = tpl_props[PlayerModel:getIllustrationId2()].mapId
+			end
 		end
 
 		self._curDisplayInfos[checkType] = curDisplay
@@ -1431,6 +1466,7 @@ function P:setDisplayPropDetailShow()
 	local inRandom = self:checkTypeInRandom(cfg)
 	local isInUse = self:_isInUse(cfg)
 	if cfg.type == GPropKind.Illustration then
+		self:refreshIllustrationSwitchItem()
 		self.RandomTag:SetActive(false)
 		self.UsedTag:SetActive(isInUse)
 		if not ItemModel:isOwned(cfg.id) then
@@ -1643,7 +1679,7 @@ function P:setButtonUse()
 				end
 			end
 		elseif self._clickItemData.cfg.type == GPropKind.Illustration then
-			ItemModel:reqUseIllustration(self._clickItemData.cfg.id)
+			ItemModel:reqUseIllustration(self._clickItemData.cfg.id, self._illSubType)
 		else
 			ItemModel:reqUseItem(self._clickItemData)
 		end
@@ -2040,6 +2076,13 @@ function P:getDecSwitchData()
 		end
 	end
 	return dtype
+end
+
+function P:refreshIllustrationSwitchItem()
+	self:find("On", self.IllLoadingItem):SetActive(self._illSubType == IllSubType.Loading)
+	self:find("Off", self.IllLoadingItem):SetActive(self._illSubType ~= IllSubType.Loading)
+	self:find("On", self.IllLoginItem):SetActive(self._illSubType == IllSubType.Login)
+	self:find("Off", self.IllLoginItem):SetActive(self._illSubType ~= IllSubType.Login)
 end
 
 function P:refreshCardEvent(dtype)

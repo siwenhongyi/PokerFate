@@ -15,6 +15,7 @@ local function _initData()
 {10008,"LAB_GACHA_TAG_8","gacha_list_bg_17","GachaCenter10008",nil,nil,nil,{1018,1019},nil,"LAB_GACHA_DES_7"},
 {10009,"LAB_GACHA_TAG_9","gacha_list_bg_20","GachaCenter10009",nil,nil,nil,{1020,1021},nil,"LAB_GACHA_DES_8"},
 {10010,"LAB_GACHA_TAG_10","gacha_list_bg_22","GachaCenter10010",nil,nil,nil,{1022},nil,"LAB_GACHA_DES_9"},
+{10011,"LAB_GACHA_TAG_11","gacha_list_bg_1023","GachaCenter10011",nil,nil,nil,{1023},nil,"LAB_GACHA_DES_10"},
 {20002,"LAB_GACHA_TAG_1002","gacha_list_bg_02","GachaCenter10002_up","Gacha[gacha_tab_up_frame_20]",{1002},{72,10,1},{1002},nil,"LAB_GACHA_DES_1"},
 {20003,"LAB_GACHA_TAG_1003","gacha_list_bg_03","GachaCenter10001_up","Gacha[gacha_tab_up_frame_20]",{1003},{148,-42,1},{1003},nil,"LAB_GACHA_DES_2"},
 {20004,"LAB_GACHA_TAG_1004","gacha_list_bg_04","GachaCenter10002_up","Gacha[gacha_tab_up_frame_20]",{1004},{148,0,1},{1004},nil,"LAB_GACHA_DES_1"},
@@ -34,7 +35,8 @@ local function _initData()
 {20019,"LAB_GACHA_TAG_1019","gacha_list_bg_18","GachaCenter10008_up","Gacha[gacha_tab_up_frame_20]",{1019},{97,-116,1},{1019},{"BackGround/Gacha/bg_gacha_matsuri_1019.png"},"LAB_GACHA_DES_7"},
 {20020,"LAB_GACHA_TAG_1020","gacha_list_bg_20","GachaCenter10009_up","Gacha[gacha_tab_up_frame_20]",{1020},{18,-135,1},{1020},{"BackGround/Gacha/bg_gacha_racing_1020.png"},"LAB_GACHA_DES_8"},
 {20021,"LAB_GACHA_TAG_1021","gacha_list_bg_21","GachaCenter10009_up","Gacha[gacha_tab_up_frame_20]",{1021},{29,-40,1},{1021},{"BackGround/Gacha/bg_gacha_racing_1021.png"},"LAB_GACHA_DES_8"},
-{20022,"LAB_GACHA_TAG_1022","gacha_list_bg_22","GachaCenter10010","Gacha[gacha_tab_up_frame_20]",{1022},nil,{1022},nil,"LAB_GACHA_DES_9"}
+{20022,"LAB_GACHA_TAG_1022","gacha_list_bg_22","GachaCenter10010","Gacha[gacha_tab_up_frame_20]",{1022},nil,{1022},nil,"LAB_GACHA_DES_9"},
+{20023,"LAB_GACHA_TAG_1023","gacha_list_bg_1023","GachaCenter10011","Gacha[gacha_tab_up_frame_20]",{1023},nil,{1023},nil,"LAB_GACHA_DES_10"}
 }
     for _, v in pairs(bodys) do
         local m = {}

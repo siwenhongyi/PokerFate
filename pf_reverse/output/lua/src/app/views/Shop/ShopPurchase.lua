@@ -62,16 +62,18 @@ function P:onClickPurchase()
 			self:hideUI()
 		else
 	    	UiManager:showToast(_T("LAB_COMMON_TIPS_1"))
-			UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(cfg.pri[1], true)})
+			-- UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(cfg.pri[1], true)})
+			ShopModel:showTicketDressShop()
 		end
 	end
 
 	-- 判断角色是否已拥有
 	local skinCfg = tpl_character_skin[cfg.role_skin]
-	if not CharacterModel:getRoleIsOwn(skinCfg.role) then
+	local role = CharacterModel:getRole(skinCfg.role)
+	if not CharacterModel:getRoleIsOwn(skinCfg.role) or role:isTrial() then
 		-- 二次确认弹窗
 		UiManager:showTip({
-	        text = _F("LAB_SHOP_ROLE_SKIN_6", _T(skinCfg.name)),
+	        text = _F("LAB_SHOP_ROLE_SKIN_6", _T(skinCfg.name), _T(tpl_character[skinCfg.role].name), ItemModel:getPropItemTimeStr(tpl_constdata.Skin_Character_Trial_Duration)),
 	        multi = true,
 	        onSure = function()
 	            purchaseSkin()

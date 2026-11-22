@@ -124,6 +124,43 @@ function P:refreshRole()
     -- local roleImage = CharacterModel:getRoleImage()
     -- roleImage.transform:SetParent(self.CharacterImage.transform, false)
     -- bee.invoke(roleImage, "setRole", self._role, true)
+
+    if self._trailTimeTag then
+        scheduler:removeTag(self._trailTimeTag)
+        self._trailTimeTag = nil
+    end
+
+    if self.TrialCont then
+        if self._role:isTrial() then
+            self.TrialCont:SetActive(true)
+            local isCanJump = ItemModel:isCanJump(self._role.info.accesses, self._role.info.id)
+            self:find("TrialTips", self.TrialCont):SetActive(not isCanJump)
+            self:find("ClaimButton", self.TrialCont):SetActive(isCanJump)
+        else
+            self.TrialCont:SetActive(false)
+        end
+    end
+    
+    if self.TrialTime then
+        self.TrialTime:SetActive(false)
+        if self._role:isTrial() then
+            self.TrialTime:SetActive(true)
+            local leftTime = self._role:getLeftTime()
+            if leftTime > 0 then
+                self.TrialTime:SetActive(true)
+                bee.setText(self:find("TimeText", self.TrialTime), ItemModel:getPropItemTimeStr(leftTime))
+                self._trailTimeTag = self:schedule(1, function()
+                    leftTime = self._role:getLeftTime()
+                    bee.setText(self:find("TimeText", self.TrialTime), ItemModel:getPropItemTimeStr(leftTime))
+                    if leftTime <= 0 then
+                        bee.emit("evt_characterTimeEnd", {role_id = self._role.info.id})
+                        scheduler:removeTag(self._trailTimeTag)
+                        self._trailTimeTag = nil
+                    end
+                end)
+            end
+        end
+    end
 end
 
 function P:setSelect(index)

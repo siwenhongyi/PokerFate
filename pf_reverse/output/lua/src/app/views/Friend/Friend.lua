@@ -34,9 +34,14 @@ function P:onAwake()
 	self.ClearButton = self:find("ClearButton", self.InputFieldSearch)
 	self.SelfIDText = self:find("UID/SelfIDText", Top)
 	self.CopyButton = self:find("UID/CopyButton", Top)
+
+	self.FriendsCountIcon = self:find("FriendsCount/friend_icon_limit", Top)
+	self.FriendsCountBlockIcon = self:find("FriendsCount/block_friend_icon_limit", Top)
 	self.FriendsCountText = self:find("FriendsCount/FriendsCountText", Top)
 	self.SearchButton:SetActive(true)
 	self.ClearButton:SetActive(false)
+
+	self._searching = false
 
 	bee.checkInputField(self.InputFieldSearch, _T("LAB_FRIENDS_1"))
 
@@ -100,10 +105,12 @@ function P:onAwake()
 		if searchText ~= "" then
 			self.SearchButton:SetActive(false)
 			self.ClearButton:SetActive(true)
+			self._searching = true
 			self:SearchFriend()
 		else
 			self.SearchButton:SetActive(true)
 			self.ClearButton:SetActive(false)
+			self._searching = false
 
 			self:onClickClearButton()
 		end
@@ -127,12 +134,13 @@ function P:onStart()
     FriendModel:initFriendList()
 
 	self:schedule(5, function()
-		if self._selectedIndex == TabIndex.FriendsList then
+		if self._selectedIndex == TabIndex.FriendsList and not self._searching then
 			FriendModel:requestFriendList(function()
 				if not bee.isNull(self.node) then
-					self:refreshList()
+					-- self:refreshList()
+					self.friendList:refreshShowingUi()
 				end
-			end)
+			end, true)
 		end
 	end)
 end
@@ -148,6 +156,7 @@ function P:onClickTabToggle(index)
 	bee.setText(self.InputFieldSearch, "", "InputField")
 
 	if index == TabIndex.FriendsList then
+		self._searching = false
 		FriendModel:requestFriendList()
 	elseif index == TabIndex.FindFriends then
 		self._searchFriendDatas = {}
@@ -185,8 +194,16 @@ function P:setFriendList(datas, blankTxt)
 	self.HalfList:SetActive(false)
 	self.Bottom:SetActive(false)
 
-	bee.setText(self.FriendsCountText, _T("LAB_FRIENDS_3") .. FriendModel:getFriendCount() .. "/" .. VipModel:getFriendLimit())
-
+	if self._selectedIndex == TabIndex.BlockedList then
+		self.FriendsCountIcon:SetActive(false)
+		self.FriendsCountBlockIcon:SetActive(true)
+		bee.setText(self.FriendsCountText, _T("LAB_FRIENDS_47") .. FriendModel:getBlockedCount() .. "/" .. VipModel:getBlacklistLimit() .. " (" .. _F("LAB_VIP_TEXT_1", VipModel:getVipLevel()) .. ")")
+	else
+		self.FriendsCountIcon:SetActive(true)
+		self.FriendsCountBlockIcon:SetActive(false)
+		bee.setText(self.FriendsCountText, _T("LAB_FRIENDS_3") .. FriendModel:getFriendCount() .. "/" .. VipModel:getFriendLimit() .. " (" .. _F("LAB_VIP_TEXT_1", VipModel:getVipLevel()) .. ")")
+	end
+	
 	if #datas > 0 then
 		self.FullList:SetActive(true)
 		self.Blank:SetActive(false)
@@ -308,9 +325,9 @@ function P:setFriendItem(item, data)
 	bee.setIconInAtlas(RankIcon, tpl_level[data.level].icon)
 
 	if data.mark and data.mark ~= "" then
-		bee.setText(NameText, GF.getOtherName(data.mark))
+		GF.setPlayerName(NameText, GF.getOtherName(data.mark), data.switch)
 	else
-		bee.setText(NameText, GF.getOtherName(data.nickname))
+		GF.setPlayerName(NameText, GF.getOtherName(data.nickname), data.switch)
 	end
 	bee.setIcon(AvatarIcon, PlayerModel:getAvatarIcon(data.avatar))
 	GF.setFrameImage(AvatarFrame, data.using_frame)
@@ -457,9 +474,9 @@ function P:setRecentItem(item, data)
 	local AppliedText = self:find("AppliedText", item)
 
 	if data.mark and data.mark ~= "" then
-		bee.setText(NameText, GF.getOtherName(data.mark))
+		GF.setPlayerName(NameText, GF.getOtherName(data.mark), data.switch)
 	else
-		bee.setText(NameText, GF.getOtherName(data.nickname))
+		GF.setPlayerName(NameText, GF.getOtherName(data.nickname), data.switch)
 	end
 	bee.setIcon(AvatarIcon, PlayerModel:getAvatarIcon(data.avatar))
 	GF.setFrameImage(AvatarFrame, data.using_frame)
@@ -538,14 +555,15 @@ function P:onClickBlock(data, cb)
 	else
 		name = data.nickname
 	end
-    UiManager:showTip({
-        text = _F("LAB_FRIENDS_26", name),
-        onSure = function()
-            FriendModel:blockFriend(data.uid)
-			UiManager:showToast(_T("LAB_FRIENDS_27"))
-			if cb then cb() end
-        end
-    })
+	FriendModel:checkBlockFriend(name, data.uid, cb)
+    -- UiManager:showTip({
+    --     text = _F("LAB_FRIENDS_26", name),
+    --     onSure = function()
+    --         FriendModel:blockFriend(data.uid)
+	-- 		UiManager:showToast(_T("LAB_FRIENDS_27"))
+	-- 		if cb then cb() end
+    --     end
+    -- })
 end
 
 function P:onClickDeleteFriend(data)
@@ -578,6 +596,11 @@ end
 
 function P:evt_friendList(refreshType)
 	if self._selectedIndex == TabIndex.FindFriends then
+		return
+	end
+
+	if self._selectedIndex == TabIndex.FriendsList and self._searching then
+		self:SearchFriend()
 		return
 	end
 

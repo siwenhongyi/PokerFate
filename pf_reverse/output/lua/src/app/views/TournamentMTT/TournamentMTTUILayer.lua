@@ -12,7 +12,7 @@ function P:onAwake()
 
     self.TextTime = self:find("TextTime", self.BlindsInfo2)
     self.TextBlind = self:find("TextBlind", self.BlindsInfo3)
-    self.TextTitle = self:find("TextTitle", self.BlindsInfo3)
+    self.TextTitle = self:find("BgTitle/TextTitle", self.BlindsInfo3)
     self.TextBlindNext = self:find("TextBlindNext", self.BlindsInfo2)
 
     bee.addClick(self:find("StatsButton", self.RightTop), function()
@@ -40,6 +40,7 @@ function P:onShow()
     self:evt_TourRoomRankRefreshBRC()
 
     bee.setText(self.TextTitle, GameModel.data:getRoomName())
+    GF.autoScrollText(self.TextTitle)
 
     self:refreshButtonSign()
     if self.ButtonSign.activeSelf or self.RebuyButton.activeSelf then
@@ -119,6 +120,7 @@ end
 function P:evt_lan_mod()
     self:evt_refreshBlind()
     bee.setText(self.TextTitle, GameModel.data:getRoomName())
+    GF.autoScrollText(self.TextTitle)
 end
 
 -- function P:evt_uiBlur(flag, name)

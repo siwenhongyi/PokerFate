@@ -13,6 +13,9 @@ function P:onAwake()
 	self.GarmentsList = self:find("GarmentsList", Right)
 	self.Item1 = self:find("Item1", Right)
 	self.ConfirmButton = self:find("ConfirmButton", Right)
+	self.TrailTime = self:find("TrailTime", Right)
+	self.TimeText = self:find("TrailTime/TimeText", Right)
+	self.TrailTime:SetActive(false)
 	self.Item1:SetActive(false)
 	self.ConfirmButton:SetActive(false)
 
@@ -36,14 +39,16 @@ function P:onStart()
 end
 
 function P:initGarmentsList()
-	self.garmentList = UiListEx:create(self.GarmentsList)
-	self.garmentList:setCreateFunc(function()
-		return CU.GameObject.Instantiate(self.Item1)
-	end)
-	self.garmentList:setRefreshFunc(function(data, item)
-		self:setSkinItem(item, data)
-	end)
-	self.garmentList:setWidth(210)
+	if not self.garmentList then
+		self.garmentList = UiListEx:create(self.GarmentsList)
+		self.garmentList:setCreateFunc(function()
+			return CU.GameObject.Instantiate(self.Item1)
+		end)
+		self.garmentList:setRefreshFunc(function(data, item)
+			self:setSkinItem(item, data)
+		end)
+		self.garmentList:setWidth(210)
+	end
 
 	local skinData = self._role:getOwnedSkins()
 	self.garmentList:setDatas(skinData)
@@ -90,15 +95,55 @@ function P:setCharacterShow()
 	if not self._characterCls then
 		self._characterCls = ObjectPool:getCls(self.CharacterImage)
 		self._characterCls:setShowReal(true)
-		self._characterCls:setRole(CharacterModel:getRole(skinCfg.role))
-
-		self._role = CharacterModel:getRole(skinCfg.role)
-		local roleCfg = tpl_character[skinCfg.role]
-		bee.setText(self.NameText, _T(roleCfg.name))
-		bee.setText(self.CVNameText, "CV: " .. _T(roleCfg.cv))
-		bee.setIcon(self.CampIcon, "Character[character_analysis_bg_camp_" .. self._role.info.campInt .. "]")
 	end
+
+	self._role = CharacterModel:getRole(skinCfg.role)
+	local roleCfg = tpl_character[skinCfg.role]
+	bee.setText(self.NameText, _T(roleCfg.name))
+	bee.setText(self.CVNameText, "CV: " .. _T(roleCfg.cv))
+	bee.setIcon(self.CampIcon, "Character[character_analysis_bg_camp_" .. self._role.info.campInt .. "]")
+	
+	self._characterCls:setRole(CharacterModel:getRole(skinCfg.role))
     self._characterCls:setSkin(skinCfg)
+
+	if self._characterTimeTag then
+		scheduler:removeTag(self._characterTimeTag)
+		self._characterTimeTag = nil
+	end
+
+	local role = CharacterModel:getRole(skinCfg.role)
+	local leftTime = role:getLeftTime()
+	if leftTime > 0 then
+		self.TrailTime:SetActive(true)
+		bee.setText(self.TimeText, ItemModel:getPropItemTimeStr(leftTime))
+		self._characterTimeTag = self:schedule(1, function()
+			leftTime = leftTime - 1
+			bee.setText(self.TimeText, ItemModel:getPropItemTimeStr(leftTime))
+			if leftTime <= 0 then
+				bee.emit("evt_characterTimeEnd", {role_id = skinCfg.role})
+				scheduler:removeTag(self._characterTimeTag)
+				self._characterTimeTag = nil
+				self:refreshTrialRole()
+			end
+		end)
+	else
+		self.TrailTime:SetActive(false)
+	end
+end
+
+function P:evt_lobbySchemeChange()
+	self:refreshTrialRole()
+end
+
+function P:refreshTrialRole()
+	if not CharacterModel:getRoleIsOwn(tpl_character_skin[self._curUsing].role) then
+		local schemeInfo = DecorationModel:getLobbySchemeInfoById(self._params.scheme_id, true)
+		self._curUsing = schemeInfo.skin_id
+		self._selected = self._curUsing
+
+		self:setCharacterShow()
+		self:initGarmentsList()
+	end
 end
 
 function P:onClickConfirm()

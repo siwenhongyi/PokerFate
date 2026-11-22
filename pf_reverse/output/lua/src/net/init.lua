@@ -9,6 +9,27 @@ require "net.net_pk"
 require "net.net_props"
 require "net.net_role"
 
+-- 桌子协议里带 tid 字段（消息所属牌桌ID，见 CSHoldem.proto），
+-- 与当前牌桌（GameModel.data:getTid()）不一致时直接丢弃该协议，
+-- 并给消息打 _stopDispatch，让 Net 不再向 UI 派发 evt_xxx。
+-- 注意：protoDefault 会给未下发的字段补默认值，所以要用 rawget 判断服务端是否真的带了 tid。
+function net:isOtherTableMsg(msg)
+	local tid = msg and rawget(msg, "tid")
+	if not tid or tid <= 0 then
+		return false
+	end
+	local data = GameModel and GameModel.data
+	if not data or not data.table_status or not data.getTid then
+		return false
+	end
+	local curTid = data:getTid()
+	if not curTid or curTid <= 0 or curTid == tid then
+		return false
+	end
+	msg._stopDispatch = true
+	return true
+end
+
 local protos = {
     "CSGameDef.proto",
     "CSValue.proto",

@@ -86,6 +86,9 @@ WebSocket:SetRecvCb(function(body)
 	if not GameModel:isStopGameMsg(szPackType) then
 		local msg = pb.decode(szPackType, szPackBody)
 		if msg then
+			if roomId and roomId > 0 then
+				msg._roomId = roomId
+			end
 			bee.protoDefault(szPackType, msg)
 			if not bee.isRelease and "pb.HeartBeatRSP" ~= szPackType and "pb.HBPingRSP" ~= szPackType then
 				print("[Net] onRecv", scheduler.timeSpend, szPackType, json.encode(msg))
@@ -97,7 +100,7 @@ WebSocket:SetRecvCb(function(body)
 				net[name](net, msg)
 			end
 
-			if not msg.code or 0 == msg.code then
+			if not msg._stopDispatch and (not msg.code or 0 == msg.code) then
 				bee.emit("evt_" .. name, msg)
 			end
 			Net:onErrorCode(msg)

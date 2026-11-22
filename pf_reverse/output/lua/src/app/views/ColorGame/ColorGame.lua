@@ -845,7 +845,11 @@ function P:doShowRewards(msg)
         SettingModel:setIsStopRefreshGold(nil)
         self._rewardSeq = nil
 
-        self:checkPushGift(playedLvlId, sum)
+        local profitSum = sum
+        for k, v in ipairs(msg.bets) do
+            profitSum = profitSum - v.value
+        end
+        self:checkPushGift(playedLvlId, profitSum)
 
         if not GameModel.data then
             if msg.ids[1] == msg.ids[2] and msg.ids[2] == msg.ids[3] then
@@ -1021,11 +1025,13 @@ end
 
 function P:getGameProfit()
     local sum = 0
-    if self._drawMsg == nil then
+    if self._recordDatas == nil then
         return sum
     end
-    for _,v in pairs(self._drawMsg.profits) do
-        sum = sum + v.profit
+    for _,v in pairs(self._recordDatas) do
+        for _,vv in pairs(v.bet_data) do
+            sum = sum + vv.profit
+        end
     end
     return sum
 end

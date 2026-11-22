@@ -48,8 +48,9 @@ function P:setItems(items)
 		else
 			self:addItem(v)
 		end
+		PlayerModel:refreshIllustration2Time()
 	end
-	
+	BattlePassModel:initExp()
 	self:refreshReddot()
 end
 
@@ -173,8 +174,22 @@ end
 function P:getItemDecorationNum()
 	local ret = 0
 	for _, v in ipairs(self._items) do
-		if table.indexof(tpl_constdata.PlayerAccessories, v.type) > 0 then
-			ret = ret + v.num
+		if not v:isDead() then
+			if table.indexof(tpl_constdata.PlayerAccessories, v.type) > 0 then
+				if v.type == GPropKind.Avatar then
+					local skinCfg = tpl_character_skin[v.mapId]
+					if skinCfg.kind == 0 then
+						local role = CharacterModel:getRole(skinCfg.role)
+						if role and not role:isTrial() and not role:isExpired() then
+							ret = ret + v.num
+						end
+					else
+						ret = ret + v.num
+					end
+				else
+					ret = ret + v.num
+				end
+			end
 		end
 	end
 	return ret
@@ -378,7 +393,7 @@ function P:getAllShowItems(backpackId, showOwn)
 				local count = self:getItemNumById(v.id)
 				if count > 0 then
 					if v.type == GPropKind.Illustration then
-						if v.sameId and v.expirationTime and self:getItemNumById(v.sameId) then
+						if v.sameId and v.expirationTime and self:getItemNumById(v.sameId) > 0 then
 							isShow = false
 						end
 					end
@@ -682,9 +697,13 @@ function P:reqUseItem(item)
 	})
 end
 
-function P:reqUseIllustration(id)
+function P:reqUseIllustration(id, subType)
+	if not subType then
+		subType = 0
+	end
 	Net:sendReq("pb.ChangeIllustrationREQ", {
 		item_id = id,
+		type = subType,
 	})
 end
 
@@ -692,7 +711,7 @@ function P:evt_ChangeIllustrationRSP(msg)
 	if msg.code ~= 0 then
 		return
 	end
-	PlayerModel:setIllustration(msg.item_id)
+	PlayerModel:setIllustration(msg.item_id, msg.type)
 end
 
 function P:reqChangeAnimation(item)
@@ -763,6 +782,12 @@ function P:isCanJump(accesses, id)
 				isOpen = false
 			end
 		end
+		if jumpCfg.battle_pass_id then
+			-- 判断关联通行证是否开启
+			if not BattlePassModel:isOpenPass(jumpCfg.battle_pass_id) then
+				isOpen = false
+			end
+		end
 		if isOpen then
 			if jumpCfg.view == "Shop" then
 				if jumpCfg.sub_page and jumpCfg.sub_page[1] == 2 then
@@ -824,7 +849,7 @@ function P:isCanJump(accesses, id)
 				end
 			elseif jumpCfg.view == "ActivityShop" then
 				local activityId = ThemeModel:getThemeConfId()
-				if activityId and activityId > 0 and not ThemeModel:getConfData().pool_group then
+				if activityId and ThemeModel:getConfData() and not ThemeModel:getConfData().pool_group then
 					local data = ShopModel:getShopExchangeList(SHOP_TYPE.activity_sports)
 					for k, v in pairs(data) do
 						for i = 1, #v.cfg.props, 3 do
@@ -836,7 +861,7 @@ function P:isCanJump(accesses, id)
 				end
 			elseif jumpCfg.view == "ActivityLottery" then
 				local activityId = ThemeModel:getThemeConfId()
-				if activityId and activityId > 0 and ThemeModel:getConfData().pool_group then
+				if activityId and ThemeModel:getConfData() and ThemeModel:getConfData().pool_group then
 					local poolId = ThemeModel:getThemePoolId()
 					if not poolId then
 						return false

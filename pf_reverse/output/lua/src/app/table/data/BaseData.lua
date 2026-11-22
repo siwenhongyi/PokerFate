@@ -104,6 +104,10 @@ function P:isMTT()
 	return GF.isMTT(self:getGameType())
 end
 
+function P:isMTTHunter()
+	return GF.isMTTHunter(self.room_info.mtt_mode)
+end
+
 function P:isTournament(isAll)
 	return self:isSNG() or self:isMTT() or (isAll and self:isFriendSNG())
 end

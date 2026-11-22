@@ -247,6 +247,8 @@ function P:_refreshItem(data, item)
     local PropItemObj = self:find("PropItem", item)
     local NewIcon = self:find("NewIcon", item)
     local ImagePlay = self:find("ImagePlay", item)
+    local CharacterTimeTag = self:find("CharacterTimeTag", item)
+    CharacterTimeTag:SetActive(false)
 
     local id = data.item_id or data.id
 
@@ -260,6 +262,11 @@ function P:_refreshItem(data, item)
         self:find("common_item_grid_m_bg_01", item):SetActive(false)
         self:find("common_item_grid_m_bg_02", item):SetActive(false)
         self:find("common_item_grid_m_bg_03", item):SetActive(true)
+
+        if data.isTrail then
+            CharacterTimeTag:SetActive(true)
+            bee.setText(self:find("TimeText", CharacterTimeTag), ItemModel:getPropItemTimeStr(tpl_constdata.Skin_Character_Trial_Duration))
+        end
     else
         PropItemObj:SetActive(true)
         RoleItemObj:SetActive(false)

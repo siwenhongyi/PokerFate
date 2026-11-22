@@ -85,6 +85,8 @@ function P:onStart()
 
 		ShopModel:initInfo()
 	end
+
+	QuickByModel:requestVipGift(true)
 end
 
 function P:evt_refreshTopInfo()

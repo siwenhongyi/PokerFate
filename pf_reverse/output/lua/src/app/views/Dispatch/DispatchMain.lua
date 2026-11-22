@@ -955,6 +955,9 @@ function P:setDispatchingDetail()
 
     -- 角色buff
     local role = CharacterModel:getRole(event.role_id)
+    if not role then
+        role = CharacterModel:getRoleData(event.role_id)
+    end
     local roleInfo = tpl_character_info[event.role_star]
     if role.info.campInt == eventCfg.campInt and roleInfo.reward_bonus > 0 then
         self.RewardBonusBuff:SetActive(true)
@@ -1116,7 +1119,7 @@ function P:onClickClaimReward()
 end
 
 function P:_claimReward(event, cb)
-    if not bee.checkCd("DispatchClaimReward", 1) then
+    if not bee.checkCd("DispatchClaimReward", 1) or not event then
         return
     end
     bee.logEvent("dispatch-claim-rewards", self._selectedCamp, self._selectedEventId)

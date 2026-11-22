@@ -787,7 +787,14 @@ function P:initTabAccount()
     self.LinkButton = self:find("LinkButton", AccountItem2)
     bee.addClick(self.LinkButton, function()
         Game:playSound("ui_button_confirm")
-        UiManager:showUI("SettingBindEmail")
+        local params = {}
+        params.title = _T("LAB_SETTINGS_177")
+        params.text = _T("LAB_SETTINGS_176")
+        params.button = 1
+        params.onSure = function()
+            UiManager:showUI("SettingBindEmail")
+        end
+        UiManager:showTip(params)
         bee.logEvent("settings-linkmail")
     end)
 

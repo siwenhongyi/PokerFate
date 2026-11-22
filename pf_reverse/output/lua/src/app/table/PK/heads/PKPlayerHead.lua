@@ -22,6 +22,10 @@ function P:onAwake()
 	self.BgCardPostion = self.BgCard.transform.localPosition
 	self.BgStatus = self:find("BgStatus")
 	self.BgStatus:SetActive(false)
+	self.BgHunter = self:find("BgHunter")
+	self.BgKO = self:find("BgKO")
+	self.BgHunter:SetActive(false)
+	self.BgKO:SetActive(false)
 
 	bee.setSortingOrder(self.BgCard, 1)
 
@@ -100,6 +104,7 @@ function P:refreshUI()
 	GF.setTitleImage(self.ImageTitle, info.title, true, true)
 	self:initHandCards()
 	self:refreshPlayUI()
+	self:refreshHunterBounty()
 	-- if info.is_fold then
 	-- 	self:foldCard()
 	-- end
@@ -192,6 +197,15 @@ function P:refreshRole()
 					self._roleSpineNode = Mask.transform:GetChild(0).gameObject
 					self._roleSpinePos = self._roleSpineNode.transform.localPosition
 					bee.invoke(self._roleSpineNode, "setHideAttachments", skinData.id)
+				end
+			end
+
+			if self._roleSpineNode and skinData.special_click_voice then
+				for i = 1, #skinData.special_click_voice, 2 do
+					local specialNode = self:find(skinData.special_click_voice[i], self._roleSpineNode)
+					if not bee.isNull(specialNode) then
+						specialNode:SetActive(false)
+					end
 				end
 			end
 
@@ -763,5 +777,134 @@ function P:refreshFightFxUi()
 		self:showFightFx()
 	end	
 end
+
+------------ 猎人赛相关 start ------------
+function P:refreshHunterBounty()
+	self.BgKO:SetActive(false)
+	if self.data:isMTTHunter() or self.data:isRecord() then
+		local info = self.data:getPlayer(self.seatid)
+		if info and info.mtt_bounty > 0 then
+			self.BgHunter:SetActive(true)
+			bee.setTextOrigin(self:find("TextHunter", self.BgHunter), _N2(info.mtt_bounty))
+			self:find("TextAdd", self.BgHunter):SetActive(false)
+		else
+			self.BgHunter:SetActive(false)
+		end
+	else
+		self.BgHunter:SetActive(false)
+	end
+end
+
+-- 筹码从赏金位置沿贝塞尔曲线飞到目标赏金位置
+function P:flyHunterChip(from, to, num, cb)
+	if not from or not to then
+		if cb then cb() end
+		return
+	end
+	num = num or 5
+	if num <= 0 or not GameModel.layer then
+		if cb then cb() end
+		return
+	end
+
+	-- 曲线参考收码：所有筹码共用同一条曲线；起点正上方做控制点形成上浮，
+	-- 中间控制点抬高形成弧顶，上浮与飞行是同一条曲线，避免两段动画之间停顿
+	local dx, dy = to.x - from.x, to.y - from.y
+	local dist = math.sqrt(dx * dx + dy * dy)
+	local arc = math.max(dist * 0.35, 60)
+	local popH = math.min(math.max(dist * 0.08, 24), 32)
+	local ctrl1 = bee.v3(from.x, from.y + popH, from.z)
+	local ctrl2 = bee.v3((from.x + to.x) * 0.5, (from.y + to.y) * 0.5 + arc, 0)
+
+	-- 飞行时长按距离换算（约 800/秒的速度，与 collectPotToHand 收码速度接近），距离越远给的时长越多
+	local flyDt = math.min(math.max(dist / 800, 0.5), 1.35)
+
+	local arrived = false
+	local function onArrive()
+		if arrived then
+			return
+		end
+		arrived = true
+		if cb and not bee.isNull(self.node) then
+			cb()
+		end
+	end
+
+	local spawned = false
+	for i = 1, num do
+		local eft = GameModel:playUIEffect("Prefab/PKTable/Eff_poker_ingame_chouma", nil, nil, 3)
+		if eft then
+			spawned = true
+			-- 起点只做小范围散开，飞行轨迹保持一致，避免视觉上过于分散
+			local fromOffset = CU.Random.insideUnitCircle * 8
+			local startPos = bee.v3(from.x + fromOffset.x, from.y + fromOffset.y, from.z)
+			bee.Tween.killByTarget(eft)
+			eft.transform.position = startPos
+
+			-- 与收码一致：上浮并入同一条曲线一气呵成，后飞的筹码时长略长，保持先后顺序
+			local dt = flyDt + (i - 1) * 0.03
+			local cmp = CS.BezierAction.BezierTo3T(eft, startPos, ctrl1, ctrl2, to, dt)
+			cmp.isLocal = false
+			cmp.delay = (i - 1) * 0.035
+			cmp:OnComplete(function()
+				GameModel:putEffectItem(eft)
+				onArrive()
+			end)
+		end
+	end
+
+	-- 没有可用特效时也要回调，避免上层结算流程卡住
+	if not spawned then
+		onArrive()
+	end
+end
+
+function P:playHunterBounty(huntInfo, fromSeatNode, bounty_inc)
+	local toNode = self.BgBet
+	if huntInfo.bounty_inc > 0 then
+		toNode = self.BgHunter
+	end
+	local fromCls = fromSeatNode and fromSeatNode.playerCls
+	if not fromCls or bee.isNull(fromCls.BgHunter) or bee.isNull(toNode) then
+		return
+	end
+	-- 先取位置再隐藏，保证起点有效
+	local fromPos = fromCls.BgHunter.transform.position
+	local toPos = toNode.transform.position
+	fromCls.BgHunter:SetActive(false)
+	self:flyHunterChip(fromPos, toPos, 5, function()
+		if bounty_inc and not bee.isNull(self.node) then
+			local info = self.data:getPlayer(self.seatid)
+			if info then
+				bee.setTextOrigin(self:find("TextHunter", self.BgHunter), _N2(info.mtt_bounty))
+			end
+			local TextAdd = self:find("TextAdd", self.BgHunter)
+			bee.setText(TextAdd, "+" .. _N2(bounty_inc))
+			bee.Tween.killByTarget(TextAdd)
+			TextAdd:SetActive(true)
+			TextAdd.transform.localScale = bee.v3zero
+			bee.tween(TextAdd)
+			: to(0.5, {scale = bee.v3(0.6, 0.6, 0.6)})
+			: to(0.2, {scale = bee.v3(0.5, 0.5, 0.5)})
+			: to(0.2, {scale = bee.v3(0.5, 0.5, 0.5)})
+			: onComplete(function()
+				TextAdd:SetActive(false)
+			end)
+			: setTarget()
+			: link()
+		end
+	end)
+end
+
+function P:playHunterKO()
+	bee.Tween.killByTarget(self.BgKO)
+	self.BgKO:SetActive(true)
+	self.BgKO.transform.localScale = bee.v3zero
+	bee.tween(self.BgKO)
+	: to(0.5, {scale = bee.v3(1.2, 1.2, 1.2)})
+	: to(0.2, {scale = bee.v3one})
+	: setTarget()
+end
+------------ 猎人赛相关 end ------------
 
 return P

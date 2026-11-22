@@ -937,6 +937,41 @@ function P:evt_WinnerRSP(params)
 			end
 		end
 	end
+
+	-- params.hunt_info = {{
+	-- 	hunter_seatid = params.winner[1].seatid,
+	-- 	prey_seatid = params.profit[1].seatid,
+	-- 	bounty_reward = 5,
+	-- 	bounty_inc = 5,
+	-- }}
+	-- if params.hunt_info[1].hunter_seatid == params.hunt_info[1].prey_seatid then
+	-- 	params.hunt_info[1].prey_seatid = params.profit[2].seatid
+	-- end
+
+	-- 猎人赏金结算
+	if params.hunt_info and #params.hunt_info > 0 then
+		seqs[#seqs + 1] = function()
+			local kos, hunters = {}, {}
+			for _, v in ipairs(params.hunt_info) do
+				if v.bounty_inc > 0 then
+					hunters[v.hunter_seatid + 1] = (hunters[v.hunter_seatid + 1] or 0) + v.bounty_inc
+				end
+			end
+			for _, v in ipairs(params.hunt_info) do
+				local hunter_seatid = v.hunter_seatid + 1
+				local prey_seatid = v.prey_seatid + 1
+				kos[prey_seatid] = prey_seatid
+				
+				self.seatController[hunter_seatid]:emitFunc("playHunterBounty", v, self.seatController[prey_seatid], hunters[hunter_seatid])
+				hunters[hunter_seatid] = nil
+			end
+			for _, v in pairs(kos) do
+				self.seatController[v]:emitFunc("playHunterKO")
+			end
+		end
+		seqs[#seqs + 1] = tpl_constdata.IngameHunterKODt
+	end
+
 	local needShowLight = self._needShowLight
 	seqs[#seqs + 1] = function()
 		if needShowLight then
@@ -975,7 +1010,7 @@ function P:evt_WinnerRSP(params)
 				winChips = chips
 			end
 			local player = self.data:getPlayer(seatid)
-			player.chips = player.chips + chips
+			-- player.chips = player.chips + chips
 			if seatid == myPosition and not self.data:isInObserve() then
 				Game:playSound("cheer")
 				bee.vibrate(tpl_vibrate.button)
@@ -1186,6 +1221,9 @@ function P:evt_RebyBRC(msg)
 			local player = self.data:getPlayer(seatid)
 			if player then
 				self.seatController[seatid]:refreshChip(player)
+				if msg.bounty > 0 then
+					self.seatController[seatid]:emitFunc("refreshHunterBounty")
+				end
 			end
 
 			if seatid ~= self.data:getMyPosition() or self.data:isInObserve() then

@@ -30,7 +30,8 @@ local function _initData()
 {100806,{"A17_2","A125","A127"}},
 {101306,{"A89","A90","A91","A111","A112","A113"}},
 {100606,{"A19"}},
-{102205,{"zhuoyi2","bj_tanzi1"}}
+{102205,{"zhuoyi2","bj_tanzi1"}},
+{102305,{"A38"}}
 }
     for _, v in pairs(bodys) do
         local m = {}

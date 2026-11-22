@@ -156,4 +156,19 @@ function P:reqVipReward(level, cb)
 	end)
 end
 
+
+function P:getVipLevelData()
+    local str = ""
+    local vip = self:getVipLevel()
+    if vip > 0 then
+        local itemCfg = tpl_props[tpl_vip_level[vip].title]
+        local vipName = _T(itemCfg.name)
+        local lanType = LanguageManager:getLanguage() == "en" and " · " or "·"
+        str = vipName .. lanType .. _F("LAB_VIP_TEXT_1", vip)
+    else
+        str = _F("LAB_VIP_TEXT_1", vip)
+    end
+    return str
+end
+
 return P

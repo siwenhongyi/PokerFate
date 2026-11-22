@@ -1,6 +1,7 @@
 syntax = "proto2";
 package pb;
 
+import "CSGameDef.proto";
 message ColorGameBet
 {
     optional int32 id = 1; // 101黄, 102灰, 103紫, 104蓝, 105红, 106绿
@@ -128,6 +129,116 @@ message PinballActionRSP
     optional PinballActionResult action_result = 2;
 }
 
+message UpdateSwitchRSP
+{
+    optional int32 switch = 1;//开关值二进制存储
+}
+
+
+
+///////////////////////////////////////////////////小丑牌////////////////////////////////////////////
+
+//席位卡牌
+message SeatCard
+{
+    optional int32 seat = 1;     //席位
+    optional int32 count = 2;    //计数
+    optional int32 id = 3;       //卡牌id
+}
+//获取小丑牌信息
+message GetClownInfoREQ
+{
+
+}
+message GetClownInfoRSP
+{
+    optional int32 code = 1;
+    optional int32 level = 2;            //当前关卡
+    repeated SeatCard seat_cards = 3;    //席位卡牌
+    optional int32 refresh = 4;          //剩余刷新次数
+    optional int32 endless_times = 5;    //今日无尽关卡领取奖励次数
+}
+
+message Formula
+{
+    optional int32 type = 1;        //1是筹码 2是倍率
+    optional int32 c_type = 2;      //1是加法 2是乘法
+    optional int32 value = 3;       //值
+}
+
+
+//操作行为
+message Operation
+{
+    optional int32 op = 1;          //1弃牌 2出牌
+    repeated int32 cards = 2;       //手牌列表
+    repeated int32 op_cards = 3;    //操作牌列表
+    optional int32 card_type = 4;   //牌型
+    repeated int32 ids = 5;         //触发的牌手id
+    optional int64 get_score = 6;   //获取的分数
+    repeated Formula formulas = 7; //计算公式
+    optional int32 op_time = 8;    //操作时间戳
+    optional int32 card_type_lv = 9;//牌型等级
+    repeated int32 card_player_ids = 10;//当前牌手阵容
+}
+
+//本关结束上报
+message GameOverREQ
+{
+    repeated Operation operations = 1;     //操作记录
+}
+message GameOverRSP
+{
+    optional int32 code = 1;
+    optional int32 level = 2;            //当前关卡
+    repeated ItemIdUnit rewards = 3;     // 奖励道具列表
+    optional bool is_pass = 4;           //true 过关 false失败
+    optional int32 endless_times = 5;    //今日无尽关卡领取奖励次数
+    optional int64 his_score = 6;        //最高分数
+}
+
+//刷新席位卡牌
+message RefreshSeatCardREQ
+{
+    optional int32 seat = 1;    //席位
+}
+
+message RefreshSeatCardRSP
+{
+    optional int32 code = 1;
+    optional int32 refresh = 2;             //刷新次数
+    optional int32 seat = 3;                //席位
+    repeated SeatCard seat_cards = 4;       //刷新卡牌 如果在凌晨4点的时候刷新会存在解锁席位卡牌
+}
+
+//开始挑战
+message StartChallengeREQ
+{
+
+}
+
+message StartChallengeRSP
+{
+    optional int32 code = 1;        //0成功
+    optional int32 level = 2;       //当前关卡
+    optional string rand_seed = 3;  //随机种子
+    repeated SeatCard seat_cards = 4;    //席位卡牌
+}
+
+//牌手位置变动
+message CardPlayerSeatChangeREQ
+{
+    repeated int32 card_player_ids = 1;//当前牌手阵容
+}
+
+message CardPlayerSeatChangeRSP
+{
+    optional int32 code = 1;
+}
+
+
+/////////////////////////////大富翁活动协议/////////////////////////
+
 message ThrowDiceREQ
 {
     optional int32 multiple = 1; //倍数
@@ -135,8 +246,8 @@ message ThrowDiceREQ
 
 message ThrowDiceRSP
 {
-    optional int32 code = 1;
-    optional int32 index = 2;        //格子排序
+    optional int32 code = 1;    
+    optional int32 index = 2;        //格子排序 
     optional int32 multiple = 3;     //倍数
     optional int32 all_cost_num =  4;//骰子消耗总数
 }
@@ -159,8 +270,8 @@ message GetMonopolyActDataREQ
 
 message GetMonopolyActDataRSP
 {
-    optional int32 code = 1;
-    optional int32 index = 2;          //格子排序
+    optional int32 code = 1;    
+    optional int32 index = 2;          //格子排序 
     optional int32 all_cost_num =  3;  //骰子消耗总数
     optional int32 progress = 4;       //已领取的进度
     optional int32 act_id = 5;         //当前活动id

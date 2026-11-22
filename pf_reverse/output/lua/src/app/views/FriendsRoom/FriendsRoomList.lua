@@ -121,7 +121,7 @@ function P:setFilterText(obj, idx)
 end
 
 function P:refreshItem(data, item)
-    bee.setTextCut(self:find("TextName", item), data.owner.name, 217)
+    GF.setPlayerName(self:find("TextName", item), data.owner.name, data.owner.switch, 217)
     bee.setIcon(self:find("Mask/ImageIcon", item), PlayerModel:getAvatarIcon(data.owner.avatar))
     GF.setFrameImage(self:find("ImageFrame", item), data.owner.frame)
 

@@ -132,6 +132,7 @@ end
 function P:refreshList()
     RecordDataModel.showIndex = self._viewIndex
     RecordDataModel.showType = self._filterType[self._viewIndex]
+    local vipStr = VipModel:getVipLevelData()
     if 1 == self._viewIndex then
         RecordDataModel:fetchRecentList(self.ReplayTypeDic[self._filterType[self._viewIndex]], function(ok, list, total)
             if ok then
@@ -145,7 +146,7 @@ function P:refreshList()
                 self:filterType(self._filterType[self._viewIndex])
             end
         end)
-        bee.setText(self.PageTip, _F("LAB_PLAYBACK3", PlayerModel:getRecentHistoryLimit()))
+        bee.setText(self.PageTip, _F("LAB_VIP_TEXT_40", vipStr, PlayerModel:getRecentHistoryLimit()))
     else
         RecordDataModel:fetchCollectList(self.ReplayTypeDic[self._filterType[self._viewIndex]], function(ok, list, total)
             if ok then
@@ -159,10 +160,10 @@ function P:refreshList()
                 self.CollectTotal = total
                 PlayerModel:setCurRecord(self.CollectTotal)
                 self:filterType(self._filterType[self._viewIndex])
-                bee.setText(self.PageTip, _F("LAB_SAVE_LIMIT", string.format("%s / %s", self.CollectTotal, PlayerModel:getRecordNum())))
+                bee.setText(self.PageTip, _F("LAB_VIP_TEXT_33", vipStr, string.format("%s / %s", self.CollectTotal, PlayerModel:getRecordNum())))
             end
         end)
-        bee.setText(self.PageTip, _F("LAB_SAVE_LIMIT", string.format("%s / %s", PlayerModel:getCurRecord(), PlayerModel:getRecordNum())))
+        bee.setText(self.PageTip, _F("LAB_VIP_TEXT_33", vipStr, string.format("%s / %s", PlayerModel:getCurRecord(), PlayerModel:getRecordNum())))
     end
 end
 
@@ -264,13 +265,15 @@ function P:refreshItem(data, item)
                         if ok then
                             self.List:removeData(data)
                             table.removebyvalue(self.CollectList, data)
+                            self.CollectTotal = self.CollectTotal - 1
                             for k,v in pairs(self.NearGameList) do
                                 if v.gameid == data.gameid then
                                     v.collected = false
                                     break
                                 end
                             end
-                            bee.setText(self.PageTip, _F("LAB_SAVE_LIMIT", self.CollectTotal .. " / " .. PlayerModel:getRecordNum()))
+                            local vipStr = VipModel:getVipLevelData()
+                            bee.setText(self.PageTip, _F("LAB_VIP_TEXT_33", vipStr, string.format("%s / %s", self.CollectTotal, PlayerModel:getRecordNum())))
                         end
                     end)
                 end

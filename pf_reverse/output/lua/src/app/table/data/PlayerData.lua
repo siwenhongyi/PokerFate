@@ -9,6 +9,7 @@ function P:ctor(index)
     self.chips = 0
     self.begin_chips = 0
     self.default_byin = 0
+    self.mtt_bounty = 0
     
     self.uid = 0
     self.name = "Player" .. self.index
@@ -46,6 +47,7 @@ function P:resetInfo(info, data)
     end
 	self.chips = info.hand_chips or 0
     self.default_byin = info.default_byin or 0
+    self.mtt_bounty = info.mtt_bounty or 0
 	self.seat_reserve = info.seat_reserve or false
 
 	self.bet_chip = info.destop_chips or 0
@@ -104,6 +106,7 @@ function P:resetBriefInfo(brief)
         self.skin_id = brief.skin_id
         self.user_type = brief.user_type
         self.card_back = brief.card_back
+        self.switch = brief.switch
         if self.card_back == nil or self.card_back == 0 then
             self.card_back = ItemModel:getDefaultDecoration(GPropKind.CardBack)
         end
@@ -135,6 +138,7 @@ function P:resetBriefInfo(brief)
         self.nameplate_eff = 0
         self.card_front = 0
         self.card_back = 0
+        self.switch = 0
     end
 end
 
@@ -188,6 +192,7 @@ function P:getPlayData()
         bet_change = self.bet_change,
         action_type = self.action_type,
         chips = self.chips,
+        mtt_bounty = self.mtt_bounty,
     }
 end
 
@@ -199,6 +204,7 @@ function P:setPlayData(d)
     self.bet_change = d.bet_change
     self.action_type = d.action_type
     self.chips = d.chips
+    self.mtt_bounty = d.mtt_bounty
 end
 
 function P:isAllin()

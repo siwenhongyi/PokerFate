@@ -11,13 +11,16 @@ message ActionNotifyBRC
     optional int64 max_chipin = 4; //可以下的最大筹码量
     optional int32 pre_action_result = 5; //0 没有设置预行动，1 预行动被重置，2 执行预行动
     optional int32 think_time = 6; //sng本局还能思考的时间长度
+    optional int32 tid = 7; // 所在的牌桌ID
 }
 
 //回合开始
 message RoundStartBRC
 {
     optional int32 stage = 1;
-    repeated int32 board = 2; //公共牌
+    repeated int32 board = 2; //公共牌,只有当前阶段的公共牌
+    optional int32 tid = 3; // 所在的牌桌ID
+    repeated int32 all_board = 4; // 所有已发出的公共牌
 }
 
 //回合结束
@@ -25,6 +28,7 @@ message RoundOverBRC
 {
     repeated int64 pool = 1; //奖池
     repeated PoolRD pool_rd = 2; // 底池详情
+    optional int32 tid = 3; // 所在的牌桌ID
 }
 
 //发手牌
@@ -35,6 +39,7 @@ message HandCardRSP
     optional int32 card3 = 3;
     optional int32 card4 = 4;
     optional int32 seatid = 5;
+    optional int32 tid = 6; // 所在的牌桌ID
 }
 
 message PreActionREQ //预行动请求
@@ -54,11 +59,20 @@ message PreActionResetRSP //预行动被重置
 {
 }
 
+// 猎杀信息
+message HuntInfo
+{
+    optional int32 hunter_seatid = 1;   // 猎人的seatid
+    optional int32 prey_seatid = 2;     // 被猎杀者的seatid
+    optional int64 bounty_reward = 3;   // 猎人获得的赏金奖励, 这部分会转换成金币进入个人账户
+    optional int64 bounty_inc = 4;      // 猎人赏金增加量
+}
+
 message WinningInfo
 {
     optional int32 seatid = 1;  //座位id
     optional int32 poolid = 2;  //奖池id
-    optional int64 chips = 3;  //奖励筹码,包含本金,已去除fee
+    optional int64 chips = 3;  //奖励筹码,包含本金,已去除fee,不包含赏金
     optional int32 type = 4; //赢牌类型
     optional int64 uid = 6;
     optional int64 jackpot_fee = 7;
@@ -79,6 +93,8 @@ message WinnerRSP
 {
     repeated WinningInfo winner 	= 1;
     repeated WinningProfit profit 	= 2;
+    repeated HuntInfo hunt_info = 3; // 猎杀信息
+    optional int32 tid = 4; // 所在的牌桌ID
 }
 
 message ShowHandInfo
@@ -93,6 +109,7 @@ message ShowHandInfo
 message ShowHandRSP
 {
     repeated ShowHandInfo info = 1;
+    optional int32 tid = 2; // 所在的牌桌ID
 }
 
 //开局信息，参与牌局的座位与筹码
@@ -109,11 +126,13 @@ message DealerInfoRSP
     optional int32 big_blind = 3;
     repeated StartInfo start_info = 4;
     optional string gameid = 5;
+    optional int32 tid = 6; // 所在的牌桌ID
 }
 
 message TableGameOverRSP
 {
     optional int32 type = 1; // 1 房间时间到   2 服务器停服   3 不够2人开局  4 热更解散旧房间 5:进入addon阶段
+    optional int32 tid = 2; // 所在的牌桌ID
 }
 
 message ShowMyCardREQ
@@ -134,6 +153,7 @@ message ShowMyCardBRC
 {
     optional string gameid = 1;
     repeated ShowMyCardInfo info = 2;
+    optional int32 tid = 3; // 所在的牌桌ID
 }
 
 //筹码从桌子返回到手里
@@ -141,6 +161,7 @@ message ChipsBackBRC
 {
     optional int32 seatid = 1;
     optional int64 chips = 2;
+    optional int32 tid = 3; // 所在的牌桌ID
 }
 
 //取消等待大盲设置(已废弃)
@@ -177,6 +198,8 @@ message RebyBRC
     optional int32 seatid = 2;
     optional int64 chips = 3;
     optional string type = 4; // 补码类型, 取值: reby/auto_reby/topup/allinfold_topup
+    optional int64 bounty = 5; // 补码成功后返回玩家当前的赏金, 目前仅MTT使用
+    optional int32 tid = 6; // 所在的牌桌ID, 仅reby成功时返回
 }
 
 message NoticeRebyRSP
@@ -184,6 +207,7 @@ message NoticeRebyRSP
     optional int32 type = 1; // 1没有chips
     optional int32 seatid = 2;
     optional int32 reby_left_time = 3; //等待reby剩余时间,单位:秒
+    optional int32 tid = 4; // 所在的牌桌ID
 }
 
 message SetRebyREQ
@@ -216,6 +240,7 @@ message ActionBRC
     optional int32 action_type = 2;
     optional int64 chips = 3;
     optional int64 hand_chips = 4;  //BET后剩余筹码
+    optional int32 tid = 5; // 所在的牌桌ID
 }
 
 message GetCardsREQ
@@ -238,6 +263,7 @@ message AnteInfo
 message AnteBRC
 {
     repeated AnteInfo info = 1;
+    optional int32 tid = 2; // 所在的牌桌ID
 }
 
 message PlayerHands
@@ -312,6 +338,7 @@ message EmojiBRC
     optional int64 uid = 1;             //发送方uid
     optional int64 to_uid = 2;          //接收方uid
     optional int32 id = 3;//表情id
+    optional int32 tid = 4; // 所在的牌桌ID
 }
 
 message NoticeAddonBRC
@@ -330,9 +357,11 @@ message AddonBRC
     optional int32 code = 1;
     optional int32 seatid = 2;
     optional int64 chips = 3;
+    optional int64 bounty = 4; // 玩家当前的赏金, 目前仅MTT使用
+    optional int32 tid = 5; // 所在的牌桌ID, 仅addon成功时返回
 }
 
 message RoomAvgChipsChangeBRC
 {
-    optional int64 avg_chips = 1; // 平均筹码, 仅用于爆衣
+    optional int64 avg_chips = 1; // 平均筹码, 仅用于sng/mtt爆衣
 }

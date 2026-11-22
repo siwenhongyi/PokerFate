@@ -87,7 +87,7 @@ function P:onShow()
 
     local skin = tpl_character_skin[self._data.skin_id or 0]
     
-    bee.setTextCut(self.TextName, PlayerModel:getNameIngame(), 460)
+    GF.setPlayerName(self.TextName, PlayerModel:getNameIngame(), nil, 460)
     bee.setText(self.TextLevel, PlayerModel:getCurLevel())
     if PlayerModel:getCurLevel() > 0 then
         bee.setIcon(self:find("Rank/icon_rank_01", self.Player), tpl_level[PlayerModel:getCurLevel()].icon)
@@ -290,6 +290,7 @@ function P:onBtClose()
 end
 
 function P:nextBtnClose()
+    bee.emit("evt_removeUiAutoEvent")
     local tourId = GameModel.data.room_info.tour_id
     bee.enterScene("MainScene", { info = {
         key = "tournamentDetail",

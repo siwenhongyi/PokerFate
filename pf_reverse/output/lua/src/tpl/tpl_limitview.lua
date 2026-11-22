@@ -5,12 +5,12 @@ local PL = {}
 local function _initData()
     local keys = {'id','path1','path2','avenues',}
     local bodys = {
-{"LoginSpineKV","views/Login/LoginSpineKV.prefab","views/Login/LoginSpineKV_hx.prefab",{6}},
+{"LoginSpineKV","KV/KV1/LoginSpineKV.prefab","KV/KV1/LoginSpineKV_hx.prefab",{6}},
 {"avatar_1004_01_full","RoleSpine/1004_1/avatar_1004_01_full.png","RoleSpine/1004_1/avatar_1004_01_full_hx.png",{6}},
 {"cg_1_1_1","BackGround/Cg/cg_1_1_1.png","BackGround/Cg/cg_1_1_1_hx.png",{6}},
 {"BackGround/Cg/cg_1_1_1.png","BackGround/Cg/cg_1_1_1.png","BackGround/Cg/cg_1_1_1_hx.png",{6}},
-{"views/Login/LoginSpineKV.prefab","views/Login/LoginSpineKV.prefab","views/Login/LoginSpineKV_hx.prefab",{6}},
-{"LoginSpineKV2","views/Login/LoginSpineKV2.prefab","views/Login/LoginSpineKV_hx.prefab",nil}
+{"KV/KV1/LoginSpineKV.prefab","KV/KV1/LoginSpineKV.prefab","KV/KV1/LoginSpineKV_hx.prefab",{6}},
+{"LoginSpineKV2","KV/KV2/LoginSpineKV2.prefab","KV/KV1/LoginSpineKV_hx.prefab",nil}
 }
     for _, v in pairs(bodys) do
         local m = {}

@@ -1,7 +1,7 @@
 
 __G__TRACKBACK__ = function(msg)
     if bee.logEvent and (bee.isInTest or bee.isRelease) and G_UPDATE_VERSION then
-        local info = G_UPDATE_VERSION .. " " .. (PlayerModel and PlayerModel:getUid() or "") .. msg
+        local info = G_UPDATE_VERSION .. " " .. (PlayerModel and PlayerModel:getUid() or "") .. " " .. msg
         bee.logEvent("client_error", info)
     end
     return msg
@@ -24,6 +24,12 @@ require "app.mgr.AnimationMgr"
 require "app.mvc.BaseModel"
 
 require "app.Types.EventDef"
+
+-- 深链参数可能晚于登录/首屏到达（Adjust deferred deeplink 场景），到时再消费一次
+bee.on("evt_deepLink", function()
+	GF.dealDeepLinkParams()
+end)
+
 require "app.Types.RedTag"
 require "app.Utils.utils"
 require "app.Utils.FontUtil"
@@ -228,13 +234,19 @@ bee.setGraphicQuality = function(index)
     elseif 2 == index then
         CS.Utils.SetQualityLevel(2)
     else
-        CS.Utils.SetQualityLevel(5)
+        if bee.isPc then
+            CS.Utils.SetQualityLevel(5)
+        else
+            CS.Utils.SetQualityLevel(5)
+        end
     end
 
     local scale = 1
     if 1 == index then
         scale = 0.5
     elseif 2 == index then
+        scale = 0.85
+    else
         scale = 1
     end
     UiManager:resizeBuffers(scale, scale)

@@ -55,3 +55,13 @@ def _formula_layer_without_fitted_corrections(monkeypatch):
     refit — so postflop actions do not move ranges unless a test points PF_FORMULA_FIT_PATH at
     a model of its own (tests/test_fit_likelihood_model.py covers the fit and the deployed file)."""
     monkeypatch.setenv("PF_FORMULA_FIT_PATH", "off")
+
+
+@pytest.fixture(autouse=True)
+def _client_tables_are_the_installers(monkeypatch):
+    """Tests read the client's tables as the repository has them (the installer's, output/), never
+    the hot update this machine synced (remote_res/, git-ignored), so they pass alike everywhere."""
+    from pf_reverse import tables
+
+    monkeypatch.setattr(tables.TABLES, "roots", [tables.TPL])
+    monkeypatch.setattr(tables.TABLES, "manifest", None)

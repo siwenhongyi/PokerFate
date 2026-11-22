@@ -25,6 +25,8 @@ local SHOP_TYPE_CFG = {
     [21] = tpl_quick_purchase,
     [22] = tpl_shop_passcard,
     [23] = tpl_shop_dispatch,
+    [24] = tpl_quick_purchase,
+    [25] = tpl_shop_battle_pass,
     [10001] = tpl_shop_exchange,
     [10002] = tpl_shop_activity,
     [10003] = tpl_shop_activity,
@@ -353,6 +355,9 @@ function P:buyWithProp(shop_type, id, num)
     if shop_type == SHOP_TYPE.shop_role_skin or shop_type == SHOP_TYPE.skin_gifts then
         local shopCfg = SHOP_TYPE_CFG[shop_type][id]
         rewards = {}
+        if not CharacterModel:getRoleIsOwn(tpl_character_skin[shopCfg.role_skin].role) then
+            table.insert(rewards, {major_type = GMajorType.ROLE, id = tpl_character_skin[shopCfg.role_skin].role, num = 1, isTrail = true})
+        end
         if not CharacterModel:isOwnedSkin(shopCfg.role_skin) then
             table.insert(rewards, {major_type = GMajorType.ROLE_SKIN, id = shopCfg.role_skin, num = 1})
         end
@@ -757,7 +762,8 @@ function P:getShopExchangeList(shop_type)
                 local prop = self:getRewardsListWithType(v.props)[1]
                 local isOwn = false
                 if prop.major_type == GMajorType.ROLE then
-                    isOwn = CharacterModel:getRoleIsOwn(prop.id)
+                    local role = CharacterModel:getRole(prop.id)
+                    isOwn = role and not role:isTrial() and not role:isExpired()
                 elseif prop.major_type == GMajorType.ROLE_SKIN then
                     isOwn = CharacterModel:isOwnedSkin(prop.id)
                 elseif prop.major_type == GMajorType.PROP then
@@ -1565,7 +1571,10 @@ function P:getShopPushList()
                     break
                 end
             end
-            
+        elseif v.shop_type == SHOP_TYPE.battle_pass then
+            if BattlePassModel:isOpenPass() then
+                table.insert(list, {cfg = v, tag = BattlePassModel:isUnlockPass()})
+            end
         end
     end
 
@@ -1720,6 +1729,77 @@ function P:isRerunSkin(skinId)
         end
     end
     return false
+end
+
+-- 招募界面推送
+function P:showDrawShop()
+    -- 双倍轮盘彩晶
+    for k, v in pairs(self:getShopTopUpList(SHOP_TYPE.shop_recharge)) do
+        if self:getIsCanDoubleReward(v.cfg.shop_type, v.cfg.id) then
+            bee.logEvent("shop-recruit-push", v.cfg.shop_type)
+            UiManager:showUI("ShopBestseller", {id = 2, multi = true})
+            return
+        end
+    end
+
+    -- 主题活动礼包
+    local activityCfg
+    for k,v in pairs(tpl_shop_hot_sell_list) do
+        if v.activity_id == ThemeModel:getThemeConfId() then
+            activityCfg = v
+            break
+        end
+    end
+    if activityCfg then
+        local data = self:getShopPackageList(SHOP_TYPE.activity_gifts)
+        for k, v in pairs(data) do
+            if not v.soldOut then
+                -- 判断是否包含抽卡道具
+                for i = 1, #v.cfg.props, 2 do
+                    if v.cfg.props[i] == GPropId.DrawCoin or v.cfg.props[i] == GPropId.DrawTicket then
+                        bee.logEvent("shop-recruit-push", v.cfg.shop_type)
+                        UiManager:showUI("ShopBestseller", {id = activityCfg.id, multi = true})
+                        return
+                    end
+                end
+            end
+         end
+     end
+
+     -- 特惠招募礼包
+     bee.logEvent("shop-recruit-push", SHOP_TYPE.shop_gifts)
+     UiManager:showUI("RecruitmentBundles")
+end
+
+-- 黑卡推送
+function P:showTicketDressShop()
+    -- 主题活动礼包
+    local activityCfg
+    for k,v in pairs(tpl_shop_hot_sell_list) do
+        if v.activity_id == ThemeModel:getThemeConfId() then
+            activityCfg = v
+            break
+        end
+    end
+    if activityCfg then
+        local data = self:getShopPackageList(SHOP_TYPE.activity_gifts)
+        for k, v in pairs(data) do
+            if not v.soldOut then
+                -- 判断是否包含服饰黑卡
+                for i = 1, #v.cfg.props, 2 do
+                    if v.cfg.props[i] == GPropId.TicketDress then
+                        bee.logEvent("shop-credits-push", v.cfg.shop_type)
+                        UiManager:showUI("ShopBestseller", {id = activityCfg.id, multi = true})
+                        return
+                    end
+                end
+            end
+         end
+     end
+
+     -- 服饰黑卡弹窗
+     bee.logEvent("shop-credits-push", SHOP_TYPE.shop_gifts)
+     UiManager:showUI("ShopFashionCredit")
 end
 
 return P

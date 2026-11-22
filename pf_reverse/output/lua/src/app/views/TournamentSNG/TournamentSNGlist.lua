@@ -48,7 +48,7 @@ function P:onShow()
             end
             GF.setFrameImage(self:find("Avatar/ImageFrame", self.Items[k]), v.brief.frame)
             GF.setTitleImage(self:find("ImageTitle", self.Items[k]), v.brief.title)
-            bee.setText(self:find("TextName", self.Items[k]), GF.getOtherName(v.brief.name, nil, v.brief.uid))
+            GF.setPlayerName(self:find("TextName", self.Items[k]), GF.getOtherName(v.brief.name, nil, v.brief.uid), v.brief.switch)
             bee.setIcon(self:find("Avatar/Mask/Icon", self.Items[k]), PlayerModel:getAvatarIcon(v.brief.avatar))
             
             bee.addClick(self:find("Avatar", self.Items[k]), function()

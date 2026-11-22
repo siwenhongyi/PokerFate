@@ -1053,7 +1053,9 @@ function P:evt_SchemeChangeBRC(msg)
         for _,v in pairs(msg.scheme_list) do
             for sk,sv in pairs(self._lobby_scheme_list) do
                 if sv.scheme_id == v.scheme_id then
+                    v.index = sv.index
                     self._lobby_scheme_list[sk] = v
+                    bee.emit("evt_lobbySchemeChange", {scheme_id = sv.scheme_id})
                 end
             end
         end
@@ -1062,7 +1064,9 @@ function P:evt_SchemeChangeBRC(msg)
         for _,v in pairs(msg.room_scheme_list) do
             for sk,sv in pairs(self._ingame_scheme_list) do
                 if sv.scheme_id == v.scheme_id then
+                    v.index = sv.index
                     self._ingame_scheme_list[sk] = v
+                    bee.emit("evt_inGameSchemeChange", {scheme_id = sv.scheme_id})
                 end
             end
         end

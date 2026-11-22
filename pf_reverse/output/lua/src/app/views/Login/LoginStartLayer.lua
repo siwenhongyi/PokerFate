@@ -5,6 +5,9 @@ function P:onAwake()
     self.Center = self:find("Center", self.AnimRoot)
     self.Bottom = self:find("Bottom", self.AnimRoot)
 
+    self.LoadingImg = self:find("LoadingImg", self.Center)
+    self.LoadingImg:SetActive(false)
+
     local Loading = self:find("Loading", self.Bottom)
     self.LoadingBar = self:find("LoadingBar", Loading)
     self.LoadingEft = self:find("LoadingEft", Loading)
@@ -149,6 +152,8 @@ function P:onShow()
     self:find("OFF", self.ButtonMusic):SetActive(not isOn)
     
     self:playStartBGM()
+
+    self:refreshCenter()
 end
 
 function P:isBGMisOn()
@@ -351,6 +356,7 @@ function P:evt_SelfUserInfoRSP(msg)
         self:hideLoginLayer()
         self.TouchStart:SetActive(true)
         self.ButtonAccount:SetActive(G_CHNL_ID ~= 8)
+        self:refreshCenter()
     end
     self._isLinked = true
     self._isInAutoLogin = nil
@@ -418,6 +424,13 @@ function P:evt_refreshLimitView()
             self.LoginSpineKVObj = obj
         end
     end
+end
+
+function P:refreshCenter()
+    self.LoadingImg:SetActive(true)
+    self.LoadingImg.transform:SetAsLastSibling()
+    local propCfg = tpl_props[PlayerModel:getIllustrationId2()]
+    GF.setIllustrationImage(propCfg.mapId, self.LoadingImg, true)
 end
 
 return P

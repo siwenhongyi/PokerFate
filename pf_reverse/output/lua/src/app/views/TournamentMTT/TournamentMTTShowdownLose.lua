@@ -71,18 +71,24 @@ function P:onShow()
         item:SetActive(true)
         PropItem:create(item, {id = v.item_id, num = v.item_num}): bindTips()
     end
+
+    local reward = {}
+    if GameModel.data:isMTTHunter() and self._data.mtt_bounty_reward > 0 then
+        table.insert(reward, {item_id = GPropId.Gold, item_num = self._data.mtt_bounty_reward})
+    end
     if self._data.bond_inc > 0 then
-        flag = true
-        local item = CU.GameObject.Instantiate(Item3, BgView.transform, false)
-        item:SetActive(true)
-        PropItem:create(item, {id = GPropId.BondSNG, num = self._data.bond_inc, format = {VipModel:getFriendshipTournament()}}): bindTips()
+        table.insert(reward, {item_id = GPropId.BondSNG, item_num = self._data.bond_inc, format = {VipModel:getFriendshipTournament()}})
     end
     if self._data.exp_inc > 0 then
+        table.insert(reward, {item_id = GPropId.ExpSNG, item_num = self._data.exp_inc, format = {VipModel:getExpTournament()}})
+    end
+    for _, v in ipairs(reward) do
         flag = true
         local item = CU.GameObject.Instantiate(Item3, BgView.transform, false)
         item:SetActive(true)
-        PropItem:create(item, {id = GPropId.ExpSNG, num = self._data.exp_inc, format = {VipModel:getExpTournament()}}): bindTips()
+        PropItem:create(item, {id = v.item_id, num = v.item_num, format = v.format}): bindTips()
     end
+    
     Rewards02:SetActive(flag)
         
     Game:stopMusic()

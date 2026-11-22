@@ -222,6 +222,9 @@ end
 
 
 function P:inputEvent()
+    if not bee.isPc then
+        return
+    end
     if self.numKeyMappings then
         for _, kv in ipairs(self.numKeyMappings) do
             if CU.Input.GetKeyDown(kv.key) then

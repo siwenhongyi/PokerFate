@@ -180,6 +180,37 @@ def iter_bundles(src):
             yield b, f.read()
 
 
+def bundle_contents(raw, name=""):
+    """{output path: plain bytes} of the proto / lua sources in one bundle (raw, XENC or not).
+    Returns (contents, skipped)."""
+    contents, n_skip = {}, 0
+    try:
+        env = UnityPy.load(xenc_decrypt(raw))
+    except Exception as e:
+        print("  跳过(加载失败) %s: %s" % (os.path.basename(name), e))
+        return contents, n_skip
+    for cpath, obj in env.container.items():
+        try:
+            obj_type = obj.type.name
+        except Exception as e:
+            print("  跳过(对象失效) %s %s: %s" % (os.path.basename(name), cpath, e))
+            n_skip += 1
+            continue
+        if obj_type != "MonoBehaviour":
+            continue
+        sub, key = map_out_path(cpath)
+        if sub is None:
+            n_skip += 1
+            continue
+        tree = obj.read_typetree()
+        if "data" not in tree:
+            n_skip += 1
+            continue
+        data = bytes(tree["data"])
+        contents[sub] = xxtea_decrypt(data, key) if tree.get("encode") else data
+    return contents, n_skip
+
+
 def extract(srcs, out_dir):
     contents = {}                                # sub -> plain（后传入的来源覆盖先前的）
     n_skip = n_xenc = 0
@@ -187,30 +218,9 @@ def extract(srcs, out_dir):
         for name, raw in iter_bundles(src):
             if raw[:4] == XENC_MAGIC:
                 n_xenc += 1
-            try:
-                env = UnityPy.load(xenc_decrypt(raw))
-            except Exception as e:
-                print("  跳过(加载失败) %s: %s" % (os.path.basename(name), e))
-                continue
-            for cpath, obj in env.container.items():
-                try:
-                    obj_type = obj.type.name
-                except Exception as e:
-                    print("  跳过(对象失效) %s %s: %s" % (os.path.basename(name), cpath, e))
-                    n_skip += 1
-                    continue
-                if obj_type != "MonoBehaviour":
-                    continue
-                sub, key = map_out_path(cpath)
-                if sub is None:
-                    n_skip += 1
-                    continue
-                tree = obj.read_typetree()
-                if "data" not in tree:
-                    n_skip += 1
-                    continue
-                data = bytes(tree["data"])
-                contents[sub] = xxtea_decrypt(data, key) if tree.get("encode") else data
+            found, skipped = bundle_contents(raw, name)
+            contents.update(found)
+            n_skip += skipped
 
     if not contents:
         sys.exit("没有解出任何 proto/lua，未改动输出目录（加密方式可能又变了）")

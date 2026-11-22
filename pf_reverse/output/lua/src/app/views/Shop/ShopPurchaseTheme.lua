@@ -85,7 +85,8 @@ function P:onClickPurchase()
 	local ownCount = ItemModel:getItemNumById(data.consumeId)
 	if ownCount < self._params.data.pri then
     	UiManager:showToast(_T("LAB_COMMON_TIPS_1"))
-		UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(data.consumeId, true)})
+		-- UiManager:showUI("BackpackDetail", {data = ItemModel:getItem(data.consumeId, true)})
+		ShopModel:showTicketDressShop()
 		return
 	end
 

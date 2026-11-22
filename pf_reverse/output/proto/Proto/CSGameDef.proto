@@ -33,6 +33,7 @@ message UserBrief
     repeated  AnimationInfo animations = 10; //玩家动效
     optional int32 card_front = 11; // 当前使用的牌面id
     optional int32 card_back = 12; // 当前使用的牌背id
+    optional int32 switch = 13;    //游戏内开关：第1位隐藏VIP等级，第2位启用VIP助手
 }
 
 message ItemInfo
@@ -77,6 +78,7 @@ message RoleInfo
     optional RoleLevelInfo level_info = 3; //角色等级信息
     optional string name = 4; //角色名称
     optional bool is_star = 5; //是否标星
+    optional int64 expire_time = 6;//过期时间
 }
 
 message PlaySummary
@@ -125,6 +127,7 @@ message FriendRoomInfo
     optional bool open_observer  = 9 ;//明牌围观 true 明牌围观 false不明牌围观, 字段废弃 20260615
     optional int32 think_time = 10;//思考时间(时间银行)
     optional int32 begin_chips = 11;//起始筹码
+    optional int32 owner_switch = 12;
 }
 
 // SNG与MTT盲注结构项
@@ -240,6 +243,7 @@ message MttRoomInfo
     optional int32 addon_multiple_switch = 54; // 多倍addon开关, 0关闭 1开启
     optional int32 addon_selection_time = 55; // 增购选择时间,单位:秒
     optional int32 mtt_start_time = 56; // MTT开赛时间
+    optional int32 mtt_mode = 57; // mtt模式 0:普通MTT 1-普通猎人赛, 2-滚雪球猎人赛
 }
 
 //水上水下数据
@@ -276,6 +280,7 @@ message SeatStatus
     optional int32 wait_blind_type = 25; // 是否需要等待大盲位再加入牌局 0:支付大盲立刻加入 1:等到大盲位再加入 2:不等待(不需要支付大盲)
     optional bool is_allin = 26; // 是否allin, 用于断线重连后显示玩家的allin状态
     optional int32 seat_index = 27; // sng等于seatid，mtt从0开始增长
+    optional int64 mtt_bounty = 28; // 玩家的MTT赏金数量
 }
 
 message ShowMyCardInfo
@@ -373,7 +378,7 @@ message RoomStatus
     optional bool is_addoning = 8; // MTT字段,是否处于addon阶段
     optional int32 addon_left_sec = 9; // MTT字段, addon剩余时间, 单位:秒
     optional int32 left_addon_times = 10; // MTT字段,玩家剩余的addon次数
-    optional int64 avg_chips = 11; // 平均筹码, 仅用于爆衣
+    optional int64 avg_chips = 11; // 平均筹码, 仅用于sng/mtt爆衣
 }
 
 message PlayingStatus
@@ -477,4 +482,5 @@ message PlayerScoreInfo
     optional int64 uid = 5;    //玩家uid
     optional int64 rank = 6;    //玩家排行
     optional int32 frame = 7;  //头像框
+    optional int32 switch = 8; 
 }

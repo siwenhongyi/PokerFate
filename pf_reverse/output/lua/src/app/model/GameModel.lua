@@ -16,6 +16,8 @@ function P:ctor()
     self.bond_settle_info = nil -- 退出房间时好感度变化信息
     self.over_bond_settle_info = nil -- 退出房间时好感度变化信息
 
+    self._skipLobbyAutoPop = false --主界面自动弹窗跳过标识
+
     self.gameType = 0
     self.roomId = 0
 
@@ -54,6 +56,16 @@ function P:ctor()
 
         ["pb.SngSpinBRC"] = true,
     }
+end
+
+function P:setSkipLobbyAutoPop(skip)
+    self._skipLobbyAutoPop = skip
+end
+
+function P:consumeSkipLobbyAutoPop()
+    local skip = self._skipLobbyAutoPop
+    self._skipLobbyAutoPop = false
+    return skip
 end
 
 function P:afterLogin()
@@ -116,8 +128,10 @@ function P:saveReplay(gameid, cb, roomid, tid)
             if 0 == d.code then
                 if d.list and #d.list > 0 then
                     local delData = d.list[#d.list]
+                    local vip = VipModel:getVipLevel()
+                    local lab = vip == VipModel:getMaxLevel() and "LAB_DEL_PLAYBACK_TIP5" or "LAB_DEL_PLAYBACK_TIP5_1"
                     UiManager:showTip({
-                        text = _F("LAB_DEL_PLAYBACK_TIP5", GameModel:getReplayTitle(delData)),
+                        text = _F(lab, GameModel:getReplayTitle(delData)),
                         sureStr = _T("LAB_SAVE"),
                         cancelStr = _T("LAB_DEL_PLAYBACK_TIP6"),
                         onSure = function()

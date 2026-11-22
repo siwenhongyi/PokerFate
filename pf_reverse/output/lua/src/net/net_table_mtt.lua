@@ -71,10 +71,12 @@ end
 
 function net:AddonBRC(msg)
 	if not GameModel.data then return end
+	if net:isOtherTableMsg(msg) then return end
 
 	local player = GameModel.data:getPlayer(msg.seatid + 1)
 	if player then
 		player.chips = player.chips + msg.chips
+		player.mtt_bounty = msg.bounty
 		if player.uid == PlayerModel:getUid() then
 			GameModel.data.room_status.left_addon_times = GameModel.data.room_status.left_addon_times - 1
 		end

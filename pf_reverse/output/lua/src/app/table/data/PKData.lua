@@ -795,6 +795,26 @@ end
 function P:setWinnerRSP(msg)
 	self.winner_rsp = msg
 
+	if msg.winner then
+		for _, v in ipairs(msg.winner) do
+			local player = self:getPlayer(v.seatid + 1)
+			if player then
+				player.chips = player.chips + v.chips
+			end
+		end
+	end
+
+	if msg.hunt_info and #msg.hunt_info > 0 then
+		for _, v in ipairs(msg.hunt_info) do
+			if v.bounty_inc > 0 then
+				local player = self:getPlayer(v.hunter_seatid + 1)
+				if player then
+					player.mtt_bounty = (player.mtt_bounty or 0) + v.bounty_inc
+				end
+			end
+		end
+	end
+
 	local items = self.table_status.his_detail.show_round_rd.items
 	for _, v in ipairs(msg.profit) do
 		local flag = true

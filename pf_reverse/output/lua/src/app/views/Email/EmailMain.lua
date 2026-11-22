@@ -152,7 +152,13 @@ function P:onAwake()
         for _, v in ipairs(shows) do
             if v == count then
                 EmailModel:reqNextEmailList(self._mail_type, function(data, mail_type)
-                    if mail_type == self._mail_type and data.list then
+                    if mail_type == self._mail_type and data.list and #data.list > 0 then
+                        local datas = self.ListEmail:getDatas()
+                        for _, v in ipairs(datas) do
+                            if v.data.id == data.list[1].id then
+                                return
+                            end
+                        end
                         self.ListEmail:append(data.list)
                     end
                 end)
@@ -434,8 +440,12 @@ function P:refreshContentText(content, text)
     local textList = GF.parseLinks(text)
     local linkText = content:GetComponent("HyperlinkText")
     linkText:RemoveAllListeners()
+    local linkColor = "#6abefe"
     for _, v in ipairs(textList) do
         if v ~= "" then
+            v = string.gsub(v, '(<a[^>]*>)(.-)(</a>)', function(openTag, linkContent, closeTag)
+                return openTag .. "<color=" .. linkColor .. ">" .. linkContent .. "</color>" .. closeTag
+            end)
             linkText:AddListener(function(href)
                 GF.onClickLink(string.gsub(href, '"', ''))
             end)

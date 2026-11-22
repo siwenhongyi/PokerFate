@@ -108,6 +108,8 @@ GPropId = {
     RoleDispatchExp = 10440005,     -- 牌手星级经验
     CampDispatchUpgrade = 10440006, -- 事务所提升/解锁道具
     DispatchBonus = 11000051,       -- 派遣彩蛋道具
+
+    BattlePassExp = 11000061,       -- 通行证经验
 }
 
 GPropQuality = {
@@ -183,6 +185,12 @@ GAME_SUB_TYPE = {
     SNG = 3,
     NORMAL_MTT = 4, -- 普通MTT
     INSTANT_MTT = 5, -- 人满即开MTT
+}
+
+GAME_MTT_MODE = {
+    NORMAL = 0,	-- 普通
+    HUNTER = 1,	-- 猎人
+    HUNTER_2 = 2,	-- 滚雪球猎人
 }
 
 -- 大厅类型
@@ -443,6 +451,7 @@ LOBBY_POP_PRIORITY = {
     VipUp = 990,    -- vip 等级提升
     Bankrupt = 980, -- 破产保护
     LimitedPack = 975, --超值礼包
+    VipGift = 973, --Vip礼包
     BondUp = 970,   -- 好感度提升
     BestSeller = 969,   -- 热销
     -- SkinGift = 969,     -- 皮肤礼包
@@ -453,12 +462,16 @@ LOBBY_POP_PRIORITY = {
     MonthlyCardEffect = 962,    -- 月卡获得特效
     RewardNew = 961,        -- 获得新道具
     Reward = 960,           -- 恭喜获得
+    VipUpLobby = 955,       -- VIP等级提升
+    PassUpgrade = 954,     -- 通行证升级
     BackpackGift = 950,     -- 礼物礼包选择
 
     ActivityNewmanCheckin = 959, -- 新人签到活动
     RewardMonthlyCard = 958,    -- 月卡签到奖励
     SignIn = 950,   -- 每日签到
     Notice = 900,   -- 公告
+
+    BattlePassUnlock = 800,       -- 通行证解锁展示
 
     RoleLoginVoice = 500,   -- 角色登场语音
 
@@ -478,10 +491,10 @@ SHOP_TYPE = {
     shop_gifts2 = 5,
     [5] = tpl_shop_gifts,
     shop_exchange = 6,
-    shop_recharge = 7,
-    shop_recharge2 = 8,
+    shop_recharge = 7,      -- 轮盘彩晶
+    shop_recharge2 = 8,     -- 服饰黑卡
     [8] = tpl_shop_recharge,
-    shop_recharge3 = 9,
+    shop_recharge3 = 9,     -- 筹码商店
     [9] = tpl_shop_recharge,
     quick_purchase = 10,
     shop_theme = 11,
@@ -495,6 +508,7 @@ SHOP_TYPE = {
     activity_gifts = 19,    -- 礼包商城-活动礼包
     skin_gifts = 20,        -- 皮肤礼包
     dispatch_passcard = 22, -- 派遣通行证
+    battle_pass = 25,       -- 通行证
     hot_spring = 10001,    -- 温泉季商店
     gala_season = 10002,   -- 礼服季商店
     activity_sports = 20001,    -- 运动会活动商店
@@ -716,8 +730,11 @@ ActivityId = {
     Matsuri = 10007,        --夏日祭
     Racing = 10008,        --赛车季
     Fantasy = 10009,        --日幻
+    Halloween = 10010,      --万圣节
 
     SpringFestival = 3001,  --春节活动
+
+    Monopoly = 30000,   --大富翁
 }
 ThemeName = {
     [ActivityId.HotSpring] = "HotSpringHall",
@@ -729,6 +746,7 @@ ThemeName = {
     [ActivityId.Matsuri] = "Matsuri",
     [ActivityId.Racing] = "Racing",
     [ActivityId.Fantasy] = "Fantasy",
+    [ActivityId.Halloween] = "Halloween",
 }
 
 
@@ -812,4 +830,14 @@ ScreenShowTypeName = {
     [ScreenShowType.Window] = "LAB_SETTINGS_168", --窗口模式
     [ScreenShowType.FullScreen] = "LAB_SETTINGS_014", --全屏模式
     [ScreenShowType.Borderless] = "LAB_SETTINGS_137", --无边框窗口
+}
+
+------------------ 教学视频 ------------------
+TutorialVideoPaths = {
+    [1] = {["zh"] = "https://www.bilibili.com/video/BV1Hyp46qEKM/", ["tw"] = "https://youtu.be/SuINW_HP_dQ",
+            ["en"] = "https://youtu.be/bl_1bSChg1U", ["jp"] = "https://youtu.be/GYa9uzCH6nE"},
+    [2] = {["zh"] = "https://www.bilibili.com/video/BV1cNWc6AEs9/", ["tw"] = "https://youtu.be/pPu1bTj5DhI",
+            ["en"] = "https://youtu.be/BRyyNZah0R8", ["jp"] = "https://youtu.be/gAueQyrS7Lk"},
+    [3] = {["zh"] = "https://www.bilibili.com/video/BV1PunC6UEvs/", ["tw"] = "https://youtu.be/lySk8i0Xi8Y",
+            ["en"] = "https://youtu.be/WSOSHDyS6dc", ["jp"] = "https://youtu.be/ctDXz-kPLO4"},
 }

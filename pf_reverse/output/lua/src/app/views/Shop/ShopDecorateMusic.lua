@@ -175,6 +175,7 @@ function P:setShopItem(item, data, isInit, index)
 
 	bee.removeAllClick(item)
 	bee.addClick2(item, function()
+		Game:playSound("ui_button_confirm")
 		if cfg.new_tag == 1 then
 			NewTag:SetActive(false)
 			ShopModel:setNewItem(cfg)
@@ -184,7 +185,14 @@ function P:setShopItem(item, data, isInit, index)
 			UiManager:showToast(_T("LAB_SHOP_COMMON_16"))
 			return
 		end
-		Game:playSound("ui_button_confirm")
+		
+		local ownCount = ItemModel:getItemNumById(cfg.pri[1])
+		if ownCount < cfg.pri[2] then
+			UiManager:showToast(_T("LAB_COMMON_TIPS_1"))
+			ShopModel:showTicketDressShop()
+			return
+		end
+
 		UiManager:showUI("ShopExchangeSingle", {data = data})
 	end)
 

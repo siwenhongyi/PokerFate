@@ -43,7 +43,10 @@ local gamePath = {
 	{name = "SpringFestivalModel", cls = require "app.model.activity.SpringFestivalModel"},
 	{name = "SoccerGuessingModel", cls = require "app.model.activity.SoccerGuessingModel"},
 	{name = "DispatchModel", cls = require "app.model.DispatchModel"},
-    
+	{name = "BattlePassModel", cls = require "app.model.BattlePassModel"},
+	{name = "BalBattleModel", cls = require "app.model.BalBattleModel"},
+	{name = "MonopolyModel", cls = require "app.model.MonopolyModel"},
+
 }
 
 local allPath={}

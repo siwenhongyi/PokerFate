@@ -486,10 +486,12 @@ function P:showLoseNodes(flag)
 	if flag then
 		self._LoseAnim = GameModel:playUIEffect("Prefab/PKTable/Eff_poker_logo_lose", self.node.transform, self.ImageLose.transform.localPosition, 4)
 		local info = self.data:getPlayer(self.seatid)
-		if info:isMe() then
-			self._LoseAnim.transform.localScale = bee.v3one
-		else
-			self._LoseAnim.transform.localScale = bee.v3(1.6, 1.6, 1.6)
+		if not bee.isNull(self._LoseAnim) then
+			if info:isMe() then
+				self._LoseAnim.transform.localScale = bee.v3one
+			else
+				self._LoseAnim.transform.localScale = bee.v3(1.6, 1.6, 1.6)
+			end
 		end
 		if not bee.isNull(self._PKWinRate) then
 			GameModel:putEffectItem(self._PKWinRate)

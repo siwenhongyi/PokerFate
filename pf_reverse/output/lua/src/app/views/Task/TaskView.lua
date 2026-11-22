@@ -289,9 +289,7 @@ function P:refreshTaskList(isInit)
 
 	if not self.taskList then
 		self:initTaskList()
-		self:once(0.15, function()
-			self.taskList:setDatas(data)
-		end)
+		self.taskList:setDatas(data)
 	else
 		self.taskList:setDatas(data, isInit)
 	end

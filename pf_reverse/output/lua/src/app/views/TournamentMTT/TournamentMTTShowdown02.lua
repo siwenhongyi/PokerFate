@@ -72,12 +72,13 @@ function P:onShow()
             is_enter_win_round = true,
             winner_brief = {name = "11", uid = 11, level = 1},
             act_reward_list = {{item_id=20410201, item_num = 1000}},
+            mtt_bounty_reward = 100,
         }
     end
     self.ObserveButton:SetActive(self._data.rank > 2)
 
     if 0 == self._data.rank then
-        bee.setTextCut(self.TextName, GF.getOtherName(self._data.winner_brief.name, self._data.winner_seat_index), 460)
+        GF.setPlayerName(self.TextName, GF.getOtherName(self._data.winner_brief.name, self._data.winner_seat_index), self._data.winner_brief.switch, 460)
         bee.setText(self.TextLevel, self._data.winner_brief.level)
         if self._data.winner_brief.level > 0 then
             bee.setIcon(self:find("Rank/icon_rank_01", self.Player), tpl_level[self._data.winner_brief.level].icon)
@@ -93,7 +94,7 @@ function P:onShow()
             bee.setIcon(ingame_history_player_01, "InGame[ingame_history_player_02]")
         end
     else
-        bee.setTextCut(self.TextName, PlayerModel:getNameIngame(), 460)
+        GF.setPlayerName(self.TextName, PlayerModel:getNameIngame(), nil, 460)
         bee.setText(self.TextLevel, PlayerModel:getCurLevel())
         if PlayerModel:getCurLevel() > 0 then
             bee.setIcon(self:find("Rank/icon_rank_01", self.Player), tpl_level[PlayerModel:getCurLevel()].icon)
@@ -139,21 +140,31 @@ function P:onShow()
     if #rewards > 3 then
         BgItems = ViewItems
     end
+    if GameModel.data:isMTTHunter() and self._data.mtt_bounty_reward > 0 then
+        for _, v in ipairs(rewards) do
+            if v.item_id == GPropId.Gold then
+                v.item_num = v.item_num + self._data.mtt_bounty_reward
+                break
+            end
+        end
+    end
     flag01 = #rewards > 0
     GF.addItemsToParent(BgItems, Item1, rewards, BgItems == ViewItems and {} or nil)
 
+    local reward = {}
     if self._data.bond_inc > 0 then
-        flag = true
-        local item = CU.GameObject.Instantiate(Item3, BgView.transform, false)
-        item:SetActive(true)
-        PropItem:create(item, {id = GPropId.BondSNG, num = self._data.bond_inc, format = {VipModel:getFriendshipTournament()}}): bindTips()
+        table.insert(reward, {item_id = GPropId.BondSNG, item_num = self._data.bond_inc, format = {VipModel:getFriendshipTournament()}})
     end
     if self._data.exp_inc > 0 then
+        table.insert(reward, {item_id = GPropId.ExpSNG, item_num = self._data.exp_inc, format = {VipModel:getExpTournament()}})
+    end
+    for _, v in ipairs(reward) do
         flag = true
         local item = CU.GameObject.Instantiate(Item3, BgView.transform, false)
         item:SetActive(true)
-        PropItem:create(item, {id = GPropId.ExpSNG, num = self._data.exp_inc, format = {VipModel:getExpTournament()}}): bindTips()
+        PropItem:create(item, {id = v.item_id, num = v.item_num, format = v.format}): bindTips()
     end
+
     if self._data.act_reward_list then
         for _, v in ipairs(self._data.act_reward_list) do
             flag = true

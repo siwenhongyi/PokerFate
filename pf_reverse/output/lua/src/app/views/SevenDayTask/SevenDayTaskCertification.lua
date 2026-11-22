@@ -63,7 +63,7 @@ function P:onStart()
 	self._isFromTable = self._params.isFromTable
 	if self._params.isCertification and not self._params.info then
 		-- 认证
-		bee.setText(self.NameText, PlayerModel:getName())
+		GF.setPlayerName(self.NameText, PlayerModel:getName())
 		local registerTime = os.date("*t", PlayerModel:getRegisterTime())
 		bee.setText(self.TimeText, _F("LAB_SEVEN_DAY_TASKS_DEC_33", registerTime.year, registerTime.month, registerTime.day))
 		local time = os.date("*t", bee.getServerTime())
@@ -75,7 +75,7 @@ function P:onStart()
 	elseif self._params.info then
 		-- 查看
 		local info = self._params.info
-		bee.setText(self.NameText, GF.getOtherName(info.name, nil, info.uid))
+		GF.setPlayerName(self.NameText, GF.getOtherName(info.name, nil, info.uid), info.switch)
 		local registerTime = os.date("*t", info.register_time)
 		bee.setText(self.TimeText, _F("LAB_SEVEN_DAY_TASKS_DEC_33", registerTime.year, registerTime.month, registerTime.day))
 		local time = os.date("*t", info.auth_cert_time)

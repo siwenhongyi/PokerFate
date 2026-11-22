@@ -90,9 +90,15 @@ function net:RoleUnlockRSP(msg)
     if CharacterModel:getRoleTotalNum() == 1 then
         CharacterModel:setGetroleguide()
     end
-    CharacterModel:addRole(msg.role_info)
-    CharacterModel:setNewRole(msg.role_info.role_id)
-    CharacterModel:reqRoleTaskList(msg.role_info.role_id)
+    local role = CharacterModel:getRole(msg.role_info.role_id)
+    if role then
+        -- 试用角色
+        role:setData(msg.role_info)
+    else
+        CharacterModel:addRole(msg.role_info)
+        CharacterModel:setNewRole(msg.role_info.role_id)
+        CharacterModel:reqRoleTaskList(msg.role_info.role_id)
+    end
 end
 
 function net:SkinUnlockRSP(msg)

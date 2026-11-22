@@ -209,8 +209,7 @@ function P:addRoleExp(role_id, exp)
     if r then
         r.exp = r.exp + exp
         local d = tpl_character_info[r.role_star + 1]
-        if d and r.exp >= d.star_exp then
-            r.exp = r.exp - d.star_exp
+        if d and r.exp >= d.total_exp then
             r.role_star = r.role_star + 1
             return true
         end

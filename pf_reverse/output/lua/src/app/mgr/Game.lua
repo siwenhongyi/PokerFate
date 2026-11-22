@@ -109,8 +109,11 @@ function P:stopRoleSound()
 end
 
 function P:playStoryVoice(voice)
-    bee.setMixerVolume("volumeMusic", -6)
-    return bee.playSound(voice, true)
+    local v = SettingModel:getSoundVolume()
+    if v > 0 then
+        bee.setMixerVolume("volumeMusic", -6)
+        return bee.playSound(voice, true)
+    end
 end
 
 function P:stopStoryVoice()

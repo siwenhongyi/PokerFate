@@ -60,7 +60,8 @@ end
 
 function P:refreshMatchingTip()
     if self.sng_matching_num > 0 then
-        if bee.isInHome() or (bee.isInGame() and GameModel.data and (not GameModel.data:isSNG() or GameModel.data:isRecord() or GameModel.data:isInObserve())) then
+        if bee.isInHome() or (bee.isInGame() and GameModel.data and (not GameModel.data:isSNG() or GameModel.data:isRecord() or GameModel.data:isInObserve())) 
+            or (bee.isInGame() and BalBattleModel:inGame()) then
             local ui = UiManager:getUI("TournamentSNGhint")
             if not ui then
                 UiManager:showUI("TournamentSNGhint")
@@ -363,7 +364,14 @@ function P:reqSngSign(data, sign_item_id, cb)
         ip = PlayerModel:getIP()
     }, function(ret)
         if ret.code ~= 0 then
-            if ret.code == tpl_RetCode.ERR_SNG_NOT_AVAILABLE.code then
+            if ret.reason then
+                for k, v in pairs(ret.reason) do
+                    if LanguageManager:getLanguage() == v.lang then
+                        UiManager:showToast(v.text)
+                        break
+                    end
+                end
+            elseif ret.code == tpl_RetCode.ERR_SNG_NOT_AVAILABLE.code then
                 bee.emit(EventDef.evt_sng_not_available)
             end
             return
