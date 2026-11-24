@@ -328,7 +328,6 @@
     /* 人机：紫色虚线框 + 标签，和真人一眼分开 */
     .live-seat.robot { border: 1px dashed #b79cff; background: rgba(46,30,84,.88); }
     .live-seat .pill.robot { background: #7a4de0; color: #fff; font-weight: 700; }
-    .live-seat .pill.robot.suspect { background: transparent; color: #d7c8ff; border: 1px dashed #b79cff; }
     .live-seat .s-stack { color: #9fe0b8; font-variant-numeric: tabular-nums; }
     .live-seat .s-tags { display: flex; gap: 5px; align-items: center; margin-top: 2px; flex-wrap: wrap; }
     .live-seat .s-cards { display: flex; gap: 3px; margin-top: 4px; }

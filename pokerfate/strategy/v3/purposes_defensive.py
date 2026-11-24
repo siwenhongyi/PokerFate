@@ -129,6 +129,37 @@ _SAFE_MEDIUM_VALUE_RAISE_SUBTYPES = {
 }
 
 
+_FOLD_GUARD_MARGIN = 0.15
+_FOLD_CURVE_SMALL_PRICE = 0.15
+_FOLD_TURN_UNCERTAINTY_SHARE = 0.5
+_BLUFF_CATCH_NO_PAIR_ADD = 0.15
+
+
+# A pair that shares a paired board: the label says 'strong' (two pair with the
+# board's pair), opponents play the same holdings like 'medium' ones.
+_BOARD_PAIR_OWN_PAIR_SUBTYPES = {'board_pair_hero_pair', 'board_pair_pocket_underpair'}
+
+
+def _fold_guarded(ctx: DecisionCtx) -> bool:
+    """Top-tier label with a clear edge over the price: ``FoldPurpose`` does not vote."""
+    return (
+        ctx.hero_bucket in ('nuts', 'strong')
+        and ctx.equity_range >= ctx.pot_odds + _FOLD_GUARD_MARGIN
+    )
+
+
+def _call_guaranteed(ctx: DecisionCtx) -> bool:
+    """A guarded hand keeps a call candidate even when ``BluffCatchCall`` would refuse it.
+
+    Without it the fold purpose abstains, the call purpose refuses, and the
+    hand is folded by default: aces on K-2-5-5 getting 25 to 1, trips with 73%
+    against a 40% price. Not for a pair that shares a paired board: there the
+    refusal is the fragile-hand margin doing its job (24 such calls in the
+    logs realised -2.6 +/- 8.9bb), and the hand is folded as before.
+    """
+    return _fold_guarded(ctx) and ctx.hero_made_subtype not in _BOARD_PAIR_OWN_PAIR_SUBTYPES
+
+
 def _villain_draw_mass(ctx: DecisionCtx) -> float:
     dist = ctx.villain_bucket_dist or {}
     return dist.get('draw', 0.0) + dist.get('weak_draw', 0.0)
@@ -547,19 +578,28 @@ class BluffCatchCall(Purpose):
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
         if not ctx.facing_bet:
             return TriggerResult(False)
-        # Accept any made-hand bucket. 'nuts' is critical — when hero holds a
-        # nut hand but weighted-equity is compressed by a polarized villain
-        # range (doc: H73 — 多人池 Jh 高顺面对 villain range 含 51% spade
-        # flush combos → hero weighted eq 49%，够不到 value_raise 0.72 门槛
-        # 但 pot odds 仍远低于 eq → call +EV)，BluffCatchCall 是唯一合法
-        # call 路径；漏掉 nuts 会导致候选池只剩 fold，hero 弃掉赢定的牌。
-        # draw / weak_draw 走 DrawCall（带 implied odds 奖励更合适）。
-        # air 仍排除：eq 通常不够 pot_odds，真需要时走 fold baseline。
-        if ctx.hero_bucket not in ('medium', 'strong', 'nuts'):
+        # 'nuts' matters here: a nut hand whose equity is compressed by a
+        # polarized range (H73: jack-high straight against a range with 51%
+        # flush combos, equity 49%, below the value-raise bar but far above
+        # the price) has no other way to call.
+        # A drawing hand ('draw') is priced by DrawCall, which adds implied
+        # odds; everything else is judged here on equity against the price.
+        if ctx.hero_bucket == 'draw':
             return TriggerResult(False)
+        # What the hand is called does not decide whether it may call: a hand
+        # without a pair (ace high, two overcards) whose equity against the
+        # bettor's range clears the price is a bluff-catcher like any other.
+        refuse = TriggerResult(True, 0.3) if _call_guaranteed(ctx) else TriggerResult(False)
         if _danger_non_nut_call_block(ctx):
-            return TriggerResult(False)
+            return refuse
         adj = 0.0
+        if ctx.hero_bucket in ('air', 'weak_draw'):
+            # No pair of his own: the hand seldom improves what it is worth at
+            # showdown and gives up to further bets more often than a pair.
+            # History, weighted by the added chance to call: below 12 points of
+            # margin such calls made -2.1bb, 12-16 points +0.2, 16 and more
+            # +6.9 [+1.1, +13.3]; hence fifteen points on top of the price.
+            adj += _BLUFF_CATCH_NO_PAIR_ADD
         if ctx.villain_stats.bet_win_count >= 5:
             if ctx.villain_stats.bluff_win_rate < 0.12:
                 adj += 0.04
@@ -572,7 +612,7 @@ class BluffCatchCall(Purpose):
 
         if _fragile_bluff_catcher(ctx):
             if passive_value_bet_dominates(ctx):
-                return TriggerResult(False)
+                return refuse
             strong_mass = _villain_strong_mass(ctx)
             rel_loss = _villain_rel_loss(ctx)
             if _high_leverage_call(ctx) and (ctx.villain_vs_hero_dist or {}):
@@ -589,9 +629,9 @@ class BluffCatchCall(Purpose):
                     and (sticky_passive(ctx) or ctx.villain_stats.af < AF_PASSIVE_BASELINE)
                 )
                 if loss_dominant_passive_raise:
-                    return TriggerResult(False)
+                    return refuse
                 if rel_eq < rel_need:
-                    return TriggerResult(False)
+                    return refuse
                 w = 0.5 + min(1.0, (rel_eq - rel_need) * 3.0)
                 return TriggerResult(True, max(0.3, w))
             adj += _BLUFF_CATCH_FRAGILE_ADD
@@ -620,7 +660,7 @@ class BluffCatchCall(Purpose):
             reopen_weight = _bluff_catch_reopen_weight(ctx, need)
             if reopen_weight > 0.0:
                 return TriggerResult(True, reopen_weight)
-            return TriggerResult(False)
+            return refuse
         # Vote weight — scales with equity margin over need. Ceiling kept at
         # 1.5 so that at strong equity (eq ≥ 0.75) value_raise still
         # dominates in the sampler (value_raise's weight grows past 2.1 in
@@ -644,15 +684,24 @@ class DrawCall(Purpose):
     def trigger(self, ctx: DecisionCtx) -> TriggerResult:
         if not ctx.facing_bet:
             return TriggerResult(False)
-        if ctx.hero_bucket not in ('draw', 'weak_draw'):
+        d = ctx.draw
+        # A pair that also holds a flush draw or an open-ended straight draw is
+        # a drawing hand as well. Its other call, bluff_catch_call, weighs what
+        # the pair is worth at showdown today and may refuse the hand whatever
+        # its outs; here it is judged like any draw, on equity against price.
+        made_with_draw = ctx.hero_bucket in ('medium', 'strong') and (d.flush_draw or d.oesd)
+        if ctx.hero_bucket not in ('draw', 'weak_draw') and not made_with_draw:
             return TriggerResult(False)
         if ctx.street == 'river':
             return TriggerResult(False)
         implied = GTOMath.implied_odds_bonus(ctx.spr, ctx.street)
         if ctx.num_opponents > 1:
             implied *= 0.7 ** (ctx.num_opponents - 1)
+        if ctx.board_sig.paired:
+            # On a paired board the completed draw is not the best hand often
+            # enough (full houses) to count on being paid: direct price only.
+            implied = 0.0
 
-        d = ctx.draw
         has_profile = any((
             d.flush_draw, d.oesd, d.gutshot, d.backdoor_flush, d.overcards,
         ))
@@ -1003,21 +1052,30 @@ class FoldPurpose(Purpose):
             return TriggerResult(False)
 
         hero_is_top_tier = ctx.hero_bucket in ('nuts', 'strong')
-        hero_is_draw = ctx.hero_bucket in ('draw', 'weak_draw')
 
-        # Guard A：hero 有 NUTS / STRONG 档 + equity 显著超 pot_odds → 不弃
-        # 保留旧"hero 有大牌绝不误弃"语义。
-        if hero_is_top_tier and ctx.equity_range >= ctx.pot_odds + 0.15:
+        # Guard A：hero 有 NUTS / STRONG 档 + equity 显著超 pot_odds → 不弃。
+        # 这里弃权之后 BluffCatchCall 保底给出跟注候选（_call_guaranteed），
+        # 决策不会落到“没有候选”的默认弃牌；唯一例外是对子面上和公对同张
+        # 的那一对，BluffCatchCall 拒绝它时照旧弃掉。
+        if _fold_guarded(ctx):
             return TriggerResult(False)
 
-        # Guard B：hero 是 draw 听牌 → FoldPurpose 不参与，交给 DrawCall 基于
-        # implied odds 判定。听牌的 EV 由 implied odds 补偿，直接算 eq vs
-        # pot_odds 会漏算 +EV 跟注。
-        if hero_is_draw:
+        # Guard B：听牌的 EV 由 implied odds 补偿，直接算 eq vs pot_odds 会
+        # 漏算 +EV 跟注，所以交给 DrawCall。'draw' 档整体交出去；'weak_draw'
+        # （卡顺、两张高张）只在 DrawCall 接受时交出去，否则它和任何一手牌
+        # 一样按胜率对价格表决。
+        if ctx.hero_bucket == 'draw':
+            return TriggerResult(False)
+        if ctx.hero_bucket == 'weak_draw' and DrawCall().trigger(ctx).hit:
             return TriggerResult(False)
 
-        # 悲观 equity = point estimate 减 tracker 不确定度
-        pessimistic_eq = ctx.equity_range - (ctx.equity_uncertainty or 0.0)
+        # 悲观 equity = point estimate 减 tracker 不确定度。转牌只扣一半：
+        # 这笔扣减里有一部分是“后面还有几轮下注、胜率兑现不了”，转牌只剩
+        # 一轮。实际结果：按全额扣减被弃掉的转牌牌，历史上跟注下去的 16 次
+        # +16.5 ± 13.5bb，求解器 EV +3.8 ± 3.4bb（15 次）；再往下扣到 0 多出
+        # 来的那些跟注是 -1.2 ± 7.6bb（29 次），所以停在一半。
+        share = _FOLD_TURN_UNCERTAINTY_SHARE if ctx.street == 'turn' else 1.0
+        pessimistic_eq = ctx.equity_range - share * (ctx.equity_uncertainty or 0.0)
         reopen_weight = _bluff_catch_reopen_weight(ctx)
 
         # 硬门：悲观口径 equity 不足 → 强 fold
@@ -1029,7 +1087,10 @@ class FoldPurpose(Purpose):
         #   0.05-0.15      → w 1.0→0.3
         #   0.15-0.30      → w 0.3→0.05（margin 越大 fold 越轻）
         #   margin >= 0.30 → w=0.05（tiny bet + 大 eq 超额，几乎不 fold）
-        margin = pessimistic_eq - ctx.pot_odds
+        # Against a small bet the margin is measured in units of the price:
+        # four points over a 6% price is a large overlay, not a thin one.
+        margin = (pessimistic_eq - ctx.pot_odds) * max(
+            1.0, _FOLD_CURVE_SMALL_PRICE / max(ctx.pot_odds, 1e-6))
         if margin < 0.05:
             w = 1.5
         elif margin < 0.15:
@@ -1061,10 +1122,7 @@ class FoldPurpose(Purpose):
             if ctx.raw_pot_odds >= _BR_T3:
                 w += 0.4    # 再累加
 
-        # Hero 自己是 air / weak → fold 至少保持 0.8 地板
-        if ctx.hero_bucket in ('air', 'weak'):
-            w = max(w, 0.8)
-        elif reopen_weight > 0.0:
+        if reopen_weight > 0.0:
             w = min(w, _BLUFF_CATCH_REOPEN_FOLD_CAP)
 
         return TriggerResult(True, max(0.0, w))

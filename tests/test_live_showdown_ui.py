@@ -25,14 +25,16 @@ const window = {};
 vm.runInNewContext(fs.readFileSync("pf_entertainment/static/live-table.js","utf8"),
  {window,document:{getElementById:id=>ids[id],createElement:()=>element()},performance:{now:()=>now},setInterval:f=>timers.push(f)});
 const render=window.PFLiveTable.render;
-ids["live-pnl"]=element(); ids["live-rewards"]=element();
-render({session_pnl_chips:-1250,session_reward_chips:2000,session_rewards_uncertain:true});
+ids["live-chips"]=element(); ids["live-pnl"]=element(); ids["live-rewards"]=element();
+render({total_chips:113165900,session_pnl_chips:-1250,session_reward_chips:2000,session_rewards_uncertain:true});
+assert.strictEqual(ids["live-chips"].textContent,"113,165,900 筹码");
 assert.strictEqual(ids["live-pnl"].textContent,"-1,250 筹码");
 assert.strictEqual(ids["live-rewards"].textContent,"2,000 筹码（另有待确认）");
 render({session_pnl_chips:100,session_reward_chips:0});
 assert.strictEqual(ids["live-pnl"].textContent,"+100 筹码");
 assert.strictEqual(ids["live-rewards"].textContent,"0 筹码");
 render({});
+assert.strictEqual(ids["live-chips"].textContent,"—");
 assert.strictEqual(ids["live-pnl"].textContent,"—");
 assert.strictEqual(ids["live-rewards"].textContent,"—");
 const group={label:"葫芦",cards:["As","Ad","Ah","Ks","Kd"],hole_used:[true,true,false,false,false]};
@@ -96,14 +98,14 @@ const window = {};
 vm.runInNewContext(fs.readFileSync("pf_entertainment/static/live-table.js","utf8"),
  {window,document:{getElementById:id=>ids[id],createElement:()=>element()},performance:{now:()=>0},setInterval:()=>0});
 const seat = (i, extra) => ({seatid:i, name:"p"+i, stack:1000, cards:[], ...extra});
-window.PFLiveTable.render({connected:true,__available:true,room_id:7,hand_no:3,humans:2,robots:2,board:[],feed:[],seat_num:6,my_seat:0,
-  seats:[seat(0,{is_me:true,pos:"BB"}), seat(1,{pos:"BTN",kind:"robot"}), seat(2,{pos:"SB",kind:"suspect"}),
+window.PFLiveTable.render({connected:true,__available:true,room_id:7,hand_no:3,humans:3,robots:1,board:[],feed:[],seat_num:6,my_seat:0,
+  seats:[seat(0,{is_me:true,pos:"BB"}), seat(1,{pos:"BTN",kind:"robot"}), seat(2,{pos:"SB",kind:""}),
          seat(3,{pos:"CO",kind:"human"}), seat(4,{pos:"",kind:""}), {seatid:5,empty:true}]});
 const node = i => ids["live-felt"].children.find(c => c.dataset.seat === String(i));
-assert.strictEqual(ids["live-mix"].textContent, "真人 2 · 人机 2");
+assert.strictEqual(ids["live-mix"].textContent, "真人 3 · 人机 1");
 assert(node(1).className.split(" ").includes("robot") && node(1).innerHTML.includes('pill robot">人机<'));
 assert(node(1).innerHTML.includes('class="s-pos btn"') && node(1).innerHTML.includes(">BTN<"));
-assert(node(2).className.split(" ").includes("robot") && node(2).innerHTML.includes("疑似人机"));
+assert(!node(2).className.split(" ").includes("robot") && !node(2).innerHTML.includes("人机"));
 assert(node(2).innerHTML.includes('class="s-pos sb"'));
 assert(!node(3).className.split(" ").includes("robot") && !node(3).innerHTML.includes("人机"));
 assert(node(3).innerHTML.includes(">CO<"));

@@ -26,6 +26,7 @@ from pokerfate.core.hand_evaluator import HandEvaluator
 from pokerfate.strategy.range_v2 import hand_categorizer as hcat
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
 from pokerfate.strategy.range_v2.action_model import ActionContext, ActionModel, PlayerProfile
+from pokerfate.strategy import pre_action
 from pokerfate.strategy.range_v2.bucket_ml_calibration import (
     calibrate_bucket_probs,
     profile_feature_dict,
@@ -178,6 +179,11 @@ class BayesianRangeTracker:
         # Per-layer trace of the most recent observe_action; consumed by the
         # API's opponent_action log.
         self.last_update_trace: Dict[str, Any] = {}
+        # Evidence from pre-selected actions (strategy/pre_action.py): the read in force per
+        # player, its per-combo multiplier, and the weights before it was applied.
+        self._pre_action_reads: Dict[int, pre_action.Read] = {}
+        self._pre_action_mult: Dict[int, np.ndarray] = {}
+        self._pre_action_base: Dict[int, np.ndarray] = {}
         # Off in play.  The training-row extractor turns it on to get, next to the trace, the
         # weights the last postflop update started from (analysis/type_truth.py).
         self.keep_update_weights: bool = False
@@ -215,6 +221,9 @@ class BayesianRangeTracker:
         self._action_meta.clear()
         self._player_profiles.clear()
         self._formula_weights.clear()
+        self._pre_action_reads.clear()
+        self._pre_action_mult.clear()
+        self._pre_action_base.clear()
 
     def _board_key(self, board: List[Card]) -> tuple:
         if board and len(board) >= 3:
@@ -354,6 +363,9 @@ class BayesianRangeTracker:
         if not position:
             position = 'CO'
         self._player_profiles[player_id] = profile
+        self._pre_action_reads.pop(player_id, None)
+        self._pre_action_mult.pop(player_id, None)
+        self._pre_action_base.pop(player_id, None)
         self._formula_weights.pop(player_id, None)
 
         w = np.ones(1326, dtype=np.float64)
@@ -415,6 +427,7 @@ class BayesianRangeTracker:
             self._apply_bucket_calibration(
                 pid, inferred_street, board, f'board:{inferred_street}'
             )
+            self._apply_pre_action_evidence(pid)
             self._emit_prediction(pid, inferred_street, board,
                                   f'board:{inferred_street}')
 
@@ -583,6 +596,11 @@ class BayesianRangeTracker:
         )
         if trace is not None:
             self._trace_layer(trace, 'bucket_cal', self._weights[player_id], board)
+        self._note_pre_action(player_id, street, refined, int(getattr(context, 'pre_action', 0) or 0), board)
+        if self._apply_pre_action_evidence(player_id) and trace is not None:
+            self._trace_layer(trace, 'pre_action', self._weights[player_id], board)
+            trace['pre_action'] = self._pre_action_reads[player_id].kind
+        if trace is not None:
             self.last_update_trace = trace
 
         # Mark as folded BEFORE emitting so active_weights excludes them for
@@ -606,6 +624,57 @@ class BayesianRangeTracker:
                     self._emit_prediction(
                         pid, street, board, 'action:fold_other',
                     )
+
+    # ── evidence from pre-selected actions ──────────────────────────────────────────────
+
+    def _note_pre_action(self, player_id: int, street: str, action: str, flag: int,
+                         board: List[Card]) -> None:
+        """Keep the read on this player current and, for a fresh pre-selected check or call,
+        its multiplier per combo: the fitted ratio of the bucket the combo is in on this board."""
+        before = self._pre_action_reads.get(player_id)
+        read = pre_action.update_read(before, street=street, action=action, pre_action=flag)
+        if read is None:
+            self._pre_action_reads.pop(player_id, None)
+            self._pre_action_mult.pop(player_id, None)
+            return
+        self._pre_action_reads[player_id] = read
+        if read is before:
+            return
+        ratio = pre_action.range_ratio(read.kind, read.street) if board and len(board) >= 3 else None
+        if ratio is None:
+            self._pre_action_mult.pop(player_id, None)
+            return
+        index = np.array([_BUCKET_CAL_IDX.get(cat, -1) for cat in self._get_categories(board)], dtype=np.int8)
+        mult = np.ones(1326, dtype=np.float64)
+        known = index >= 0
+        mult[known] = ratio[index[known]]
+        self._pre_action_mult[player_id] = mult
+
+    def _apply_pre_action_evidence(self, player_id: int) -> bool:
+        """Multiply the evidence into the player's weights, on top of everything else.
+
+        Like the bucket model this is an overlay: the state the fitted layers work on is kept
+        aside (``_formula_weights``) and the next update starts from it, so those layers see
+        exactly what they were fitted on.  Without a read nothing changes at all.
+        """
+        self._pre_action_base.pop(player_id, None)
+        mult = self._pre_action_mult.get(player_id)
+        w = self._weights.get(player_id)
+        if mult is None or w is None:
+            return False
+        moved = w * mult
+        total = float(moved.sum())
+        if total <= 1e-15:
+            return False
+        if player_id not in self._formula_weights:
+            self._formula_weights[player_id] = w.copy()
+        self._pre_action_base[player_id] = w
+        self._weights[player_id] = moved / total
+        return True
+
+    def pre_action_read(self, player_id: int) -> Optional[pre_action.Read]:
+        """The pre-selected action of this player that is still in force, if any."""
+        return self._pre_action_reads.get(player_id)
 
     def _emit_prediction(self, player_id: int, street: str,
                          board: List[Card], trigger: str) -> None:
@@ -734,13 +803,17 @@ class BayesianRangeTracker:
                 loss_w += p
         return {'win': win_w, 'tie': tie_w, 'loss': loss_w}
 
-    def get_bucket_distribution(self, player_id: int, board: List[Card]) -> Dict[str, float]:
+    def get_bucket_distribution(self, player_id: int, board: List[Card],
+                                with_pre_action: bool = True) -> Dict[str, float]:
         """Return weight-aggregated bucket distribution {category: pct}.
 
         Sums w[i] per HandCategorizer bucket, normalized to percentages.
-        Only includes buckets > 0.
+        Only includes buckets > 0.  ``with_pre_action=False`` leaves the evidence from
+        pre-selected actions out (for models that take it as an input of their own).
         """
         w = self._weights.get(player_id)
+        if not with_pre_action:
+            w = self._pre_action_base.get(player_id, w)
         if w is None:
             return {}
         board_ints = self._board_ints(board) if board else set()

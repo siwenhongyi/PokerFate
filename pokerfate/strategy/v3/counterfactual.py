@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from pokerfate.strategy.v3.context import DecisionCtx, VillainStats
+from pokerfate.strategy import pre_action
 from pokerfate.strategy.v3.exploit import no_fold_equity
 
 
@@ -213,7 +214,32 @@ def _range_fold_prior(ctx: DecisionCtx, frac: float, purpose: str) -> float | No
     return clamp(folded, 0.03, 0.90)
 
 
+def _read_fold_prior(ctx: DecisionCtx, action_kind: str, frac: float) -> float | None:
+    """Chance that everybody folds to a bet when some opponent pre-selected a check.
+
+    The estimate below gives every opponent the same chance, built from one player's
+    statistics; here the field is not alike.  The measured single fold rates multiply
+    (``pre_action.field_fold_prob``), so they are used as they are.  Not against a table
+    with a proven calling station: there the cap of the general estimate stays in force.
+    """
+    if action_kind != "bet" or not ctx.weak_reads:
+        return None
+    try:
+        if no_fold_equity(ctx):
+            return None
+    except Exception:
+        return None
+    reads = list(ctx.opp_reads)
+    if len(reads) != max(1, int(ctx.num_opponents or 1)):
+        return None
+    joint = pre_action.field_fold_prob(ctx.street, reads[:4], frac)
+    return clamp(joint, 0.03, 0.90) if joint is not None else None
+
+
 def _stat_fold_prior(ctx: DecisionCtx, action_kind: str, frac: float, purpose: str) -> tuple[float, str, int]:
+    read_joint = _read_fold_prior(ctx, action_kind, frac)
+    if read_joint is not None:
+        return read_joint, "pre_action", 0
     base, source, sample_count = _fold_stat_base(ctx, purpose)
     base *= _size_fold_multiplier(frac)
     range_prior = _range_fold_prior(ctx, frac, purpose)
@@ -343,7 +369,7 @@ def reaction_estimate(
 ) -> ReactionEstimate:
     p_fold, source, sample_count = _stat_fold_prior(ctx, action_kind, frac, purpose)
     confidence = 0.25 + min(0.55, (sample_count / (sample_count + 24.0)) * 0.65) if sample_count > 0 else 0.25
-    p_raise = _raise_prior(ctx, frac)
+    p_raise = _raise_prior(ctx, frac) * pre_action.raise_factor(ctx.primary_read)
     p_fold = clamp(p_fold)
     p_raise = clamp(min(p_raise, 1.0 - p_fold))
     p_call = max(0.0, 1.0 - p_fold - p_raise)

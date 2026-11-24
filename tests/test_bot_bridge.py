@@ -84,16 +84,10 @@ def test_seat_move_keeps_models_for_same_uid():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_game_http_and_pushes(monkeypatch):
+def _isolate_pushes(monkeypatch):
+    # Game HTTP is isolated for every test file in conftest.py.
     import pf_intercept.bot as bot_mod
-    monkeypatch.setattr(bot_mod, "load_auth_token", lambda: "test-token")
-    monkeypatch.setattr(bot_mod, "_sync_fetch", lambda *args, **kwargs: None)
     monkeypatch.setattr(bot_mod, "notify", lambda *args, **kwargs: None)
-    yield
-    # Finish request workers before monkeypatch restores real HTTP functions.
-    for thread in threading.enumerate():
-        if thread.name.startswith("pf-gamedata-"):
-            thread.join(timeout=2.0)
 
 
 class TestBotBridgeActionAmounts:
@@ -1955,49 +1949,43 @@ def test_hand_swing_includes_last_hand_detail(monkeypatch) -> None:
     assert "game_id" not in notified[0][1]
 
 
-def test_auto_collect_special_hand_calls_collcard(monkeypatch) -> None:
-    import pf_intercept.bot as bot_mod
-
-    calls = []
-    monkeypatch.setattr(
-        bot_mod,
-        "_sync_collect_game",
-        lambda gameid, **kwargs: calls.append((gameid, kwargs)) or {"code": 0},
-    )
-
-    b = BotBridge(max_auto_rebuy=3)
-    b._current_gameid = "g-special"
-    b._table_room_id = 42
-    b._table_tid = 1
-
-    assert b._maybe_auto_collect_current_hand(["四条"]) is True
-    assert calls == [
-        (
-            "g-special",
-            {"roomid": 42, "tid": 1, "reason": "四条"},
-        )
-    ]
-
-
-def test_auto_collect_special_hand_skips_friend_room(monkeypatch) -> None:
-    import pf_intercept.bot as bot_mod
-
-    calls = []
-    monkeypatch.setattr(
-        bot_mod,
-        "_sync_collect_game",
-        lambda gameid, **kwargs: calls.append((gameid, kwargs)) or {"code": 0},
-    )
-
-    b = BotBridge(max_auto_rebuy=3)
-    b._current_gameid = "g-friend"
-    b._is_friend_room = True
-    assert b._maybe_auto_collect_current_hand(["皇家同花顺"]) is False
-    assert calls == []
-
-
 def test_profit_lock_threshold_in_config() -> None:
     assert isinstance(config.PROFIT_LOCK_BB_THRESHOLD, int)
     assert config.PROFIT_LOCK_BB_THRESHOLD >= 1
 
 
+class _BoardApi:
+    def __init__(self):
+        self.calls = []
+
+    def sync_board(self, cards, street, pot=None):
+        self.calls.append(("sync", list(cards), street))
+
+
+def _wire(cards):
+    rank = "23456789TJQKA"
+    suit = {"d": 1, "c": 2, "h": 3, "s": 4}
+    return [suit[c[1]] * 256 + rank.index(c[0]) + 2 for c in cards]
+
+
+def test_round_start_syncs_the_full_board_when_all_board_is_present():
+    b = BotBridge()
+    b._api = _BoardApi()
+    flop = ["As", "Kd", "2c"]
+    b._on_round_start({"stage": 2, "board": _wire(flop), "all_board": _wire(flop)})
+    b._on_round_start({"stage": 2, "board": _wire(flop), "all_board": _wire(flop)})  # repeat is harmless
+    b._on_round_start({"stage": 4, "board": _wire(["3c"]), "all_board": _wire(flop + ["9h", "3c"])})
+    assert [c[:3] for c in b._api.calls] == [
+        ("sync", flop, "flop"), ("sync", flop, "flop"),
+        ("sync", flop + ["9h", "3c"], "river"),
+    ]
+
+
+def test_round_start_without_all_board_does_not_guess_the_board(caplog):
+    b = BotBridge()
+    b._api = _BoardApi()
+    with caplog.at_level("ERROR"):
+        b._on_round_start({"stage": 2, "board": _wire(["As", "Kd", "2c"])})
+        b._on_round_start({"stage": 3, "board": _wire(["9h"])})
+    assert b._api.calls == []
+    assert sum("没有 all_board" in r.getMessage() for r in caplog.records) == 1  # reported once

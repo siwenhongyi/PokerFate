@@ -94,8 +94,12 @@ def parse_json_log(log_path: Path, hero_names: HeroNames, big_blind: float = 0.0
                     bets[pid] = amt
                 elif r["action"] == "raise":
                     bets[pid] = amt
-                cur["events"].append({"type": "opp_action", "pid": pid, "action": r["action"],
-                                      "amount": amt, "street": r["street"]})
+                opp_event = {"type": "opp_action", "pid": pid, "action": r["action"],
+                             "amount": amt, "street": r["street"]}
+                if r.get("pre_action"):
+                    # ActionNotifyBRC.pre_action_result (1 reset, 2 pre-selected), logged since 2026-11-22
+                    opp_event["pre_action"] = int(r["pre_action"])
+                cur["events"].append(opp_event)
             elif e == "decision":
                 if r.get("street") == "preflop" and r.get("pot"):
                     cur["_pots"].append(float(r["pot"]))

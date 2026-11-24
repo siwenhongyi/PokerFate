@@ -1,8 +1,8 @@
 {
  "version": 1,
- "fitted_at": "2026-11-19T01:26:25",
- "rows_from": "2026-11-15T17:03:09.935739+00:00",
- "rows_to": "2026-11-19T09:15:56.513650+00:00",
+ "fitted_at": "2026-11-24T23:09:57",
+ "rows_from": "2026-11-15T17:03:52.944632+00:00",
+ "rows_to": "2026-11-25T06:07:27.465548+00:00",
  "holdout_from": null,
  "features": {
   "facing_bet": [
@@ -53,92 +53,92 @@
   "facing_bet": {
    "turn": {
     "call": {
-     "intercept": 2.30613,
+     "intercept": 2.16848,
      "weights": {
-      "size_lo": -2.97698,
-      "size_mid": -0.88089,
-      "size_hi": -0.44999,
-      "facing_raise": 0.17547,
-      "in_position": -0.32893,
-      "checked_this_street": -0.64783,
-      "prev_bet": 0.50657,
-      "prev_call": 0.38446,
+      "size_lo": -3.35795,
+      "size_mid": -1.16882,
+      "size_hi": -0.29279,
+      "facing_raise": 0.37928,
+      "in_position": -0.19579,
+      "checked_this_street": -0.46215,
+      "prev_bet": 0.40922,
+      "prev_call": 0.38152,
       "called_twice": 0.0,
-      "opp_bet_prev": 0.13451,
-      "known": -0.92351,
-      "tight": -0.06759,
-      "aggressive": -0.20491,
-      "nuts": 0.81285,
-      "strong": 0.50893,
-      "medium": 0.37273,
-      "draw": -0.08927
+      "opp_bet_prev": 0.06547,
+      "known": -0.93721,
+      "tight": -0.07941,
+      "aggressive": -0.10096,
+      "nuts": 0.41527,
+      "strong": 1.10986,
+      "medium": 0.58377,
+      "draw": 0.72533
      }
     },
     "raise": {
-     "intercept": -0.03263,
+     "intercept": -0.67248,
      "weights": {
-      "size_lo": -2.02314,
-      "size_mid": 0.08264,
-      "size_hi": 0.13038,
-      "facing_raise": 0.36527,
-      "in_position": -0.51782,
-      "checked_this_street": -0.98879,
-      "prev_bet": 0.9084,
-      "prev_call": 0.08734,
+      "size_lo": -2.05614,
+      "size_mid": -0.30936,
+      "size_hi": 0.03687,
+      "facing_raise": 0.3471,
+      "in_position": -0.28826,
+      "checked_this_street": -0.78798,
+      "prev_bet": 0.56137,
+      "prev_call": 0.10972,
       "called_twice": 0.0,
-      "opp_bet_prev": 0.74221,
-      "known": -1.05128,
-      "tight": -0.04813,
-      "aggressive": 0.18417,
-      "nuts": 2.30691,
-      "strong": 0.78335,
-      "medium": 0.86016,
-      "draw": 0.97694
+      "opp_bet_prev": 0.63281,
+      "known": -0.91047,
+      "tight": -0.11811,
+      "aggressive": 0.27944,
+      "nuts": 2.38412,
+      "strong": 3.34634,
+      "medium": 1.00167,
+      "draw": 0.72263
      }
     }
    },
    "river": {
     "call": {
-     "intercept": 1.10361,
+     "intercept": 1.39391,
      "weights": {
-      "size_lo": -2.39432,
-      "size_mid": -0.99501,
-      "size_hi": -1.4654,
-      "facing_raise": 0.0964,
-      "in_position": -0.67542,
-      "checked_this_street": -0.50196,
-      "prev_bet": 0.17549,
-      "prev_call": 0.49806,
-      "called_twice": 0.21398,
-      "opp_bet_prev": -0.64763,
-      "known": -0.25297,
-      "tight": 0.0828,
-      "aggressive": 0.22229,
-      "nuts": 1.82853,
-      "strong": 1.25638,
-      "medium": 0.87138,
+      "size_lo": -2.60986,
+      "size_mid": -0.9524,
+      "size_hi": -0.87326,
+      "facing_raise": 0.33375,
+      "in_position": -0.19569,
+      "checked_this_street": -0.20619,
+      "prev_bet": 0.08737,
+      "prev_call": -0.03834,
+      "called_twice": 0.18302,
+      "opp_bet_prev": -0.04099,
+      "known": -1.02177,
+      "tight": 0.01999,
+      "aggressive": 0.11377,
+      "nuts": 1.81014,
+      "strong": 1.60787,
+      "medium": 0.83561,
       "draw": 0.0
      }
     },
     "raise": {
-     "intercept": 0.09855,
+     "intercept": -0.09263,
      "weights": {
-      "size_lo": -0.50941,
-      "size_mid": -0.65278,
-      "size_hi": -0.38889,
-      "facing_raise": -0.37131,
-      "in_position": -0.58096,
-      "checked_this_street": -1.28699,
-      "prev_bet": 0.32854,
-      "prev_call": 0.08162,
-      "called_twice": 0.5399,
-      "opp_bet_prev": -0.12907,
-      "known": -1.69914,
-      "tight": -0.0927,
-      "aggressive": 0.45927,
-      "nuts": 3.01657,
-      "strong": 1.91859,
-      "medium": 1.38184,
+      "size_lo": -2.00353,
+      "size_mid": -0.53837,
+      "size_hi": -0.25982,
+      "facing_raise": -0.27497,
+      "in_position": -0.24626,
+      "checked_this_street": -1.00083,
+      "prev_bet": 0.14842,
+      "prev_call": -0.0842,
+      "called_twice": 0.59257,
+      "opp_bet_prev": -0.07546,
+      "known": -0.8167,
+      "tight": -0.07609,
+      "aggressive": 0.28345,
+      "nuts": 2.74158,
+      "strong": 2.13067,
+      "medium": 0.69948,
       "draw": 0.0
      }
     }
@@ -147,36 +147,36 @@
   "checked_to": {
    "turn": {
     "bet": {
-     "intercept": -0.8589,
+     "intercept": -0.97157,
      "weights": {
-      "prev_bet": 0.96333,
-      "prev_call": 0.09823,
+      "prev_bet": 0.9712,
+      "prev_call": 0.27532,
       "called_twice": 0.0,
-      "opp_bet_prev": 0.26772,
-      "known": 0.07938,
-      "tight": 0.02939,
-      "aggressive": 0.53493,
-      "nuts": 0.45855,
-      "strong": 0.55607,
-      "medium": 0.20948,
-      "draw": 0.35734
+      "opp_bet_prev": 0.0754,
+      "known": 0.2318,
+      "tight": -0.03747,
+      "aggressive": 0.77698,
+      "nuts": 0.61942,
+      "strong": 0.6751,
+      "medium": 0.03814,
+      "draw": 0.48648
      }
     }
    },
    "river": {
     "bet": {
-     "intercept": -0.97013,
+     "intercept": -0.98484,
      "weights": {
-      "prev_bet": 0.90623,
-      "prev_call": 0.29461,
-      "called_twice": -0.02341,
-      "opp_bet_prev": 0.01818,
-      "known": 0.39462,
-      "tight": 0.12095,
-      "aggressive": 0.89419,
-      "nuts": 0.56233,
-      "strong": -0.02944,
-      "medium": 0.02113,
+      "prev_bet": 0.76143,
+      "prev_call": -0.11895,
+      "called_twice": 0.24214,
+      "opp_bet_prev": 0.1935,
+      "known": -0.21238,
+      "tight": 0.05971,
+      "aggressive": 0.76561,
+      "nuts": 1.64639,
+      "strong": 0.75372,
+      "medium": 0.62315,
       "draw": 0.0
      }
     }
@@ -185,37 +185,37 @@
  },
  "report": {
   "facing_bet/turn": {
-   "rows": 1979,
+   "rows": 4959,
    "ridge": 0.3,
    "answers": {
-    "fold": 0.4053,
-    "call": 0.4694,
-    "raise": 0.1253
+    "fold": 0.395,
+    "call": 0.4902,
+    "raise": 0.1147
    }
   },
   "facing_bet/river": {
-   "rows": 1431,
+   "rows": 3532,
    "ridge": 0.3,
    "answers": {
-    "fold": 0.4997,
-    "call": 0.355,
-    "raise": 0.1454
+    "fold": 0.4926,
+    "call": 0.3734,
+    "raise": 0.1339
    }
   },
   "checked_to/turn": {
-   "rows": 1493,
+   "rows": 3611,
    "ridge": 3.0,
    "answers": {
-    "check": 0.5238,
-    "bet": 0.4762
+    "check": 0.5245,
+    "bet": 0.4755
    }
   },
   "checked_to/river": {
-   "rows": 1132,
-   "ridge": 3.0,
+   "rows": 2816,
+   "ridge": 1.0,
    "answers": {
-    "check": 0.5954,
-    "bet": 0.4046
+    "check": 0.6055,
+    "bet": 0.3945
    }
   }
  }

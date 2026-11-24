@@ -365,6 +365,22 @@ def _sticky_semibluff_allowed(ctx: DecisionCtx, *, multiway: bool = False) -> bo
     return blocker and ctx.equity_range >= 0.40 and ctx.spr >= 3.0
 
 
+_MULTIWAY_VALUE_EDGE = 0.26
+
+
+def _multiway_value_edge(ctx: DecisionCtx) -> bool:
+    """A top-tier made hand far above its fair share of a multiway pot.
+
+    With n opponents the average share is 1/(n+1); an absolute equity bar set
+    for heads-up play (0.62-0.72) is out of reach in a four-way pot even for a
+    set, so the value bet is judged against the share instead.
+    """
+    if ctx.num_opponents < 2 or ctx.hero_bucket not in ('strong', 'nuts'):
+        return False
+    share = 1.0 / (ctx.num_opponents + 1)
+    return ctx.equity_range >= share + _MULTIWAY_VALUE_EDGE
+
+
 def _sticky_multiway_value_ok(ctx: DecisionCtx) -> bool:
     """Higher value threshold for sticky multiway pots."""
     if not _sticky_multiway(ctx):
@@ -385,7 +401,7 @@ def _sticky_multiway_value_ok(ctx: DecisionCtx) -> bool:
             return ctx.equity_range >= 0.72 and nuts <= 0.18
         if has_rel:
             return rel_eq >= 0.62 and hero_wins >= villain_wins + 0.08 and villain_wins <= 0.34
-        return ctx.equity_range >= 0.62 and nuts <= 0.24
+        return (ctx.equity_range >= 0.62 or _multiway_value_edge(ctx)) and nuts <= 0.24
 
     if not _safe_medium_protection_hand(ctx):
         return False
@@ -1445,7 +1461,8 @@ class ThickValueBet(Purpose):
             elif ctx.spr <= 10.0:
                 eq_need = min(eq_need, 0.55)
         low_spr_pressure = _low_spr_made_hand_value_pressure(ctx)
-        if ctx.equity_range < eq_need and not low_spr_pressure:
+        share_edge = ctx.equity_range < eq_need and _multiway_value_edge(ctx)
+        if ctx.equity_range < eq_need and not low_spr_pressure and not share_edge:
             return TriggerResult(False)
         if _river_fragile_relative_value_block(ctx, eq_need):
             return TriggerResult(False)
@@ -1483,7 +1500,7 @@ class ThickValueBet(Purpose):
         # 权重基准从 eq_need 起算而非固定 0.70，确保 low SPR 下早触发的
         # hand 权重不会因为 (eq - 0.70) 为负而崩塌。低 SPR 成牌压力由 MC/
         # 支付桶补充 raw range equity，避免接近 commit 时只剩 check。
-        if low_spr_pressure:
+        if low_spr_pressure or share_edge:
             w = 1.0
         else:
             w = 0.8 + (ctx.equity_range - eq_need) * 3.0

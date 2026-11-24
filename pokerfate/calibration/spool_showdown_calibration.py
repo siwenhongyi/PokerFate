@@ -45,8 +45,8 @@ _UPDATE_SCHEMA = "showdown_calibration_updates_v1"
 _GB = 1024 ** 3
 _DEFAULT_MIN_WORKERS = 1
 _DEFAULT_DRAIN_SEC = 3600.0
-_DEFAULT_WARN_GB = 20.0
-_DEFAULT_STOP_GB = 50.0
+_DEFAULT_WARN_GB = 2.0
+_DEFAULT_STOP_GB = 5.0
 _BACKPRESSURE_FILE = "backpressure.json"
 _SUPERVISOR_PID_FILE = "supervisor.pid"
 _SUPERVISOR_STATUS_FILE = "supervisor_status.json"
@@ -859,8 +859,8 @@ def _maybe_monitor_spool(
             f"spool={dirs['root']}"
         )
 
-    pause_threshold = max(1.0, float(stop_gb or 50.0))
-    warn_threshold = max(1.0, float(warn_gb or 20.0))
+    pause_threshold = max(1.0, float(stop_gb or _DEFAULT_STOP_GB))
+    warn_threshold = max(1.0, float(warn_gb or _DEFAULT_WARN_GB))
     cooldown_sec = 1800.0
     current_bp = spool_backpressure_status(dirs["root"])
     was_active = bool(current_bp.get("active"))
@@ -1090,8 +1090,8 @@ def worker_loop(
     min_workers: int = 1,
     max_workers: int = 0,
     drain_sec: float = 3600.0,
-    warn_gb: float = 20.0,
-    stop_gb: float = 50.0,
+    warn_gb: float = _DEFAULT_WARN_GB,
+    stop_gb: float = _DEFAULT_STOP_GB,
     key_file: Optional[Path | str] = None,
 ) -> None:
     dirs = _ensure_dirs(spool_dir)
@@ -1325,8 +1325,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     worker.add_argument("--min-workers", type=int, default=1)
     worker.add_argument("--max-workers", type=int, default=0)
     worker.add_argument("--drain-sec", type=float, default=3600.0)
-    worker.add_argument("--warn-gb", type=float, default=20.0)
-    worker.add_argument("--stop-gb", type=float, default=50.0)
+    worker.add_argument("--warn-gb", type=float, default=_DEFAULT_WARN_GB)
+    worker.add_argument("--stop-gb", type=float, default=_DEFAULT_STOP_GB)
     worker.add_argument(
         "--key-file",
         default=str(_repo_root() / "local" / "secrets" / "bark_key.txt"),

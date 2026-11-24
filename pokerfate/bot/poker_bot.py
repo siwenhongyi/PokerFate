@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -18,6 +18,7 @@ from pokerfate.core.position import normalize_position
 from pokerfate.data import format_action, lookup_gto
 from pokerfate.strategy.draw_utils import is_drawing_heavy
 from pokerfate.strategy import preflop as _pf_mod
+from pokerfate.strategy import pre_action as pre_action_mod
 from pokerfate.strategy.gto import GTOMath
 from pokerfate.strategy.postflop import (
     BoardTexture,
@@ -51,6 +52,7 @@ from pokerfate.strategy.range_v2.river_relative_calibrator import (
 )
 from pokerfate.strategy.range_v2.hand_categorizer import (
     categorize_cards as _hero_categorize,
+    decision_bucket as _hero_decision_bucket,
     made_hand_info as _hero_made_info,
 )
 from pokerfate.strategy.v3.exploit import aggregate_villain_stats
@@ -63,6 +65,15 @@ _SHOWDOWN_EQUITY_SAMPLES = 2000
 # Each way the players still to act can split gets its share of those samples,
 # and at least this many.
 _SHOWDOWN_OUTCOME_MIN_SAMPLES = 400
+
+# How often a player re-raises an open, as the preflop rules read it: his own
+# count pulled towards the pool by the weight his opportunities deserve.
+# Humans in the profile store on 2026-11-24 (9,489 with at least one
+# opportunity, 157,659 opportunities): pooled rate 6.2%; among the 2,017 with
+# 20 or more the true rates differ by 3.9 points (standard deviation, sampling
+# noise taken out), which is a prior worth 35 opportunities.
+_THREE_BET_POOL_RATE = 0.062
+_THREE_BET_PRIOR_OPPS = 35.0
 
 
 def _strongest_share(weights: np.ndarray, share: float) -> np.ndarray:
@@ -128,6 +139,8 @@ class PokerBot:
         # Per-hand dedup guards: prevent counting VPIP/PFR more than once per player per hand
         self._vpip_recorded: set = set()
         self._pfr_recorded: set = set()
+        # {player_id: (opportunities, re-raises)} recorded in the hand being played
+        self._hand_three_bets: Dict[int, Tuple[int, int]] = {}
         # P6/P9 – cross-street action tracking for delayed cbet / probe detection
         # {street: action_str} e.g. {'flop': 'check', 'turn': 'raise'}
         self._my_street_actions: dict = {}
@@ -231,6 +244,23 @@ class PokerBot:
         facing_action, open_raise = self._classify_preflop_action(gs, player)
 
         # 翻前面对加注时使用 range equity 作为决策依据（random 仅供参考对比）
+        #
+        # What this number is: hero's showdown equity if EVERY player who has
+        # not folded is in the pot - the ones already in for the raise and the
+        # ones still to act, the latter on the range they hold before acting.
+        # It is a worst case, not an estimate: outside the big blind there is
+        # almost always someone still to act (97-99% of decisions), and against
+        # the players already in alone the equity is 14 points higher on
+        # average (41% against 30% with one player still to act).  The flats it
+        # screens (dampened 3-bets, tiny and cheap prices, seats without a
+        # chart) are therefore held to "good even if everyone behind comes
+        # along, their chips not counted".  That screen is kept on purpose:
+        # nothing measured supports a looser one.  The pool's flats of a raise
+        # lose at every seat (-1.4 to -5.2bb each), hero's own raises with the
+        # same class of hands in position only break even (-0.1 +/- 0.8), and
+        # the 91 flats that passed the screen outside the big blind made
+        # +1.2 +/- 3.1.  A call that ends the betting is priced separately on
+        # who really comes along (``_preflop_showdown_price``).
         opp_ids = [p.player_id for p in gs.active_players if p.player_id != player.player_id]
         if opp_ids and facing_action in ('open', '3bet', '4bet'):
             # Multi-range equity: each opponent uses their own Bayesian
@@ -297,7 +327,7 @@ class PokerBot:
             squeeze_callers=squeeze_callers,
             villain_vpip=preflop_villain_stats.vpip if preflop_villain_stats else 0.0,
             villain_pfr=preflop_villain_stats.pfr if preflop_villain_stats else 0.0,
-            villain_three_bet=preflop_villain_stats.three_bet_pct if preflop_villain_stats else 0.0,
+            villain_three_bet=self._preflop_three_bet_rate(preflop_aggressor_id),
             villain_af=preflop_villain_stats.aggression_factor if preflop_villain_stats else 1.5,
             villain_hands_seen=preflop_villain_stats.hands_seen if preflop_villain_stats else 0,
             villain_fold_to_3bet=preflop_villain_stats.fold_to_3bet if preflop_villain_stats else 0.55,
@@ -355,13 +385,32 @@ class PokerBot:
             'squeeze_callers': squeeze_callers,
             'preflop_villain_vpip': preflop_villain_stats.vpip if preflop_villain_stats else 0.0,
             'preflop_villain_pfr': preflop_villain_stats.pfr if preflop_villain_stats else 0.0,
-            'preflop_villain_3bet': preflop_villain_stats.three_bet_pct if preflop_villain_stats else 0.0,
+            'preflop_villain_3bet': self._preflop_three_bet_rate(preflop_aggressor_id),
             'preflop_villain_fold_to_3bet': preflop_villain_stats.fold_to_3bet if preflop_villain_stats else 0.55,
             'preflop_villain_fold_to_3bet_opps': preflop_villain_stats.fold_to_3bet_opps if preflop_villain_stats else 0,
             'preflop_expand_reason': preflop_expand_reason,
         }
         return self._to_action(
             action_str, amount, raw_to_call, stack, current_bet=player.current_bet,
+        )
+
+    def _preflop_three_bet_rate(self, player_id: Optional[int]) -> float:
+        """How often this player re-raises an open, on what was known before this hand.
+
+        The re-raise hero is answering is itself an action of this hand: counted,
+        it would make a player with no record a 100% re-raiser at the moment he
+        re-raises.  So the hand being played is left out, and the rest is pulled
+        towards the pool rate (a Beta prior of ``_THREE_BET_PRIOR_OPPS``).
+        """
+        if player_id is None:
+            return _THREE_BET_POOL_RATE
+        stats = self.opponent_model.get(player_id)
+        seen_opps, seen_hits = self._hand_three_bets.get(player_id, (0, 0))
+        return self._bayes_shrunk_rate(
+            max(0.0, float(stats.three_bet_count or 0) - seen_hits),
+            max(0.0, float(stats.three_bet_opportunities or 0) - seen_opps),
+            _THREE_BET_POOL_RATE,
+            _THREE_BET_PRIOR_OPPS,
         )
 
     def _preflop_showdown_price(
@@ -383,7 +432,7 @@ class PokerBot:
         level = float(gs.current_bet or 0.0)
         in_for_it = [
             o for o in others
-            if not o.can_act() or float(o.stack or 0.0) <= 0.0 or float(o.current_bet or 0.0) >= level - 1e-9
+            if not o.can_act() or float(o.current_bet or 0.0) >= level - 1e-9
         ]
         if not in_for_it:
             return None
@@ -500,7 +549,7 @@ class PokerBot:
         if gs.has_robot_opponent or opener_id is None or gs.big_blind <= 0:
             return 0.0
         opener = self._find_player(gs, opener_id)
-        if opener is None or not opener.can_act() or opener.stack <= 0 or gs.current_bet != opener.current_bet:
+        if opener is None or not opener.can_act() or gs.current_bet != opener.current_bet:
             return 0.0
         # Blinds are not in action_history. Any call (a limper, a cold caller,
         # hero's own limp) or second raise takes the hand out of the spot.
@@ -650,13 +699,13 @@ class PokerBot:
         is_ip = gs.is_ip(player)
         street = str(gs.street)
         bb = gs.big_blind
-        # can_act 排除 all-in 玩家：all-in 对手无法弃牌/跟注，不影响下注的折叠价值计算
-        num_opponents = sum(1 for p in gs.active_players
-                           if p.player_id != player.player_id and p.can_act())
         facing_bet = raw_to_call > 0
 
         # Opponents still in the hand + exploit target: last aggressor, else best profile among limpers
         opp_ids = [p.player_id for p in gs.active_players if p.player_id != player.player_id]
+        # Every opponent still in the hand, all-in or not: each of them holds
+        # cards hero has to beat at showdown.
+        num_opponents = len(opp_ids)
         primary_opp_id = gs.aggressor_opponent_id(player)
         if primary_opp_id is None:
             primary_opp_id = self.opponent_model.preferred_exploit_target(opp_ids)
@@ -708,6 +757,8 @@ class PokerBot:
             # 实际胜率的平均 bias 加回。action_ctx 区分"passive / bet / raise"
             # 三种 tracker 压缩强度档位，防止 bet/raise 场景下的大 bias 被
             # passive 样本稀释（参见 docs/多对手重构/plan.md）。
+            # The calibrator's key is the range label (categorize_cards): its samples
+            # are stored under that label, so the lookup has to use the same one.
             hero_bucket = _hero_categorize(list(player.hole_cards), list(board))
             action_ctx = classify_action_ctx_from_decision(
                 facing_bet=facing_bet, to_call=to_call, pot=pot,
@@ -752,11 +803,15 @@ class PokerBot:
         # over-estimated SPR inflates all of them in lockstep.
         #
         # Rule:
-        #   1. If an aggressor exists on this hand, bind SPR to that
-        #      opponent — they're the player we're actually contesting.
-        #   2. Otherwise fall back to the shortest live (can_act) opponent.
-        #      All-in opponents are excluded because they can't fold/call,
-        #      so they don't constrain our remaining chips-in-play.
+        #   1. If an aggressor exists on this hand and still has chips in
+        #      play on this street (behind him or in front of him), bind SPR
+        #      to that opponent — they're the player we're actually
+        #      contesting. An aggressor who went all-in on an earlier street
+        #      has none and does not count.
+        #   2. Otherwise fall back to the shortest opponent who can still
+        #      bet. All-in opponents are excluded because they can't
+        #      fold/call, so they don't constrain our remaining
+        #      chips-in-play.
         #   3. If hero is the shortest, hero's own committed amount wins.
         #
         # Motivation (from logs/20.log regression): max(opponent_totals)
@@ -768,7 +823,7 @@ class PokerBot:
         aggressor_total: Optional[float] = None
         if spr_aggressor_id is not None:
             agg = self._find_player(gs, spr_aggressor_id)
-            if agg is not None and agg.can_act():
+            if agg is not None and agg.stack + agg.current_bet > 0:
                 aggressor_total = agg.stack + agg.current_bet
 
         if aggressor_total is not None:
@@ -832,7 +887,7 @@ class PokerBot:
         #   air=0.0 / weak_draw=0.2 / draw=0.3 / medium=0.5 / strong=0.7 / nuts=1.0
         _BUCKET_RANK = {'air': 0.0, 'weak_draw': 0.2, 'draw': 0.3,
                         'medium': 0.5, 'strong': 0.7, 'nuts': 1.0}
-        hero_bucket = _hero_categorize(
+        hero_bucket = _hero_decision_bucket(
             list(player.hole_cards), list(board)
         ) if bool(board) else 'medium'
         hero_strength = _BUCKET_RANK.get(hero_bucket, 0.5)
@@ -976,6 +1031,20 @@ class PokerBot:
                 seed=self._seed_for('postflop_behind'),
             )
 
+        # Reads from pre-selected actions, one per opponent still in the hand.
+        opp_reads = tuple(self.pre_action_key(pid, street) for pid in opp_ids)
+        # An opponent who is all-in cannot fold: nothing a read says about folding applies to
+        # the field then (his read still shapes his range).
+        if not any(opp_reads) or any(
+            p.is_all_in for p in gs.active_players if p.player_id != player.player_id
+        ):
+            opp_reads = ()
+        primary_read = (
+            self.pre_action_key(primary_opp_id, street)
+            if primary_opp_id is not None and primary_opp_id >= 0 else None
+        )
+        self._last_pre_action_reads = [key for key in opp_reads if key]
+
         action_str, amount = self.postflop.decide(
             equity=equity,
             pot=pot,
@@ -1004,6 +1073,7 @@ class PokerBot:
             villain_nuts_pct=villain_nuts_pct,
             exploit_need_adjust=exploit_need_adjust,
             hole_cards=player.hole_cards,
+            can_raise=gs.legal_raise_to(player, float('inf')) is not None,
             villain_stats=villain_stats_full,
             is_pfr=hero_is_pfr,
             worst_villain_stats=worst_vs,
@@ -1011,6 +1081,8 @@ class PokerBot:
             max_trap_lean=max_tl,
             max_bluff_lean=max_bl,
             n_sticky=n_sticky,
+            opp_reads=opp_reads,
+            primary_read=primary_read,
             villain_vs_hero_dist=villain_vs_hero_dist,
             # 2026-04-25 修 P0 bug：把完整跟踪的 hero / 主要 villain 街道动作
             # 传给 engine，修 double_barrel / triple_barrel / stop_and_go /
@@ -1065,19 +1137,18 @@ class PokerBot:
         self._my_street_actions[street] = action_str
 
         # 加注金额不超过对手有效可投入的上限（超出无意义）。
-        # 有效上限 = 对手剩余筹码 + 对手本街已投入（因为 amount 是 bot 的总额语义）。
+        # 有效上限 = 仍在牌局里的对手中最深的那个：剩余筹码 + 本街已投入
+        # （因为 amount 是 bot 的总额语义）。这个上限可以低于桌上的最小加注额；
+        # 合法性由 GameState.legal_raise_to 统一处理（api.request_action）。
         if action_str == 'raise' and amount > 0:
             # The rule engine sizes additional chips against the
             # remaining stack. Convert once to the public raise-to contract.
             amount += player.current_bet
-            acting_effective = [
+            amount = min(amount, max((
                 p.stack + p.current_bet
                 for p in gs.active_players
-                if p.player_id != player.player_id and p.can_act()
-            ]
-            if acting_effective:
-                max_effective = max(acting_effective)
-                amount = min(amount, max_effective)
+                if p.player_id != player.player_id
+            ), default=amount))
 
         opp_label = ""
         if primary_opp_id >= 0:
@@ -1311,6 +1382,7 @@ class PokerBot:
             'stack': stack,
             'spr': round(spr, 4),
             'hero_bucket': hero_bucket,
+            'pre_action_reads': list(getattr(self, '_last_pre_action_reads', []) or []) or None,
             'hero_made_subtype': detail.get('hero_made_subtype', ''),
             'hero_hand_rank': detail.get('hero_hand_rank', ''),
             'hero_kicker_rank': int(detail.get('hero_kicker_rank') or 0),
@@ -2059,6 +2131,13 @@ class PokerBot:
     # Opponent model update (called by game engine)
     # ------------------------------------------------------------------
 
+    def pre_action_key(self, player_id: int, street: str) -> Optional[str]:
+        """What the player's latest pre-selected action is worth on ``street``
+        (``pre_action.CHECK_NOW`` / ``CHECK_PREV`` / ...), or None."""
+        if not pre_action_mod.enabled():
+            return None
+        return pre_action_mod.read_key(self._range_tracker.pre_action_read(player_id), str(street or '').lower())
+
     def observe_action(
         self,
         player_id: int,
@@ -2073,8 +2152,13 @@ class PokerBot:
         opp_position: str = '',
         is_raise_over: bool = False,
         is_ip: bool = False,
+        pre_action: int = 0,
     ):
-        """Record an observed opponent action for modeling."""
+        """Record an observed opponent action for modeling.
+
+        ``pre_action`` is the table's flag for this action (0 nothing selected, 1 reset,
+        2 pre-selected); the range tracker keeps the read that follows from it.
+        """
         act = str(action.action_type).lower()
         self.opponent_model.record_action(player_id, act, street)
 
@@ -2095,6 +2179,9 @@ class PokerBot:
         if is_3bet_spot:
             did_3bet = action.action_type == ActionType.RAISE
             self.opponent_model.record_3bet_opportunity(player_id, did_3bet)
+            if not self.opponent_model.frozen:
+                opps, hits = self._hand_three_bets.get(player_id, (0, 0))
+                self._hand_three_bets[player_id] = (opps + 1, hits + int(did_3bet))
 
         if is_fold_to_3bet_spot:
             folded = action.action_type == ActionType.FOLD
@@ -2127,6 +2214,7 @@ class PokerBot:
             is_raise_over=is_raise_over,
             is_ip=is_ip,
             preflop_action_type=observed_preflop_type,
+            pre_action=int(pre_action or 0),
         )
         self._range_tracker.observe_action(
             player_id, act, street, ctx, profile,
@@ -2181,6 +2269,7 @@ class PokerBot:
         """
         self._vpip_recorded.clear()
         self._pfr_recorded.clear()
+        self._hand_three_bets.clear()
         # Reset cross-street action trackers for each new hand
         self._my_street_actions.clear()
         self._opp_street_actions.clear()

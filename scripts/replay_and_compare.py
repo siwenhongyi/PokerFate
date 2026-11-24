@@ -152,6 +152,7 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
                     action=action,
                     amount=api_amount,
                     street=street,
+                    pre_action=int(ev.get("pre_action") or 0),
                 ))
             except Exception as exc:
                 print(
@@ -300,7 +301,6 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
                 my_p.stack = hero_stack
                 my_p.current_bet = my_current_bet_this_street
                 my_p.is_folded = hist_action == "fold"
-                my_p.is_all_in = hero_stack <= 0
             api._street_contribs[hero_id] = my_current_bet_this_street
             api._bot._my_street_actions[hist_street] = hist_action
 

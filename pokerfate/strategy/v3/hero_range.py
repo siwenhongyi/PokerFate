@@ -24,7 +24,7 @@ from pokerfate.core.game_state import ActionType
 from pokerfate.core.position import normalize_position
 from pokerfate.strategy import preflop as _pf
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
-from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards
+from pokerfate.strategy.range_v2.hand_categorizer import decision_bucket
 
 log = logging.getLogger(__name__)
 
@@ -322,7 +322,7 @@ def _reach_prob(
     if 'flop' in my_prev_actions and 'flop' not in filters and len(board) >= 3:
         flop_board = board[:3]
         try:
-            bucket = categorize_cards(list(combo), flop_board)
+            bucket = decision_bucket(list(combo), flop_board)
         except Exception:
             log.exception(
                 "hero range reach bucket failed street=flop combo=%s board=%s",
@@ -338,7 +338,7 @@ def _reach_prob(
     if 'turn' in my_prev_actions and 'turn' not in filters and len(board) >= 4:
         turn_board = board[:4]
         try:
-            bucket = categorize_cards(list(combo), turn_board)
+            bucket = decision_bucket(list(combo), turn_board)
         except Exception:
             log.exception(
                 "hero range reach bucket failed street=turn combo=%s board=%s",
@@ -450,7 +450,7 @@ def distribution(
             if combo[0] in blocked or combo[1] in blocked:
                 continue
             try:
-                bucket = categorize_cards(combo, board)
+                bucket = decision_bucket(combo, board)
             except Exception:
                 log.exception(
                     "hero range distribution bucket failed combo=%s board=%s",

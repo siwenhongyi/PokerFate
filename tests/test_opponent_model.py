@@ -375,9 +375,6 @@ class TestOpponentStatsToVillainStats:
         # VillainStats 不含 player_type 字段；对手建模不再输出离散标签。
         assert not hasattr(vs, 'player_type')
 
-    def test_opponent_stats_no_discrete_player_type_label(self):
-        assert not hasattr(OpponentStats(), 'player_type')
-
 
 # ── Persistence must be atomic ───────────────────────────────────────────────
 

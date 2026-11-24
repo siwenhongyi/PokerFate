@@ -161,6 +161,11 @@ class HeadlessSession:
         rewards = self._rewards
         return (rewards.confirmed_chips, rewards.uncertain) if rewards else (0, False)
 
+    def live_total_chips(self) -> int | None:
+        """The account's chips for the live view: the wallet as the server last told it plus
+        the chips on the table. None until the first wallet answer."""
+        return self._bankroll_snapshot.get("current_total_chips")
+
     def bankroll_dashboard(self) -> dict:
         """Read the last completed bridge snapshot without waiting for the bot.
 
@@ -648,6 +653,10 @@ class HeadlessSession:
                             log.warning("[BOT] 丢弃过期行动通知：服务器已进入后续行动，排队 %.0fms",
                                         (time.monotonic() - received_at) * 1000)
                             self.stats.injects_dropped += 1
+                            # Nothing to decide any more, but the notice still says whether the
+                            # action that overtook it was pre-selected - and a pre-selected action
+                            # always overtakes its notice.
+                            self.bridge.note_pre_action(msg)
                             continue
                         started = time.monotonic()
                         self.bridge.note_seen_room_id(room_id)

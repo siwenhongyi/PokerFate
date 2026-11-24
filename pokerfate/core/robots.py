@@ -1,11 +1,13 @@
 """Robot (house bot) registry, grown from the server's own robot counter.
 
 The game server broadcasts ``rb_num`` — the number of robots in the room — whenever somebody
-leaves (``OtherLeaveRoomBRC``) and, when the server sends it, when somebody enters
-(``OtherEnterRoomBRC``).  That counter is the ground truth.  ``RoomRobotTracker`` turns the
-stream of counts into per-account labels:
+leaves (``OtherLeaveRoomBRC``).  That counter is the ground truth, and the only one: the
+broadcast for somebody entering (``OtherEnterRoomBRC``) declares the field but never carries
+it (0 of 4,229 in the wire log up to 2026-11-22), so an entry is a change of who is in the
+room and nothing more.  ``RoomRobotTracker`` turns the stream of counts into per-account
+labels:
 
-  * count rule    after an event the room holds exactly ``rb_num`` robots; if that equals
+  * count rule    after a count the room holds exactly ``rb_num`` robots; if that equals
                   the number of still-unlabelled accounts they are all robots, if it is 0
                   they are all humans;
   * change rule   between two consecutive counts the difference equals the robots that
@@ -13,9 +15,16 @@ stream of counts into per-account labels:
                   came or went".
 
 Labels are written to ``RobotRegistry`` (a JSON file next to opponents.json) and are never
-guessed: an account is ``robot`` or ``human`` only after a count proved it.  Accounts not yet
-proven are ``suspect`` when their UID lies inside a dense run of proven robots (the robots'
-UIDs were allocated in one block) and ``unknown`` otherwise.
+guessed: an account is ``robot`` or ``human`` only after a count proved it, and everything
+that asks "is this a robot" gets the proven label of that one uid.  An account without one
+is unknown and is treated as a human.
+
+Suspected, never used: the proven robots seen so far have uids in two ranges,
+10294785-10297276 and 10331582-10336532 (664 proven robots, no proven human, 421 accounts
+not proven either way; wire log 2026-11-06 .. 2026-11-22).  This is an observation only.
+Uids look like they are handed out in registration order, so a human can sit between two
+robots, and a range can grow or new ones can appear.  No code may label, count or exclude an
+account because of where its uid falls.
 
 Nothing here imports strategy code, so the wire client, the strategy API, the training
 scripts and the analysis tools can all use it.
@@ -31,17 +40,10 @@ from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 ROBOT = "robot"
 HUMAN = "human"
-SUSPECT = "suspect"
 UNKNOWN = "unknown"
 
 DEFAULT_PATH = Path(__file__).resolve().parents[2] / "local" / "models" / "robots.json"
 
-# A run of proven robots whose neighbouring UIDs are at most this far apart is treated as one
-# allocation block; unproven UIDs inside a block are "suspect".
-BLOCK_MAX_GAP = 400
-BLOCK_MIN_ROBOTS = 5
-# A block stops being trusted once this share of its proven accounts turned out human.
-BLOCK_MAX_HUMAN_SHARE = 0.02
 _SAVE_INTERVAL_SEC = 20.0
 
 
@@ -63,7 +65,7 @@ def table_verdict(humans: int, robots: int) -> str:
 
 
 class RobotRegistry:
-    """Persistent uid -> proven label, plus the derived suspect blocks."""
+    """Persistent uid -> proven label."""
 
     def __init__(self, path: Optional[os.PathLike] = None, *, autosave: bool = True) -> None:
         self.path = Path(path) if path is not None else DEFAULT_PATH
@@ -71,7 +73,6 @@ class RobotRegistry:
         self._lock = threading.RLock()
         self._labels: Dict[str, dict] = {}
         self._conflicts: Dict[str, dict] = {}
-        self._blocks: Optional[List[Tuple[int, int, int]]] = None
         self._dirty = False
         self._last_save = 0.0
         self.load()
@@ -90,7 +91,6 @@ class RobotRegistry:
             for uid, rec in (data.get("conflicts") or {}).items():
                 if isinstance(rec, dict):
                     self._conflicts[_uid(uid)] = dict(rec)
-            self._blocks = None
             self._dirty = False
 
     def save(self, *, force: bool = False) -> None:
@@ -101,7 +101,6 @@ class RobotRegistry:
                 "schema": "robot_registry_v1",
                 "updated_at": int(time.time()),
                 "counts": self.counts(),
-                "blocks": [{"lo": lo, "hi": hi, "robots": n} for lo, hi, n in self.blocks()],
                 "accounts": dict(sorted(self._labels.items(), key=lambda kv: int(kv[0]) if kv[0].isdigit() else 0)),
                 "conflicts": self._conflicts,
             }
@@ -123,15 +122,12 @@ class RobotRegistry:
         return rec["label"] if rec else None
 
     def status(self, uid) -> str:
-        """robot / human when proven, else suspect (inside a robot UID block) or unknown."""
-        proven = self.label(uid)
-        if proven:
-            return proven
-        return SUSPECT if self.in_block(uid) else UNKNOWN
+        """robot / human when proven, else unknown."""
+        return self.label(uid) or UNKNOWN
 
-    def is_robot(self, uid, *, include_suspect: bool = True) -> bool:
-        status = self.status(uid)
-        return status == ROBOT or (include_suspect and status == SUSPECT)
+    def is_robot(self, uid) -> bool:
+        """Proven robot.  An account nothing has proven yet is not one."""
+        return self.label(uid) == ROBOT
 
     def robots(self) -> Set[str]:
         return {u for u, r in self._labels.items() if r["label"] == ROBOT}
@@ -142,35 +138,6 @@ class RobotRegistry:
     def counts(self) -> dict:
         robots = sum(1 for r in self._labels.values() if r["label"] == ROBOT)
         return {"robot": robots, "human": len(self._labels) - robots, "conflict": len(self._conflicts)}
-
-    def blocks(self) -> List[Tuple[int, int, int]]:
-        """[(lo, hi, proven_robots)] for runs of proven robots with small UID gaps."""
-        with self._lock:
-            if self._blocks is not None:
-                return self._blocks
-            ids = sorted(int(u) for u, r in self._labels.items() if r["label"] == ROBOT and u.isdigit())
-            humans = sorted(int(u) for u, r in self._labels.items() if r["label"] == HUMAN and u.isdigit())
-            blocks: List[Tuple[int, int, int]] = []
-            run: List[int] = []
-            for value in ids + [None]:
-                if value is not None and (not run or value - run[-1] <= BLOCK_MAX_GAP):
-                    run.append(value)
-                    continue
-                if len(run) >= BLOCK_MIN_ROBOTS:
-                    lo, hi = run[0], run[-1]
-                    inside_humans = sum(1 for h in humans if lo <= h <= hi)
-                    if inside_humans <= BLOCK_MAX_HUMAN_SHARE * (len(run) + inside_humans):
-                        blocks.append((lo, hi, len(run)))
-                run = [value] if value is not None else []
-            self._blocks = blocks
-            return blocks
-
-    def in_block(self, uid) -> bool:
-        text = _uid(uid)
-        if not text.isdigit():
-            return False
-        value = int(text)
-        return any(lo <= value <= hi for lo, hi, _ in self.blocks())
 
     # ── updates ───────────────────────────────────────────────────────────
     def confirm(self, uid, label: str, how: str = "", *, ts: Optional[float] = None) -> bool:
@@ -189,7 +156,6 @@ class RobotRegistry:
                     self._dirty = True
                     return False
                 self._labels[key] = {"label": label, "n": 1, "first": int(now), "last": int(now), "how": how}
-                self._blocks = None
                 self._dirty = True
                 self._maybe_save()
                 return True
@@ -202,7 +168,6 @@ class RobotRegistry:
             # The same account proven both ways: trust neither until looked at by a human.
             self._conflicts[key] = {rec["label"]: int(rec.get("n", 1)), label: 1, "how": [rec.get("how", ""), how]}
             del self._labels[key]
-            self._blocks = None
             self._dirty = True
             self._maybe_save()
             return True
@@ -212,10 +177,14 @@ class RoomRobotTracker:
     """Per-room inference from the ``rb_num`` counter.  Feed it every seat event."""
 
     def __init__(self, registry: RobotRegistry, my_uid=None,
-                 on_label: Optional[Callable[[str, str, str], None]] = None) -> None:
+                 on_label: Optional[Callable[[str, str, str], None]] = None,
+                 on_mismatch: Optional[Callable[[List[str], int], None]] = None) -> None:
         self.registry = registry
         self.my_uid = _uid(my_uid) if my_uid is not None else ""
         self.on_label = on_label
+        # Called with (members, rb_num) when a count cannot be true of the labels the
+        # registry holds for the people in the room: one of those labels is wrong.
+        self.on_mismatch = on_mismatch
         self.members: Set[str] = set()          # everybody else known to be in the room
         self.joined: Set[str] = set()           # joined since the last count
         self.prev_count: Optional[int] = None   # rb_num at the last count, None = no usable base
@@ -224,6 +193,7 @@ class RoomRobotTracker:
         self.pending: List[Tuple[frozenset, int]] = []   # unresolved "c robots among this set"
         self.events = 0
         self.skipped = 0
+        self.mismatches = 0
 
     # ── room lifecycle ────────────────────────────────────────────────────
     def set_my_uid(self, uid) -> None:
@@ -246,14 +216,10 @@ class RoomRobotTracker:
         self.members.add(key)
         self.joined.add(key)
 
-    def entered(self, uid, num, rb_num, *, ts: Optional[float] = None) -> None:
-        key = _uid(uid)
-        if not key or key == self.my_uid:
-            return
-        if key not in self.members:
-            self.members.add(key)
-            self.joined.add(key)
-        self._count(left=None, num=num, rb_num=rb_num, ts=ts)
+    def entered(self, uid) -> None:
+        """Somebody entered the room.  The broadcast carries no robot count (see the module
+        text), so this only adds him to the people the next count is about."""
+        self.sat_down(uid)
 
     def left(self, uid, num, rb_num, *, ts: Optional[float] = None) -> None:
         key = _uid(uid)
@@ -284,6 +250,11 @@ class RoomRobotTracker:
             return
         self.prev_count = r
         label = self.registry.label
+        robots = sum(1 for u in self.members if label(u) == ROBOT)
+        if not robots <= r <= robots + sum(1 for u in self.members if label(u) is None):
+            self.mismatches += 1
+            if self.on_mismatch is not None:
+                self.on_mismatch(sorted(self.members), r)
 
         # change rule
         if prev is not None and not unknown_leaver:
@@ -347,7 +318,7 @@ class RoomRobotTracker:
         """Humans / robots among the given seated opponents.
 
         The server's own count wins when it is current for exactly these people; otherwise
-        proven labels are used and unproven accounts inside a robot UID block count as robots.
+        proven labels are used, and an account nothing has proven yet counts as a human.
         """
         uids = [u for u in (_uid(s) for s in seated) if u and u != self.my_uid]
         robots = sum(1 for u in uids if self.registry.is_robot(u))

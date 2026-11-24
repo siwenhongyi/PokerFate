@@ -328,6 +328,7 @@ class PokerLogger:
         to_call: float = 0.0,
         pot_before_action: float = 0.0,
         layer_trace: Optional[Dict] = None,
+        pre_action: int = 0,
     ):
         self._file({
             "event": "opponent_action",
@@ -342,6 +343,8 @@ class PokerLogger:
             "pot_before_action": round(pot_before_action, 2) if pot_before_action > 0 else None,
             # Range V2 per-layer update trace (BayesianRangeTracker.last_update_trace).
             "layer_trace": layer_trace or None,
+            # ActionNotifyBRC.pre_action_result (1 reset, 2 pre-selected); absent when 0.
+            "pre_action": int(pre_action) or None,
         })
         if not self._console:
             return

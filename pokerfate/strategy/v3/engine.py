@@ -14,6 +14,7 @@ from pokerfate.strategy.v3.purpose import Purpose
 from pokerfate.strategy.v3.purposes_active import all_active, monster_value_plan_kind
 from pokerfate.strategy.v3.purposes_defensive import all_defensive
 from pokerfate.strategy.v3.purposes_passive import all_passive
+from pokerfate.strategy.v3.purposes_reads import all_reads
 from pokerfate.strategy.v3.stackoff_guard import stackoff_guard_reason
 
 
@@ -100,7 +101,7 @@ class V3Engine:
 
     def __init__(self) -> None:
         self.active_purposes = [
-            p for p in all_active() + all_passive()
+            p for p in all_active() + all_reads() + all_passive()
             if not p.facing_bet and p.default_action != "fold"
         ]
         self.defensive_purposes = [p for p in all_defensive()]
@@ -690,6 +691,9 @@ class V3Engine:
         )
         if not sticky:
             return False
+        if purpose_id == "read_stab" and ctx.weak_reads >= ctx.num_opponents:
+            # every opponent left has shown he gave up: nobody is there to be sticky
+            return False
         if ctx.hero_bucket in {"air", "weak_draw"}:
             return True
         if ctx.hero_bucket == "medium" and frac > _STICKY_MULTIWAY_MEDIUM_MAX_FRAC:
@@ -810,6 +814,8 @@ class V3Engine:
                     metadata=metadata,
                 )
             elif action == "raise":
+                if not ctx.can_raise:
+                    continue
                 amount = self._raise_amount(ctx, p)
                 if amount <= ctx.to_call:
                     continue

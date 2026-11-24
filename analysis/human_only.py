@@ -2,8 +2,9 @@
 
     .venv/bin/python -m analysis.human_only pokerfate/logs/archive/2026-11-*.pokerfate.bak.log pokerfate/logs/pokerfate.log [--since ISO]
 
-Only hands at tables without any house robot (robot registry: proven, or inside a robot UID
-block) are used, so the "pool" in every table below is the human pool.
+Only hands at tables without any house robot (robot registry: accounts the server's robot
+count has proven; an account not proven counts as a human) are used, so the "pool" in every
+table below is the human pool.
 
 Sections
   1  baseline, per-hand spread, and how many hands a given improvement needs to be seen

@@ -64,7 +64,8 @@ if str(ROOT) not in sys.path:
 from analysis.range_layers import iter_rows, slice_names  # noqa: E402
 from analysis.type_truth import GROUPS, TRIGGER as UNCONTESTED, TYPES  # noqa: E402
 from pokerfate.strategy.range_v2.fitted_likelihood import (  # noqa: E402
-    ACTIONS, FEATURES, PREFLOP_ACTIONS, PREFLOP_BINS, PREFLOP_FEATURES, PREFLOP_GROUPS, position_group,
+    ACTIONS, FEATURES, PREFLOP_ACTIONS, PREFLOP_BINS, PREFLOP_FEATURES, PREFLOP_GROUPS, PREFLOP_STRONG_FROM,
+    position_group,
 )
 
 CATS = ("nuts", "strong", "medium", "draw", "weak_draw", "air")
@@ -382,10 +383,11 @@ def slices(data: dict[str, Data], post: dict[str, np.ndarray], min_rows: int = 1
     groups: dict[str, list[tuple[float, float, str]]] = defaultdict(list)
     for action, d in data.items():
         mixed, typed = d.mixed(post[action]), d.groups(post[action])
-        top = slice(0, 2) if not d.layout.preflop else slice(len(d.layout.cats) - 3, None)   # strong hands
+        strong_from = d.layout.cats.index(PREFLOP_STRONG_FROM) if d.layout.preflop else 0
+        top = slice(0, 2) if not d.layout.preflop else slice(strong_from, None)   # strong hands
         for i in range(len(d)):
             if d.kind[i] == SHOWDOWN:
-                held = 1.0 if (d.y[i] <= 1 if not d.layout.preflop else d.y[i] >= len(d.layout.cats) - 3) else 0.0
+                held = 1.0 if (d.y[i] <= 1 if not d.layout.preflop else d.y[i] >= strong_from) else 0.0
                 item = (d.after[i, top].sum() - held, mixed[i, top].sum() - held, d.player[i])
                 for name in d.names[i]:
                     groups[name].append(item)

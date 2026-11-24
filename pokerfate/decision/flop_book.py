@@ -470,7 +470,9 @@ class FlopBookDecisionEngine:
             self._fallback("hero_missing_or_folded", street=street)
             return None
 
-        active = [p for p in gs.active_players if not p.is_all_in]
+        # Two players left in the hand, whoever of them is all-in; see
+        # ``RealtimeCFRDecisionEngine._prepare``.
+        active = gs.active_players
         if len(active) != 2:
             self._fallback("requires_heads_up_active_players", street=street, active_count=len(active))
             return None

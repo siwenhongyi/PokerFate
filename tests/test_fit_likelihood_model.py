@@ -403,7 +403,12 @@ def test_preflop_lines_features_and_strength_bins():
     trash = hcm.COMBO_TO_IDX[tuple(sorted((hcm.card_to_int(Card.from_str("7s")), hcm.card_to_int(Card.from_str("2h")))))]
     assert bins[aces] == len(fl.PREFLOP_BINS) - 1 and bins[trash] == 0
     share = np.bincount(bins, minlength=len(fl.PREFLOP_BINS)) / 1326
-    assert np.all(share[:9] > 0.07) and np.all(share[:9] < 0.13) and share[9] + share[10] == pytest.approx(0.1, abs=0.03)
+    assert np.all(share[:9] > 0.07) and np.all(share[:9] < 0.13) and share[9:].sum() == pytest.approx(0.1, abs=0.03)
+    # the strongest twentieth is three bins, by hand: TT-77 / AQs / AJs, JJ / AK, QQ+
+    combo = lambda a, b: hcm.COMBO_TO_IDX[tuple(sorted((hcm.card_to_int(Card.from_str(a)), hcm.card_to_int(Card.from_str(b)))))]
+    names = [fl.PREFLOP_BINS[bins[combo(a, b)]] for a, b in (("7s", "7h"), ("As", "Qs"), ("Js", "Jh"), ("As", "Kh"), ("Qs", "Qh"))]
+    assert names == ["TT-77,AQs,AJs", "TT-77,AQs,AJs", "JJ,AK", "JJ,AK", "QQ+"]
+    assert [int(n) for n in np.bincount(bins)[-3:]] == [32, 22, 18]
 
 
 def _pre_rows(n, true, seed=0, lam=0.08):
@@ -463,7 +468,7 @@ def test_preflop_fit_writes_its_own_section_and_keeps_the_other(tmp_path):
     model = fit["preflop_model"]
     assert model["bins"] == list(fl.PREFLOP_BINS) and set(model["actions"]) == {"limp", "call"}
     limp = model["actions"]["limp"]["base"]["all"]
-    assert limp["95-100"] > limp["00-10"] + 0.8
+    assert limp[fl.PREFLOP_BINS[-1]] > limp["00-10"] + 0.8
     assert fit["report"]["preflop_model"]["out_of_fold"]["showdown"]["rows"] == len(rows)
 
 
@@ -472,7 +477,7 @@ def _pre_model_file(tmp_path, monkeypatch):
     steep = {b: -4.0 + 4.0 * i / (len(fl.PREFLOP_BINS) - 1) for i, b in enumerate(fl.PREFLOP_BINS)}
     path = tmp_path / "fit.json"
     path.write_text(json.dumps({"preflop_model": {"bins": list(fl.PREFLOP_BINS), "actions": {
-        "open": {"base": {"all": steep}, "weights": {"size_big": {"95-100": 1.0}}},
+        "open": {"base": {"all": steep}, "weights": {"size_big": {fl.PREFLOP_BINS[-1]: 1.0}}},
         "check": {"base": {"all": flat}, "weights": {}}}}}), encoding="utf-8")
     monkeypatch.setenv("PF_FORMULA_FIT_PATH", str(path))
 
@@ -502,7 +507,8 @@ def test_tracker_starts_uniform_and_lets_the_preflop_model_speak(tmp_path, monke
     assert top(opener) > 4 * start
     trace = opener.last_update_trace
     assert trace["preflop_label"] == "open" and set(trace["layers"]["pre"]) == set(fl.PREFLOP_BINS)
-    assert trace["layers"]["floor"]["95-100"] > 4 * trace["layers"]["pre"]["95-100"]
+    best = fl.PREFLOP_BINS[-1]
+    assert trace["layers"]["floor"][best] > 4 * trace["layers"]["pre"][best]
     assert trace["features"]["known"] > 0.8 and trace["lam"] == 0.08
 
     big = BayesianRangeTracker(ActionModel())
@@ -533,3 +539,12 @@ def test_hole_cards_of_the_last_hand_do_not_block_this_one():
     assert w[idx("As", "Qh")] > 0.0 and w[idx("Kd", "Ks")] > 0.0            # last hand's cards are free again
     assert w[idx("7c", "8c")] == 0.0 and w[idx("7d", "7h")] == 0.0          # this hand's are not, already preflop
     assert int((w > 0).sum()) == 1225 and w.sum() == pytest.approx(1.0)
+
+
+def test_a_preflop_model_fitted_on_other_bins_is_not_read(tmp_path, monkeypatch):
+    old_bins = list(fl.PREFLOP_BINS[:10]) + ["95-100"]
+    path = tmp_path / "fit.json"
+    path.write_text(json.dumps({"preflop_model": {"bins": old_bins, "actions": {
+        "open": {"base": {"all": {b: 1.0 for b in old_bins}}, "weights": {}}}}}), encoding="utf-8")
+    monkeypatch.setenv("PF_FORMULA_FIT_PATH", str(path))
+    assert fl.preflop_likelihood("open", _pre_features()) is None

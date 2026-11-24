@@ -55,6 +55,9 @@ class ActionContext:
     # Set by the range tracker for every postflop action: what the fitted likelihood may
     # depend on (fitted_likelihood.likelihood_features).
     likelihood_features: Optional[Dict[str, float]] = None
+    # ActionNotifyBRC.pre_action_result of this action: 0 nothing selected, 1 reset, 2 the
+    # action was pre-selected (pokerfate/strategy/pre_action.py).
+    pre_action: int = 0
 
 
 # ---------------------------------------------------------------------------

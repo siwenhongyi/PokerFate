@@ -4,7 +4,7 @@ The file (JSON, next to the bucket model) holds ``likelihood_model``: the postfl
 likelihood fitted by ``scripts/fit_likelihood_model.py`` and read by ``fitted_likelihood.py``.
 Everything above this layer (the bucket model, the online hero-equity calibrator) is fitted
 on its output, so a new file means re-extracting rows and retraining those — see
-docs/range_v2_bucket_ml.md.
+scripts/README.md.
 
 ``PF_FORMULA_FIT_PATH`` points the tracker at another file (a candidate under evaluation);
 ``off`` leaves the tracker without a postflop likelihood: actions then do not move ranges.

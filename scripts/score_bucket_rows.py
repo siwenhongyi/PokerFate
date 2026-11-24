@@ -1,7 +1,7 @@
 """Closed-loop scoring of bucket-calibration rows against revealed showdown hands.
 
 Workflow (the acceptance test for any bucket-ML candidate, see
-docs/range_v2_bucket_ml.md):
+scripts/README.md):
 
   1. python -m scripts.extract_range_calibration_rows_parallel --replay R.jsonl --mode bucket \\
          --bucket-calibration current --out rows_off.jsonl      (PF_BUCKET_ML=off)

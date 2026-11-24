@@ -70,7 +70,7 @@ request_action()
 | `wire/pb/` | 逆向得到的 Protobuf 定义编译结果 |
 | `dns/server.py` | 伪 DNS 服务（Android 模式下将游戏域名解析到本机） |
 | `certificates/generator.py` | 生成本地 CA + 服务端证书（一次性操作） |
-| `game_api/` | 游戏 REST API helper，包括玩家统计和收藏牌局接口 |
+| `game_api/` | 游戏 REST API helper：签名请求和玩家统计接口 |
 | `tools/gen_pb2.sh` | 根据 `pf_reverse/output/proto/Proto` 重新生成 `wire/pb` |
 
 **关键自动行为（BotBridge）**：
@@ -324,4 +324,4 @@ PID 由 bot 自动维护，退出后删除；同一项目通过文件锁防止�
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-Python 3.12+。完整依赖以 `requirements.txt` 为准；其中包含 AI 决策运行依赖、WSS 代理依赖和测试工具。代理模式的 launcher 和 headless 取凭证脚本用到的 `mitmproxy` 不在其中，按上面的步骤单独安装。
+Python 3.12+。完整依赖以 `requirements.txt` 为准；其中包含 AI 决策运行依赖、WSS 代理依赖、测试工具、重拟合脚本的依赖，以及客户端更新后同步 lua / proto 用的工具。代理模式的 launcher 和 headless 取凭证脚本用到的 `mitmproxy` 不在其中，按上面的步骤单独安装。

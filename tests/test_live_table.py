@@ -24,6 +24,11 @@ def test_session_totals_survive_room_changes_and_ignore_replayed_settlements():
     assert LiveTableObserver(my_uid=42).snapshot()["session_pnl_chips"] == 0
 
 
+def test_snapshot_carries_the_account_chips_from_its_source():
+    assert LiveTableObserver(chips_source=lambda: 113_165_900).snapshot()["total_chips"] == 113_165_900
+    assert LiveTableObserver().snapshot()["total_chips"] is None
+
+
 def test_session_result_in_big_blinds_counts_each_hand_at_its_own_blind():
     obs = LiveTableObserver(my_uid=42)
     enter = lambda bb: obs.observe("pb.EnterRoomRSP", {"roomid": 7, "room_info": {"bb": str(bb), "sb": str(bb // 2)}})
@@ -192,6 +197,15 @@ def test_round_over_uses_server_pots_after_uncalled_bet_return(observer, pool, e
     assert observer.snapshot()["pot"] == expected + 10000
 
 
+def test_round_start_clears_every_seat_action_and_bet(observer):
+    observer.observe("pb.ActionBRC", {"action_type": 7, "chips": "10000", "hand_chips": "990000"})
+    observer.observe("pb.ActionBRC", {"seatid": 3, "action_type": 1, "hand_chips": "500000"})
+    observer.observe("pb.RoundStartBRC", {"stage": 3})
+    seats = observer.snapshot()["seats"]
+    assert [(seats[i]["last"], seats[i]["bet"]) for i in (0, 3)] == [("", 0), ("", 0)]
+    assert seats[3]["folded"] is True
+
+
 def test_round_over_without_pool_does_not_erase_known_pot(observer):
     observer.observe("pb.ActionBRC", {
         "action_type": 7, "chips": "10000", "hand_chips": "990000",
@@ -307,12 +321,34 @@ def test_snapshot_tells_robots_from_humans_and_counts_them(observer):
     for uid in (500, 505, 510, 515, 520):
         reg.confirm(uid, ROBOT, "test")
     reg.confirm(42, HUMAN, "test")
-    _table(observer, ["9", "505", "507", "42", "777"])       # me, proven robot, suspect, proven human, unknown
+    _table(observer, ["9", "505", "507", "42", "777"])       # me, proven robot, not proven, proven human, unknown
     observer.observe("pb.SitDownRSP", {"seatid": 0, "chips": "1000"})
     snap = observer.snapshot()
     kinds = {s["seatid"]: s["kind"] for s in snap["seats"] if not s["empty"]}
-    assert kinds == {0: "", 1: "robot", 2: "suspect", 3: "human", 4: ""}
-    assert (snap["humans"], snap["robots"]) == (2, 2)
+    assert kinds == {0: "", 1: "robot", 2: "", 3: "human", 4: ""}
+    assert (snap["humans"], snap["robots"]) == (3, 1)
     observer.observe("pb.ActionBRC", {"seatid": 1, "action_type": 4, "chips": "300", "hand_chips": "700"})
     observer.observe("pb.ActionBRC", {"seatid": 3, "action_type": 3, "chips": "300", "hand_chips": "700"})
     assert observer.snapshot()["feed"][-2:] == ["p505〔人机〕 加注 300", "p42 跟注 300"]
+
+
+def _codes(cards):
+    rank = "23456789TJQKA"
+    suit = {"d": 1, "c": 2, "h": 3, "s": 4}
+    return [suit[c[1]] * 256 + rank.index(c[0]) + 2 for c in cards]
+
+
+def test_board_prefers_all_board_and_survives_repeats_and_missed_streets(observer):
+    board = ["Ah", "Kd", "Ks", "2c", "3c"]
+    observer.observe("pb.RoundStartBRC", {"stage": 2, "board": _codes(board[:3]), "all_board": _codes(board[:3])})
+    observer.observe("pb.RoundStartBRC", {"stage": 2, "board": _codes(board[:3]), "all_board": _codes(board[:3])})
+    assert observer.snapshot()["board"] == board[:3]
+    # the turn message is lost: the river's all_board still gives the whole board
+    observer.observe("pb.RoundStartBRC", {"stage": 4, "board": _codes(board[4:]), "all_board": _codes(board)})
+    assert observer.snapshot()["board"] == board
+
+
+def test_round_start_without_all_board_leaves_the_board_alone(observer):
+    observer.observe("pb.RoundStartBRC", {"stage": 2, "board": _codes(["Ah", "Kd", "Ks"]), "all_board": _codes(["Ah", "Kd", "Ks"])})
+    observer.observe("pb.RoundStartBRC", {"stage": 3, "board": _codes(["2c"])})
+    assert observer.snapshot()["board"] == ["Ah", "Kd", "Ks"]

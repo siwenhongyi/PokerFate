@@ -65,7 +65,7 @@ def replay(path: Path, registry: RobotRegistry, my_uid: str = "") -> dict:
         elif kind == "pb.OtherEnterRoomBRC":
             uid = (msg.get("user") or {}).get("uid")
             if uid:
-                tracker.entered(uid, msg.get("num", 0), msg.get("rb_num", 0), ts=ts)
+                tracker.entered(uid)
                 seen.add(str(uid))
                 stats["enter_counts"] += 1
         elif kind == "pb.OtherLeaveRoomBRC":
@@ -83,13 +83,14 @@ def replay(path: Path, registry: RobotRegistry, my_uid: str = "") -> dict:
     seen.discard(tracker.my_uid)
     stats["count_events"] = tracker.events
     stats["count_events_skipped"] = tracker.skipped
+    stats["count_mismatches"] = tracker.mismatches
     return {"seen": seen, "stats": stats}
 
 
 def report(registry: RobotRegistry, seen: set, stats: Counter) -> None:
     robots, humans = registry.robots(), registry.humans()
-    print(f"房内计数事件 {stats['count_events']} 次（其中人数对不上、未用于推断 {stats['count_events_skipped']} 次），"
-          f"进桌 {stats['enter_room']} 次")
+    print(f"房内计数事件 {stats['count_events']} 次（其中人数对不上、未用于推断 {stats['count_events_skipped']} 次，"
+          f"与已有标签矛盾 {stats['count_mismatches']} 次），进桌 {stats['enter_room']} 次")
     print(f"同桌出现过的账号 {len(seen)} 个：证实人机 {len(robots & seen)}，证实真人 {len(humans & seen)}，"
           f"未证实 {len(seen - robots - humans)}，互相矛盾 {registry.counts()['conflict']}")
     ids = sorted(int(u) for u in robots)
@@ -102,14 +103,22 @@ def report(registry: RobotRegistry, seen: set, stats: Counter) -> None:
         gaps_sorted = sorted(gaps)
         print(f"相邻两个人机 UID 的间隔：中位 {gaps_sorted[len(gaps) // 2]}，90% 分位 {gaps_sorted[int(.9 * len(gaps))]}，"
               f"最大 {gaps_sorted[-1]}")
-    for lo, hi, n in registry.blocks():
+    # 只是观察，不参与任何判定：证实人机的 UID 聚成几段，段内没被证实的账号只能算疑似
+    # （UID 看起来按注册顺序发放，段内可以夹着真人）。
+    runs, run = [], [ids[0]]
+    for value in ids[1:]:
+        if value - run[-1] <= 2000:
+            run.append(value)
+        else:
+            runs.append(run)
+            run = [value]
+    runs.append(run)
+    for run in runs:
+        lo, hi = run[0], run[-1]
         in_h = sorted(int(u) for u in humans if lo <= int(u) <= hi)
-        in_seen = [u for u in seen if u.isdigit() and lo <= int(u) <= hi]
-        unproven = [u for u in in_seen if registry.label(u) is None]
-        print(f"号段 {lo}–{hi}：证实人机 {n}，证实真人 {len(in_h)}{' ' + str(in_h[:5]) if in_h else ''}，"
-              f"段内出现过但未证实 {len(unproven)}")
-    outside = [u for u in robots if not registry.in_block(u)]
-    print(f"号段之外的证实人机 {len(outside)} 个：{sorted(outside)[:12]}")
+        unproven = [u for u in seen if u.isdigit() and lo <= int(u) <= hi and registry.label(u) is None]
+        print(f"证实人机聚集的 UID 段（仅供参考）{lo}–{hi}：证实人机 {len(run)}，证实真人 {len(in_h)}"
+              f"{' ' + str(in_h[:5]) if in_h else ''}，段内出现过但未证实（疑似） {len(unproven)}")
     hum = sorted(int(u) for u in humans)
     if hum:
         print(f"证实真人 {len(hum)} 个，UID 范围 {hum[0]}–{hum[-1]}")

@@ -1,0 +1,500 @@
+{
+ "version": 1,
+ "fitted": {
+  "hands": 32949,
+  "from": "2026-11-06T20:39",
+  "to": "2026-11-24T14:16",
+  "holdout_from": "2026-11-19T12:23",
+  "rows": {
+   "range": 25775,
+   "answer": 43856,
+   "lead": 80554
+  }
+ },
+ "range": {
+  "check": {
+   "flop": {
+    "nuts": 0.384,
+    "strong": 0.663,
+    "medium": 0.568,
+    "draw": 0.862,
+    "weak_draw": 0.882,
+    "air": 1.428
+   },
+   "turn": {
+    "nuts": 0.388,
+    "strong": 0.33,
+    "medium": 0.601,
+    "draw": 0.886,
+    "weak_draw": 0.988,
+    "air": 1.814
+   },
+   "river": {
+    "nuts": 0.436,
+    "strong": 0.411,
+    "medium": 0.548,
+    "draw": 1.0,
+    "weak_draw": 1.0,
+    "air": 1.669
+   }
+  },
+  "call": {
+   "flop": {
+    "nuts": 0.367,
+    "strong": 0.651,
+    "medium": 1.089,
+    "draw": 1.139,
+    "weak_draw": 1.34,
+    "air": 0.903
+   },
+   "turn": {
+    "nuts": 0.411,
+    "strong": 0.813,
+    "medium": 1.178,
+    "draw": 1.071,
+    "weak_draw": 1.258,
+    "air": 0.765
+   },
+   "river": {
+    "nuts": 0.694,
+    "strong": 0.993,
+    "medium": 1.212,
+    "draw": 1.0,
+    "weak_draw": 1.0,
+    "air": 0.55
+   }
+  }
+ },
+ "fold_shift": {
+  "check_now": 1.1424,
+  "check_prev": 0.8941,
+  "option_prev": 0.4093,
+  "call_prev": -0.027
+ },
+ "fold_rate": {
+  "flop": {
+   "1": {
+    "small": 0.3293,
+    "mid": 0.4243,
+    "big": 0.5596,
+    "rows": 9562
+   },
+   "2": {
+    "small": 0.4667,
+    "mid": 0.5322,
+    "big": 0.6487,
+    "rows": 7329
+   },
+   "3": {
+    "small": 0.5116,
+    "mid": 0.5725,
+    "big": 0.6652,
+    "rows": 2980
+   }
+  },
+  "turn": {
+   "1": {
+    "small": 0.2745,
+    "mid": 0.4229,
+    "big": 0.535,
+    "rows": 6941
+   },
+   "2": {
+    "small": 0.4647,
+    "mid": 0.5878,
+    "big": 0.6543,
+    "rows": 3000
+   },
+   "3": {
+    "small": 0.5299,
+    "mid": 0.5764,
+    "big": 0.6466,
+    "rows": 858
+   }
+  },
+  "river": {
+   "1": {
+    "small": 0.3695,
+    "mid": 0.5088,
+    "big": 0.6104,
+    "rows": 4858
+   },
+   "2": {
+    "small": 0.5918,
+    "mid": 0.6733,
+    "big": 0.743,
+    "rows": 1267
+   },
+   "3": {
+    "small": 0.6872,
+    "mid": 0.7492,
+    "big": 0.8062,
+    "rows": 224
+   }
+  }
+ },
+ "raise_factor": {
+  "check_now": 0.397,
+  "check_prev": 0.943,
+  "option_prev": 0.4,
+  "call_prev": 0.896
+ },
+ "bet_shift": {
+  "check_prev": -0.9273,
+  "option_prev": -0.6294,
+  "call_prev": -0.2019
+ },
+ "response": {
+  "facing_bet": {
+   "turn": {
+    "check_prev": {
+     "call": -0.826,
+     "raise": -0.8838
+    }
+   },
+   "river": {
+    "check_prev": {
+     "call": -0.826,
+     "raise": -0.8838
+    }
+   }
+  },
+  "checked_to": {
+   "turn": {
+    "check_prev": {
+     "bet": -0.7044
+    }
+   },
+   "river": {
+    "check_prev": {
+     "bet": -0.7044
+    }
+   }
+  }
+ },
+ "evidence": {
+  "range": {
+   "counts": {
+    "check": {
+     "flop": {
+      "shown": 4709,
+      "pre_selected": 342,
+      "pre_by_bucket": {
+       "air": 207,
+       "weak_draw": 61,
+       "medium": 48,
+       "draw": 15,
+       "strong": 10,
+       "nuts": 1
+      }
+     },
+     "turn": {
+      "shown": 4464,
+      "pre_selected": 319,
+      "pre_by_bucket": {
+       "air": 155,
+       "weak_draw": 65,
+       "nuts": 2,
+       "strong": 4,
+       "draw": 29,
+       "medium": 64
+      }
+     },
+     "river": {
+      "shown": 4596,
+      "pre_selected": 409,
+      "pre_by_bucket": {
+       "air": 290,
+       "medium": 107,
+       "strong": 8,
+       "nuts": 4
+      }
+     }
+    },
+    "call": {
+     "flop": {
+      "shown": 5178,
+      "pre_selected": 471,
+      "pre_by_bucket": {
+       "weak_draw": 102,
+       "air": 56,
+       "medium": 193,
+       "strong": 46,
+       "draw": 67,
+       "nuts": 7
+      }
+     },
+     "turn": {
+      "shown": 3948,
+      "pre_selected": 343,
+      "pre_by_bucket": {
+       "medium": 168,
+       "nuts": 14,
+       "draw": 49,
+       "weak_draw": 54,
+       "strong": 45,
+       "air": 13
+      }
+     },
+     "river": {
+      "shown": 2880,
+      "pre_selected": 273,
+      "pre_by_bucket": {
+       "medium": 175,
+       "nuts": 37,
+       "strong": 49,
+       "air": 12
+      }
+     }
+    }
+   },
+   "holdout": {
+    "rows": 717,
+    "gain": 0.0524,
+    "ci95": 0.0384
+   }
+  },
+  "fold": {
+   "rows": 43856,
+   "weights": {
+    "check_now": {
+     "rows": 408,
+     "fold": 1.1424
+    },
+    "check_prev": {
+     "rows": 595,
+     "fold": 0.8941
+    },
+    "option_prev": {
+     "rows": 617,
+     "fold": 0.4093
+    },
+    "call_now": {
+     "rows": 31,
+     "fold": 0.2623
+    },
+    "call_prev": {
+     "rows": 923,
+     "fold": -0.027
+    }
+   },
+   "holdout": {
+    "check_now": {
+     "rows": 135,
+     "gain": 0.0735,
+     "ci95": 0.087,
+     "actual": {
+      "stay": 0.215,
+      "fold": 0.785
+     },
+     "without": {
+      "stay": 0.396,
+      "fold": 0.604
+     },
+     "with": {
+      "stay": 0.178,
+      "fold": 0.822
+     }
+    },
+    "check_prev": {
+     "rows": 194,
+     "gain": 0.0538,
+     "ci95": 0.0592,
+     "actual": {
+      "stay": 0.237,
+      "fold": 0.763
+     },
+     "without": {
+      "stay": 0.389,
+      "fold": 0.611
+     },
+     "with": {
+      "stay": 0.218,
+      "fold": 0.782
+     }
+    },
+    "option_prev": {
+     "rows": 201,
+     "gain": 0.0114,
+     "ci95": 0.0184,
+     "actual": {
+      "stay": 0.269,
+      "fold": 0.731
+     },
+     "without": {
+      "stay": 0.338,
+      "fold": 0.662
+     },
+     "with": {
+      "stay": 0.276,
+      "fold": 0.724
+     }
+    },
+    "call_now": {
+     "rows": 10,
+     "gain": -0.0046,
+     "ci95": 0.014,
+     "actual": {
+      "stay": 0.4,
+      "fold": 0.6
+     },
+     "without": {
+      "stay": 0.595,
+      "fold": 0.405
+     },
+     "with": {
+      "stay": 0.602,
+      "fold": 0.398
+     }
+    },
+    "call_prev": {
+     "rows": 320,
+     "gain": 0.0002,
+     "ci95": 0.0017,
+     "actual": {
+      "stay": 0.553,
+      "fold": 0.447
+     },
+     "without": {
+      "stay": 0.544,
+      "fold": 0.456
+     },
+     "with": {
+      "stay": 0.549,
+      "fold": 0.451
+     }
+    }
+   }
+  },
+  "bet": {
+   "rows": 80554,
+   "weights": {
+    "check_prev": {
+     "rows": 966,
+     "bet": -0.9273
+    },
+    "option_prev": {
+     "rows": 1463,
+     "bet": -0.6294
+    },
+    "call_prev": {
+     "rows": 1417,
+     "bet": -0.2019
+    }
+   },
+   "holdout": {
+    "check_prev": {
+     "rows": 314,
+     "gain": 0.0534,
+     "ci95": 0.0351,
+     "actual": {
+      "check": 0.854,
+      "bet": 0.146
+     },
+     "without": {
+      "check": 0.716,
+      "bet": 0.284
+     },
+     "with": {
+      "check": 0.856,
+      "bet": 0.144
+     }
+    },
+    "option_prev": {
+     "rows": 499,
+     "gain": 0.0292,
+     "ci95": 0.0167,
+     "actual": {
+      "check": 0.852,
+      "bet": 0.148
+     },
+     "without": {
+      "check": 0.752,
+      "bet": 0.248
+     },
+     "with": {
+      "check": 0.834,
+      "bet": 0.166
+     }
+    },
+    "call_prev": {
+     "rows": 494,
+     "gain": 0.0063,
+     "ci95": 0.0086,
+     "actual": {
+      "check": 0.802,
+      "bet": 0.198
+     },
+     "without": {
+      "check": 0.761,
+      "bet": 0.239
+     },
+     "with": {
+      "check": 0.797,
+      "bet": 0.203
+     }
+    }
+   }
+  },
+  "response_answer": {
+   "rows": 20772,
+   "weights": {
+    "check_prev": {
+     "rows": 595,
+     "call": -0.826,
+     "raise": -0.8838
+    }
+   },
+   "holdout": {
+    "check_prev": {
+     "rows": 194,
+     "gain": 0.0482,
+     "ci95": 0.0556,
+     "actual": {
+      "fold": 0.763,
+      "call": 0.196,
+      "raise": 0.041
+     },
+     "without": {
+      "fold": 0.618,
+      "call": 0.32,
+      "raise": 0.061
+     },
+     "with": {
+      "fold": 0.779,
+      "call": 0.187,
+      "raise": 0.034
+     }
+    }
+   }
+  },
+  "response_lead": {
+   "rows": 19496,
+   "weights": {
+    "check_prev": {
+     "rows": 955,
+     "bet": -0.7044
+    }
+   },
+   "holdout": {
+    "check_prev": {
+     "rows": 310,
+     "gain": 0.0316,
+     "ci95": 0.0276,
+     "actual": {
+      "check": 0.852,
+      "bet": 0.148
+     },
+     "without": {
+      "check": 0.749,
+      "bet": 0.251
+     },
+     "with": {
+      "check": 0.851,
+      "bet": 0.149
+     }
+    }
+   }
+  }
+ }
+}

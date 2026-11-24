@@ -97,11 +97,6 @@ _PUSH_ACTION_LABELS = {
     ActionType.RAISE: "加",
 }
 _PUSH_SUIT_SYMBOLS = {"s": "♠️", "h": "♥️", "d": "♦️", "c": "♣️"}
-_AUTO_COLLECT_HAND_RANKS = {
-    HandRank.FOUR_OF_A_KIND: "四条",
-    HandRank.STRAIGHT_FLUSH: "同花顺",
-    HandRank.ROYAL_FLUSH: "皇家同花顺",
-}
 _RIVER_VALUE_SIZING_PURPOSES = {
     "thin_value_bet",
     "thick_value_bet",
@@ -153,7 +148,7 @@ class PlayerInfo:
     stack: Optional[float] = None   # None = unknown / use session default
     position: str = ""              # e.g. "BTN", "BB", "UTG"
     seat_index: Optional[int] = None  # physical table seat, when known
-    # House robot (proven by the server's rb_num counter, or inside a robot UID block).
+    # House robot: an account the server's rb_num counter has proven, nothing else.
     # Robots are played against as usual but kept out of every learning / collection path.
     is_robot: bool = False
 
@@ -168,6 +163,14 @@ class ActionEvent:
     # the current highest street bet".
     amount: float = 0.0
     street: str = ""
+    # The player's remaining stack after this action, when the table reports
+    # it. It replaces the stack the API would otherwise work out from the
+    # action amounts, which misses forced posts (blinds are not actions).
+    stack_after: Optional[float] = None
+    # The table's flag for this action (``ActionNotifyBRC.pre_action_result``): 0 nothing was
+    # selected in advance, 1 the selection was reset by the bet just before, 2 the action was
+    # pre-selected.  See pokerfate/strategy/pre_action.py.
+    pre_action: int = 0
 
 
 @dataclass
@@ -364,7 +367,6 @@ class PokerFateAPI:
         self._street_base_street: str = "preflop"
         self._street_contribs: Dict[int, float] = {}
         self._last_hand_push_detail: str = ""
-        self._last_auto_collect_reasons: list[str] = []
         self._pending_river_value_sizing_rows: list[dict[str, Any]] = []
         self._runtime_calibration_recorder = None
         self._runtime_collection_enabled = False
@@ -768,6 +770,16 @@ class PokerFateAPI:
                         for k, v in bucket_dist.items()
                         if float(v or 0.0) > 1e-9
                     }
+                read_key = self._bot.pre_action_key(int(villain_id), street)
+                if read_key:
+                    out["pre_action"] = read_key
+                    base_dist = self._bot._range_tracker.get_bucket_distribution(
+                        int(villain_id), board, with_pre_action=False,
+                    )
+                    if base_dist:
+                        out["bucket_dist_base"] = {
+                            str(k): float(v) for k, v in base_dist.items() if float(v or 0.0) > 1e-9
+                        }
                 if len(board) >= 5 and self._hole_cards:
                     vs_t0 = time.perf_counter()
                     vs_hero = self._bot._range_tracker.get_vs_hero_dist(
@@ -1359,7 +1371,6 @@ class PokerFateAPI:
         self._board = []
         self._action_history = []
         self._last_hand_push_detail = ""
-        self._last_auto_collect_reasons = []
         self._pending_river_value_sizing_rows = []
         self._decision_index = 0
         self._last_decision_diagnostics = {}
@@ -1537,6 +1548,23 @@ class PokerFateAPI:
         """重连时静默恢复公共牌，不触发日志/统计（仅还原 _board 状态）。"""
         self._board = [Card.from_str(c) for c in cards]
 
+    def sync_board(self, cards: List[str], street: str, pot: Optional[float] = None) -> None:
+        """Set the board to the server's COMPLETE community cards (idempotent).
+
+        ``RoundStartBRC.all_board`` is the authoritative full board, so a repeated,
+        late or re-ordered message cannot duplicate or drop cards: the known board
+        is kept when it is a prefix, the missing tail is dealt as a normal street,
+        and anything else (missed street, different hand) is a silent restore.
+        """
+        want = [str(Card.from_str(c)) for c in cards]
+        have = [str(c) for c in self._board]
+        if want == have:
+            return
+        if len(want) > len(have) and want[:len(have)] == have:
+            self.deal_board(want[len(have):], street, pot)
+        else:
+            self.restore_board(want)
+
     def deal_board(self, cards: List[str], street: str, pot: Optional[float] = None) -> None:
         """Notify the bot of new community cards.
 
@@ -1662,6 +1690,7 @@ class PokerFateAPI:
         # Update player state after deriving all pre-action diagnostics.
         self._apply_player_action(
             player, action_name, amount_added, total_bet_after,
+            stack_after=event.stack_after,
         )
         self._record_street_contribution(event.player_id, amount_added)
 
@@ -1678,6 +1707,8 @@ class PokerFateAPI:
             opp_position=opp_pos,
             is_raise_over=is_raise_over,
             is_ip=opp_is_ip,
+            # a house robot is not read: what was measured is how humans use the buttons
+            pre_action=0 if event.player_id in self._hand_robot_ids else int(event.pre_action or 0),
         )
         self._record_river_value_sizing_response(
             event=event,
@@ -1726,6 +1757,7 @@ class PokerFateAPI:
             to_call=to_call,
             pot_before_action=pot_at_action,
             layer_trace=layer_trace or None,
+            pre_action=int(event.pre_action or 0),
         )
 
         # Check for newly significant opponent patterns and surface them
@@ -1775,6 +1807,7 @@ class PokerFateAPI:
         num_active_opponents: int = 1,
         my_current_bet_this_street: float = 0.0,
         is_bb_option: bool = False,
+        min_raise_to: Optional[float] = None,
     ) -> BotDecision:
         """Ask the bot for its action.
 
@@ -1796,6 +1829,9 @@ class PokerFateAPI:
             Number of opponents still in the hand.
         my_current_bet_this_street : float
             Amount the bot has already put in this street (for raise calculations).
+        min_raise_to : float, optional
+            Lowest raise-to total the table accepts from the bot now, as the
+            table states it; 0 when it accepts no raise. None when unknown.
 
         Returns
         -------
@@ -1825,6 +1861,7 @@ class PokerFateAPI:
             current_bet=current_bet,
             my_stack=my_stack,
             my_current_bet_this_street=my_current_bet_this_street,
+            min_raise_to=min_raise_to,
         )
 
         t0 = time.perf_counter()
@@ -1853,15 +1890,17 @@ class PokerFateAPI:
                 )
             )
             action = self._bot.decide(gs, self.my_player_id, is_bb_option=is_bb_option)
-        # All engines share the execution contract: raise-to totals, at least
-        # one BB unless the remaining stack only permits a smaller all-in.
-        # Normalize before logging, history, and stack accounting so they agree
-        # with the amount sent on the wire (not the server's silent correction).
+        # All engines share the execution contract: raise-to totals inside the
+        # range the table accepts (``GameState.legal_raise_to``), and a call or
+        # check when it accepts no raise. Normalize before logging, history, and
+        # stack accounting so they agree with what the table will execute.
         if action.action_type == ActionType.RAISE:
             requested_action = action
-            max_total = float(my_current_bet_this_street) + max(0.0, float(my_stack))
-            total_bet = min(max_total, max(float(self.big_blind), float(action.amount)))
-            if total_bet <= float(current_bet):
+            total_bet = gs.legal_raise_to(
+                Player(self.my_player_id, "", float(my_stack), current_bet=float(my_current_bet_this_street)),
+                float(action.amount),
+            )
+            if total_bet is None:
                 call_amount = min(
                     max(0.0, float(current_bet) - float(my_current_bet_this_street)),
                     max(0.0, float(my_stack)),
@@ -1879,6 +1918,7 @@ class PokerFateAPI:
                     "requested_action": str(requested_action.action_type),
                     "requested_amount": requested_action.amount,
                     "action": str(action.action_type), "amount": action.amount,
+                    "min_raise_to": min_raise_to,
                 })
         elapsed_ms = (time.perf_counter() - t0) * 1000
         decision_timing: dict[str, Any] = {
@@ -2080,7 +2120,7 @@ class PokerFateAPI:
                 for key in (
                     "final_purpose", "decision_reason", "arbitration_mode",
                     "hero_bucket", "hero_made_subtype", "facing_action",
-                    "preflop_expand_reason", "position",
+                    "preflop_expand_reason", "position", "pre_action_reads",
                 ):
                     if diag.get(key) not in (None, ""):
                         extra[key] = diag[key]
@@ -2630,10 +2670,6 @@ class PokerFateAPI:
             hand_combos=hand_combos or {},
             my_combo=my_combo,
         )
-        self._last_auto_collect_reasons = self._build_auto_collect_reasons(
-            winner_ids=winner_ids,
-        )
-
         self._log.hand_result(
             winner_names=winner_names,
             pot=pot,
@@ -2763,30 +2799,6 @@ class PokerFateAPI:
         if self._last_decision_diagnostics:
             return dict(self._last_decision_diagnostics)
         return dict(self._bot.last_decision_diagnostics or {})
-
-    def last_auto_collect_reasons(self) -> list[str]:
-        """Reasons why the latest hand should be auto-collected."""
-        return list(self._last_auto_collect_reasons)
-
-    def _build_auto_collect_reasons(self, *, winner_ids: List[int]) -> list[str]:
-        if self.my_player_id not in set(winner_ids):
-            return []
-
-        rank = self._my_best_hand_rank()
-        if rank is None:
-            return []
-
-        label = _AUTO_COLLECT_HAND_RANKS.get(rank)
-        return [label] if label else []
-
-    def _my_best_hand_rank(self) -> Optional[HandRank]:
-        if not self._hole_cards or len(self._hole_cards) + len(self._board) < 5:
-            return None
-        try:
-            score = HandEvaluator.evaluate(self._hole_cards + self._board)
-        except Exception:
-            return None
-        return score[0]
 
     def _build_hand_push_detail(
         self,
@@ -3056,6 +3068,7 @@ class PokerFateAPI:
         current_bet: float,
         my_stack: float,
         my_current_bet_this_street: float,
+        min_raise_to: Optional[float] = None,
     ) -> GameState:
         street_map = {
             "preflop": Street.PREFLOP,
@@ -3107,6 +3120,7 @@ class PokerFateAPI:
             player_seats=dict(self._hand_seat_indices),
             dealer_seat=self._dealer_seat_index,
             action_history=list(self._action_history),
+            min_raise_to=min_raise_to,
         )
         return gs
 
@@ -3159,17 +3173,17 @@ class PokerFateAPI:
         if action == "call":
             amount_added = raw if raw > 0 else max(0.0, street_max_before - prev_bet)
             total_bet_after = prev_bet + amount_added
-            if street_max_before > 0 and amount_added >= street_max_before - prev_bet:
-                total_bet_after = max(total_bet_after, street_max_before)
-            elif (
-                street_max_before > 0
-                and raw > 0
-                and player is not None
-                and float(player.stack) > raw
+            if event.stack_after is not None:
+                chips_left = float(event.stack_after)
+            else:
+                chips_left = float(player.stack) - amount_added if player is not None else 0.0
+            # A call is reported as the chips it adds. Forced blinds are not
+            # actions, so what a blind seat had in front before it can be
+            # unknown here: a call that leaves chips behind matched the
+            # table's bet in full, only an all-in call can fall short of it.
+            if street_max_before > 0 and (
+                amount_added >= street_max_before - prev_bet or chips_left > 0
             ):
-                # Live bridge sends call as added chips. Forced blinds are not
-                # model actions, so a blind player's prev_bet can be unknown
-                # here; if they are not all-in, a call closes to table max.
                 total_bet_after = max(total_bet_after, street_max_before)
             return amount_added, total_bet_after
 
@@ -3181,7 +3195,13 @@ class PokerFateAPI:
         action: str,
         amount_added: float,
         total_bet_after: float,
+        stack_after: Optional[float] = None,
     ) -> None:
+        """Book one action on ``player``.
+
+        ``stack_after`` is the stack the table reports after the action; without
+        it the stack is the previous one less the chips added.
+        """
         if player is None:
             return
         action = action.lower()
@@ -3190,15 +3210,11 @@ class PokerFateAPI:
             return
         if action in ("raise", "call"):
             player.current_bet = max(player.current_bet, total_bet_after)
-        elif action == "check":
-            return
-
-        if amount_added > 0:
-            pay = min(float(amount_added), float(player.stack))
+            pay = min(max(0.0, float(amount_added)), float(player.stack))
             player.stack = max(0.0, float(player.stack) - pay)
             player.total_invested += pay
-            if player.stack <= 0:
-                player.is_all_in = True
+        if stack_after is not None:
+            player.stack = max(0.0, float(stack_after))
 
     def _to_decision(self, action: Action) -> BotDecision:
         name = action.action_type.name.lower()

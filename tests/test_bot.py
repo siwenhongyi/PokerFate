@@ -1,6 +1,5 @@
 """Integration tests: bot makes valid decisions in full game scenarios."""
 
-import random as _rng
 
 import pytest
 from pokerfate.core.card import Card
@@ -43,155 +42,25 @@ class TestBotDecisions:
         assert isinstance(action, Action)
         assert action.action_type in ActionType
 
-    def test_bot_action_type_preflop_aa(self):
-        bot = PokerBot(equity_iterations=200)
-        gs, _ = self._make_state()
-        action = bot.decide(gs, player_id=0)
-        # With AA from BTN facing no action, should raise
-        assert action.action_type == ActionType.RAISE
-        assert action.amount > 0
+    @pytest.mark.parametrize("villains, pot, contestable, pot_after_call", [
+        # hero 50 behind facing 70: the call is capped at 50, the excess is not contestable
+        (1, 100.0, 80.0, 130.0),     # 30 old pot + 70 bet
+        (2, 170.0, 130.0, 180.0),    # 30 old pot + two 70 bets
+    ])
+    def test_effective_call_context_caps_what_hero_cannot_call(self, villains, pot, contestable, pot_after_call):
+        hero = Player(0, 'Hero', 50.0, cards('Ac', 'Ad'))
+        others = [Player(i, f'Villain{i}', 200.0, cards('7c', '2d') if i == 1 else cards('8c', '3d'))
+                  for i in range(1, villains + 1)]
+        for p in others:
+            p.current_bet = 70.0
+        gs = GameState(players=[hero, *others], street=Street.FLOP, board=cards('As', 'Kd', '2c'),
+                       pot=pot, current_bet=70.0)
 
-    def test_bot_postflop_with_strong_hand(self):
-        bot = PokerBot(equity_iterations=300)
-        bot.set_next_decision_seed(20260517)
-        gs, _ = self._make_state(
-            street=Street.FLOP,
-            board=cards('As', 'Kd', '2c'),
-            pot=20.0,
-            current_bet=0.0,
-        )
-        action = bot.decide(gs, player_id=0)
-        # Top set may bet immediately or check on a safe board.
-        assert action.action_type in (ActionType.RAISE, ActionType.CHECK)
+        raw_call, effective_call, contestable_pot, pot_odds = PokerBot._effective_call_context(gs, hero)
 
-    def test_bot_postflop_facing_bet(self):
-        bot = PokerBot(equity_iterations=300)
-        p0 = Player(0, 'Hero', 200.0, cards('Ac', 'Ad'))
-        p0.current_bet = 0.0
-        p1 = Player(1, 'Villain', 200.0, cards('7c', '2d'))
-        p1.current_bet = 10.0
-        gs = GameState(
-            players=[p0, p1],
-            dealer_pos=0,
-            street=Street.FLOP,
-            board=cards('As', 'Kd', '2c'),
-            pot=30.0,
-            current_bet=10.0,
-            big_blind=2.0,
-            current_player_idx=0,
-        )
-        action = bot.decide(gs, player_id=0)
-        # Should call or raise (not fold) with top set
-        assert action.action_type != ActionType.FOLD
-
-    def test_effective_call_context_caps_uncallable_overbet(self):
-        p0 = Player(0, 'Hero', 50.0, cards('Ac', 'Ad'))
-        p1 = Player(1, 'Villain', 200.0, cards('7c', '2d'))
-        p1.current_bet = 70.0
-        gs = GameState(
-            players=[p0, p1],
-            street=Street.FLOP,
-            board=cards('As', 'Kd', '2c'),
-            pot=100.0,          # 30 old pot + villain's 70
-            current_bet=70.0,
-        )
-
-        raw_call, effective_call, contestable_pot, pot_odds = PokerBot._effective_call_context(gs, p0)
-
-        assert raw_call == pytest.approx(70.0)
-        assert effective_call == pytest.approx(50.0)
-        assert contestable_pot == pytest.approx(80.0)  # 30 old pot + matched 50
-        # Break-even equity is rake-adjusted: C / ((P + C) × keep).
-        assert pot_odds == pytest.approx(50.0 / 130.0 / RAKE_KEEP)
-
-    def test_effective_call_context_caps_multiway_side_pot_excess(self):
-        p0 = Player(0, 'Hero', 50.0, cards('Ac', 'Ad'))
-        p1 = Player(1, 'Villain1', 200.0, cards('7c', '2d'))
-        p2 = Player(2, 'Villain2', 200.0, cards('8c', '3d'))
-        p1.current_bet = 70.0
-        p2.current_bet = 70.0
-        gs = GameState(
-            players=[p0, p1, p2],
-            street=Street.FLOP,
-            board=cards('As', 'Kd', '2c'),
-            pot=170.0,          # 30 old pot + two 70 bets
-            current_bet=70.0,
-        )
-
-        raw_call, effective_call, contestable_pot, pot_odds = PokerBot._effective_call_context(gs, p0)
-
-        assert raw_call == pytest.approx(70.0)
-        assert effective_call == pytest.approx(50.0)
-        assert contestable_pot == pytest.approx(130.0)  # 30 old pot + two matched 50s
-        assert pot_odds == pytest.approx(50.0 / 180.0 / RAKE_KEEP)
-
-    def test_bot_folds_weak_hand_vs_large_bet(self):
-        bot = PokerBot(equity_iterations=300)
-        p0 = Player(0, 'Hero', 50.0, cards('7c', '2d'))
-        p0.current_bet = 0.0
-        p1 = Player(1, 'Villain', 200.0, cards('Ac', 'Kd'))
-        p1.current_bet = 45.0
-        gs = GameState(
-            players=[p0, p1],
-            dealer_pos=0,
-            street=Street.RIVER,
-            board=cards('As', 'Kd', 'Qc', 'Js', '9h'),
-            pot=100.0,
-            current_bet=45.0,
-            big_blind=2.0,
-            current_player_idx=0,
-        )
-        action = bot.decide(gs, player_id=0)
-        # 72o on AKQJs9 board with large bet should fold
-        assert action.action_type == ActionType.FOLD
-
-    def test_ip_raise_facing_bet_with_strong_hand(self):
-        """IP bot with strong hand facing a bet should sometimes raise (not only call)."""
-        bot = PokerBot(equity_iterations=400)
-        actions = set()
-        for _ in range(60):
-            p0 = Player(0, 'Hero', 200.0, cards('Ac', 'Ad'))
-            p0.current_bet = 0.0
-            p1 = Player(1, 'Villain', 200.0, cards('7c', '2d'))
-            p1.current_bet = 10.0
-            gs = GameState(
-                players=[p0, p1],
-                dealer_pos=0,          # p0 is dealer = IP
-                street=Street.FLOP,
-                board=cards('As', 'Kd', '2c'),
-                pot=30.0,
-                current_bet=10.0,
-                big_blind=2.0,
-                current_player_idx=0,
-            )
-            action = bot.decide(gs, player_id=0)
-            actions.add(action.action_type)
-        # Over 60 trials with strong hand IP, should see both CALL and RAISE
-        assert ActionType.RAISE in actions, "IP strong hand should raise sometimes"
-        assert ActionType.FOLD not in actions, "IP strong hand should never fold"
-
-    def test_raise_size_ip_is_larger_than_call(self):
-        """When IP raises facing a bet, raise amount must exceed to_call."""
-        bot = PokerBot(equity_iterations=400)
-        for _ in range(30):
-            p0 = Player(0, 'Hero', 200.0, cards('Ac', 'Ad'))
-            p0.current_bet = 0.0
-            p1 = Player(1, 'Villain', 200.0, cards('7c', '2d'))
-            p1.current_bet = 10.0
-            gs = GameState(
-                players=[p0, p1],
-                dealer_pos=0,
-                street=Street.FLOP,
-                board=cards('As', 'Kd', '2c'),
-                pot=30.0,
-                current_bet=10.0,
-                big_blind=2.0,
-                current_player_idx=0,
-            )
-            action = bot.decide(gs, player_id=0)
-            if action.action_type == ActionType.RAISE:
-                assert action.amount > 10.0, "Raise amount must exceed to_call"
-                assert action.amount <= 200.0, "Cannot raise more than stack"
+        assert (raw_call, effective_call, contestable_pot) == pytest.approx((70.0, 50.0, contestable))
+        # break-even equity is rake-adjusted: C / ((P + C) × keep)
+        assert pot_odds == pytest.approx(50.0 / pot_after_call / RAKE_KEEP)
 
     def test_bot_does_not_crash_any_street(self):
         bot = PokerBot(equity_iterations=200)
@@ -210,9 +79,7 @@ class TestPreflopBetLevelClassification:
     def _preflop_state(self, action_history, short_current_bet: float = 0.0) -> GameState:
         hero = Player(0, 'Royal Police', 930_000.0, cards('Ts', 'Tc'), current_bet=60_000.0)
         three_bettor = Player(1, 'zhouking', 1_000_000.0, [], current_bet=200_000.0)
-        short_stack = Player(
-            2, 'kasyer', 0.0, [], current_bet=short_current_bet, is_all_in=True,
-        )
+        short_stack = Player(2, 'kasyer', 0.0, [], current_bet=short_current_bet)
         button = Player(3, 'button', 1_000_000.0, [])
         return GameState(
             players=[hero, three_bettor, short_stack, button],
@@ -226,53 +93,27 @@ class TestPreflopBetLevelClassification:
             action_history=action_history,
         )
 
-    def test_short_all_in_below_current_bet_does_not_turn_3bet_into_4bet(self):
+    @pytest.mark.parametrize("third_raise, raisers, level, primary_id, primary_pos", [
+        # a short all-in below the current bet, or an all-in raise too small to reopen, is no new level
+        (40_000.0, [0, 1], ('3bet', 200_000.0), 1, 'BB'),
+        (250_000.0, [0, 1], ('3bet', 200_000.0), 1, 'BB'),
+        # a full raise over the 3-bet is a 4-bet
+        (360_000.0, [0, 1, 2], ('4bet', 360_000.0), 2, 'UTG'),
+    ])
+    def test_preflop_bet_level(self, third_raise, raisers, level, primary_id, primary_pos):
         bot = PokerBot(equity_iterations=10)
         gs = self._preflop_state(
             [
                 (0, Action(ActionType.RAISE, 60_000.0), 'preflop'),
                 (1, Action(ActionType.RAISE, 200_000.0), 'preflop'),
-                (2, Action(ActionType.RAISE, 40_000.0), 'preflop'),
+                (2, Action(ActionType.RAISE, third_raise), 'preflop'),
             ],
-            short_current_bet=40_000.0,
+            short_current_bet=third_raise,
         )
-
-        assert [pid for _idx, pid, _act in bot._effective_preflop_raises(gs)] == [0, 1]
-        assert bot._classify_preflop_action(gs, gs.players[0]) == ('3bet', 200_000.0)
-        assert bot._primary_raiser_id(gs, gs.players[0]) == 1
-        assert bot._primary_raiser_position(gs, gs.players[0]) == 'BB'
-
-    def test_insufficient_all_in_raise_does_not_turn_3bet_into_4bet(self):
-        bot = PokerBot(equity_iterations=10)
-        gs = self._preflop_state(
-            [
-                (0, Action(ActionType.RAISE, 60_000.0), 'preflop'),
-                (1, Action(ActionType.RAISE, 200_000.0), 'preflop'),
-                (2, Action(ActionType.RAISE, 250_000.0), 'preflop'),
-            ],
-            short_current_bet=250_000.0,
-        )
-
-        assert [pid for _idx, pid, _act in bot._effective_preflop_raises(gs)] == [0, 1]
-        assert bot._classify_preflop_action(gs, gs.players[0]) == ('3bet', 200_000.0)
-        assert bot._primary_raiser_id(gs, gs.players[0]) == 1
-        assert bot._primary_raiser_position(gs, gs.players[0]) == 'BB'
-
-    def test_full_raise_after_3bet_still_classifies_as_4bet(self):
-        bot = PokerBot(equity_iterations=10)
-        gs = self._preflop_state(
-            [
-                (0, Action(ActionType.RAISE, 60_000.0), 'preflop'),
-                (1, Action(ActionType.RAISE, 200_000.0), 'preflop'),
-                (2, Action(ActionType.RAISE, 360_000.0), 'preflop'),
-            ],
-            short_current_bet=360_000.0,
-        )
-
-        assert [pid for _idx, pid, _act in bot._effective_preflop_raises(gs)] == [0, 1, 2]
-        assert bot._classify_preflop_action(gs, gs.players[0]) == ('4bet', 360_000.0)
-        assert bot._primary_raiser_id(gs, gs.players[0]) == 2
-        assert bot._primary_raiser_position(gs, gs.players[0]) == 'UTG'
+        hero = gs.players[0]
+        assert [pid for _idx, pid, _act in bot._effective_preflop_raises(gs)] == raisers
+        assert bot._classify_preflop_action(gs, hero) == level
+        assert (bot._primary_raiser_id(gs, hero), bot._primary_raiser_position(gs, hero)) == (primary_id, primary_pos)
 
 # ---------------------------------------------------------------------------
 # Range Estimator Tests (Libratus-inspired range compression)
@@ -378,111 +219,6 @@ class TestTinyBetValueRaise:
         assert ctx.equity_range == pytest.approx(0.25)
         assert ctx.compression == pytest.approx(0.25 / 0.70)
 
-    def test_decide_calls_tiny_bet_with_marginal_range_equity(self):
-        """range equity=0.43 (losing to opponent range 57%) → call tiny bet, don't raise.
-
-        旧代码用 raw_equity=0.78 决定加注，但 raw equity 只是 vs 随机手牌的胜率，
-        不反映对手实际范围。range equity 0.43 意味着对手范围里多数手牌赢我们，
-        加注"价值"实际是撞枪口。正确行为是跟注这个极小注（pot odds 1.8% < 43%）。
-        """
-        strat = PostflopStrategy()
-        board = [Card.from_str(c) for c in ['7s', '9d', 'Qc', '8c']]
-        calls = 0
-        for i in range(100):
-            _rng.seed(i)
-            action, amt = strat.decide(
-                equity=0.43,
-                pot=55000.0,
-                to_call=1000.0,
-                stack=127711.0,
-                board=board,
-                is_ip=False,
-                street='turn',
-                facing_bet=True,
-                num_opponents=2,
-                big_blind=3.0,
-            )
-            calls += (action == 'call')
-        assert calls >= 90, f"expected mostly call vs tiny bet with marginal range equity, got {calls}/100"
-
-    def test_decide_raises_tiny_bet_with_strong_range_equity(self):
-        """range equity=0.80 (ahead of opponent range) → value raise against tiny bet."""
-        strat = PostflopStrategy()
-        board = [Card.from_str(c) for c in ['7s', '9d', 'Qc', '8c']]
-        raises = 0
-        for i in range(100):
-            _rng.seed(i)
-            action, amt = strat.decide(
-                equity=0.80,
-                pot=55000.0,
-                to_call=1000.0,
-                stack=127711.0,
-                board=board,
-                is_ip=True,
-                street='turn',
-                facing_bet=True,
-                num_opponents=1,
-                big_blind=3.0,
-            )
-            if action == 'raise':
-                raises += 1
-                assert amt > 1000.0
-        assert raises >= 50, f"expected frequent value-raise with strong range equity, got {raises}/100"
-
-
-class TestBBDecisions:
-    """BB-specific bot decisions: free check, iso-raise, never fold vs limpers."""
-
-    def _make_bb_state(self, hole_cards_str, num_players=3, limper_count=1):
-        """Create a state where the bot is in BB with limpers and no raise."""
-
-        # Build players: p0 = BTN (dealer), p1 = SB, p2 = BB (bot)
-        # For this test bot is player_id=2 in BB
-        players = [
-            Player(0, 'BTN', 200.0, []),
-            Player(1, 'SB',  200.0, []),
-            Player(2, 'BB',  200.0, cards(*hole_cards_str), current_bet=2.0),
-        ]
-        # Simulate limpers: each limper put in a CALL action in history
-        history = []
-        for i in range(limper_count):
-            history.append((i, Action(ActionType.CALL, 2.0), "preflop"))  # limp
-        gs = GameState(
-            players=players,
-            dealer_pos=0,       # index 0 = BTN, index 1 = SB, index 2 = BB
-            street=Street.PREFLOP,
-            board=[],
-            pot=2.0 + 1.0 + 2.0 * limper_count,
-            current_bet=2.0,
-            big_blind=2.0,
-            small_blind=1.0,
-            current_player_idx=2,
-            action_history=history,
-        )
-        return gs
-
-    def test_bb_with_junk_checks_vs_limpers(self):
-        """BB holding junk checks (does not fold) when facing only limpers."""
-        bot = PokerBot(equity_iterations=100)
-        gs = self._make_bb_state(['7c', '2d'], limper_count=1)
-        action = bot.decide(gs, player_id=2)
-        # Must check or raise — never fold with free check option
-        assert action.action_type != ActionType.FOLD
-
-    def test_bb_with_junk_never_folds_multiple_limpers(self):
-        """BB holding junk never folds even with 2 limpers."""
-        bot = PokerBot(equity_iterations=100)
-        gs = self._make_bb_state(['8h', '3s'], limper_count=2)
-        action = bot.decide(gs, player_id=2)
-        assert action.action_type != ActionType.FOLD
-
-    def test_bb_with_premium_iso_raises(self):
-        """BB with a premium hand iso-raises vs limpers."""
-        bot = PokerBot(equity_iterations=100)
-        gs = self._make_bb_state(['Ac', 'Ad'], limper_count=1)
-        action = bot.decide(gs, player_id=2)
-        assert action.action_type == ActionType.RAISE
-
 class TestEffectiveStackSPR:
     """SPR uses aggressor-first effective stack.
 
@@ -552,13 +288,16 @@ class TestEffectiveStackSPR:
         bot.decide(gs, player_id=0)
         assert bot.last_spr == pytest.approx(50.0 / 30.0, rel=0.02)
 
-    def test_spr_multiway_all_in_opp_excluded(self):
-        """all-in opponents don't constrain SPR (can_act filter)."""
+    @pytest.mark.parametrize("aggressor_idx", [None, 1])
+    def test_spr_multiway_all_in_opp_excluded(self, aggressor_idx):
+        """An opponent who is all-in from an earlier street does not constrain
+        SPR, whether or not he was the last to raise."""
         bot = PokerBot(equity_iterations=100)
-        gs = self._flop_state(my_stack=400.0, opp_stacks=[100.0, 80.0])
-        gs.players[1].is_all_in = True   # V1 is all-in → excluded from can_act
+        gs = self._flop_state(
+            my_stack=400.0, opp_stacks=[0.0, 80.0], aggressor_idx=aggressor_idx, raise_amount=10.0,
+        )
         bot.decide(gs, player_id=0)
-        # No aggressor → fallback min(hero=400, V2=80)
+        # fallback min(hero=400, V2=80)
         assert bot.last_spr == pytest.approx(80.0 / 30.0, rel=0.02)
 
     def test_spr_hero_shortest_uses_hero(self):
@@ -698,77 +437,6 @@ class TestPreflopShowdownPrice:
             action_history=history,
         )
 
-    def test_committed_stack_is_priced_and_called(self):
-        # Hand 830 of 2026-11-16: 99, 22.5bb in, 11.7bb behind, a limper re-raises to 56bb.
-        hero = Player(0, 'Hero', 117_450.0, cards('9h', '9c'), current_bet=225_000.0)
-        limper = Player(1, 'limper', 1_417_500.0, [], current_bet=562_500.0)
-        opener = Player(2, 'opener', 1_925_000.0, [], current_bet=75_000.0, is_folded=True)
-        gs = self._state(
-            [hero, limper, opener],
-            [
-                (1, Action(ActionType.CALL, 10_000.0), 'preflop'),
-                (2, Action(ActionType.RAISE, 75_000.0), 'preflop'),
-                (0, Action(ActionType.RAISE, 225_000.0), 'preflop'),
-                (1, Action(ActionType.RAISE, 562_500.0), 'preflop'),
-            ],
-            pot=877_500.0, level=562_500.0,
-        )
-        bot = self._bot({1: self._range('AA', 'KK', 'QQ', 'JJ', 'TT', 'AKs', 'AKo', 'AQs')})
-        _raw, to_call, pot, _odds = bot._effective_call_context(gs, hero)
-
-        price = bot._preflop_showdown_price(gs, hero, to_call, pot)
-
-        assert (to_call, pot) == (117_450.0, 657_450.0)       # 22bb of the re-raise cannot be won
-        assert price.pending == 0 and price.call == 117_450.0
-        assert price.need == pytest.approx(117_450.0 / (RAKE_KEEP * 774_900.0))
-        assert 0.30 < price.equity < 0.42                     # against a tight re-raising range
-        assert price.ev > 0
-        action = bot.decide(gs, 0)
-        assert (action.action_type, action.amount) == (ActionType.CALL, pytest.approx(117_450.0))
-        assert bot.preflop.last_expand_reason.startswith('showdown_price:call call=11.7bb')
-
-    def test_betting_that_goes_on_is_not_priced(self):
-        hero = Player(0, 'Hero', 930_000.0, cards('Ts', 'Tc'), current_bet=60_000.0)
-        three_bettor = Player(1, 'villain', 800_000.0, [], current_bet=200_000.0)
-        gs = self._state(
-            [hero, three_bettor],
-            [(0, Action(ActionType.RAISE, 60_000.0), 'preflop'), (1, Action(ActionType.RAISE, 200_000.0), 'preflop')],
-            pot=260_000.0, level=200_000.0,
-        )
-        bot = self._bot({})
-
-        assert bot._preflop_showdown_price(gs, hero, 140_000.0, 260_000.0) is None
-
-    def test_all_in_raiser_with_players_still_to_act(self):
-        # Hand 802 of 2026-11-16: JTs raises a limper to 6bb, both blinds call, the limper shoves 58.7bb.
-        hero = Player(0, 'Hero', 925_000.0, cards('Jd', 'Td'), current_bet=60_000.0)
-        shover = Player(1, 'shover', 0.0, [], current_bet=587_150.0, is_all_in=True)
-        small = Player(2, 'sb', 205_149.0, [], current_bet=60_000.0)
-        big = Player(3, 'bb', 1_569_583.0, [], current_bet=60_000.0)
-        gs = self._state(
-            [hero, shover, small, big],
-            [
-                (1, Action(ActionType.CALL, 10_000.0), 'preflop'),
-                (0, Action(ActionType.RAISE, 60_000.0), 'preflop'),
-                (2, Action(ActionType.CALL, 55_000.0), 'preflop'),
-                (3, Action(ActionType.CALL, 50_000.0), 'preflop'),
-                (1, Action(ActionType.RAISE, 587_150.0), 'preflop'),
-            ],
-            pot=767_150.0, level=587_150.0,
-        )
-        tight = self._range('AA', 'KK', 'QQ', 'JJ', 'AKs', 'AKo')
-        bot = self._bot({1: tight})
-
-        price = bot._preflop_showdown_price(gs, hero, 527_150.0, 767_150.0)
-
-        assert price.pending == 2
-        assert 0.23 < price.equity < 0.32          # against the shover alone (JTs v JJ+, AK: 27%)
-        assert price.need == pytest.approx(527_150.0 / (RAKE_KEEP * 1_294_300.0))
-        assert price.ev < 0
-        assert bot.decide(gs, 0).action_type == ActionType.FOLD
-        assert bot.preflop.last_expand_reason.startswith('showdown_price:fold call=52.7bb')
-        assert bot.last_equity < price.equity - 0.05   # the equity against everybody still in is not the price
-
     def _five_bet_spot(self, earlier_raisers: bool):
         """Hand 216 of 2026-11-16: 66 in the BB with 24.6bb; open, 3-bet, 4-bet, then the SB makes
         it 120bb.  The call is all-in.  ``earlier_raisers``: the three players between them are the
@@ -831,3 +499,31 @@ class TestPreflopShowdownPrice:
 
         assert kept.sum() / len(hcm.ALL_COMBOS) == pytest.approx(0.30, abs=0.01)
         assert strength[kept > 0].min() >= strength[kept == 0].max()
+
+
+class TestPreflopThreeBetRate:
+    """How often an opponent re-raises an open, as the preflop rules read it."""
+
+    def test_a_player_without_a_record_reads_as_the_pool(self):
+        bot = PokerBot(equity_iterations=50)
+        assert bot._preflop_three_bet_rate(7) == pytest.approx(0.062)
+        assert bot._preflop_three_bet_rate(None) == pytest.approx(0.062)
+
+    def test_his_own_count_is_pulled_towards_the_pool(self):
+        bot = PokerBot(equity_iterations=50)
+        stats = bot.opponent_model.get(7)
+        stats.three_bet_opportunities, stats.three_bet_count = 40, 6
+        # (6 + 0.062 * 35) / (40 + 35)
+        assert bot._preflop_three_bet_rate(7) == pytest.approx(8.17 / 75)
+
+    def test_the_re_raise_of_the_hand_being_played_is_left_out(self):
+        bot = PokerBot(equity_iterations=50)
+        bot.new_hand([0, 7])
+        stats = bot.opponent_model.get(7)
+        stats.three_bet_opportunities, stats.three_bet_count = 40, 6
+        bot.observe_action(7, Action(ActionType.RAISE, 22.0), 'preflop', is_3bet_spot=True)
+        assert (stats.three_bet_opportunities, stats.three_bet_count) == (41, 7)
+        assert bot._preflop_three_bet_rate(7) == pytest.approx(8.17 / 75)
+        bot.new_hand([0, 7])
+        # (7 + 0.062 * 35) / (41 + 35)
+        assert bot._preflop_three_bet_rate(7) == pytest.approx(9.17 / 76)

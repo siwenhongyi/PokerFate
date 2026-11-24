@@ -83,7 +83,6 @@ def _expand_range(spec: str) -> Set[str]:
 # ---------------------------------------------------------------------------
 # Position-based opening ranges (6-max cash, 100BB)  — V2
 # GTO solver 共识对齐：UTG ~15–18%，HJ ~20–23%，CO ~25–30%，BTN ~40–48%。
-# 详见 docs/PREFLOP_OPEN_RANGE_V2.md
 # ---------------------------------------------------------------------------
 
 _UTG_RANGE = _expand_range(
@@ -268,6 +267,17 @@ _3BET_VALUE = _expand_range('TT+, AKs, AKo, AQs, AQo, AJs, KQs')
 # down are below the line and need folds, so they stay with the bluff logic:
 # 77 53%, ATo 53%, KJs 52%, KQo 50%.
 #
+# 2026-11-24: AJo and ATs taken out.  54.9% is the line for money a caller
+# matches; a 3-bet also loses its whole size when the opener 4-bets.  Openers
+# now answer a clean 3-bet with fold 25% / call 59% / 4-bet 16% (n=857, opens
+# to 4bb or less, human tables).  With those answers a 3-bet of a 3bb open that
+# folds to a 4-bet and is checked down when called breaks even at 56-57%
+# against the callers (9.6bb in position, 13.2bb from the big blind).  Against
+# the 212 hands openers showed after calling: 99 62.7%, 88 58.6%, AJo 57.8%,
+# ATs 56.9%.  The two unpaired hands are on the line with nothing left for
+# what they fail to realise; the rule's 20 uses made -11.9 +/- 12.7bb each
+# (AJo 9 of them).
+#
 # Not widened: spots the chart does not 3-bet (the big blind closing the action
 # against an early open calls; AJo on the button folds to a UTG open), seats
 # without a chart (MP / CO), squeezes, opens outside the measured sizes, stacks
@@ -275,7 +285,7 @@ _3BET_VALUE = _expand_range('TT+, AKs, AKo, AQs, AQo, AJs, KQs')
 #
 # Size of the change: the spot comes up about once per 1,000 hands, so it will
 # not show in results; the script above tracks it and states the stopping rule.
-_POOL_VALUE_3BET_HANDS = _expand_range('99, 88, AJo, ATs')
+_POOL_VALUE_3BET_HANDS = _expand_range('99, 88')
 _POOL_VALUE_3BET_ENABLED = os.environ.get('PF_3BET_VALUE_EXPAND', '1') != '0'
 _POOL_VALUE_3BET_MIN_EFFECTIVE_BB = 50.0
 _POOL_VALUE_3BET_MAX_OPEN_BB = 4.0   # 93% of the pool's opens
@@ -470,18 +480,60 @@ def showdown_call_ev(
         probability * value(eq, pot + call + chips) for probability, eq, chips in outcomes
     ) / weight
 
+# ── A flat with less than one pot behind ────────────────────────────────────
+# A call of a re-raise is a flat only while something is left to play for.  With
+# less than the pot behind after it, the next bet is for the whole stack: the
+# call commits hero at the worst price (the raiser is never made to fold, and a
+# fold on the flop gives the call away).  Such a hand goes all-in when its price
+# against a call allows it and folds otherwise.  Calls at a tiny or cheap price
+# and calls that end the betting are priced on their own and are not touched.
+#
+# Measured on 28,118 human-table hands to 2026-11-26, bb against folding, after
+# rake, all-in adjusted.  Hero's flats of a re-raise with pocket pairs and
+# QQ+ / AK, by the stack left after the call:
+#     under one pot      -21.2 +/- 20.6  (15; five folded on the flop)
+#     one to two pots     -4.2           (6)
+#     two pots or more    +9.6 +/-  8.5  (54)
+FLAT_MIN_POTS_BEHIND = 1.0
+
+# ── Who may flat a re-raise ─────────────────────────────────────────────────
+# A call of a re-raise that leaves betting to come is for QQ+ / AK and for
+# pocket pairs.  Every other hand folds or re-raises.  Calls that end the
+# betting (``showdown_call_ev``) and calls at a tiny or cheap price
+# (``_price_call_allowed``) are priced on their own and are not touched.
+#
+# Measured on 25,391 human-table hands to 2026-11-24, bb against folding,
+# after rake, all-in adjusted.  Hero's flats of a re-raise that came from a
+# chart or a static range:
+#     QQ+ / AK              +1.8 +/- 29.0  (18)
+#     pairs JJ-22           +1.2 +/-  7.5  (53)
+#     unpaired, below AK    -8.8           (122; -7.7 +/- 3.1 with every hand
+#                                           capped at +/-40bb)
+# The unpaired hands lost at every size of the call, and more against
+# re-raisers with a record of re-raising often (-14.8 +/- 7.8, 38) than against
+# the rest (-6.1 +/- 6.1, 84), so there is no exception for those.  82 of the
+# 122 were folded after the flop.  The pool does no better: openers who call a
+# re-raise make -3.4 +/- 3.0 against folding (1,168).
+#
+# Why it is so here: the charts answer a re-raising range with bluffs in it.
+# This pool re-raises 6.2% of the time and, among its strongest hands, AA / KK /
+# QQ / AK are 64% of what it shows (equal weight per combo would be 47%).  An
+# unpaired hand below AK is dominated by that range; a pair is not.  And the
+# 9% rake has no cap, so it is largest in exactly these pots.
+def may_flat_reraise(cat: str) -> bool:
+    """Whether a hand class may call a re-raise that leaves betting to come."""
+    return cat in _PRESSURE_PREMIUM_CONTINUE or (len(cat) == 2 and cat[0] == cat[1])
+
+
 # Opponent-aware range expansions.  These only add continues against opponents
 # whose observed preflop aggression is materially wider than baseline.
 _WIDE_OPEN_3BET_EXPAND = _expand_range('99, 88, ATs, KQo, KJs, QJs')
 _VERY_WIDE_OPEN_3BET_EXPAND = _WIDE_OPEN_3BET_EXPAND | _expand_range(
     '77, A9s, KTs, QTs, JTs, T9s'
 )
-_WIDE_3BET_DEFEND_EXPAND = _expand_range(
-    '99, 88, 77, AQo, AJo, ATs, A9s, KQo, KJs, KTs, QJs, QTs, JTs, T9s'
-)
-_VERY_WIDE_3BET_DEFEND_EXPAND = _WIDE_3BET_DEFEND_EXPAND | _expand_range(
-    '66, A8s, K9s, Q9s, 98s, 87s'
-)
+# Against a re-raiser the widening is pairs only (``may_flat_reraise``).
+_WIDE_3BET_DEFEND_EXPAND = _expand_range('99, 88, 77')
+_VERY_WIDE_3BET_DEFEND_EXPAND = _WIDE_3BET_DEFEND_EXPAND | _expand_range('66')
 
 
 # ---------------------------------------------------------------------------
@@ -495,27 +547,19 @@ _VERY_WIDE_3BET_DEFEND_EXPAND = _WIDE_3BET_DEFEND_EXPAND | _expand_range(
 # Source reference: RangeConverter "6 max 100bb 100z GTO Ranges" free PDF.
 # The standard chart set has UTG/MP/CO/BTN/SB RFI vs 3bet pages; there is no
 # standard BB RFI vs 3bet page, so BB intentionally falls back to default.
+#
+# 2026-11-24: the unpaired hands below AK are gone from these tables - the rule
+# is ``may_flat_reraise``; the tables only say how deep the pairs go by seat.
 # ---------------------------------------------------------------------------
 _3BET_CALL_BY_POS = {
-    # UTG: narrow continue core; exact blind/late 3bet mixes are chart-backed.
-    'UTG': _expand_range('JJ, TT, AKo, AQs, AJs, KQs'),
-
-    # MP: high-rake 100bb core keeps suited broadways; drops old AQo/88 widen.
-    'MP':  _expand_range('JJ, TT, 99, AKo, AQs, AJs, ATs, KQs, KJs, QJs'),
-
-    # CO: keep core pair/broadway calls; avoid auto-calling low suited connectors.
-    'CO':  _expand_range('JJ, TT, 99, 88, AKo, AQs, AJs, ATs, KQs, KJs, QJs, JTs'),
-
-    # BTN: widest standard RFI-vs-blind-3bet fallback, but still not BB-wide.
-    'BTN': _expand_range('JJ, TT, 99, 88, 77, AKo, AQs, AQo, AJs, ATs, A9s, '
-                         'KQs, KQo, KJs, KTs, QJs, QTs, JTs, T9s, 98s'),
-
-    # SB: only standard SB RFI vs BB 3bet fallback.
-    'SB':  _expand_range('JJ, TT, 99, 88, 77, AKo, AQs, AQo, AJs, ATs, '
-                         'A9s, KQs, KQo, KJs, KTs, QJs, QTs, JTs, T9s, 98s'),
+    'UTG': _expand_range('JJ, TT, AKo'),
+    'MP':  _expand_range('JJ, TT, 99, AKo'),
+    'CO':  _expand_range('JJ, TT, 99, 88, AKo'),
+    'BTN': _expand_range('JJ, TT, 99, 88, 77, AKo'),
+    'SB':  _expand_range('JJ, TT, 99, 88, 77, AKo'),
 }
 # Fallback for unknown / unmatched hero position
-_3BET_CALL_DEFAULT = _expand_range('JJ, TT, 99, AKo, AQs, AQo, AJs, KQs')
+_3BET_CALL_DEFAULT = _expand_range('JJ, TT, 99, AKo')
 
 
 # ---------------------------------------------------------------------------
@@ -1522,11 +1566,43 @@ class PreflopStrategy:
             cat, stack, pot, to_call, open_raise, big_blind, equity, '3bet',
         ):
             return True
-        if cat in call_range:
+        if cat in call_range and may_flat_reraise(cat):
             return self._static_call_stands(
                 cat, '3bet', stack, pot, to_call, open_raise, big_blind, equity,
             )
         return False
+
+    def _flat_or_commit(
+        self,
+        cat: str,
+        call_amt: float,
+        *,
+        stack: float,
+        pot: float,
+        equity: float,
+        max_raise_to: float,
+    ) -> Tuple[str, float]:
+        """A flat of a re-raise, or what replaces it when it leaves under one pot behind.
+
+        ``call_amt`` is what the flat costs, ``stack`` hero's remaining stack and
+        ``pot`` the pot before the call.  With ``FLAT_MIN_POTS_BEHIND`` pots or more
+        left the flat stands.  Below that the hand is all-in when being called
+        for the whole stack is worth it (``showdown_call_ev``; the raiser folding
+        is not counted, which keeps the price on the safe side) and a fold when
+        it is not.
+        """
+        left = stack - call_amt
+        pot_after = pot + call_amt
+        if left <= 0.0 or left >= FLAT_MIN_POTS_BEHIND * pot_after:
+            return ('call', call_amt)
+        ev = showdown_call_ev(call=stack, pot=pot + left, equity=equity)
+        need = stack / (rake_keep() * (pot + left + stack)) + SHOWDOWN_EQUITY_MARGIN
+        verdict = 'allin' if ev > 0.0 else 'fold'
+        self.last_expand_reason = (
+            f"shallow_flat:{verdict} {cat} behind={left / pot_after:.2f}pot "
+            f"eq={equity:.0%} need={need:.0%}"
+        )
+        return ('raise', max_raise_to) if ev > 0.0 else ('fold', 0.0)
 
     def _static_call_stands(
         self,
@@ -2112,6 +2188,14 @@ class PreflopStrategy:
                     f"{size_map_reason} | {self.last_expand_reason}"
                 )
 
+        def _flat(call_amt: float) -> Tuple[str, float]:
+            """A chart or static-range flat of a re-raise (see ``_flat_or_commit``)."""
+            decision = self._flat_or_commit(
+                cat, call_amt, stack=stack, pot=pot, equity=equity, max_raise_to=max_raise_to,
+            )
+            _preserve_size_map_reason()
+            return decision
+
         if facing_action == 'none':
             pos = _normalize_position(position) or position
             if num_limpers == 0:
@@ -2413,6 +2497,14 @@ class PreflopStrategy:
                 _preserve_size_map_reason()
                 return ('raise', min(four_bet, max_raise_to))
 
+            if chart_action == 'call' and not may_flat_reraise(cat):
+                # The chart flats a hand that may not flat a re-raise: what is
+                # left is the chart's fold branch (a tiny or cheap price aside).
+                self.last_expand_reason = (
+                    f"reraise_flat_block:3bet greenline "
+                    f"{hero_norm}-vs-3bet-{_normalize_position(villain_position)} {cat}"
+                )
+                chart_action = 'fold'
             if chart_action == 'call':
                 self.last_expand_reason = (
                     f"chart_expand:3bet_call greenline "
@@ -2432,8 +2524,7 @@ class PreflopStrategy:
                 ):
                     _preserve_size_map_reason()
                     return _fold_fallback()
-                _preserve_size_map_reason()
-                return ('call', min(to_call or open_raise, stack))
+                return _flat(min(to_call or open_raise, stack))
 
             if chart_action == 'fold':
                 if self._price_call_allowed(
@@ -2467,8 +2558,7 @@ class PreflopStrategy:
                 open_raise, big_blind, stack, pot, to_call, stack_bb,
                 equity,
             ):
-                _preserve_size_map_reason()
-                return ('call', min(to_call or open_raise, stack))
+                return _flat(min(to_call or open_raise, stack))
             _preserve_size_map_reason()
             return _fold_fallback()
 
@@ -2478,6 +2568,9 @@ class PreflopStrategy:
             )
             if chart_action == 'raise':
                 return ('raise', max_raise_to)
+            if chart_action == 'call' and not may_flat_reraise(cat):
+                self.last_expand_reason = f"reraise_flat_block:4bet {cat}"
+                chart_action = 'fold'
             if chart_action == 'call':
                 if not self._chart_call_pressure_allows(
                     cat,
@@ -2492,7 +2585,7 @@ class PreflopStrategy:
                     is_ip=is_ip,
                 ):
                     return _fold_fallback()
-                return ('call', min(to_call or open_raise, stack))
+                return _flat(min(to_call or open_raise, stack))
             if chart_action == 'fold':
                 if self._price_call_allowed(
                     cat, stack, pot, to_call, open_raise, big_blind, equity, '4bet',
@@ -2509,7 +2602,7 @@ class PreflopStrategy:
             if cat in _VS_4BET_FALLBACK_CALL and self._static_call_stands(
                 cat, '4bet', stack, pot, to_call, open_raise, big_blind, equity,
             ):
-                return ('call', min(to_call or open_raise, stack))
+                return _flat(min(to_call or open_raise, stack))
             return _fold_fallback()
 
         return ('fold', 0.0)

@@ -1,123 +1,117 @@
 {
   "bucket": {
-    "features": 1287,
+    "features": 1777,
     "runtime_usable": true,
     "selected_blend": {
-      "alpha": 0.4,
+      "alpha": 0.75,
       "metrics": {
-        "actual_bucket_avg_pct": 36.99,
-        "brier": 0.6156,
-        "n": 13147,
-        "nll": 1.16954,
-        "strong_nuts_combo_avg_pct": 49.4,
-        "strong_nuts_combo_under_20_pct": 13.11,
-        "strong_nuts_mass_bias_pp": 0.48,
-        "strong_nuts_mass_cell_max_abs_pp": 3.84,
+        "actual_bucket_avg_pct": 35.38,
+        "brier": 0.6363,
+        "n": 17663,
+        "nll": 1.2308,
+        "strong_nuts_combo_avg_pct": 37.45,
+        "strong_nuts_combo_under_20_pct": 21.92,
+        "strong_nuts_mass_bias_pp": -0.17,
+        "strong_nuts_mass_cell_max_abs_pp": 4.86,
         "strong_nuts_mass_cells": {
           "flop action:bet": {
-            "actual_pct": 32.76,
-            "bias_pp": -0.41,
-            "n": 519,
-            "pred_pct": 32.35
+            "actual_pct": 31.47,
+            "bias_pp": -1.79,
+            "n": 680,
+            "pred_pct": 29.68
           },
           "flop action:call": {
-            "actual_pct": 21.81,
-            "bias_pp": 0.64,
-            "n": 619,
-            "pred_pct": 22.45
+            "actual_pct": 19.53,
+            "bias_pp": 1.57,
+            "n": 886,
+            "pred_pct": 21.1
           },
           "flop action:check": {
-            "actual_pct": 10.72,
-            "bias_pp": 0.97,
-            "n": 1138,
-            "pred_pct": 11.69
+            "actual_pct": 10.18,
+            "bias_pp": -0.59,
+            "n": 1542,
+            "pred_pct": 9.59
           },
           "flop action:raise_over": {
-            "actual_pct": 45.73,
-            "bias_pp": 2.8,
-            "n": 164,
-            "pred_pct": 48.54
+            "actual_pct": 53.59,
+            "bias_pp": -4.79,
+            "n": 153,
+            "pred_pct": 48.8
           },
           "flop board:flop": {
-            "actual_pct": 20.03,
-            "bias_pp": -1.51,
-            "n": 2217,
-            "pred_pct": 18.52
+            "actual_pct": 18.89,
+            "bias_pp": -1.6,
+            "n": 2959,
+            "pred_pct": 17.3
           },
           "river action:bet": {
-            "actual_pct": 70.0,
-            "bias_pp": -0.88,
-            "n": 340,
-            "pred_pct": 69.12
+            "actual_pct": 52.14,
+            "bias_pp": 1.82,
+            "n": 443,
+            "pred_pct": 53.97
           },
           "river action:call": {
-            "actual_pct": 55.0,
-            "bias_pp": 3.84,
-            "n": 320,
-            "pred_pct": 58.84
+            "actual_pct": 34.33,
+            "bias_pp": 1.66,
+            "n": 466,
+            "pred_pct": 36.0
           },
           "river action:check": {
-            "actual_pct": 28.07,
-            "bias_pp": -0.31,
-            "n": 1122,
-            "pred_pct": 27.76
-          },
-          "river action:raise_over": {
-            "actual_pct": 85.47,
-            "bias_pp": -2.99,
-            "n": 117,
-            "pred_pct": 82.48
+            "actual_pct": 14.43,
+            "bias_pp": -0.09,
+            "n": 1573,
+            "pred_pct": 14.34
           },
           "river board:river": {
-            "actual_pct": 44.43,
-            "bias_pp": 1.21,
-            "n": 2217,
-            "pred_pct": 45.64
+            "actual_pct": 29.71,
+            "bias_pp": 1.1,
+            "n": 2959,
+            "pred_pct": 30.8
           },
           "turn action:bet": {
-            "actual_pct": 44.77,
-            "bias_pp": 1.0,
-            "n": 449,
-            "pred_pct": 45.77
+            "actual_pct": 39.36,
+            "bias_pp": -1.69,
+            "n": 592,
+            "pred_pct": 37.67
           },
           "turn action:call": {
-            "actual_pct": 33.84,
-            "bias_pp": 0.31,
-            "n": 461,
-            "pred_pct": 34.15
+            "actual_pct": 28.55,
+            "bias_pp": -0.23,
+            "n": 676,
+            "pred_pct": 28.32
           },
           "turn action:check": {
-            "actual_pct": 18.12,
-            "bias_pp": 1.25,
-            "n": 1137,
-            "pred_pct": 19.37
+            "actual_pct": 12.44,
+            "bias_pp": 0.59,
+            "n": 1560,
+            "pred_pct": 13.03
           },
           "turn action:raise_over": {
-            "actual_pct": 55.45,
-            "bias_pp": 3.25,
-            "n": 110,
-            "pred_pct": 58.7
+            "actual_pct": 63.64,
+            "bias_pp": -4.86,
+            "n": 132,
+            "pred_pct": 58.78
           },
           "turn board:turn": {
-            "actual_pct": 30.36,
-            "bias_pp": 1.17,
-            "n": 2217,
-            "pred_pct": 31.53
+            "actual_pct": 24.1,
+            "bias_pp": -0.05,
+            "n": 2959,
+            "pred_pct": 24.05
           }
         },
-        "strong_nuts_under_20_pct": 31.48,
-        "top1_pct": 51.79,
-        "under_10_pct": 6.75
+        "strong_nuts_under_20_pct": 44.78,
+        "top1_pct": 49.15,
+        "under_10_pct": 8.42
       },
-      "nll_gain": 0.04988,
+      "nll_gain": 0.04651,
       "pinned": true,
       "risk": {
-        "strong_nuts_combo_avg_delta_pp": 0.97,
-        "strong_nuts_combo_under_20_delta_pp": -1.48,
-        "strong_nuts_mass_bias_pp": 0.48,
-        "strong_nuts_mass_cell_max_abs_pp": 3.84,
-        "strong_nuts_mass_cell_worsen_pp": 0.57,
-        "strong_nuts_under_20_delta_pp": -2.26
+        "strong_nuts_combo_avg_delta_pp": 1.22,
+        "strong_nuts_combo_under_20_delta_pp": -3.15,
+        "strong_nuts_mass_bias_pp": -0.17,
+        "strong_nuts_mass_cell_max_abs_pp": 4.86,
+        "strong_nuts_mass_cell_worsen_pp": 0.77,
+        "strong_nuts_under_20_delta_pp": -3.05
       },
       "usable": true
     },
@@ -143,454 +137,442 @@
       }
     },
     "train_lgbm": {
-      "actual_bucket_avg_pct": 38.36,
-      "brier": 0.59864,
-      "n": 44052,
-      "nll": 1.12897,
-      "strong_nuts_combo_avg_pct": 50.67,
-      "strong_nuts_combo_under_20_pct": 12.49,
-      "strong_nuts_mass_bias_pp": 0.0,
-      "strong_nuts_mass_cell_max_abs_pp": 1.27,
+      "actual_bucket_avg_pct": 35.49,
+      "brier": 0.63599,
+      "n": 107600,
+      "nll": 1.2312,
+      "strong_nuts_combo_avg_pct": 38.27,
+      "strong_nuts_combo_under_20_pct": 21.19,
+      "strong_nuts_mass_bias_pp": -0.0,
+      "strong_nuts_mass_cell_max_abs_pp": 1.39,
       "strong_nuts_mass_cells": {
         "flop action:bet": {
-          "actual_pct": 31.31,
-          "bias_pp": 0.44,
-          "n": 1734,
-          "pred_pct": 31.76
+          "actual_pct": 29.58,
+          "bias_pp": -0.04,
+          "n": 4135,
+          "pred_pct": 29.54
         },
         "flop action:call": {
-          "actual_pct": 22.21,
-          "bias_pp": 0.58,
-          "n": 2107,
-          "pred_pct": 22.79
+          "actual_pct": 20.17,
+          "bias_pp": 0.63,
+          "n": 5068,
+          "pred_pct": 20.8
         },
         "flop action:check": {
-          "actual_pct": 11.88,
-          "bias_pp": -0.61,
-          "n": 3821,
-          "pred_pct": 11.28
+          "actual_pct": 10.03,
+          "bias_pp": -0.54,
+          "n": 9538,
+          "pred_pct": 9.49
         },
         "flop action:raise_over": {
-          "actual_pct": 45.72,
-          "bias_pp": 1.09,
-          "n": 573,
-          "pred_pct": 46.81
+          "actual_pct": 46.07,
+          "bias_pp": -0.27,
+          "n": 1285,
+          "pred_pct": 45.8
         },
         "flop board:flop": {
-          "actual_pct": 20.33,
-          "bias_pp": -0.59,
-          "n": 7406,
-          "pred_pct": 19.74
+          "actual_pct": 18.3,
+          "bias_pp": -0.45,
+          "n": 18079,
+          "pred_pct": 17.84
         },
         "river action:bet": {
-          "actual_pct": 67.6,
-          "bias_pp": 0.85,
-          "n": 1179,
-          "pred_pct": 68.45
+          "actual_pct": 54.32,
+          "bias_pp": 0.46,
+          "n": 2776,
+          "pred_pct": 54.78
         },
         "river action:call": {
-          "actual_pct": 58.4,
-          "bias_pp": 0.65,
-          "n": 1089,
-          "pred_pct": 59.06
+          "actual_pct": 36.67,
+          "bias_pp": -0.08,
+          "n": 2681,
+          "pred_pct": 36.59
         },
         "river action:check": {
-          "actual_pct": 28.61,
-          "bias_pp": -0.43,
-          "n": 3716,
-          "pred_pct": 28.17
+          "actual_pct": 14.75,
+          "bias_pp": -0.57,
+          "n": 9331,
+          "pred_pct": 14.17
         },
         "river action:raise_over": {
-          "actual_pct": 81.53,
-          "bias_pp": 0.54,
-          "n": 379,
-          "pred_pct": 82.07
+          "actual_pct": 69.33,
+          "bias_pp": 1.39,
+          "n": 802,
+          "pred_pct": 70.72
         },
         "river board:river": {
-          "actual_pct": 45.14,
-          "bias_pp": 0.29,
-          "n": 7406,
-          "pred_pct": 45.43
+          "actual_pct": 30.59,
+          "bias_pp": 0.32,
+          "n": 18077,
+          "pred_pct": 30.91
         },
         "turn action:bet": {
-          "actual_pct": 45.44,
-          "bias_pp": 0.95,
-          "n": 1556,
-          "pred_pct": 46.39
+          "actual_pct": 37.22,
+          "bias_pp": 0.14,
+          "n": 3700,
+          "pred_pct": 37.36
         },
         "turn action:call": {
-          "actual_pct": 36.29,
-          "bias_pp": 0.23,
-          "n": 1546,
-          "pred_pct": 36.51
+          "actual_pct": 27.0,
+          "bias_pp": 0.65,
+          "n": 3848,
+          "pred_pct": 27.66
         },
         "turn action:check": {
-          "actual_pct": 20.09,
-          "bias_pp": -0.51,
-          "n": 3743,
-          "pred_pct": 19.58
+          "actual_pct": 13.22,
+          "bias_pp": -0.05,
+          "n": 9301,
+          "pred_pct": 13.17
         },
         "turn action:raise_over": {
-          "actual_pct": 57.29,
-          "bias_pp": 1.27,
-          "n": 391,
-          "pred_pct": 58.56
+          "actual_pct": 54.56,
+          "bias_pp": 0.62,
+          "n": 900,
+          "pred_pct": 55.18
         },
         "turn board:turn": {
-          "actual_pct": 31.72,
-          "bias_pp": 0.17,
-          "n": 7406,
-          "pred_pct": 31.89
+          "actual_pct": 24.18,
+          "bias_pp": 0.26,
+          "n": 18079,
+          "pred_pct": 24.44
         }
       },
-      "strong_nuts_under_20_pct": 30.68,
-      "top1_pct": 52.89,
-      "under_10_pct": 5.61
+      "strong_nuts_under_20_pct": 44.85,
+      "top1_pct": 49.24,
+      "under_10_pct": 8.13
     },
     "train_raw": {
-      "actual_bucket_avg_pct": 35.57,
-      "brier": 0.64468,
-      "n": 44052,
-      "nll": 1.23213,
-      "strong_nuts_combo_avg_pct": 48.29,
-      "strong_nuts_combo_under_20_pct": 14.81,
-      "strong_nuts_mass_bias_pp": -0.15,
-      "strong_nuts_mass_cell_max_abs_pp": 2.93,
+      "actual_bucket_avg_pct": 34.0,
+      "brier": 0.66153,
+      "n": 107600,
+      "nll": 1.29013,
+      "strong_nuts_combo_avg_pct": 36.6,
+      "strong_nuts_combo_under_20_pct": 24.77,
+      "strong_nuts_mass_bias_pp": -0.03,
+      "strong_nuts_mass_cell_max_abs_pp": 2.76,
       "strong_nuts_mass_cells": {
         "flop action:bet": {
-          "actual_pct": 31.31,
-          "bias_pp": 0.41,
-          "n": 1734,
-          "pred_pct": 31.72
+          "actual_pct": 29.58,
+          "bias_pp": -0.32,
+          "n": 4135,
+          "pred_pct": 29.26
         },
         "flop action:call": {
-          "actual_pct": 22.21,
-          "bias_pp": -0.11,
-          "n": 2107,
-          "pred_pct": 22.11
-        },
-        "flop action:check": {
-          "actual_pct": 11.88,
-          "bias_pp": 0.08,
-          "n": 3821,
-          "pred_pct": 11.96
-        },
-        "flop action:raise_over": {
-          "actual_pct": 45.72,
-          "bias_pp": 0.94,
-          "n": 573,
-          "pred_pct": 46.67
-        },
-        "flop board:flop": {
-          "actual_pct": 20.33,
-          "bias_pp": -2.93,
-          "n": 7406,
-          "pred_pct": 17.41
-        },
-        "river action:bet": {
-          "actual_pct": 67.6,
-          "bias_pp": 1.3,
-          "n": 1179,
-          "pred_pct": 68.9
-        },
-        "river action:call": {
-          "actual_pct": 58.4,
-          "bias_pp": 0.3,
-          "n": 1089,
-          "pred_pct": 58.71
-        },
-        "river action:check": {
-          "actual_pct": 28.61,
-          "bias_pp": 0.2,
-          "n": 3716,
-          "pred_pct": 28.81
-        },
-        "river action:raise_over": {
-          "actual_pct": 81.53,
-          "bias_pp": 1.1,
-          "n": 379,
-          "pred_pct": 82.63
-        },
-        "river board:river": {
-          "actual_pct": 45.14,
-          "bias_pp": 0.89,
-          "n": 7406,
-          "pred_pct": 46.03
-        },
-        "turn action:bet": {
-          "actual_pct": 45.44,
-          "bias_pp": 1.45,
-          "n": 1556,
-          "pred_pct": 46.89
-        },
-        "turn action:call": {
-          "actual_pct": 36.29,
-          "bias_pp": -0.16,
-          "n": 1546,
-          "pred_pct": 36.13
-        },
-        "turn action:check": {
-          "actual_pct": 20.09,
-          "bias_pp": -0.02,
-          "n": 3743,
-          "pred_pct": 20.07
-        },
-        "turn action:raise_over": {
-          "actual_pct": 57.29,
+          "actual_pct": 20.17,
           "bias_pp": -0.06,
-          "n": 391,
-          "pred_pct": 57.22
-        },
-        "turn board:turn": {
-          "actual_pct": 31.72,
-          "bias_pp": 0.29,
-          "n": 7406,
-          "pred_pct": 32.01
-        }
-      },
-      "strong_nuts_under_20_pct": 35.77,
-      "top1_pct": 47.71,
-      "under_10_pct": 9.04
-    },
-    "val_brier_gain": 0.04703,
-    "val_lgbm": {
-      "actual_bucket_avg_pct": 38.71,
-      "brier": 0.5903,
-      "n": 13147,
-      "nll": 1.11529,
-      "strong_nuts_combo_avg_pct": 50.87,
-      "strong_nuts_combo_under_20_pct": 11.71,
-      "strong_nuts_mass_bias_pp": 0.54,
-      "strong_nuts_mass_cell_max_abs_pp": 4.13,
-      "strong_nuts_mass_cells": {
-        "flop action:bet": {
-          "actual_pct": 32.76,
-          "bias_pp": -0.3,
-          "n": 519,
-          "pred_pct": 32.46
-        },
-        "flop action:call": {
-          "actual_pct": 21.81,
-          "bias_pp": 0.96,
-          "n": 619,
-          "pred_pct": 22.77
+          "n": 5068,
+          "pred_pct": 20.11
         },
         "flop action:check": {
-          "actual_pct": 10.72,
-          "bias_pp": 0.51,
-          "n": 1138,
-          "pred_pct": 11.23
+          "actual_pct": 10.03,
+          "bias_pp": -0.02,
+          "n": 9538,
+          "pred_pct": 10.02
         },
         "flop action:raise_over": {
-          "actual_pct": 45.73,
-          "bias_pp": 2.89,
-          "n": 164,
-          "pred_pct": 48.62
+          "actual_pct": 46.07,
+          "bias_pp": 0.21,
+          "n": 1285,
+          "pred_pct": 46.28
         },
         "flop board:flop": {
-          "actual_pct": 20.03,
-          "bias_pp": -0.15,
-          "n": 2217,
-          "pred_pct": 19.88
+          "actual_pct": 18.3,
+          "bias_pp": -2.76,
+          "n": 18079,
+          "pred_pct": 15.54
         },
         "river action:bet": {
-          "actual_pct": 70.0,
-          "bias_pp": -1.3,
-          "n": 340,
-          "pred_pct": 68.7
+          "actual_pct": 54.32,
+          "bias_pp": 1.81,
+          "n": 2776,
+          "pred_pct": 56.13
         },
         "river action:call": {
-          "actual_pct": 55.0,
-          "bias_pp": 4.13,
-          "n": 320,
-          "pred_pct": 59.13
+          "actual_pct": 36.67,
+          "bias_pp": -0.27,
+          "n": 2681,
+          "pred_pct": 36.4
         },
         "river action:check": {
-          "actual_pct": 28.07,
-          "bias_pp": -0.71,
-          "n": 1122,
-          "pred_pct": 27.36
+          "actual_pct": 14.75,
+          "bias_pp": 0.19,
+          "n": 9331,
+          "pred_pct": 14.94
         },
         "river action:raise_over": {
-          "actual_pct": 85.47,
-          "bias_pp": -3.25,
-          "n": 117,
-          "pred_pct": 82.22
+          "actual_pct": 69.33,
+          "bias_pp": 1.99,
+          "n": 802,
+          "pred_pct": 71.31
         },
         "river board:river": {
-          "actual_pct": 44.43,
-          "bias_pp": 0.84,
-          "n": 2217,
-          "pred_pct": 45.27
+          "actual_pct": 30.59,
+          "bias_pp": 1.44,
+          "n": 18077,
+          "pred_pct": 32.03
         },
         "turn action:bet": {
-          "actual_pct": 44.77,
-          "bias_pp": 0.77,
-          "n": 449,
-          "pred_pct": 45.54
+          "actual_pct": 37.22,
+          "bias_pp": 1.09,
+          "n": 3700,
+          "pred_pct": 38.31
         },
         "turn action:call": {
-          "actual_pct": 33.84,
-          "bias_pp": 0.76,
-          "n": 461,
-          "pred_pct": 34.6
+          "actual_pct": 27.0,
+          "bias_pp": -0.2,
+          "n": 3848,
+          "pred_pct": 26.81
         },
         "turn action:check": {
-          "actual_pct": 18.12,
-          "bias_pp": 0.86,
-          "n": 1137,
-          "pred_pct": 18.97
+          "actual_pct": 13.22,
+          "bias_pp": 0.03,
+          "n": 9301,
+          "pred_pct": 13.26
         },
         "turn action:raise_over": {
-          "actual_pct": 55.45,
-          "bias_pp": 4.09,
-          "n": 110,
-          "pred_pct": 59.54
+          "actual_pct": 54.56,
+          "bias_pp": 0.51,
+          "n": 900,
+          "pred_pct": 55.06
         },
         "turn board:turn": {
-          "actual_pct": 30.36,
-          "bias_pp": 1.04,
-          "n": 2217,
-          "pred_pct": 31.4
+          "actual_pct": 24.18,
+          "bias_pp": 0.57,
+          "n": 18079,
+          "pred_pct": 24.75
         }
       },
-      "strong_nuts_under_20_pct": 29.04,
-      "top1_pct": 54.42,
-      "under_10_pct": 5.21
+      "strong_nuts_under_20_pct": 48.3,
+      "top1_pct": 46.23,
+      "under_10_pct": 10.75
     },
-    "val_nll_gain": 0.10413,
-    "val_raw": {
-      "actual_bucket_avg_pct": 35.85,
-      "brier": 0.63733,
-      "n": 13147,
-      "nll": 1.21942,
-      "strong_nuts_combo_avg_pct": 48.43,
-      "strong_nuts_combo_under_20_pct": 14.59,
-      "strong_nuts_mass_bias_pp": 0.43,
-      "strong_nuts_mass_cell_max_abs_pp": 3.64,
+    "val_brier_gain": 0.02415,
+    "val_lgbm": {
+      "actual_bucket_avg_pct": 35.73,
+      "brier": 0.6319,
+      "n": 17663,
+      "nll": 1.22046,
+      "strong_nuts_combo_avg_pct": 37.85,
+      "strong_nuts_combo_under_20_pct": 21.1,
+      "strong_nuts_mass_bias_pp": -0.17,
+      "strong_nuts_mass_cell_max_abs_pp": 5.05,
       "strong_nuts_mass_cells": {
         "flop action:bet": {
-          "actual_pct": 32.76,
-          "bias_pp": -0.48,
-          "n": 519,
-          "pred_pct": 32.28
+          "actual_pct": 31.47,
+          "bias_pp": -1.69,
+          "n": 680,
+          "pred_pct": 29.78
         },
         "flop action:call": {
-          "actual_pct": 21.81,
-          "bias_pp": 0.43,
-          "n": 619,
-          "pred_pct": 22.24
+          "actual_pct": 19.53,
+          "bias_pp": 1.73,
+          "n": 886,
+          "pred_pct": 21.25
         },
         "flop action:check": {
-          "actual_pct": 10.72,
-          "bias_pp": 1.28,
-          "n": 1138,
-          "pred_pct": 12.0
+          "actual_pct": 10.18,
+          "bias_pp": -0.73,
+          "n": 1542,
+          "pred_pct": 9.45
         },
         "flop action:raise_over": {
-          "actual_pct": 45.73,
-          "bias_pp": 2.75,
-          "n": 164,
-          "pred_pct": 48.48
+          "actual_pct": 53.59,
+          "bias_pp": -5.05,
+          "n": 153,
+          "pred_pct": 48.54
         },
         "flop board:flop": {
-          "actual_pct": 20.03,
-          "bias_pp": -2.41,
-          "n": 2217,
-          "pred_pct": 17.61
+          "actual_pct": 18.89,
+          "bias_pp": -1.02,
+          "n": 2959,
+          "pred_pct": 17.87
         },
         "river action:bet": {
-          "actual_pct": 70.0,
-          "bias_pp": -0.6,
-          "n": 340,
-          "pred_pct": 69.4
+          "actual_pct": 52.14,
+          "bias_pp": 1.45,
+          "n": 443,
+          "pred_pct": 53.6
         },
         "river action:call": {
-          "actual_pct": 55.0,
-          "bias_pp": 3.64,
-          "n": 320,
+          "actual_pct": 34.33,
+          "bias_pp": 1.63,
+          "n": 466,
+          "pred_pct": 35.97
+        },
+        "river action:check": {
+          "actual_pct": 14.43,
+          "bias_pp": -0.29,
+          "n": 1573,
+          "pred_pct": 14.14
+        },
+        "river board:river": {
+          "actual_pct": 29.71,
+          "bias_pp": 0.8,
+          "n": 2959,
+          "pred_pct": 30.51
+        },
+        "turn action:bet": {
+          "actual_pct": 39.36,
+          "bias_pp": -1.88,
+          "n": 592,
+          "pred_pct": 37.48
+        },
+        "turn action:call": {
+          "actual_pct": 28.55,
+          "bias_pp": -0.02,
+          "n": 676,
+          "pred_pct": 28.53
+        },
+        "turn action:check": {
+          "actual_pct": 12.44,
+          "bias_pp": 0.51,
+          "n": 1560,
+          "pred_pct": 12.94
+        },
+        "turn action:raise_over": {
+          "actual_pct": 63.64,
+          "bias_pp": -4.81,
+          "n": 132,
+          "pred_pct": 58.83
+        },
+        "turn board:turn": {
+          "actual_pct": 24.1,
+          "bias_pp": -0.14,
+          "n": 2959,
+          "pred_pct": 23.95
+        }
+      },
+      "strong_nuts_under_20_pct": 43.89,
+      "top1_pct": 49.69,
+      "under_10_pct": 7.91
+    },
+    "val_nll_gain": 0.05685,
+    "val_raw": {
+      "actual_bucket_avg_pct": 34.32,
+      "brier": 0.65605,
+      "n": 17663,
+      "nll": 1.27731,
+      "strong_nuts_combo_avg_pct": 36.23,
+      "strong_nuts_combo_under_20_pct": 25.07,
+      "strong_nuts_mass_bias_pp": -0.15,
+      "strong_nuts_mass_cell_max_abs_pp": 4.99,
+      "strong_nuts_mass_cells": {
+        "flop action:bet": {
+          "actual_pct": 31.47,
+          "bias_pp": -2.06,
+          "n": 680,
+          "pred_pct": 29.41
+        },
+        "flop action:call": {
+          "actual_pct": 19.53,
+          "bias_pp": 1.12,
+          "n": 886,
+          "pred_pct": 20.64
+        },
+        "flop action:check": {
+          "actual_pct": 10.18,
+          "bias_pp": -0.15,
+          "n": 1542,
+          "pred_pct": 10.03
+        },
+        "flop action:raise_over": {
+          "actual_pct": 53.59,
+          "bias_pp": -4.02,
+          "n": 153,
+          "pred_pct": 49.58
+        },
+        "flop board:flop": {
+          "actual_pct": 18.89,
+          "bias_pp": -3.31,
+          "n": 2959,
+          "pred_pct": 15.58
+        },
+        "river action:bet": {
+          "actual_pct": 52.14,
+          "bias_pp": 2.93,
+          "n": 443,
+          "pred_pct": 55.08
+        },
+        "river action:call": {
+          "actual_pct": 34.33,
+          "bias_pp": 1.75,
+          "n": 466,
+          "pred_pct": 36.08
+        },
+        "river action:check": {
+          "actual_pct": 14.43,
+          "bias_pp": 0.51,
+          "n": 1573,
+          "pred_pct": 14.94
+        },
+        "river board:river": {
+          "actual_pct": 29.71,
+          "bias_pp": 1.97,
+          "n": 2959,
+          "pred_pct": 31.68
+        },
+        "turn action:bet": {
+          "actual_pct": 39.36,
+          "bias_pp": -1.11,
+          "n": 592,
+          "pred_pct": 38.24
+        },
+        "turn action:call": {
+          "actual_pct": 28.55,
+          "bias_pp": -0.87,
+          "n": 676,
+          "pred_pct": 27.68
+        },
+        "turn action:check": {
+          "actual_pct": 12.44,
+          "bias_pp": 0.84,
+          "n": 1560,
+          "pred_pct": 13.27
+        },
+        "turn action:raise_over": {
+          "actual_pct": 63.64,
+          "bias_pp": -4.99,
+          "n": 132,
           "pred_pct": 58.64
         },
-        "river action:check": {
-          "actual_pct": 28.07,
-          "bias_pp": -0.05,
-          "n": 1122,
-          "pred_pct": 28.03
-        },
-        "river action:raise_over": {
-          "actual_pct": 85.47,
-          "bias_pp": -2.81,
-          "n": 117,
-          "pred_pct": 82.66
-        },
-        "river board:river": {
-          "actual_pct": 44.43,
-          "bias_pp": 1.45,
-          "n": 2217,
-          "pred_pct": 45.88
-        },
-        "turn action:bet": {
-          "actual_pct": 44.77,
-          "bias_pp": 1.15,
-          "n": 449,
-          "pred_pct": 45.92
-        },
-        "turn action:call": {
-          "actual_pct": 33.84,
-          "bias_pp": 0.01,
-          "n": 461,
-          "pred_pct": 33.85
-        },
-        "turn action:check": {
-          "actual_pct": 18.12,
-          "bias_pp": 1.51,
-          "n": 1137,
-          "pred_pct": 19.63
-        },
-        "turn action:raise_over": {
-          "actual_pct": 55.45,
-          "bias_pp": 2.68,
-          "n": 110,
-          "pred_pct": 58.14
-        },
         "turn board:turn": {
-          "actual_pct": 30.36,
-          "bias_pp": 1.26,
-          "n": 2217,
-          "pred_pct": 31.62
+          "actual_pct": 24.1,
+          "bias_pp": 0.24,
+          "n": 2959,
+          "pred_pct": 24.34
         }
       },
-      "strong_nuts_under_20_pct": 33.74,
-      "top1_pct": 49.05,
-      "under_10_pct": 8.72
+      "strong_nuts_under_20_pct": 47.83,
+      "top1_pct": 46.42,
+      "under_10_pct": 10.59
     },
     "val_risk": {
-      "strong_nuts_combo_avg_delta_pp": 2.44,
-      "strong_nuts_combo_under_20_delta_pp": -2.88,
-      "strong_nuts_mass_bias_pp": 0.54,
-      "strong_nuts_mass_cell_max_abs_pp": 4.13,
-      "strong_nuts_mass_cell_worsen_pp": 1.41,
-      "strong_nuts_under_20_delta_pp": -4.7
+      "strong_nuts_combo_avg_delta_pp": 1.62,
+      "strong_nuts_combo_under_20_delta_pp": -3.97,
+      "strong_nuts_mass_bias_pp": -0.17,
+      "strong_nuts_mass_cell_max_abs_pp": 5.05,
+      "strong_nuts_mass_cell_worsen_pp": 1.03,
+      "strong_nuts_under_20_delta_pp": -3.94
     }
   },
   "meta": {
     "bucket_rows": {
-      "train": 44052,
-      "val": 13147
+      "train": 107600,
+      "val": 17663
     },
     "data_meta": {
       "train": {
         "experiment_flags": {},
-        "rows": 64791,
+        "rows": 158444,
         "strategy_versions": {
-          "legacy": 64791
+          "legacy": 158444
         }
       },
       "val": {
         "experiment_flags": {},
-        "rows": 19413,
+        "rows": 25936,
         "strategy_versions": {
-          "legacy": 19413
+          "legacy": 25936
         }
       }
     },
@@ -598,8 +580,8 @@
       "excluded": true,
       "registry": {
         "conflict": 0,
-        "human": 1262,
-        "robot": 344
+        "human": 1969,
+        "robot": 788
       },
       "train": 0,
       "val": 0

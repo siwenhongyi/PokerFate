@@ -29,7 +29,6 @@ stage (RoundStartBRC):
 
 from __future__ import annotations
 import asyncio
-import functools
 import json
 import logging
 import random
@@ -44,7 +43,6 @@ from pokerfate.core.robots import RoomRobotTracker, default_registry
 from pokerfate.core.seating import derive_seating
 from pf_intercept import config
 from pf_intercept.table_policy import Step, TablePolicy, TablePolicyConfig
-from pf_intercept.game_api.collcard import _sync_collect_game
 from pf_intercept.game_api.gamedata import GameDataHTTPContext, _sync_fetch, seed_from_server
 from pf_intercept.game_api.http import load_auth_token
 from pf_intercept.wire.action_types import ACTION_TYPE_TO_EVENT_ACTION, FOLD_ACTION_TYPES
@@ -318,10 +316,8 @@ class BotBridge:
         # C2S 帧里的 room_id 须与客户端 Net.packNetData 一致（GameModel:getRoomId）。
         # 部分 S2C（如 WinnerRSP）wire 上 room_id 可能为 0，要用进房时或任意非 0 帧补全。
         self._table_room_id: int = 0
-        self._table_tid: int = 1
         self._current_gameid: str = ""
         self._hand_seq: int = 0
-        self._auto_collected_gameids: set[str] = set()
         self._pending_injects: list[WireInject] = []
         self._last_hero_action_notify_sig: tuple | None = None
         self._last_hero_action_notify_at: float = 0.0
@@ -359,10 +355,12 @@ class BotBridge:
         self._max_bet:  int       = 0   # highest bet this street
         self._my_chips: int       = 0
         self._street_bets: dict[int, int] = {}
+        # seat -> pre_action_result of its latest "your turn" notice, until its action arrives
+        self._pre_action_flags: dict[int, int] = {}
         self._my_forced_post_this_street: bool = False
         self._folded:   set[int]  = set()
         self._all_seats: list[int] = []
-        self._announced_stages: set[int] = set()
+        self._all_board_missing_logged: bool = False  # 缺 all_board 的错误每个 bridge 只报一次
         # Track each seat's remaining chips (for final_stacks on hand_over)
         # Initialised from DealerInfoRSP.start_info, updated on every ActionBRC
         self._seat_chips: dict[int, int] = {}
@@ -380,7 +378,9 @@ class BotBridge:
         # 选桌：桌上没有真人、或真人少于人机时离桌换桌 / 换场（table_policy.py）。
         # 策略只在 headless 显式 configure_table_policy 后生效；识别始终运行。
         self._robots = default_registry()
-        self._room_tracker = RoomRobotTracker(self._robots, None, on_label=self._on_robot_label)
+        self._room_tracker = RoomRobotTracker(
+            self._robots, None, on_label=self._on_robot_label, on_mismatch=self._on_robot_count_mismatch,
+        )
         self._table_policy: TablePolicy | None = None
         self._table_switch: dict | None = None      # 选桌发起的离桌，等待 LeaveRoomRSP
         self._table_log_path: Path | None = _TABLE_LOG_PATH
@@ -610,6 +610,11 @@ class BotBridge:
     def _on_robot_label(self, uid: str, label: str, how: str) -> None:
         log.info("[BOT] 人机识别：uid=%s → %s（%s）名单 %s", uid, label, how, self._robots.counts())
 
+    def _on_robot_count_mismatch(self, members: list, rb_num: int) -> None:
+        """The server's robot count cannot be true of the labels held for the people in the
+        room, so one of those labels is wrong: put it on record."""
+        self._table_log("robot_count_mismatch", rb_num=int(rb_num), members=list(members))
+
     def _table_composition(self) -> dict:
         return self._room_tracker.composition(self._room_tracker.members)
 
@@ -742,12 +747,13 @@ class BotBridge:
         return self._table_step(self._table_policy.on_match_failed(code, time.time()))
 
     def _on_other_enter_room_brc(self, msg: dict) -> WireInject | None:
-        """Somebody entered the room; the server tells us the new robot count."""
+        """Somebody entered the room.  This broadcast carries no robot count; only the one
+        for somebody leaving does."""
         user = msg.get("user") or {}
         uid = user.get("uid")
         if uid is None or (self._my_uid is not None and str(uid) == str(self._my_uid)):
             return None
-        self._room_tracker.entered(uid, msg.get("num", 0), msg.get("rb_num", 0))
+        self._room_tracker.entered(uid)
         return self._table_event("seats")
 
     def _profit_lock_cancel_reenter(self) -> None:
@@ -1477,9 +1483,6 @@ class BotBridge:
 
         # Seed player names from current table snapshot + trigger server stats fetch
         table_status = msg.get("table_status") or {}
-        tid = _chip_int(table_status.get("tid", 0), 0)
-        if tid > 0:
-            self._table_tid = tid
         previous_gameid = self._current_gameid
         gameid = str(table_status.get("gameid") or "").strip()
         if gameid and gameid != "0":
@@ -1510,18 +1513,14 @@ class BotBridge:
         self._sync_stacks_from_table_snapshot(table_status)
         self._sync_hand_snapshot_from_enter_room(table_status)
 
-        # 重连时恢复公共牌。若 table_status 携带了 board（说明局中重连），直接写入 api._board，
-        # 并标记已处理的街道，避免后续 RoundStartBRC 重复 deal_board 累加出重复牌。
+        # 重连时恢复公共牌。若 table_status 携带了 board（说明局中重连），直接写入 api._board；
+        # 之后的 RoundStartBRC.all_board 走 sync_board，与已恢复的牌一致时不会重复发牌。
         stage = table_status.get("stage", 1)
         board_ids = table_status.get("board", [])
         if board_ids and stage > 1 and self._api:
             cards = [_card_str(c) for c in board_ids if _card_str(c)]
             if cards:
                 self._api.restore_board(cards)
-                # 已处于哪一街就把该街及之前的 stage 全部标记，
-                # 防止 _on_round_start 重复处理（turn/river 会作为新 stage 正常到来）
-                for s in range(2, stage + 1):
-                    self._announced_stages.add(s)
 
         playing_status = msg.get("playing_status") or {}
         if self._enter_room_playing_status_is_current_hand(table_status, playing_status):
@@ -1886,9 +1885,9 @@ class BotBridge:
         self._my_bet = 0
         self._max_bet = 0
         self._street_bets = {}
+        self._pre_action_flags = {}
         self._my_forced_post_this_street = False
         self._folded = set()
-        self._announced_stages = set()
         self._hole_cards_count = 0
         self._pending_showdown = {}
         self._pending_winner_types = {}
@@ -1927,7 +1926,7 @@ class BotBridge:
         self._pending_seeds.clear()
 
     def _is_robot_seat(self, seat: int, player_id: int) -> bool:
-        """人机（已证实或位于人机号段内），不含自己。策略层据此让整手牌不参与采集 / 学习。"""
+        """已被服务器计数证实的人机，不含自己。策略层据此让整手牌不参与采集 / 学习。"""
         return seat != self._my_seat and player_id > 0 and self._robots.is_robot(player_id)
 
     def _start_hand_from_enter_room_snapshot_if_needed(
@@ -2371,27 +2370,33 @@ class BotBridge:
         self._my_bet  = 0
         self._max_bet = 0
         self._street_bets = {}
+        self._pre_action_flags = {}
         self._my_forced_post_this_street = False
         self._pending_hero_wire_action = None
         self._last_hero_action_context = None
 
-        board_ids = msg.get("board", [])
-        if board_ids and stage not in self._announced_stages and self._api:
-            self._announced_stages.add(stage)
-            cards = [_card_str(c) for c in board_ids if _card_str(c)]
-            if cards:
-                # Keep display/log pot aligned with bridge-side real-time pot tracking.
-                self._api.deal_board(
-                    cards,
-                    street=_STAGE_TO_STREET.get(stage, "flop"),
-                    pot=self._pot,
-                )
+        if not self._api:
+            return
+        # 1.7.5+：服务端直接给出到目前为止的全部公共牌，幂等同步，
+        # 重复 / 迟到 / 漏掉的街都不会让牌面错位。
+        cards = [c for c in (_card_str(x) for x in msg.get("all_board") or []) if c]
+        if cards:
+            self._api.sync_board(cards, street=_STAGE_TO_STREET.get(stage, "flop"), pot=self._pot)
+        elif stage > 1 and not self._all_board_missing_logged:
+            # 不再回退到按街累加：没有 all_board 就没有可信的公共牌，必须被看见。
+            self._all_board_missing_logged = True
+            log.error("[BOT] RoundStartBRC stage=%s 没有 all_board，公共牌未更新（服务端协议变了？）", stage)
 
     def _on_action_brc(self, msg: dict) -> None:
         seat        = _chip_int(msg.get("seatid", 0), 0)
         action_type = _chip_int(msg.get("action_type", 1), 1)
         chips       = _chip_int(msg.get("chips", 0))
         hand_chips  = msg.get("hand_chips")
+        # The flag of the notice that asked for this action; a system fold / check (timeout,
+        # leaving) was not chosen by the player.
+        pre_action_flag = self._pre_action_flags.pop(seat, 0)
+        if action_type in (12, 13, 16):
+            pre_action_flag = 0
 
         # seatid=-1 is used by the game for system broadcasts (no specific player).
         if seat < 0:
@@ -2414,6 +2419,12 @@ class BotBridge:
             self._seat_chips[seat] = _chip_int(hand_chips)
 
         action_str = ACTION_TYPE_TO_EVENT_ACTION.get(action_type)
+        # The table reports every all-in as ALLIN, whatever it does to the
+        # betting. One that does not top the highest bet of the others is a
+        # call; only a higher one raises.
+        other_max = max((v for s, v in self._street_bets.items() if s != seat), default=0)
+        if action_str == "raise" and total_street_bet <= other_max:
+            action_str = "call"
 
         if seat == self._my_seat:
             self._my_bet = total_street_bet
@@ -2454,6 +2465,8 @@ class BotBridge:
             action=action_str,
             amount=api_amount,
             street=street,
+            stack_after=None if hand_chips is None else _chip_int(hand_chips),
+            pre_action=pre_action_flag,
         ))
 
     def _on_round_over(self, msg: dict) -> None:
@@ -2461,11 +2474,26 @@ class BotBridge:
         if pool:
             self._pot = sum(_chip_int(p, 0) for p in pool)
 
+    def note_pre_action(self, msg: dict) -> None:
+        """Remember what a "your turn" notice says about another seat's pre-selected action.
+
+        The notice says whether the seat had picked its action in advance; the action itself
+        follows in ActionBRC and takes the flag along.  The headless session calls this also
+        for the notices it does not hand over because the table has already moved on: a
+        pre-selected action arrives together with its notice, so those are exactly the
+        notices that carry the flag.
+        """
+        seat = _chip_int(msg.get("seatid", 0), 0)
+        if self._my_seat is None or seat == self._my_seat or seat < 0:
+            return
+        self._pre_action_flags[seat] = _chip_int(msg.get("pre_action_result", 0), 0)
+
     def _on_action_notify(self, msg: dict) -> WireInject | None:
         if self._api is None or self._my_seat is None:
             return None
         seat = _chip_int(msg.get("seatid", 0), 0)
         if seat != self._my_seat:
+            self.note_pre_action(msg)
             log.debug("[BOT] Ignore ActionNotify seat=%d my_seat=%d", seat, self._my_seat)
             return None
 
@@ -2474,6 +2502,9 @@ class BotBridge:
             return None
 
         call_need = _chip_int(msg.get("call_need_chips", 0))
+        # Chips a minimum raise takes on top of what is already in front of
+        # us; the table sends 0 (decoded: no field) when it accepts no raise.
+        min_chipin = _chip_int(msg.get("min_chipin", 0))
         self._last_hero_action_notify_sig = notify_sig
         self._last_hero_action_notify_at = time.monotonic()
 
@@ -2513,6 +2544,7 @@ class BotBridge:
             num_active_opponents=max(num_active_opponents, 1),
             my_current_bet_this_street=self._my_bet,
             is_bb_option=is_bb_option,
+            min_raise_to=self._my_bet + min_chipin if min_chipin > 0 else 0,
         )
 
         log.info(
@@ -2684,9 +2716,6 @@ class BotBridge:
         if self._my_seat is not None:
             self._check_hand_swing(my_profit_delta)
 
-        reasons = self._api.last_auto_collect_reasons()
-        self._maybe_auto_collect_current_hand(reasons)
-
         inject = self._maybe_profit_lock_leave_reenter(final_stacks)
         if inject is not None:
             return inject
@@ -2696,53 +2725,6 @@ class BotBridge:
             return inject
         # 留在这张桌：筹码短了就在桌上补码。
         return self._maybe_topup(final_stacks)
-
-    def _maybe_auto_collect_current_hand(self, reasons: list[str]) -> bool:
-        if not getattr(config, "AUTO_COLLECT_SPECIAL_HANDS_ENABLED", True):
-            return False
-        if self._is_friend_room:
-            log.debug("[BOT] 自动收藏：好友房跳过 gameid=%s", self._current_gameid)
-            return False
-        reasons = [str(r) for r in reasons if str(r)]
-        if not reasons:
-            return False
-
-        gameid = str(self._current_gameid or "").strip()
-        if not gameid or gameid == "0":
-            log.warning("[BOT] 自动收藏：命中 %s，但缺少 gameid，跳过。", "/".join(reasons))
-            return False
-        if gameid in self._auto_collected_gameids:
-            return False
-        self._auto_collected_gameids.add(gameid)
-
-        room_id = _chip_int(self._table_room_id, 0)
-        tid = _chip_int(self._table_tid, 1)
-        reason = "/".join(reasons)
-        log.warning(
-            "[BOT] 自动收藏：gameid=%s roomid=%s tid=%s reason=%s",
-            gameid,
-            room_id,
-            tid,
-            reason,
-        )
-
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            _sync_collect_game(gameid, roomid=room_id, tid=tid, reason=reason)
-            return True
-
-        loop.run_in_executor(
-            None,
-            functools.partial(
-                _sync_collect_game,
-                gameid,
-                roomid=room_id,
-                tid=tid,
-                reason=reason,
-            ),
-        )
-        return True
 
     def _check_hand_swing(self, profit_delta: int) -> None:
         """单手盈亏波动：|delta| >= 20BB 时发通知。

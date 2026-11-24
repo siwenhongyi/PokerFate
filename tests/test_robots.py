@@ -2,7 +2,7 @@
 
 import json
 
-from pokerfate.core.robots import HUMAN, ROBOT, SUSPECT, UNKNOWN, RobotRegistry, RoomRobotTracker
+from pokerfate.core.robots import HUMAN, ROBOT, UNKNOWN, RobotRegistry, RoomRobotTracker
 
 ME = "10262053"
 
@@ -58,14 +58,26 @@ def test_change_rule_on_join_between_two_counts(tmp_path):
     assert reg.label("D") == ROBOT          # 2 robots among D, E
 
 
-def test_enter_broadcast_counts_the_newcomer(tmp_path):
-    reg, tr = _tracker(tmp_path, [ME, "A"])
-    tr.entered("X", num=3, rb_num=1)        # first count: one robot among A, X
-    tr.entered("Y", num=4, rb_num=2)        # rose -> Y robot
-    tr.entered("Z", num=5, rb_num=2)        # unchanged -> Z human
-    assert reg.label("Y") == ROBOT and reg.label("Z") == HUMAN
-    tr.sat_down("Y")                        # sitting down after entering changes nothing
-    assert tr.joined == set()
+def test_entering_is_judged_at_the_next_count(tmp_path):
+    reg, tr = _tracker(tmp_path, [ME, "A", "B"])
+    tr.left("B", num=2, rb_num=0)           # A human
+    tr.entered("X")                         # the enter broadcast carries no robot count
+    tr.sat_down("X")                        # sitting down after entering changes nothing
+    assert reg.label("X") is None and tr.joined == {"X"} and tr.events == 1
+    tr.left("A", num=2, rb_num=1)           # X joined, A (human) left, counter rose -> X robot
+    assert reg.label("X") == ROBOT
+
+
+def test_count_that_the_labels_cannot_explain_is_reported(tmp_path):
+    seen = []
+    reg = RobotRegistry(tmp_path / "robots.json", autosave=False)
+    tr = RoomRobotTracker(reg, ME, on_mismatch=lambda members, rb_num: seen.append((members, rb_num)))
+    reg.confirm("A", HUMAN)
+    reg.confirm("B", HUMAN)
+    tr.reset([ME, "A", "B", "C"])
+    tr.left("C", num=3, rb_num=1)           # one robot among two accounts labelled human
+    assert seen == [(["A", "B"], 1)] and tr.mismatches == 1
+    assert reg.label("A") == HUMAN and reg.label("B") == HUMAN
 
 
 def test_no_inference_when_people_are_unaccounted_for(tmp_path):
@@ -87,19 +99,14 @@ def test_conflicting_proofs_cancel_out(tmp_path):
     assert reg.confirm("7", ROBOT, "x") is False     # stays a conflict
 
 
-def test_blocks_make_unproven_neighbours_suspect(tmp_path):
+def test_only_a_proven_uid_is_a_robot(tmp_path):
     reg = RobotRegistry(tmp_path / "robots.json", autosave=False)
-    for uid in (1000, 1010, 1100, 1300, 1650, 9000):
+    for uid in (1000, 1010, 1100, 1300, 1650):
         reg.confirm(uid, ROBOT)
-    assert reg.blocks() == [(1000, 1650, 5)]          # 9000 is alone: no block
-    assert reg.status(1200) == SUSPECT and reg.is_robot(1200)
-    assert not reg.is_robot(1200, include_suspect=False)
-    assert reg.status(999) == UNKNOWN and reg.status(9001) == UNKNOWN
-    assert reg.status(9000) == ROBOT
-    reg.confirm(1200, HUMAN)                          # a proven human overrides the block for itself…
-    assert reg.status(1200) == HUMAN and not reg.is_robot(1200)
-    assert reg.blocks() == []                         # …and one human in six is too many to trust the block
-    assert reg.status(1201) == UNKNOWN
+    reg.confirm(1200, HUMAN)
+    assert reg.is_robot(1010) and reg.status(1010) == ROBOT
+    assert not reg.is_robot(1200) and reg.status(1200) == HUMAN
+    assert not reg.is_robot(1005) and reg.status(1005) == UNKNOWN     # between proven robots, proven nothing
 
 
 def test_registry_round_trip(tmp_path):
@@ -117,7 +124,7 @@ def test_registry_round_trip(tmp_path):
 
 def test_composition_prefers_the_server_count(tmp_path):
     reg, tr = _tracker(tmp_path, [ME, "A", "B", "C"])
-    # no count yet: only labels (nothing proven, nothing suspect) -> everybody counts as human
+    # no count yet: only labels (nothing proven) -> everybody counts as human
     assert tr.composition(tr.members) == {"humans": 3, "robots": 0, "total": 3, "source": "labels", "unproven": 3}
     tr.left("C", num=3, rb_num=1)
     comp = tr.composition(tr.members)
@@ -132,10 +139,10 @@ def test_training_rows_about_robots_are_dropped(tmp_path):
     reg = RobotRegistry(tmp_path / "robots.json", autosave=False)
     for uid in (500, 505, 510, 515, 520):
         reg.confirm(uid, ROBOT)
-    rows = [{"player_uid": "505", "x": 1}, {"player_uid": "507", "x": 2},      # proven, suspect
+    rows = [{"player_uid": "505", "x": 1}, {"player_uid": "507", "x": 2},      # proven robot / not proven: kept
             {"player_uid": "42", "x": 3}, {"player_uid": "", "x": 4}, {"x": 5}]  # human / no uid: kept
     kept, dropped = drop_robot_rows(rows, reg)
-    assert dropped == 2 and [r["x"] for r in kept] == [3, 4, 5]
+    assert dropped == 1 and [r["x"] for r in kept] == [2, 3, 4, 5]
 
 
 def test_learning_uses_the_table_rule():

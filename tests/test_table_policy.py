@@ -472,20 +472,3 @@ def test_policy_off_changes_nothing(monkeypatch):
     assert not b.wants_tick()
     assert b.handle("pb.EnterRoomRSP", _enter([ME, ROBOTS[0], ROBOTS[1]])) is None
     assert b.adjust_match_fields({"wait_blind": False}) == {"wait_blind": False}
-
-
-def test_table_selection_has_no_off_switch(monkeypatch):
-    """Joining a table always comes with table selection; the old --no-table-select is gone."""
-    import argparse
-    import sys
-
-    from pf_intercept.headless import __main__ as cli
-
-    cfg = cli._table_policy_config(argparse.Namespace(bb=10000, buyin_bb=50, stakes=""))
-    assert cfg.ladder == (10000, 20000, 5000, 2000, 1000) and cfg.buyin_bb == 50 and cfg.wait_blind
-    # a home stake outside the fallback list still gets table selection, at that stake only
-    assert cli._table_policy_config(argparse.Namespace(bb=50000, buyin_bb=100, stakes="")).ladder == (50000,)
-    assert cli._table_policy_config(argparse.Namespace(bb=0, buyin_bb=100, stakes="")) is None   # login only
-    monkeypatch.setattr(sys, "argv", ["headless", "--bb", "10000", "--no-table-select"])
-    with pytest.raises(SystemExit):
-        cli._parse_args()

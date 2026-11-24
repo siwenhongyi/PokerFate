@@ -1,36 +1,38 @@
-# Python
+# Python 环境与缓存
 .venv/
 __pycache__/
 *.py[cod]
-target/
+.pytest_cache/
+
+# 构建产物（Python / Rust）
 *.egg-info/
 dist/
 build/
-.pytest_cache/
+target/
 
-# mac
-.DS_Store
-
-# Generated certs (sensitive — generate locally with gen_cert.py)
-pf_intercept/certs/
-
-# Runtime logs and captures (may contain credentials / game data)
-*.log
-*.mitm
-pf_intercept/logs/
-
-# IDE
+# 开发工具与系统文件
 .idea/
 .vscode/
 .claude/
 *.swp
-logs/
-docs/*
-!docs/realtime_cfr_integration.md
+.DS_Store
 
-# 本机数据，不入库：凭证（secrets/）、运行状态（state/）、学出来的模型（models/）、训练样本（training/）。
-# 目录名叫 data 的一律入库，不要再加 data 相关的忽略规则。
+# 本机数据与凭证
+# local/ 保存凭证、运行状态、学习模型、训练样本和个人笔记。
 /local/
+# 证书由 gen_cert.py 在本机生成。
+pf_intercept/certs/
 
-# 热更新层：运行时从 CDN 同步（pf_reverse/hotupdate.py），不入库；入库的 output/ 只放安装包解出的文件
+# 运行日志与抓包（可能包含凭证和对局数据）
+*.log
+*.mitm
+logs/
+pf_intercept/logs/
+
+# 本地分析与历史记录
+# 长期维护文档随对应模块入库。
+/docs/
+
+# 客户端热更新缓存
+# hotupdate.py 从 CDN 同步；入库的 output/ 只保存安装包基线。
 pf_reverse/remote_res/

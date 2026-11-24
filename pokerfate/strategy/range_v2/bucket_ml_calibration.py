@@ -105,7 +105,7 @@ def _load_model(mode: str) -> Optional[dict[str, Any]]:
         return None
     # The model is fitted on the output of the formula layer.  With another formula fit in
     # force it would correct errors that are not there any more (the 2026-11-11 model did,
-    # for four days), so it is left out until it is retrained: docs/range_v2_bucket_ml.md.
+    # for four days), so it is left out until it is retrained (scripts/README.md).
     trained_on = model.get("formula_fit")
     if trained_on is not None and trained_on != formula_fit.fingerprint():
         logging.getLogger(__name__).warning(

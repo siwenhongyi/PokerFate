@@ -46,10 +46,15 @@ class Player:
     current_bet: float = 0.0  # amount bet this street
     total_invested: float = 0.0  # total chips in pot this hand
     is_folded: bool = False
-    is_all_in: bool = False
+
+    @property
+    def is_all_in(self) -> bool:
+        """In the hand with no chips left to bet."""
+        return not self.is_folded and self.stack <= 0
 
     def can_act(self) -> bool:
-        return not self.is_folded and not self.is_all_in
+        """Still in the hand with chips left to bet."""
+        return not self.is_folded and self.stack > 0
 
     def effective_stack(self) -> float:
         return self.stack
@@ -77,6 +82,29 @@ class GameState:
     player_seats: Dict[int, int] = field(default_factory=dict)
     dealer_seat: Optional[int] = None
     has_robot_opponent: bool = False
+    # Lowest raise-to total the table accepts from the player to act, as the
+    # table states it: 0 when it accepts no raise from him (the betting was
+    # not reopened, or nobody is left who could call one). None when the
+    # caller does not know; ``legal_raise_to`` then goes by the rules it can
+    # check from the state itself.
+    min_raise_to: Optional[float] = None
+
+    def legal_raise_to(self, player: Player, amount: float) -> Optional[float]:
+        """The raise-to total nearest ``amount`` that ``player`` may make; None when he may not raise.
+
+        An all-in is always accepted, also below the minimum raise.
+        """
+        all_in = player.current_bet + max(0.0, player.stack)
+        if self.min_raise_to is None:
+            floor = self.big_blind
+            if not any(p.can_act() for p in self.active_players if p.player_id != player.player_id):
+                return None
+        elif self.min_raise_to <= 0:
+            return None
+        else:
+            floor = self.min_raise_to
+        total = min(all_in, max(floor, amount))
+        return total if total > self.current_bet else None
 
     def last_aggressor_id(self, my_player_id: int, street: Optional[str] = None) -> Optional[int]:
         """Last opponent to bet or raise (RAISE includes first bet), optionally on one street."""

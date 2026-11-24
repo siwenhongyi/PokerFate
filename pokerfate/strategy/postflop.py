@@ -1,8 +1,8 @@
 """Postflop module — **thin compatibility layer** over v3 engine.
 
 The legacy `PostflopStrategy` class (1000+ lines of hand-coded branches) has
-been replaced by the purpose-first architecture in `pokerfate.strategy.v3`.
-See docs/betting-redesign/03-new-betting-decision-design.md.
+been replaced by the purpose-first architecture in `pokerfate.strategy.v3`
+(overview: pokerfate/decision/README.md, 规则引擎).
 
 Why this file still exists:
  - `BoardTexture` is a small data class used by poker_bot's reasoning text.
@@ -83,7 +83,7 @@ def _compute_equity_uncertainty(
 
     return min(_U_CAP, u)
 from pokerfate.strategy.v3 import board as _v3_board
-from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards, made_hand_info
+from pokerfate.strategy.range_v2.hand_categorizer import decision_bucket, made_hand_info, straight_draw_outs
 
 log = logging.getLogger(__name__)
 
@@ -131,21 +131,9 @@ def _hero_draw_profile(hole: List[Card], board: List[Card]) -> DrawProfile:
         )
     )
 
-    all_ranks = {int(c.rank) for c in cards}
-    hole_ranks = {int(c.rank) for c in hole}
-    straight_out_ranks: set[int] = set()
-    for seq in _STRAIGHT_SEQUENCES:
-        present = seq & all_ranks
-        if len(present) != 4:
-            continue
-        if not (hole_ranks & present):
-            continue
-        missing = seq - present
-        if len(missing) == 1:
-            straight_out_ranks.update(missing)
-
-    oesd = len(straight_out_ranks) >= 2
-    gutshot = len(straight_out_ranks) == 1
+    straight_outs = straight_draw_outs(hole, board)
+    oesd = straight_outs >= 2
+    gutshot = straight_outs == 1
 
     top_board = max(int(c.rank) for c in board)
     overcards = all(int(c.rank) > top_board for c in hole)
@@ -498,6 +486,7 @@ class PostflopStrategy:
         villain_nuts_pct: float = 0.0,
         exploit_need_adjust: float = 0.0,
         hole_cards: Optional[List[Card]] = None,
+        can_raise: bool = True,
         villain_stats: Optional[VillainStats] = None,
         is_pfr: Optional[bool] = None,
         worst_villain_stats: Optional[VillainStats] = None,
@@ -505,6 +494,8 @@ class PostflopStrategy:
         max_trap_lean: float = 0.0,
         max_bluff_lean: float = 0.0,
         n_sticky: int = 0,
+        opp_reads: Optional[tuple] = None,
+        primary_read: Optional[str] = None,
         villain_vs_hero_dist: Optional[Dict[str, float]] = None,
         my_prev_actions: Optional[dict] = None,
         opp_prev_actions: Optional[dict] = None,
@@ -529,7 +520,7 @@ class PostflopStrategy:
         """
         ctx = self._build_ctx(
             equity=equity, pot=pot, to_call=to_call, stack=stack,
-            effective_stack=effective_stack, board=board,
+            effective_stack=effective_stack, can_raise=can_raise, board=board,
             is_ip=is_ip, street=street, facing_bet=facing_bet,
             num_opponents=num_opponents, big_blind=big_blind, spr=spr,
             opponent_af=opponent_af, opponent_fold_rate=opponent_fold_rate,
@@ -545,6 +536,8 @@ class PostflopStrategy:
             max_trap_lean=max_trap_lean,
             max_bluff_lean=max_bluff_lean,
             n_sticky=n_sticky,
+            opp_reads=opp_reads,
+            primary_read=primary_read,
             villain_vs_hero_dist=villain_vs_hero_dist,
             my_prev_actions=my_prev_actions,
             opp_prev_actions=opp_prev_actions,
@@ -633,7 +626,7 @@ class PostflopStrategy:
 
     def _build_ctx(
         self, *, equity: float, pot: float, to_call: float, stack: float,
-        effective_stack: Optional[float] = None,
+        effective_stack: Optional[float] = None, can_raise: bool = True,
         board: List[Card], is_ip: bool, street: str, facing_bet: bool,
         num_opponents: int, big_blind: float, spr: float,
         opponent_af: float, opponent_fold_rate: float,
@@ -648,6 +641,8 @@ class PostflopStrategy:
         max_trap_lean: float = 0.0,
         max_bluff_lean: float = 0.0,
         n_sticky: int = 0,
+        opp_reads: Optional[tuple] = None,
+        primary_read: Optional[str] = None,
         villain_vs_hero_dist: Optional[Dict[str, float]] = None,
         my_prev_actions: Optional[dict] = None,
         opp_prev_actions: Optional[dict] = None,
@@ -670,7 +665,7 @@ class PostflopStrategy:
         # Hero bucket
         if hole and len(board_list) >= 3:
             try:
-                hero_bucket = categorize_cards(hole, board_list)
+                hero_bucket = decision_bucket(hole, board_list)
                 hmi = made_hand_info(hole, board_list)
             except Exception:
                 log.exception(
@@ -777,6 +772,7 @@ class PostflopStrategy:
             pot_odds=pot_odds,
             facing_bet=facing_bet,
             facing_large_bet=(raw_pot_odds >= 0.30 and spr < 5),
+            can_raise=can_raise,
             hero_bucket=hero_bucket,
             hero_made_subtype=hmi.subtype,
             hero_hand_rank=hmi.hand_rank,
@@ -802,6 +798,8 @@ class PostflopStrategy:
             max_trap_lean=max_trap_lean,
             max_bluff_lean=max_bluff_lean,
             n_sticky=n_sticky,
+            opp_reads=tuple(opp_reads or ()),
+            primary_read=primary_read or None,
             # 2026-04-25 修 P0 bug：my_prev_actions / opp_prev_actions 之前
             # 只在 is_delayed_cbet / opponent_checked_back 的 'check' 情况
             # 填充 → double_barrel / triple_barrel / stop_and_go / float_bet

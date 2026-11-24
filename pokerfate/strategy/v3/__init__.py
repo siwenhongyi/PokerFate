@@ -1,6 +1,6 @@
 """V3 purpose-first postflop decision system.
 
-See docs/betting-redesign/03-new-betting-decision-design.md for architecture.
+Overview: pokerfate/decision/README.md, section 规则引擎.
 """
 
 from pokerfate.strategy.v3.context import (

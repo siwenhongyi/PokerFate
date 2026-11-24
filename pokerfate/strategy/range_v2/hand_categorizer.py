@@ -103,8 +103,8 @@ def categorize_all(board: List[Card]) -> List[str]:
 NUTS = 'nuts'           # set+, two pair top, straights, flushes, full houses, quads
 STRONG = 'strong'       # overpair, top pair good kicker
 MEDIUM = 'medium'       # top pair weak kicker, second pair, pocket pair below top
-DRAW = 'draw'           # flush draw, OESD (8+ outs)
-WEAK_DRAW = 'weak_draw' # gutshot, backdoor + overcards
+DRAW = 'draw'           # flush draw, open-ended straight draw
+WEAK_DRAW = 'weak_draw' # gutshot, double gutshot, two overcards
 AIR = 'air'             # nothing
 GOOD_KICKER_MIN_RANK = 10
 
@@ -174,8 +174,33 @@ def _board_made_bucket(hole, board, score, hand_rank, board_ranks_desc, strength
     return None
 
 
+def _own_pair_bucket(pair_rank: int, hole: List[Card], top_board_rank: int) -> str:
+    """One pair made with a hole card: an overpair or top pair with a good
+    kicker is STRONG, every other pair MEDIUM."""
+    if pair_rank > top_board_rank:
+        return STRONG  # overpair
+    if pair_rank == top_board_rank:
+        kicker = max((c.rank for c in hole if c.rank != pair_rank), default=pair_rank)
+        return STRONG if kicker >= GOOD_KICKER_MIN_RANK else MEDIUM
+    return MEDIUM  # second pair, bottom pair, pocket pair below the top card
+
+
 def categorize_cards(hole: List[Card], board: List[Card]) -> str:
-    """Categorize hole cards on the given board."""
+    """Categorize hole cards on the given board (the range label).
+
+    The label says what the hole cards add to the board; a pair the board
+    holds by itself is nobody's hand. On K♠K♦7♣ an A♥7♥ is second pair
+    (MEDIUM, not two pair), Q♣Q♥ on 9♠9♦4♣ is an overpair (STRONG), and a hand
+    that pairs nothing is labelled by its draw exactly as on an unpaired
+    board. Shown hands act that way too (53,330 human actions, 2026-11-24):
+    second pair on a paired board bets 37% of the time when checked to, like
+    second pair elsewhere and unlike two pair (57%); a flush draw on a paired
+    board bets 31%, like any flush draw (32%) and unlike air (14%).
+
+    This is the feature the range stack is fitted on (likelihood tables,
+    bucket model, hero equity calibrator keys, pre-action fit): changing what
+    it returns means refitting those layers.
+    """
     if not board or len(board) < 3:
         return _preflop_bucket(hole)
 
@@ -195,59 +220,70 @@ def categorize_cards(hole: List[Card], board: List[Card]) -> str:
         return NUTS
     if hand_rank == HandRank.THREE_OF_A_KIND:
         return NUTS
-    if hand_rank == HandRank.TWO_PAIR:
-        # Two pair using at least one hole card is strong
-        hole_ranks = {c.rank for c in hole}
-        pair_ranks_in_score = [score[1], score[2]]  # the two pair ranks
-        if hole_ranks & set(pair_ranks_in_score):
-            return STRONG
-        return MEDIUM  # board two pair
-    if hand_rank == HandRank.ONE_PAIR:
-        pair_rank = score[1]
-        hole_ranks = {c.rank for c in hole}
-        if pair_rank not in hole_ranks and pair_rank not in {c.rank for c in board}:
-            # Pair from board + kicker
-            pass
-        # Check if pair uses a hole card
-        board_rank_counts = Counter(c.rank for c in board)
-        if board_rank_counts.get(pair_rank, 0) >= 2:
-            # Board pair — we just have kickers
-            if all(c.rank > board_ranks[0] for c in hole):
-                return MEDIUM  # overcards to board pair
-            return AIR
-        # Pair involves a hole card
-        if pair_rank >= board_ranks[0]:
-            # Top pair or overpair
-            non_pair = [c.rank for c in hole if c.rank != pair_rank]
-            kicker = max(non_pair) if non_pair else pair_rank
-            if pair_rank > board_ranks[0]:
-                return STRONG  # overpair
-            # Top pair: kicker quality matters
-            if kicker >= GOOD_KICKER_MIN_RANK:
-                return STRONG
-            return MEDIUM
-        if len(board_ranks) > 1 and pair_rank >= board_ranks[1]:
-            return MEDIUM  # second pair
-        return MEDIUM  # bottom pair / low pocket pair
+    if hand_rank in (HandRank.TWO_PAIR, HandRank.ONE_PAIR):
+        pair_ranks = (r1, r2) if hand_rank == HandRank.TWO_PAIR else (r1,)
+        own_pairs = [c.rank for c in hole if c.rank in pair_ranks]
+        if own_pairs:
+            if hand_rank == HandRank.TWO_PAIR and len(set(board_ranks)) == len(board_ranks):
+                return STRONG  # two pair made with both hole cards
+            return _own_pair_bucket(max(own_pairs), hole, board_ranks[0])
+        # The pair (or both pairs) lie on the board: hero holds kickers.
+        if is_river:
+            if hand_rank == HandRank.TWO_PAIR:
+                return MEDIUM
+            # Two overcards keep showdown value against the board pair.
+            return MEDIUM if all(c.rank > board_ranks[0] for c in hole) else AIR
 
-    # --- No made hand: check draws ---
+    # --- No made hand of hero's own: check draws ---
     if not is_river:
-        if _has_flush_draw(hole, board):
+        if _has_flush_draw(hole, board) or _has_oesd(hole, board):
             return DRAW
-        if _has_oesd(hole, board):
-            return DRAW
-        if _has_gutshot(hole, board):
+        if straight_draw_outs(hole, board) >= 1:
+            return WEAK_DRAW  # gutshot, double gutshot, A-K-Q-J / A-2-3-4
+        if _has_overcards(hole, board):
             return WEAK_DRAW
-        # Backdoor flush + overcards (flop only)
-        if len(board) == 3:
-            if _has_backdoor_flush(hole, board) and _has_overcards(hole, board):
-                return WEAK_DRAW
-
-    # Overcards on non-river
-    if not is_river and _has_overcards(hole, board):
-        return WEAK_DRAW
-
     return AIR
+
+
+def decision_bucket(hole: List[Card], board: List[Card]) -> str:
+    """Bucket of hero's own hand for the decision engine.
+
+    ``categorize_cards`` asks how opponents play a class of hands; this asks
+    what hero's hand is worth to him, and differs in three places:
+
+    - a double gutshot is DRAW (eight outs), though opponents play it like a
+      gutshot;
+    - two overcards to a board pair stay MEDIUM on the flop and turn unless
+      they hold a flush draw or eight straight outs: their showdown value is
+      worth more than four outs;
+    - a pair of hero's own next to a board pair is STRONG, as it was before
+      the range label learned to call it second pair (2026-11-24). The
+      decision thresholds were measured with this label; changing it is a
+      decision change that needs its own evidence.
+    """
+    bucket = categorize_cards(hole, board)
+    if bucket in (NUTS, STRONG) or len(hole) != 2 or len(board) < 3:
+        return bucket
+    board_ranks = [c.rank for c in board]
+    hand_rank, r1, r2, _strength = _score(list(hole) + list(board))
+    board_two_pair = hand_rank == HandRank.TWO_PAIR and not any(c.rank in (r1, r2) for c in hole)
+    if hole[0].rank == hole[1].rank or any(c.rank in board_ranks for c in hole):
+        # Hero holds a pair of his own: the made hand is the hand.
+        if hand_rank == HandRank.TWO_PAIR:
+            return MEDIUM if board_two_pair else STRONG
+        return bucket
+    if len(board) > 4:
+        return bucket
+    outs = straight_draw_outs(hole, board)
+    if _has_flush_draw(hole, board) or outs >= 2:
+        return DRAW
+    if bucket == MEDIUM or board_two_pair:
+        return MEDIUM  # kickers over board trips, or over two board pairs
+    if hand_rank == HandRank.ONE_PAIR and all(c.rank > max(board_ranks) for c in hole):
+        return MEDIUM  # two overcards to a board pair
+    if outs == 1:
+        return WEAK_DRAW
+    return bucket
 
 
 def made_hand_info(hole: List[Card], board: List[Card]) -> MadeHandInfo:
@@ -401,6 +437,31 @@ def _preflop_bucket(hole: List[Card]) -> str:
 # Draw detection helpers
 # -----------------------------------------------------------------------
 
+_STRAIGHT_WINDOWS = tuple(
+    frozenset(seq) for seq in (
+        (14, 13, 12, 11, 10), (13, 12, 11, 10, 9), (12, 11, 10, 9, 8), (11, 10, 9, 8, 7),
+        (10, 9, 8, 7, 6), (9, 8, 7, 6, 5), (8, 7, 6, 5, 4), (7, 6, 5, 4, 3), (6, 5, 4, 3, 2),
+        (14, 5, 4, 3, 2),
+    )
+)
+
+
+def straight_draw_outs(hole: List[Card], board: List[Card]) -> int:
+    """How many ranks complete a straight that uses a hole card.
+
+    2 = an open-ended draw or a double gutshot (eight outs), 1 = a gutshot,
+    A-K-Q-J or A-2-3-4 (four outs), 0 = no straight draw.
+    """
+    ranks = {int(c.rank) for c in list(hole) + list(board)}
+    hole_ranks = {int(c.rank) for c in hole}
+    out_ranks: set = set()
+    for window in _STRAIGHT_WINDOWS:
+        present = window & ranks
+        if len(present) == 4 and hole_ranks & present:
+            out_ranks |= window - present
+    return len(out_ranks)
+
+
 def _has_flush_draw(hole: List[Card], board: List[Card]) -> bool:
     """4 cards of same suit between hole + board."""
     suits = Counter(c.suit for c in list(hole) + list(board))
@@ -413,47 +474,19 @@ def _has_flush_draw(hole: List[Card], board: List[Card]) -> bool:
 
 
 def _has_oesd(hole: List[Card], board: List[Card]) -> bool:
-    """Open-ended straight draw: 4 consecutive ranks (8 outs)."""
-    all_ranks = sorted(set(c.rank for c in list(hole) + list(board)))
-    hole_ranks = {c.rank for c in hole}
-    for i in range(len(all_ranks) - 3):
-        window = all_ranks[i:i + 4]
-        if window[-1] - window[0] == 3:
-            # Check we don't already have a straight (5 consecutive)
-            if i + 4 < len(all_ranks) and all_ranks[i + 4] - window[0] == 4:
-                continue  # already a straight
-            # At least one hole card contributes
-            if hole_ranks & set(window):
-                return True
-    # Wheel draw: A-2-3-4
-    wheel = {14, 2, 3, 4}
-    if len(wheel & set(all_ranks)) >= 4 and (hole_ranks & wheel):
-        return True
-    return False
+    """Open-ended straight draw: four ranks in a row, 2-3-4-5 up to T-J-Q-K,
+    that a card on either end completes (eight outs).
 
-
-def _has_gutshot(hole: List[Card], board: List[Card]) -> bool:
-    """Gutshot straight draw: 4 ranks within span of 4 (one gap, 4 outs)."""
-    all_ranks = sorted(set(c.rank for c in list(hole) + list(board)))
-    hole_ranks = {c.rank for c in hole}
-    for i in range(len(all_ranks) - 3):
-        window = all_ranks[i:i + 4]
-        if window[-1] - window[0] == 4 and len(window) == 4:
-            if hole_ranks & set(window):
-                return True
-    # Wheel gutshot
-    wheel = {14, 2, 3, 4, 5}
-    present = wheel & set(all_ranks)
-    if len(present) >= 4 and (hole_ranks & present):
-        return True
-    return False
-
-
-def _has_backdoor_flush(hole: List[Card], board: List[Card]) -> bool:
-    """3 cards of same suit (only meaningful on flop)."""
-    suits = Counter(c.suit for c in list(hole) + list(board))
-    for suit, cnt in suits.items():
-        if cnt >= 3 and any(c.suit == suit for c in hole):
+    A-K-Q-J and A-2-3-4 have one live end and are gutshots here; a double
+    gutshot has eight outs without four in a row and is one too: shown hands
+    of both kinds are played like gutshots, not like open-ended draws.
+    Callers have already ruled out a made straight.
+    """
+    ranks = {int(c.rank) for c in list(hole) + list(board)}
+    hole_ranks = {int(c.rank) for c in hole}
+    for low in range(2, 11):
+        run = {low, low + 1, low + 2, low + 3}
+        if run <= ranks and hole_ranks & run:
             return True
     return False
 

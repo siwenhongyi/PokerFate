@@ -147,11 +147,6 @@ TABLE_SELECT_MIXED_CONFIRM_HANDS = 2        # 真人少于人机需连续多少�
 TABLE_SELECT_EMPTY_GRACE_SEC = 60.0         # 空桌等多久没人来就走
 TABLE_SELECT_WAIT_BLIND = True              # 进桌等大盲再入局（先看桌，不白付盲注）
 
-# 自动收藏牌局：WinnerRSP 结算后，仅对我方获胜的特殊牌型调用 /collCard/update。
-# 与盈利锁仓一致，SNG / 好友局会跳过。
-# 条件：四条 / 同花顺 / 皇家同花顺。
-AUTO_COLLECT_SPECIAL_HANDS_ENABLED = True
-
 GAME_HTTP_VERSION = "1.7.0"  # G_UPDATE_VERSION in versionconfig.lua; also sent as UserLoginREQ.ver
 
 # ── GameData API (30-day player stats) ───────────────────────────────────────

@@ -65,9 +65,13 @@ class _RecordingBridge:
         self.room_ids: list[int] = []
         self.injects: dict[str, list] = {}
         self.slow: dict[str, float] = {}   # seconds a handler blocks (runs in a worker thread)
+        self.pre_action_notices: list[dict] = []
 
     def note_seen_room_id(self, rid):
         self.room_ids.append(rid)
+
+    def note_pre_action(self, msg):
+        self.pre_action_notices.append(msg)
 
     def room_id_for_c2s(self, frame_room_id):
         return frame_room_id or (self.room_ids[-1] if self.room_ids else 0)
@@ -104,13 +108,15 @@ def test_backlogged_action_is_discarded_after_server_system_fold(monkeypatch):
         try:
             ws.push("pb.WinnerRSP", {})
             ws.push("pb.DealerInfoRSP", {"gameid": "new"})
-            ws.push("pb.ActionNotifyBRC", {"seatid": 3})
+            ws.push("pb.ActionNotifyBRC", {"seatid": 3, "pre_action_result": 2})
             ws.push("pb.ActionBRC", {"seatid": 3, "action_type": 12})
             for _ in range(100):
                 if any(t == "pb.ActionBRC" for t, _ in bridge.handled):
                     break
                 await asyncio.sleep(0.01)
             assert not any(t == "pb.ActionNotifyBRC" for t, _ in bridge.handled)
+            # the overtaken notice is not acted on, but its pre-action flag reaches the bridge
+            assert bridge.pre_action_notices == [{"seatid": 3, "pre_action_result": 2}]
             assert "pb.ActionREQ" not in ws.sent_types()
             assert sess.stats.injects_dropped == 1
             assert sess.stats.heartbeats_sent > 0
@@ -334,7 +340,7 @@ def test_headless_web_bankroll_tracks_wallet_hands_rebuy_and_leave(monkeypatch):
 
     async def run():
         sess, ws = await _connect_with_fake(monkeypatch, bridge)
-        observer = LiveTableObserver(my_uid=42)
+        observer = LiveTableObserver(my_uid=42, chips_source=sess.live_total_chips)
         sess.on_frame = observer.observe
         server = await start_live_web(observer, port=0, bankroll_source=sess.bankroll_dashboard)
 
@@ -366,6 +372,7 @@ def test_headless_web_bankroll_tracks_wallet_hands_rebuy_and_leave(monkeypatch):
             empty = await dashboard(wallet_chips=None, current_total_chips=None)
             assert empty["max_auto_rebuy"] == 5
             assert empty["samples"] == empty["hand_points"] == []
+            assert (await _web_get_json(server.port, "/api/live"))["live"]["total_chips"] is None
             wallet(50_000)
             await dashboard(base_total_chips=50_000, session_delta_chips=0)
 
@@ -383,7 +390,6 @@ def test_headless_web_bankroll_tracks_wallet_hands_rebuy_and_leave(monkeypatch):
             await dashboard(table_chips=200, wallet_chips=49_800, session_delta_chips=0)
 
             bridge._api = Mock()
-            bridge._api.last_auto_collect_reasons.return_value = []
             deal(1, 200)
             settle(30)
             won = await dashboard(table_chips=230, session_delta_chips=30)
@@ -391,6 +397,8 @@ def test_headless_web_bankroll_tracks_wallet_hands_rebuy_and_leave(monkeypatch):
             assert won["hand_points"][0]["hand_no"] == 1
             assert won["hand_points"][0]["hand_delta_chips"] == 30
             assert won["hand_points"][0]["total_chips"] == 50_030
+            # The live view shows the same total: wallet plus the chips on the table.
+            assert (await _web_get_json(server.port, "/api/live"))["live"]["total_chips"] == 50_030
 
             # Returned snapshots cannot mutate the cached accounting history.
             detached = sess.bankroll_dashboard()

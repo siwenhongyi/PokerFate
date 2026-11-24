@@ -1,15 +1,15 @@
 """Robots in the strategy logs (all sessions): replication of the hidden-card dependence on
-accounts in the robot UID block, and what hero's lines actually earn against them.
+proven robot accounts, and what hero's lines actually earn against them.
 
     .venv/bin/python -m analysis.robot_logs pokerfate/logs/archive/2026-11-*.pokerfate.bak.log pokerfate/logs/pokerfate.log
 
 Robots are identified with the registry built from the server's own ``rb_num`` counter
 (pokerfate/core/robots.py; rebuild it from the wire log with ``python -m analysis.robot_wire
---write``): proven robots plus unproven accounts inside a robot UID block.
+--write``): proven robots only.
 
 Sections
   1  hero's result by who sits at the table (robots only / mixed / none), before and after rake
-  2  hidden-card test per UID block: opponents' first decision in an unopened pot, taken
+  2  hidden-card test, proven robots vs everybody else: opponents' first decision in an unopened pot, taken
      before hero has acted, against the strength of hero's hole cards
   3  hero at robot-only tables: result of voluntarily played hands by hole-card tier
   4  hero's open raises against robots: how they respond by tier
@@ -65,9 +65,9 @@ def composition(hands):
         if not opp:
             continue
         nr = sum(is_robot(p["id"]) for p in opp)
-        key = "全是机器人号段" if nr == len(opp) else "没有机器人号段" if nr == 0 else "混合"
+        key = "全是证实人机" if nr == len(opp) else "没有证实人机" if nr == 0 else "混合"
         groups[key].append(h)
-    for key in ("全是机器人号段", "混合", "没有机器人号段"):
+    for key in ("全是证实人机", "混合", "没有证实人机"):
         v = groups[key]
         if not v:
             continue
@@ -76,11 +76,11 @@ def composition(hands):
         pre = [d + p for d, p in zip(post, paid)]
         print(f"  {key:8s} {len(v):5d} 手  抽水后 {ms(post, 100)} bb/100   抽水前 {ms(pre, 100)}   "
               f"被抽 {100 * sum(paid) / len(v):.1f}   桌型 {dict(Counter(h['n'] for h in v).most_common(3))}")
-    return groups["全是机器人号段"]
+    return groups["全是证实人机"]
 
 
 def hidden_card_test(hands, P):
-    print("\n== 2 对手在 hero 行动之前的首次入池决定 × hero 底牌强度（按 UID 号段）==")
+    print("\n== 2 对手在 hero 行动之前的首次入池决定 × hero 底牌强度（证实人机 vs 其他账号）==")
     tab = defaultdict(lambda: defaultdict(Counter))
     for h in hands:
         idof = {p["name"]: p["id"] for p in h["players"]}
@@ -93,10 +93,10 @@ def hidden_card_test(hands, P):
             if a.get("raises_before", 0) > 0:
                 break
             if a["to_call"] > 0:
-                tab["机器人号段" if is_robot(idof.get(a["who"])) else "其他账号"][t][a["act"]] += 1
+                tab["证实人机" if is_robot(idof.get(a["who"])) else "其他账号"][t][a["act"]] += 1
             if a["act"] != "fold":
                 break
-    for grp in ("机器人号段", "其他账号"):
+    for grp in ("证实人机", "其他账号"):
         print(f"  {grp}")
         for t in sorted(tab[grp]):
             c = tab[grp][t]
@@ -203,7 +203,7 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     hands, _ = load(argv)
     hands = [h for h in hands if h.get("hole") and len(h["hole"]) == 2 and h.get("delta_bb") is not None and h.get("actions")]
-    print(f"{len(hands)} 手；对手账号中机器人号段 "
+    print(f"{len(hands)} 手；对手账号中证实人机 "
           f"{len({p['id'] for h in hands for p in opponents(h) if is_robot(p['id'])})} 个\n")
     P = hand_percentile()
     robot_hands = composition(hands)

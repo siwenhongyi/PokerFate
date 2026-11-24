@@ -4,8 +4,7 @@ Rows come from `scripts/extract_range_calibration_rows_parallel.py --mode bucket
 (or the live recorder). Features are built by the RUNTIME feature function
 (`bucket_ml_calibration._feature_values`) so train/serve skew is impossible;
 acceptance is two-sided (strong+nuts mass must not be over- or under-stated)
-and relative to the raw formula distribution. Workflow and rationale:
-docs/range_v2_bucket_ml.md.
+and relative to the raw formula distribution. Workflow: scripts/README.md.
 
 The hero-equity and river-relative LightGBM layers this script used to fit were
 removed on 2026-11-11: retrained with feature parity they did not beat the raw

@@ -108,9 +108,12 @@ class LiveTableObserver:
     """Maintains a thread-safe render snapshot of the live table."""
 
     def __init__(self, *, my_uid: int | str | None = None, log_size: int = 14,
-                 reward_source: Callable[[], tuple[int, bool]] | None = None) -> None:
+                 reward_source: Callable[[], tuple[int, bool]] | None = None,
+                 chips_source: Callable[[], int | None] | None = None) -> None:
         self.my_uid = str(my_uid) if my_uid is not None else None
         self._reward_source = reward_source
+        # The account's chips, wallet plus table; None until the server has told the wallet.
+        self._chips_source = chips_source
         self._session_pnl_chips = 0
         # The same result in big blinds, each hand at the blind it was played at (table selection
         # can change stakes).  None once a hand settled with no blind known: the page then reads
@@ -206,8 +209,7 @@ class LiveTableObserver:
             self._seat(seatid)["pos"] = label
 
     def _player_kind(self, uid: str) -> str:
-        """robot (proven by the server's counter) / suspect (inside a robot UID block) /
-        human (proven) / "" (nothing known yet)."""
+        """robot / human, each proven by the server's counter, or "" (nothing proven yet)."""
         if not uid or uid == self.my_uid:
             return ""
         try:
@@ -392,15 +394,15 @@ class LiveTableObserver:
         stage = _chip(msg.get("stage"), 0)
         if stage:
             self._street = _STAGE_TO_STREET.get(stage, self._street)
-        # RoundStartBRC carries only the cards newly revealed this street
-        # (flop=3, turn=1, river=1); accumulate so the whole board stays shown
-        # (dedup also tolerates a message that repeats the full board).
-        for c in (_card_str(x) for x in msg.get("board") or []):
-            if c and c not in self._board:
-                self._board.append(c)
-        # New street: street bets are swept into the pot.
+        # all_board is the full board so far - just take it.
+        full = [c for c in (_card_str(x) for x in msg.get("all_board") or []) if c]
+        if full:
+            self._board = full
+        # New street: street bets are swept into the pot, and nobody has acted on it yet.
+        # A fold or an all-in still shows on the seat itself (dimmed / ALLIN tag).
         for s in self._seats.values():
             s["bet"] = 0
+            s["last"] = ""
 
     def _h_action(self, msg: dict) -> None:
         # Protobuf omits default-valued fields, so seat 0's broadcasts arrive
@@ -426,7 +428,7 @@ class LiveTableObserver:
         if chips > 0:
             self._pot += chips
         who = (s["name"] if s and s["name"] else (f"座位{seatid}" if seatid >= 0 else "?"))
-        if s and self._player_kind(s["uid"]) in ("robot", "suspect"):
+        if s and self._player_kind(s["uid"]) == "robot":
             who += "〔人机〕"
         if label and at not in _BLIND_ACTIONS:
             amt = f" {chips}" if chips > 0 and at not in _FOLD_ACTIONS else ""
@@ -587,6 +589,7 @@ class LiveTableObserver:
     # ── snapshot for the web ─────────────────────────────────────────────────
     def snapshot(self) -> dict:
         rewards, uncertain = self._reward_source() if self._reward_source else (None, False)
+        total_chips = self._chips_source() if self._chips_source else None
         with self._lock:
             seats = []
             for i in range(max(self._seat_num, (max(self._seats) + 1) if self._seats else 0)):
@@ -612,8 +615,9 @@ class LiveTableObserver:
                     "kind": "" if s["empty"] or i == self._my_seat else self._player_kind(s["uid"]),
                 })
             others = [x for x in seats if not x.get("empty") and not x.get("is_me")]
-            robots = sum(1 for x in others if x.get("kind") in ("robot", "suspect"))
+            robots = sum(1 for x in others if x.get("kind") == "robot")
             return {
+                "total_chips": total_chips,
                 "session_pnl_chips": self._session_pnl_chips,
                 "session_pnl_bb": None if self._session_pnl_bb is None else round(self._session_pnl_bb, 2),
                 "session_reward_chips": rewards,

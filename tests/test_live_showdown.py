@@ -25,7 +25,8 @@ def observer():
     ]}})
     obs.observe("pb.DealerInfoRSP", {"gameid": "hand-1"})
     obs.observe("pb.HandCardRSP", reveal(1, ["As", "Ad"]))
-    obs.observe("pb.RoundStartBRC", {"stage": 4, "board": codes(["Ah", "Kd", "Ks", "2c", "3c"])})
+    board = codes(["Ah", "Kd", "Ks", "2c", "3c"])
+    obs.observe("pb.RoundStartBRC", {"stage": 4, "board": board[4:], "all_board": board})
     return obs
 
 

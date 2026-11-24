@@ -32,6 +32,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence, Tuple
 
+from pokerfate.strategy import pre_action
 from pokerfate.strategy.range_v2.fitted_likelihood import likelihood_features
 
 DEFAULT_PATH = Path(__file__).resolve().parents[1] / "data" / "runtime_calibration" / "response_model.json"
@@ -167,14 +168,21 @@ def covers(kind: str, street: str) -> bool:
     return bool(((load_model().get("models") or {}).get(kind) or {}).get(street))
 
 
-def predict(kind: str, street: str, features: Optional[Dict[str, float]]) -> Optional[Dict[str, float]]:
-    """Probability of each answer in ``CLASSES[kind]``; None without a model for this spot."""
+def predict(kind: str, street: str, features: Optional[Dict[str, float]],
+            pre_action_key: Optional[str] = None) -> Optional[Dict[str, float]]:
+    """Probability of each answer in ``CLASSES[kind]``; None without a model for this spot.
+
+    ``pre_action_key`` is the read on the answering player from a pre-selected action
+    (``pre_action.read_key``); its fitted offsets are added to the class scores.  The bucket
+    shares in ``features`` must then be the ones without that evidence, or it counts twice.
+    """
     if features is None or kind not in CLASSES:
         return None
     spec = ((load_model().get("models") or {}).get(kind) or {}).get(street)
     if not spec:
         return None
     classes = CLASSES[kind]
+    offsets = pre_action.response_offsets(kind, street, pre_action_key) if pre_action_key else {}
     scores = [0.0]
     for answer in classes[1:]:
         part = spec.get(answer) or {}
@@ -182,7 +190,7 @@ def predict(kind: str, street: str, features: Optional[Dict[str, float]]) -> Opt
         score = float(part.get("intercept", 0.0))
         for name in FEATURES[kind]:
             score += float(weights.get(name, 0.0)) * float(features.get(name, 0.0))
-        scores.append(score)
+        scores.append(score + float(offsets.get(answer, 0.0)))
     top = max(scores)
     exps = [math.exp(s - top) for s in scores]
     total = sum(exps)

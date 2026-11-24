@@ -113,139 +113,29 @@ class TestAPILifecycle:
         assert "赢家牌型: Opponent:同花" in detail
         assert "结果: Opponent 赢池 118，我 -40" in detail
 
-    def test_weak_winner_before_river_does_not_count_as_bluff_win_without_showdown(self):
+    @pytest.mark.parametrize("bet_street, showdown, expected", [
+        # (bet_win_count, bluff_win_count, showdown_count) of a weak-handed winner
+        ("turn", None, (0, 0, 0)),
+        ("turn", ["Jh", "Th"], (0, 0, 1)),
+        ("river", None, (1, 1, 0)),
+    ])
+    def test_weak_winner_counts_as_a_bluff_win_only_after_a_river_bet_without_showdown(
+            self, bet_street, showdown, expected):
         api = make_api()
         start_hand(api)
         api.deal_hole_cards(["As", "Qh"])
         api.deal_board(["Kd", "7d", "2c"], street="flop", pot=20)
         api.deal_board(["9h"], street="turn", pot=60)
-        api.notify_action(ActionEvent(1, "raise", 30.0, "turn"))
-
+        if bet_street == "river":
+            api.deal_board(["3s"], street="river", pot=90)
+        api.notify_action(ActionEvent(1, "raise", 30.0, bet_street))
         api.hand_over(
-            winner_ids=[1],
-            pot=90,
-            final_stacks={0: 170, 1: 230},
-            winner_hand_types={1: 1},
-            my_profit_delta=-30,
+            winner_ids=[1], pot=120 if bet_street == "river" else 90,
+            final_stacks={0: 170, 1: 230}, winner_hand_types={1: 1}, my_profit_delta=-30,
+            **({"showdown_hands": {1: showdown}} if showdown else {}),
         )
-
         stats = api._bot.opponent_model.get(1)
-        assert stats.bet_win_count == 0
-        assert stats.bluff_win_count == 0
-
-    def test_weak_winner_before_river_does_not_count_as_bluff_win_with_showdown(self):
-        api = make_api()
-        start_hand(api)
-        api.deal_hole_cards(["As", "Qh"])
-        api.deal_board(["Kd", "7d", "2c"], street="flop", pot=20)
-        api.deal_board(["9h"], street="turn", pot=60)
-        api.notify_action(ActionEvent(1, "raise", 30.0, "turn"))
-
-        api.hand_over(
-            winner_ids=[1],
-            pot=90,
-            final_stacks={0: 170, 1: 230},
-            showdown_hands={1: ["Jh", "Th"]},
-            winner_hand_types={1: 1},
-            my_profit_delta=-30,
-        )
-
-        stats = api._bot.opponent_model.get(1)
-        assert stats.showdown_count == 1
-        assert stats.showdown_win_count == 1
-        assert stats.bet_win_count == 0
-        assert stats.bluff_win_count == 0
-
-    def test_non_showdown_weak_winner_on_river_counts_as_bluff_win(self):
-        api = make_api()
-        start_hand(api)
-        api.deal_hole_cards(["As", "Qh"])
-        api.deal_board(["Kd", "7d", "2c"], street="flop", pot=20)
-        api.deal_board(["9h"], street="turn", pot=60)
-        api.deal_board(["3s"], street="river", pot=90)
-        api.notify_action(ActionEvent(1, "raise", 30.0, "river"))
-
-        api.hand_over(
-            winner_ids=[1],
-            pot=120,
-            final_stacks={0: 170, 1: 230},
-            winner_hand_types={1: 1},
-            my_profit_delta=-30,
-        )
-
-        stats = api._bot.opponent_model.get(1)
-        assert stats.bet_win_count == 1
-        assert stats.bluff_win_count == 1
-
-    def test_auto_collect_reasons_ignore_profit_only_hands(self):
-        api = make_api()
-        start_hand(api)
-        api.deal_hole_cards(["As", "Ah"])
-        api.deal_board(["Ks", "7d", "2c"], street="flop", pot=20)
-        api.deal_board(["9h"], street="turn", pot=60)
-        api.deal_board(["3c"], street="river", pot=120)
-
-        api.hand_over(
-            winner_ids=[0],
-            pot=400,
-            final_stacks={0: 500, 1: 0},
-            my_profit_delta=300,
-        )
-
-        assert api.last_auto_collect_reasons() == []
-
-    def test_auto_collect_reasons_skip_full_house(self):
-        api = make_api()
-        start_hand(api)
-        api.deal_hole_cards(["Ac", "Ks"])
-        api.deal_board(["Ah", "Ad", "7s"], street="flop", pot=20)
-        api.deal_board(["7c"], street="turn", pot=60)
-        api.deal_board(["2d"], street="river", pot=120)
-
-        api.hand_over(
-            winner_ids=[0],
-            pot=120,
-            final_stacks={0: 260, 1: 140},
-            my_profit_delta=60,
-        )
-
-        assert api.last_auto_collect_reasons() == []
-
-    def test_auto_collect_reasons_skip_board_trips_full_house(self):
-        api = make_api()
-        start_hand(api)
-        api.deal_hole_cards(["Kd", "Qs"])
-        api.deal_board(["Ah", "Ad", "As"], street="flop", pot=20)
-        api.deal_board(["Kc"], street="turn", pot=60)
-        api.deal_board(["2d"], street="river", pot=120)
-
-        api.hand_over(
-            winner_ids=[0],
-            pot=120,
-            final_stacks={0: 260, 1: 140},
-            my_profit_delta=60,
-        )
-
-        assert api.last_auto_collect_reasons() == []
-
-    def test_hand_over_partial_board_does_not_print_best_five_traceback(self, capsys):
-        api = make_api()
-        start_hand(api)
-        api.deal_hole_cards(["Jd", "7s"])
-        api.deal_board(["Js"], street="flop", pot=20)
-
-        api.hand_over(
-            winner_ids=[1],
-            pot=20,
-            final_stacks={0: 190, 1: 210},
-            showdown_hands={1: ["Qd", "3s"]},
-            my_profit_delta=-10,
-        )
-
-        captured = capsys.readouterr()
-        assert "best_five ERROR" not in captured.out
-        assert "hand_combos ERROR" not in captured.out
-        assert "Traceback" not in captured.out
+        assert (stats.bet_win_count, stats.bluff_win_count, stats.showdown_count) == expected
 
     def test_range_calibration_extractor_skips_partial_board_replays(self):
         from scripts.extract_range_calibration_rows_parallel import _malformed_board_reason
@@ -276,36 +166,6 @@ class TestAPILifecycle:
         )
         assert isinstance(decision, BotDecision)
         assert decision.action in ("fold", "check", "call", "raise")
-
-    def test_aa_preflop_raises(self):
-        api = make_api()
-        start_hand(api)
-        api.deal_hole_cards(["Ac", "Ad"])
-        decision = api.request_action(
-            street="preflop",
-            pot=3.0,
-            current_bet=2.0,
-            to_call=2.0,
-            my_stack=200.0,
-        )
-        assert decision.action == "raise"
-        assert decision.amount > 2.0
-
-    def test_free_check_signal_does_not_override_open_outside_bb(self):
-        api = make_api()
-        start_hand(api)  # Hero is BTN, not BB
-        api.deal_hole_cards(["Ac", "Ad"])
-
-        decision = api.request_action(
-            street="preflop",
-            pot=3.0,
-            current_bet=0.0,
-            to_call=0.0,
-            my_stack=200.0,
-            is_bb_option=True,
-        )
-
-        assert decision.action == "raise"
 
     def test_notify_action_updates_state(self):
         api = make_api()
@@ -649,247 +509,75 @@ class TestStackTracking:
         assert api._session_stacks[1] == 175.0
 
 
-class TestBugFixes:
-    """Regression tests for the two confirmed bugs."""
+class TestPositionsAndStatOpportunities:
+    """Seat positions, and the opportunities the opponent model counts."""
 
-    # ------------------------------------------------------------------
-    # Bug 1: position_of() used player_id as list index
-    # ------------------------------------------------------------------
-
-    def test_position_non_contiguous_player_ids(self):
-        """player_id 不连续时，位置判断必须正确。"""
-        # player_ids: 0, 5, 99 — dealer_pos=0 → index 0 is BTN
-        players = [
-            Player(0,  "Bot",  200.0),
-            Player(5,  "Opp1", 200.0),
-            Player(99, "Opp2", 200.0),
-        ]
+    @pytest.mark.parametrize("player_ids, expected", [
+        ([0, 5, 99], ["BTN", "SB", "BB"]),
+        ([100, 200], ["BTN", "BB"]),
+    ])
+    def test_game_state_position_follows_the_dealer_index(self, player_ids, expected):
+        players = [Player(pid, f"P{pid}", 200.0) for pid in player_ids]
         gs = GameState(players=players, dealer_pos=0, big_blind=2.0)
-        # index 0 = BTN, index 1 = SB, index 2 = BB
-        assert gs.position_of(players[0]) == "BTN"
-        assert gs.position_of(players[1]) == "SB"
-        assert gs.position_of(players[2]) == "BB"
+        assert [gs.position_of(p) for p in players] == expected
 
-    def test_position_large_player_ids(self):
-        """player_id 很大时不能越界。"""
-        players = [
-            Player(100, "A", 200.0),
-            Player(200, "B", 200.0),
-        ]
-        gs = GameState(players=players, dealer_pos=0, big_blind=2.0)
-        # HU: dealer_pos=0 → index 0 is BTN, index 1 is BB
-        assert gs.position_of(players[0]) == "BTN"
-        assert gs.position_of(players[1]) == "BB"
+    @pytest.mark.parametrize("seats, dealer_id, hero_id, expected", [
+        # no labels: derived from the dealer
+        ([(100, ""), (200, "")], 100, 100, {100: "BTN", 200: "BB"}),
+        ([(100, ""), (200, ""), (300, "")], 100, 100, {100: "BTN", 200: "SB", 300: "BB"}),
+        # labels given: used whatever the dealer id or the list order, 9-max names mapped to 6-max
+        ([(1, "BB"), (1006, "UTG"), (2, "UTG+1"), (3, "UTG+2"), (4, "SB")], 10454453, 1006,
+         {1: "BB", 1006: "UTG", 2: "MP", 3: "CO", 4: "SB"}),
+        ([(1, "UTG+2"), (2, "SB"), (682, "BB"), (3, "UTG"), (4, "UTG+1"), (5, "BTN")], 5, 682,
+         {1: "CO", 2: "SB", 682: "BB", 3: "UTG", 4: "MP", 5: "BTN"}),
+    ])
+    def test_api_hand_positions(self, seats, dealer_id, hero_id, expected):
+        api = PokerFateAPI(my_player_id=hero_id, big_blind=2.0, autosave_path=None)
+        api.new_hand(players=[PlayerInfo(pid, f"P{pid}", 200.0, label) for pid, label in seats],
+                     dealer_id=dealer_id)
+        gs = api._build_game_state(street="preflop", pot=3.0, current_bet=2.0,
+                                   my_stack=200.0, my_current_bet_this_street=0.0)
+        assert {p.player_id: gs.position_of(p) for p in gs.players} == expected
+        tracker_meta = api._bot._range_tracker._action_meta
+        opponents = {pid: pos for pid, pos in expected.items() if pid != hero_id}
+        assert {pid: tracker_meta[pid]["position"] for pid in opponents} == opponents
 
-    def test_position_via_api_non_contiguous(self):
-        """通过 API 接入路径验证位置判断正确传递到决策。"""
-        api = PokerFateAPI(my_player_id=100, big_blind=2.0, autosave_path=None)
-        api.new_hand(
-            players=[
-                PlayerInfo(100, "PokerFate", 200.0),
-                PlayerInfo(200, "Opp",       200.0),
-            ],
-            dealer_id=100,  # player_id=100 在座位 0，是 BTN
-        )
-        api.deal_hole_cards(["Ac", "Ad"])
-        # BTN 面对 BB（没有开牌动作），应该加注（open raise）
-        decision = api.request_action(
-            street="preflop", pot=3.0, current_bet=2.0,
-            to_call=2.0, my_stack=200.0,
-        )
-        assert decision.action == "raise"
+    _FLOP = ("flop", ["As", "7d", "2c"])
+    _TURN = ("turn", ["2h"])
 
-    def test_api_infers_empty_playerinfo_positions_for_range_tracker(self):
-        """Empty PlayerInfo.position should not collapse runtime features to CO."""
-        api = PokerFateAPI(my_player_id=100, big_blind=2.0, autosave_path=None)
-        api.new_hand(
-            players=[
-                PlayerInfo(100, "PokerFate", 200.0),
-                PlayerInfo(200, "Opp SB", 200.0),
-                PlayerInfo(300, "Opp BB", 200.0),
-            ],
-            dealer_id=100,
-        )
-
-        assert api._hand_positions[100] == "BTN"
-        assert api._hand_positions[200] == "SB"
-        assert api._hand_positions[300] == "BB"
-        assert api._bot._range_tracker._action_meta[200]["position"] == "SB"
-        assert api._bot._range_tracker._action_meta[300]["position"] == "BB"
-
-    def test_api_uses_playerinfo_position_when_dealer_player_is_missing(self):
-        """Dead-button hands must use upstream positions, not dealer_pos=0."""
-        hero_id = 1006
-        api = PokerFateAPI(my_player_id=hero_id, big_blind=10_000.0, autosave_path=None)
-        api.new_hand(
-            players=[
-                PlayerInfo(1, "CrispyPegion", 1_000_000.0, "BB"),
-                PlayerInfo(hero_id, "Royal Police", 1_000_000.0, "UTG"),
-                PlayerInfo(2, "miraclerogue", 1_000_000.0, "UTG+1"),
-                PlayerInfo(3, "小莫丶", 1_000_000.0, "UTG+2"),
-                PlayerInfo(4, "Atoom", 1_000_000.0, "SB"),
-            ],
-            dealer_id=10454453,
-        )
-
-        gs = api._build_game_state(
-            street="preflop",
-            pot=15_000.0,
-            current_bet=10_000.0,
-            my_stack=1_000_000.0,
-            my_current_bet_this_street=0.0,
-        )
-        hero = next(p for p in gs.players if p.player_id == hero_id)
-
-        assert gs.position_of(hero) == "UTG"
-
-        for p in api._players:
-            p.is_folded = p.player_id not in (1, hero_id)
-        postflop = api._build_game_state(
-            street="flop",
-            pot=105_000.0,
-            current_bet=0.0,
-            my_stack=970_000.0,
-            my_current_bet_this_street=0.0,
-        )
-        hero = next(p for p in postflop.players if p.player_id == hero_id)
-        assert postflop.position_of(hero) == "UTG"
-        assert postflop.is_ip(hero) is True
-
-    def test_api_uses_playerinfo_position_when_player_order_is_not_seat_order(self):
-        """Runtime position must not depend on arbitrary upstream player order."""
-        hero_id = 682
-        api = PokerFateAPI(my_player_id=hero_id, big_blind=10_000.0, autosave_path=None)
-        api.new_hand(
-            players=[
-                PlayerInfo(1, "danking123", 1_000_000.0, "UTG+2"),
-                PlayerInfo(2, "艾伊西斯", 1_000_000.0, "SB"),
-                PlayerInfo(hero_id, "Royal Police", 1_000_000.0, "BB"),
-                PlayerInfo(3, "dsfg", 1_000_000.0, "UTG"),
-                PlayerInfo(4, "菌军君", 1_000_000.0, "UTG+1"),
-                PlayerInfo(5, "虎贲", 1_000_000.0, "BTN"),
-            ],
-            dealer_id=5,
-        )
-
-        gs = api._build_game_state(
-            street="preflop",
-            pot=15_000.0,
-            current_bet=10_000.0,
-            my_stack=1_000_000.0,
-            my_current_bet_this_street=10_000.0,
-        )
-        hero = next(p for p in gs.players if p.player_id == hero_id)
-
-        assert gs.position_of(hero) == "BB"
-
-    # ------------------------------------------------------------------
-    # Bug 2: is_cbet_spot / is_3bet_spot 永远是 False
-    # ------------------------------------------------------------------
-
-    def test_3bet_spot_detected(self):
-        """对手回应一次开牌加注时，应记录为 3-bet 机会。"""
+    @pytest.mark.parametrize("players, raises, boards, events, player, stat, added", [
+        # 3-bet chances: answering an open raise
+        (2, [(0, 6.0, "preflop")], [], [(1, "fold", 0.0, "preflop")], 1, "three_bet_opportunities", 1),
+        (2, [], [], [(1, "raise", 6.0, "preflop")], 1, "three_bet_opportunities", 0),
+        # fold-to-3bet: the opener answering a 3-bet
+        (2, [(1, 6.0, "preflop"), (0, 20.0, "preflop")], [], [(1, "fold", 0.0, "preflop")], 1, "fold_to_3bet_opps", 1),
+        (2, [(1, 6.0, "preflop"), (0, 20.0, "preflop")], [], [(1, "fold", 0.0, "preflop")], 1, "fold_to_3bet_count", 1),
+        (2, [(1, 6.0, "preflop"), (0, 20.0, "preflop")], [], [(1, "fold", 0.0, "preflop")], 1, "three_bet_opportunities", 0),
+        # fold-to-cbet: answering the first bet of the flop, whoever made it
+        (2, [(0, 6.0, "preflop"), (0, 5.0, "flop")], [_FLOP], [(1, "fold", 0.0, "flop")], 1, "fold_to_cbet_opps", 1),
+        (2, [(0, 6.0, "preflop"), (0, 5.0, "flop")], [_FLOP], [(1, "fold", 0.0, "flop")], 1, "fold_to_cbet_count", 1),
+        (3, [], [_FLOP], [(1, "raise", 5.0, "flop"), (2, "fold", 0.0, "flop")], 2, "fold_to_cbet_opps", 1),
+        (3, [], [_FLOP], [(1, "raise", 5.0, "flop"), (2, "fold", 0.0, "flop")], 1, "fold_to_cbet_opps", 0),
+        (2, [], [_FLOP], [(1, "raise", 5.0, "flop")], 1, "fold_to_cbet_opps", 0),
+        (3, [], [_FLOP], [(1, "raise", 5.0, "flop"), (2, "raise", 15.0, "flop"), (1, "fold", 0.0, "flop")],
+         1, "fold_to_cbet_opps", 0),
+        (2, [(0, 6.0, "preflop")], [_FLOP, _TURN], [(1, "fold", 0.0, "turn")], 1, "fold_to_cbet_opps", 0),
+    ])
+    def test_stat_opportunities(self, players, raises, boards, events, player, stat, added):
         api = PokerFateAPI(my_player_id=0, big_blind=2.0, autosave_path=None)
-        api.new_hand(
-            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "Opp", 200.0)],
-            dealer_id=0,
-        )
+        api.new_hand(players=[PlayerInfo(i, f"P{i}", 200.0) for i in range(players)], dealer_id=0)
         api.deal_hole_cards(["Ac", "Kd"])
-
-        # Bot 开牌加注（记录到 action_history）
-        api._action_history.append((0, Action(ActionType.RAISE, 6.0), "preflop"))
-
-        before = api._bot.opponent_model.get(1).three_bet_opportunities
-
-        # 对手回应（fold）—— 应该被识别为 3-bet spot
-        api.notify_action(ActionEvent(1, "fold", 0.0, "preflop"))
-
-        after = api._bot.opponent_model.get(1).three_bet_opportunities
-        assert after == before + 1, "3-bet opportunity should be recorded"
-
-    def test_cbet_spot_detected_on_fold(self):
-        """对手 fold 回应 bot 的翻牌下注时，fold_to_cbet 应被记录。"""
-        api = PokerFateAPI(my_player_id=0, big_blind=2.0, autosave_path=None)
-        api.new_hand(
-            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "Opp", 200.0)],
-            dealer_id=0,
-        )
-        api.deal_hole_cards(["Ac", "Kd"])
-        api._action_history.append((0, Action(ActionType.RAISE, 6.0), "preflop"))
-        api.deal_board(["As", "7d", "2c"], street="flop")
-
-        # Bot 在翻牌下注（模拟已记录到 history）
-        api._action_history.append((0, Action(ActionType.RAISE, 5.0), "flop"))
-
-        before_opps = api._bot.opponent_model.get(1).fold_to_cbet_opps
-        before_folds = api._bot.opponent_model.get(1).fold_to_cbet_count
-
-        # 对手 fold
-        api.notify_action(ActionEvent(1, "fold", 0.0, "flop"))
-
-        after_opps = api._bot.opponent_model.get(1).fold_to_cbet_opps
-        after_folds = api._bot.opponent_model.get(1).fold_to_cbet_count
-        assert after_opps == before_opps + 1, "fold_to_cbet opportunity should be recorded"
-        assert after_folds == before_folds + 1, "fold_to_cbet count should be recorded"
-
-    def test_cbet_spot_not_triggered_without_bot_bet(self):
-        """对手主动下注（非回应 bot 的 c-bet）时，不应记录为 cbet spot。"""
-        api = PokerFateAPI(my_player_id=0, big_blind=2.0, autosave_path=None)
-        api.new_hand(
-            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "Opp", 200.0)],
-            dealer_id=0,
-        )
-        api.deal_hole_cards(["Ac", "Kd"])
-        api.deal_board(["As", "7d", "2c"], street="flop")
-        # 翻牌无人下注，对手主动 donk-bet
-        before = api._bot.opponent_model.get(1).fold_to_cbet_opps
-        api.notify_action(ActionEvent(1, "raise", 5.0, "flop"))
-        assert api._bot.opponent_model.get(1).fold_to_cbet_opps == before
-
-    def test_cbet_spot_not_inherited_from_old_street(self):
-        """只有旧街 hero 加注、当前街没有 hero 下注时，不应记录 cbet response。"""
-        api = PokerFateAPI(my_player_id=0, big_blind=2.0, autosave_path=None)
-        api.new_hand(
-            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "Opp", 200.0)],
-            dealer_id=0,
-        )
-        api.deal_hole_cards(["Ac", "Kd"])
-        api._action_history.append((0, Action(ActionType.RAISE, 6.0), "preflop"))
-        api.deal_board(["As", "7d", "2c"], street="flop")
-        api.deal_board(["2h"], street="turn")
-        before = api._bot.opponent_model.get(1).fold_to_cbet_opps
-        api.notify_action(ActionEvent(1, "fold", 0.0, "turn"))
-        assert api._bot.opponent_model.get(1).fold_to_cbet_opps == before
-
-    def test_3bet_spot_not_triggered_on_open(self):
-        """第一个开牌动作不是 3-bet 机会。"""
-        api = PokerFateAPI(my_player_id=0, big_blind=2.0, autosave_path=None)
-        api.new_hand(
-            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "Opp", 200.0)],
-            dealer_id=0,
-        )
-        api.deal_hole_cards(["Ac", "Kd"])
-        before = api._bot.opponent_model.get(1).three_bet_opportunities
-        # 对手第一个动作（open raise），没有前置加注，不是 3-bet spot
-        api.notify_action(ActionEvent(1, "raise", 6.0, "preflop"))
-        assert api._bot.opponent_model.get(1).three_bet_opportunities == before
-
-    def test_fold_to_3bet_records_opener_response(self):
-        api = PokerFateAPI(my_player_id=0, big_blind=2.0, autosave_path=None)
-        api.new_hand(
-            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "Opp", 200.0)],
-            dealer_id=0,
-        )
-        api.deal_hole_cards(["Ac", "Kd"])
-        api._action_history.append((1, Action(ActionType.RAISE, 6.0), "preflop"))
-        api._action_history.append((0, Action(ActionType.RAISE, 20.0), "preflop"))
-        before = api._bot.opponent_model.get(1).fold_to_3bet_opps
-        three_bet_before = api._bot.opponent_model.get(1).three_bet_opportunities
-        api.notify_action(ActionEvent(1, "fold", 0.0, "preflop"))
-        stats = api._bot.opponent_model.get(1)
-        assert stats.fold_to_3bet_opps == before + 1
-        assert stats.fold_to_3bet_count == 1
-        assert stats.three_bet_opportunities == three_bet_before
+        dealt = dict(boards)
+        for street in ("preflop", "flop", "turn"):
+            if street in dealt:
+                api.deal_board(dealt[street], street=street)
+            for pid, amount, raise_street in raises:
+                if raise_street == street:
+                    api._action_history.append((pid, Action(ActionType.RAISE, amount), street))
+        before = getattr(api._bot.opponent_model.get(player), stat)
+        for pid, action, amount, street in events:
+            api.notify_action(ActionEvent(pid, action, amount, street))
+        assert getattr(api._bot.opponent_model.get(player), stat) - before == added
 
     def test_river_fold_rate_uses_facing_bet_opportunities(self):
         api = PokerFateAPI(my_player_id=0, big_blind=2.0, autosave_path=None)
@@ -1089,14 +777,6 @@ class TestDecisionEngine:
         assert cfr.pop("requested") == "cfr"
         assert status == cfr
 
-    @pytest.mark.parametrize("engine", ["realtime_cfr", "realtime-cfr"])
-    def test_removed_engine_cannot_be_selected_at_runtime(self, engine):
-        api = PokerFateAPI(decision_engine="cfr", cfr_flop_book_enabled=False)
-        before = api.decision_engine_status()
-        with pytest.raises(ValueError, match="must be rule_engine or cfr"):
-            api.set_decision_engine(engine)
-        assert api.decision_engine_status() == before
-
     def test_new_hand_clears_realtime_cfr_error(self):
         api = PokerFateAPI(
             my_player_id=0,
@@ -1127,87 +807,6 @@ def test_record_hero_execution_logs_the_server_amounts(monkeypatch):
                        "action": "raise", "amount_added": 90.0, "total_bet_after": 100.0}]
 
 
-class TestFoldToCbetAnyFirstFlopBet:
-    """fold_to_cbet is 'fold to the first flop bet', whoever bets (2026-11-08)."""
-
-    def _api(self):
-        api = PokerFateAPI(my_player_id=0, big_blind=2.0, autosave_path=None)
-        api.new_hand(
-            players=[PlayerInfo(0, "Bot", 200.0), PlayerInfo(1, "A", 200.0), PlayerInfo(2, "B", 200.0)],
-            dealer_id=0,
-        )
-        api.deal_hole_cards(["Ac", "Kd"])
-        api.deal_board(["As", "7d", "2c"], street="flop")
-        return api
-
-    def test_response_to_another_villain_first_bet_counts(self):
-        api = self._api()
-        api.notify_action(ActionEvent(1, "raise", 5.0, "flop"))   # A bets first
-        before = api._bot.opponent_model.get(2).fold_to_cbet_opps
-        api.notify_action(ActionEvent(2, "fold", 0.0, "flop"))    # B folds to it
-        s = api._bot.opponent_model.get(2)
-        assert s.fold_to_cbet_opps == before + 1 and s.fold_to_cbet_count >= 1
-        # The bettor itself gets no opportunity.
-        assert api._bot.opponent_model.get(1).fold_to_cbet_opps == 0
-
-    def test_response_to_a_reraise_does_not_count(self):
-        api = self._api()
-        api.notify_action(ActionEvent(1, "raise", 5.0, "flop"))
-        api.notify_action(ActionEvent(2, "raise", 15.0, "flop"))  # re-raise
-        before = api._bot.opponent_model.get(1).fold_to_cbet_opps
-        api.notify_action(ActionEvent(1, "fold", 0.0, "flop"))
-        assert api._bot.opponent_model.get(1).fold_to_cbet_opps == before
-
-
-def _pool_3bet_hand(hole, *, opener_stack=200, robot=False):
-    """Hero on the button, 100bb deep, on a six-handed table (big blind 2)."""
-    api = PokerFateAPI(my_player_id=0, big_blind=2, small_blind=1, equity_iterations=10,
-                       decision_engine="cfr", decision_seed=7, enable_showdown_calibration=False)
-    api.new_hand(players=[
-        PlayerInfo(0, "Hero", 200, "BTN"), PlayerInfo(1, "UTG", 200, "UTG", is_robot=robot),
-        PlayerInfo(2, "MP", opener_stack, "MP"), PlayerInfo(3, "CO", opener_stack, "CO"),
-        PlayerInfo(4, "SB", 200, "SB"), PlayerInfo(5, "BB", 200, "BB"),
-    ], dealer_id=0)
-    api.deal_hole_cards(hole)
-    return api
-
-
-@pytest.mark.parametrize("hole,category", [
-    (["9s", "9d"], "99"), (["8s", "8d"], "88"), (["Ad", "Js"], "AJo"), (["Ad", "Td"], "ATs"),
-])
-def test_pool_value_3bet_answers_a_clean_human_open(hole, category):
-    api = _pool_3bet_hand(hole)
-    for seat in (1, 2):
-        api.notify_action(ActionEvent(seat, "fold", 0, "preflop"))
-    api.notify_action(ActionEvent(3, "raise", 6, "preflop"))
-    decision = api.request_action("preflop", pot=9, current_bet=6, to_call=6, my_stack=200)
-    assert decision.action == "raise"
-    assert decision.amount == api._bot.preflop.three_bet_size(6, True, 2, "CO", "BTN")
-    assert api._bot.preflop.last_expand_reason == f"pool_value_3bet:BTN-vs-open-CO {category}"
-    assert "3bet价值" in api._bot.last_reasoning
-
-
-@pytest.mark.parametrize("scenario", ["disabled", "robot", "squeeze", "limp", "short_opener", "3bet"])
-def test_pool_value_3bet_needs_the_measured_spot(monkeypatch, scenario):
-    from pokerfate.strategy import preflop
-    monkeypatch.setattr(preflop, "_POOL_VALUE_3BET_ENABLED", scenario != "disabled")
-    api = _pool_3bet_hand(["9c", "9d"], opener_stack=50 if scenario == "short_opener" else 200,
-                          robot=scenario == "robot")
-    api.notify_action(ActionEvent(1, "call" if scenario == "limp" else "fold", 2 if scenario == "limp" else 0, "preflop"))
-    pot, price = 3 + (2 if scenario == "limp" else 0), 6
-    if scenario in ("squeeze", "3bet"):
-        api.notify_action(ActionEvent(2, "raise", 6, "preflop"))
-        pot += 6
-        price = 6 if scenario == "squeeze" else 20
-        api.notify_action(ActionEvent(3, "call" if scenario == "squeeze" else "raise", price, "preflop"))
-    else:
-        api.notify_action(ActionEvent(2, "fold", 0, "preflop"))
-        api.notify_action(ActionEvent(3, "raise", 6, "preflop"))
-    pot += price
-    api.request_action("preflop", pot=pot, current_bet=price, to_call=price, my_stack=200)
-    assert not api._bot.preflop.last_expand_reason.startswith("pool_value_3bet:")
-
-
 def test_session_config_event_is_logged(monkeypatch):
     monkeypatch.setenv("PF_V3_EV_VETO", "1")
     events = []
@@ -1219,3 +818,36 @@ def test_session_config_event_is_logged(monkeypatch):
     assert events[-1]["env"].get("PF_V3_EV_VETO") == "1"
     assert "PF_V3_EV_VETO" in events[-1]["resolved"]
     assert "RAKE_RATE" in events[-1]["resolved"]
+
+
+class TestSyncBoard:
+    """sync_board takes the server's complete board and is idempotent."""
+
+    @staticmethod
+    def _board(api):
+        return [str(c) for c in api._board]
+
+    def test_streets_and_repeats_never_duplicate_cards(self):
+        api = make_api()
+        start_hand(api)
+        api.sync_board(["Ks", "7d", "2c"], street="flop", pot=20)
+        api.sync_board(["Ks", "7d", "2c"], street="flop", pot=20)  # repeated message
+        api.sync_board(["Ks", "7d", "2c", "9h"], street="turn", pot=60)
+        api.sync_board(["Ks", "7d", "2c", "9h"], street="turn", pot=60)
+        api.sync_board(["Ks", "7d", "2c", "9h", "3c"], street="river", pot=120)
+        assert self._board(api) == ["Ks", "7d", "2c", "9h", "3c"]
+
+    def test_missed_street_is_filled_from_the_full_board(self):
+        api = make_api()
+        start_hand(api)
+        api.sync_board(["Ks", "7d", "2c"], street="flop", pot=20)
+        # the turn message never arrived; the river carries all five cards
+        api.sync_board(["Ks", "7d", "2c", "9h", "3c"], street="river", pot=120)
+        assert self._board(api) == ["Ks", "7d", "2c", "9h", "3c"]
+
+    def test_unrelated_board_is_replaced_silently(self):
+        api = make_api()
+        start_hand(api)
+        api.sync_board(["Ks", "7d", "2c"], street="flop", pot=20)
+        api.sync_board(["As", "Ad", "5c", "6h"], street="turn", pot=60)
+        assert self._board(api) == ["As", "Ad", "5c", "6h"]

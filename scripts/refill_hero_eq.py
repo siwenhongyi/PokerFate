@@ -9,7 +9,7 @@ of the logs with the new stack in place (extractor ``--mode full``, parts in ses
     .venv/bin/python -m scripts.refill_hero_eq --rows parts_full/task_*.jsonl [--apply]
 
 ``--apply`` swaps the refilled state into opponents.json and keeps a backup; only while the bot
-is stopped.  It is the last step of a refit of the range stack (docs/range_v2_bucket_ml.md).
+is stopped.  It is the last step of a refit of the range stack (scripts/README.md).
 """
 from __future__ import annotations
 

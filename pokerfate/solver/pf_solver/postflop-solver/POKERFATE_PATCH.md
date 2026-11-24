@@ -11,14 +11,14 @@
 
 反事实价值本身不依赖自己的到达权重（`compute_cfvalue_recursive` 只用对手的 reach），所以改成直接除以对手的权重：
 
-- `game/mod.rs`、`game/base.rs`：新增缓存 `opponent_weights`。
-- `game/interpreter.rs`
+- `src/game/mod.rs`、`src/game/base.rs`：新增缓存 `opponent_weights`。
+- `src/game/interpreter.rs`
   - `cache_normalized_weights` 同时写入 `opponent_weights`（舍入余量按 0 处理）。
   - 新增 `pub fn opponent_weights(player)`。
   - `expected_values_detail`：`v * normalizer / w_opponent`；只有 `w_opponent = 0`（对手没有手牌到达）时才填 0。
     `expected_values` 走同一段代码。`equity` 没有改。
 
-- `lib.rs`：加了三行 `#![allow(...)]`。作为 git 依赖时 cargo 会放宽依赖的 lint；改成本地路径依赖后，
+- `src/lib.rs`：加了三行 `#![allow(...)]`。作为 git 依赖时 cargo 会放宽依赖的 lint；改成本地路径依赖后，
   rustc 1.96 会因为 `dangerous_implicit_autorefs` 拒绝 action_tree.rs 里三处上游原有的写法。上游代码没有改，只恢复原来的 lint 处理。
 
 ## 影响
@@ -26,8 +26,11 @@
 - 走得到节点的手牌：数值不变（只差浮点舍入）。
 - 走不到节点的手牌：原来是 0，现在是真实 EV。
 - 起因：2026-11-17 实战，坚果同花在“自己下注后被全下”的节点上 EV 被报成 弃牌 0 / 跟注 0，被上层当成真实数值而弃牌。
-  见 `docs/candidates/zero_ev_2026-11-17/README.md`。
+  因此不能把“自己的到达权重为零”当成动作 EV 为零。项目的接入与构建说明见
+  [决策引擎](../../../decision/README.md)。
 
 ## 升级上游时
 
-重新取上游源码后，按 `[PokerFate patch]` 注释把这几处改回去（共 5 处），或对照 `docs/candidates/zero_ev_2026-11-17/upstream.patch`。
+保留本目录与上游提交的差异，对照上面的字段和方法逐项迁移；`[PokerFate patch]` 注释用于定位。
+不要直接把父目录 Cargo.toml 的本地 path 依赖改成上游 git 依赖，否则会绕过这些修复。
+重新构建后检查可到达手牌的 EV 不变、零自身到达权重手牌的 EV 可用；对手到达权重为零时仍应返回零。

@@ -1,4 +1,4 @@
-"""DecisionCtx — 单次决策的唯一数据入口（docs/betting-redesign/03 §3）。
+"""DecisionCtx — 单次决策的唯一数据入口。
 
 所有 purpose 的 trigger 只读 ctx；新信号必须先落到这里。
 """
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from pokerfate.core.card import Card
 
@@ -60,6 +60,9 @@ class BoardSignals:
         if not self.is_dry and not self.is_wet:
             self.is_dry = self.wetness < 0.35
             self.is_wet = self.wetness >= 0.55
+
+
+_WEAK_READS = ('check_now', 'check_prev', 'option_prev')    # pre_action.WEAK_KEYS
 
 
 @dataclass
@@ -118,6 +121,10 @@ class DecisionCtx:
     pot_odds: float = 0.0
     facing_bet: bool = False
     facing_large_bet: bool = False
+    # Whether hero may raise the bet he faces (``GameState.legal_raise_to``).
+    # False when the betting was not reopened for him or nobody is left who
+    # could call a raise: the decision is then between calling and folding.
+    can_raise: bool = True
 
     # === Hero strength ===
     hero_bucket: str = 'air'                    # nuts/strong/medium/draw/weak_draw/air
@@ -173,6 +180,14 @@ class DecisionCtx:
     n_sticky: int = 0
     # ↑ _value_lean ≥ 1.2 的对手数量（零/一/多三档足以）
 
+    # === Reads from pre-selected actions (pokerfate/strategy/pre_action.py) ===
+    # One entry per opponent still in the hand: what his latest pre-selected action is worth
+    # on this street (check_now / check_prev / option_prev / call_now / call_prev) or None.
+    # Empty when nobody has one.
+    opp_reads: Tuple[Optional[str], ...] = ()
+    # The primary opponent's read (None when he has none).
+    primary_read: Optional[str] = None
+
     # === Cross-street memory ===
     my_prev_actions: Dict[str, str] = field(default_factory=dict)
     opp_prev_actions: Dict[str, str] = field(default_factory=dict)
@@ -189,6 +204,11 @@ class DecisionCtx:
     resistance_level: float = 0.0
 
     # === Derived convenience flags ===
+    @property
+    def weak_reads(self) -> int:
+        """Opponents whose pre-selected check (or option check) is still in force."""
+        return sum(1 for key in self.opp_reads if key in _WEAK_READS)
+
     @property
     def raw_pot_odds(self) -> float:
         """Rake-free call price ``to_call / (pot + to_call)``.

@@ -121,16 +121,17 @@ def test_a_replayed_hand_flags_robots_like_a_live_one(tmp_path):
     import pokerfate.core.robots as robots
     from scripts.replay_and_compare import _replay_hand
 
-    for uid in (ROBOT_ID, ROBOT_ID + 5, ROBOT_ID + 10, ROBOT_ID + 15, ROBOT_ID + 20):
+    for uid in (ROBOT_ID, ROBOT_ID + 5):
         robots.default_registry().confirm(uid, "robot", "test")
     seat = lambda uid, name: {"id": uid, "name": name, "stack": 1_000_000}
-    hand = {"players": [seat(HERO, "hero"), seat(HUMAN_ID, "human"), seat(ROBOT_ID + 7, "robot")],   # unproven, in the block
+    hand = {"players": [seat(HERO, "hero"), seat(HUMAN_ID, "human"), seat(ROBOT_ID, "robot"),
+                        seat(ROBOT_ID + 2, "unproven")],                     # between two proven robots: no robot
             "dealer_id": HERO, "hole_cards": [], "events": []}
     api = _api(tmp_path)
     _replay_hand(api, hand, hero_id=HERO)
-    assert api._hand_robot_ids == {ROBOT_ID + 7} and not api._hand_skip_learning
-    hand["players"].append(seat(ROBOT_ID + 8, "robot2"))                     # now outnumbered
-    _replay_hand(api, hand, hero_id=HERO)
+    assert api._hand_robot_ids == {ROBOT_ID} and not api._hand_skip_learning
+    hand["players"] = [seat(HERO, "hero"), seat(HUMAN_ID, "human"), seat(ROBOT_ID, "robot"), seat(ROBOT_ID + 5, "robot2")]
+    _replay_hand(api, hand, hero_id=HERO)                                    # now outnumbered
     assert api._hand_skip_learning and api._bot.opponent_model.frozen
 
 
@@ -146,9 +147,8 @@ def test_cfr_opponent_prior_library_leaves_robots_out(tmp_path, monkeypatch):
 
     humans = {str(20000000 + i): {"name": f"h{i}", "stats": stats(200, 0.30, 0.40)} for i in range(6)}
     bots = {str(uid): {"name": f"r{uid}", "stats": stats(200, 0.90, 0.95)} for uid in (500, 505, 510, 515, 520)}
-    suspect = {"507": {"name": "r507", "stats": stats(200, 0.90, 0.95)}}        # unproven, inside the block
     (tmp_path / onp.OPPONENT_MODEL_FILE).write_text(
-        json.dumps({"players": {**humans, **bots, **suspect}}), encoding="utf-8")
+        json.dumps({"players": {**humans, **bots}}), encoding="utf-8")
     monkeypatch.setattr(onp, "MODEL_DIR", tmp_path)
     for uid in bots:
         robots.default_registry().confirm(uid, "robot", "test")

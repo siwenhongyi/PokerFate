@@ -131,7 +131,12 @@
       }
       const bb = Number(data.bb || 0);
       if (bb > 0) lastBb = bb;
-      const pnl = $("live-pnl"), rewards = $("live-rewards");
+      const chips = $("live-chips"), pnl = $("live-pnl"), rewards = $("live-rewards");
+      if (chips) {
+        // Wallet plus the chips on the table; an older bot process does not send it.
+        const n = data.total_chips;
+        chips.textContent = Number.isSafeInteger(n) ? `${n.toLocaleString("zh-CN")} 筹码` : "—";
+      }
       if (pnl) {
         const n = data.session_pnl_chips;
         // Chips and big blinds side by side.  The server adds up each hand at the blind it was
@@ -207,8 +212,8 @@
         if (s.acting) cls.push("acting");
         if (s.folded && !s.revealed) cls.push("folded");
         if (s.revealed) cls.push("revealed");
-        // 人机：服务器计数证实的（人机）或 UID 落在人机号段内的（疑似人机）。
-        const robot = s.kind === "robot" || s.kind === "suspect";
+        // 人机：只认服务器计数证实的账号。
+        const robot = s.kind === "robot";
         if (robot) cls.push("robot");
         node.className = cls.join(" ");
         let cardsHtmlStr = "";
@@ -219,7 +224,6 @@
         }
         const tags = [];
         if (s.kind === "robot") tags.push('<span class="pill robot">人机</span>');
-        else if (s.kind === "suspect") tags.push('<span class="pill robot suspect">疑似人机</span>');
         if (s.allin) tags.push('<span class="pill allin">ALLIN</span>');
         if (s.revealed) tags.push('<span class="pill">亮牌</span>');
         const posCls = { "BTN": "btn", "BTN/SB": "btn", "SB": "sb", "BB": "bb" }[s.pos] || "";

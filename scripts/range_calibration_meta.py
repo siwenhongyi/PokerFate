@@ -98,7 +98,7 @@ def meta_summary(rows: list[dict[str, Any]], *, max_flags: int = 12) -> dict[str
 
 
 def drop_robot_rows(rows: list[dict[str, Any]], registry=None) -> tuple[list[dict[str, Any]], int]:
-    """Remove rows whose subject is a house robot (proven, or inside a robot UID block).
+    """Remove rows whose subject is a house robot (an account the server's robot count has proven).
 
     Robots' actions carry no hand-strength information, so their showdowns would teach the
     models noise.  Hands at tables the bot would leave (no human, or fewer humans than robots)

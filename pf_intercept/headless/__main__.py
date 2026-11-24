@@ -234,7 +234,8 @@ async def _run(args: argparse.Namespace, stop: asyncio.Event | None = None) -> i
     if not args.no_web or remote_live_enabled:
         from pf_entertainment.live_table import LiveTableObserver, start_live_web
         # Initial login may switch lines and replace session before the first hand.
-        observer = LiveTableObserver(my_uid=result.uid, reward_source=lambda: session.live_reward_totals())
+        observer = LiveTableObserver(my_uid=result.uid, reward_source=lambda: session.live_reward_totals(),
+                                     chips_source=lambda: session.live_total_chips())
 
     # Frame hook: feed the live observer and notice LeaveRoomRSP for graceful exit.
     leave_done = asyncio.Event()

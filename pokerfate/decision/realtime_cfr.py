@@ -34,6 +34,7 @@ from pokerfate.decision.opponent_numeric_prior import (
     build_numeric_prior,
 )
 from pokerfate.strategy.range_v2 import hand_combo_map as hcm
+from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards as _range_bucket
 
 
 # postflop-solver charges ``min(rake_rate × pot, rake_cap)`` in chip units, so a
@@ -395,7 +396,10 @@ class RealtimeCFRDecisionEngine:
             self._fallback("hero_missing_or_folded", street=street)
             return None
 
-        active = [p for p in gs.active_players if not p.is_all_in]
+        # Two players left in the hand, whoever of them is all-in. A third
+        # player who is all-in still takes his share at showdown, and the
+        # heads-up tree knows nothing of him.
+        active = gs.active_players
         if len(active) != 2:
             self._fallback("requires_heads_up_active_players", street=street, active_count=len(active))
             return None
@@ -992,8 +996,24 @@ def _select_exploit_action(
     best_passive_gto_ev = max(passive_gto_evs.values(), default=best_gto_ev)
 
     solve_cache: dict[str, Any] = {}
+    # The two size guards below judge bets that live on fold equity. Laid on a made hand
+    # they turned the solver's large value bets into small ones or checks, at about 3bb a
+    # time (506 decisions to 2026-11-24, realised minus the solver's EV of its first
+    # choice); on hands without a pair they cost nothing (431 decisions, -0.1 +/- 1.5).
+    hero_has_made_hand = _hero_holds_made_hand(hero_combo, line_context)
+    # The turn-barrel and sticky-opponent guards judge the same kind of bet and already
+    # spare the hands they rate as value. With a made hand they do not judge the solver's
+    # own first choice: where they took it away, nothing was gained (first solver decision
+    # of a hand, same yardstick, 28,118 human-table hands: sticky -1.7 +/- 5.8bb on 83,
+    # turn barrel -1.4 +/- 11.4 on 45, against -1.0 +/- 2.0 where a made hand played the
+    # solver's choice). Every other action of a made hand stays under them: with both off
+    # for made hands altogether, 31 of 68 released decisions in a replay of 850 hands went
+    # past the solver's choice on the fitted fold rates alone (an overpair shoving 90bb
+    # into 31bb), and on the turn the value when called is not resized to who calls.
+    gto_best_label = max(gto_evs.items(), key=lambda item: (item[1], gto_strategy.get(item[0], 0.0)))[0]
     for label, gto_ev in gto_evs.items():
         child = by_path.get(f"{current_path}:{label}")
+        solver_choice_of_made_hand = hero_has_made_hand and label == gto_best_label
         answered = _response_adjusted_ev_detail_from_result(
             result,
             child,
@@ -1037,7 +1057,7 @@ def _select_exploit_action(
         adjusted_evs[label] = adj_ev
         final_ev = (1.0 - confidence) * gto_ev + confidence * adj_ev
         blend_evs[label] = final_ev
-        risk = _river_aggression_risk_discount(
+        risk = None if hero_has_made_hand else _river_aggression_risk_discount(
             label,
             street=street,
             line_context=line_context,
@@ -1052,7 +1072,7 @@ def _select_exploit_action(
             if discount > 0.0:
                 final_ev -= discount
                 safety.setdefault("river_aggression_risk", []).append(risk)
-        turn_risk = _turn_barrel_quality_discount(
+        turn_risk = None if solver_choice_of_made_hand else _turn_barrel_quality_discount(
             label,
             street=street,
             line_context=line_context,
@@ -1067,7 +1087,7 @@ def _select_exploit_action(
             if discount > 0.0:
                 final_ev -= discount
                 safety.setdefault("turn_barrel_quality", []).append(turn_risk)
-        large_support = _large_size_support_check(
+        large_support = None if hero_has_made_hand else _large_size_support_check(
             label,
             street=street,
             line_context=line_context,
@@ -1124,7 +1144,7 @@ def _select_exploit_action(
         )
         if strict_gate:
             safety.setdefault("strict_bluff_gate", []).append(strict_gate)
-        sticky_aggression = _sticky_aggression_discount(
+        sticky_aggression = None if solver_choice_of_made_hand else _sticky_aggression_discount(
             label,
             street=street,
             line_context=line_context,
@@ -1152,7 +1172,6 @@ def _select_exploit_action(
     # EV *before* guard discounts. The old cap against the best action's raw
     # GTO EV let a leashed action win whenever the best action's own exploit
     # adjustment was negative.
-    gto_best_label = max(gto_evs.items(), key=lambda item: (item[1], gto_strategy.get(item[0], 0.0)))[0]
     for label, gap in leashed.items():
         if label not in final or gto_best_label not in blend_evs:
             continue
@@ -1660,6 +1679,11 @@ def _public_range_v2_prior(raw: Any) -> dict[str, Any]:
     bucket = _normalize_bucket_dist(prior.get("bucket_dist"))
     if bucket:
         out["bucket_dist"] = {k: round(v, 4) for k, v in bucket.items() if v > 1e-4}
+    if prior.get("pre_action"):
+        out["pre_action"] = str(prior["pre_action"])
+        base_bucket = _normalize_bucket_dist(prior.get("bucket_dist_base"))
+        if base_bucket:
+            out["bucket_dist_base"] = {k: round(v, 4) for k, v in base_bucket.items() if v > 1e-4}
     raw_bucket = _normalize_bucket_dist(prior.get("raw_bucket_dist"))
     if raw_bucket:
         out["raw_bucket_dist"] = {k: round(v, 4) for k, v in raw_bucket.items() if v > 1e-4}
@@ -1863,9 +1887,14 @@ def _expected_response_probs(
     rv2 = ctx.get("range_v2") if isinstance(ctx.get("range_v2"), dict) else {}
     if rv2.get("villain_is_robot"):
         return unchanged("robot")
-    bucket_dist = rv2.get("bucket_dist")
+    # A read from a pre-selected action enters the model as its own input, so the shares
+    # it is given are the ones without that evidence.
+    pre_action_key = rv2.get("pre_action") or None
+    bucket_dist = (rv2.get("bucket_dist_base") if pre_action_key else None) or rv2.get("bucket_dist")
     if not isinstance(bucket_dist, dict) or not bucket_dist:
         return unchanged("no_range")
+    if pre_action_key:
+        info["pre_action"] = str(pre_action_key)
 
     size = 0.0
     facing_raise = False
@@ -1891,7 +1920,7 @@ def _expected_response_probs(
         vpip=_profile_float(profile, "vpip", 0.0),
         aggression_factor=_profile_float(profile, "af", 0.0),
     )
-    predicted = response_model.predict(kind, street_l, features)
+    predicted = response_model.predict(kind, street_l, features, pre_action_key=pre_action_key)
     if predicted is None:
         return unchanged("no_model")
     if kind == response_model.FACING_BET and "raise" not in present and "call" in present:
@@ -1956,6 +1985,39 @@ def _summary_of(
         },
         "response": info,
     }
+
+
+def _raises_beyond_equilibrium_as_calls(
+    eq_probs: dict[str, float],
+    adj_probs: dict[str, float],
+) -> tuple[dict[str, float], float]:
+    """The answer frequencies one of hero's bets is valued with, and the raise mass moved.
+
+    The solver's value after a raise is the value against its own raising range.  An
+    opponent who raises more often than the equilibrium does it with hands the
+    equilibrium calls with, the strongest of them, and those are not part of that range:
+    against them hero stands where he would after their call, or better when his hand
+    beats them and more goes in.  Valued at the solver's raise value, every such raise
+    counted as the bet lost, so the stronger hero's hand and the larger his bet, the more
+    it was marked down (river bets of 1.1 pots or more with a 90% hand: 0.15 pots, on 18
+    options in the logs of 2026-11-19..26), while those hands, raised, won 14 of 21.
+
+    So the raises beyond the equilibrium's are valued as calls: the raise answers keep
+    their equilibrium mass and the rest joins the call.  Fewer raises than the
+    equilibrium's are left alone (what goes missing there are the bluffs), and so is an
+    answer set without a call.  Returns (frequencies to value with, mass moved).
+    """
+    raises = [label for label in adj_probs if _action_kind(label) in {"Bet", "Raise", "AllIn"}]
+    eq_raise = sum(max(0.0, float(eq_probs.get(label, 0.0))) for label in raises)
+    adj_raise = sum(max(0.0, float(adj_probs.get(label, 0.0))) for label in raises)
+    moved = adj_raise - eq_raise
+    if "Call" not in adj_probs or moved <= 1e-9:
+        return dict(adj_probs), 0.0
+    valued = dict(adj_probs)
+    for label in raises:
+        valued[label] = max(0.0, float(eq_probs.get(label, 0.0)))
+    valued["Call"] = float(adj_probs.get("Call", 0.0)) + moved
+    return valued, moved
 
 
 def _river_strengths(result: dict[str, Any], side: str, board: Sequence[str], cache: Optional[dict[str, Any]]) -> list:
@@ -2095,6 +2157,10 @@ def _response_adjusted_ev_detail_from_result(
 
         value = solver value + sum over answers of (expected - equilibrium frequency) x value after that answer
 
+    Raises beyond the equilibrium's are valued as calls (``_raises_beyond_equilibrium_as_calls``)
+    and on the river the value when called follows the resized calling range
+    (``_river_call_value_shift``).
+
     Returns None when there is no opponent decision behind the action or the solver's
     values after it cannot be trusted; the action then keeps its solver value.
     """
@@ -2167,6 +2233,9 @@ def _response_adjusted_ev_detail_from_result(
     )
     adj_evs = dict(response_evs)
     summary = _summary_of(eq_probs, adj_probs, info, hero_action_label, line_context)
+    valued_probs, raises_as_calls = _raises_beyond_equilibrium_as_calls(eq_probs, adj_probs)
+    if raises_as_calls > 0.0:
+        summary["raises_as_calls"] = round(raises_as_calls, 4)
     if info.get("model") and str(street).lower() == "river" and risk_bb > 0.0 and "Call" in adj_evs:
         shift = _river_call_value_shift(
             result,
@@ -2174,7 +2243,7 @@ def _response_adjusted_ev_detail_from_result(
             hero_combo=hero_combo,
             hero_side=hero_side,
             eq_probs=eq_probs,
-            adj_probs=adj_probs,
+            adj_probs=valued_probs,
             call_value_bb=adj_evs["Call"],
             risk_bb=risk_bb,
             line_context=line_context,
@@ -2185,7 +2254,7 @@ def _response_adjusted_ev_detail_from_result(
             adj_evs["Call"] += float(shift.get("delta_bb") or 0.0)
     adj_total = 0.0
     adj_mass = 0.0
-    for label, prob in adj_probs.items():
+    for label, prob in valued_probs.items():
         if label not in adj_evs:
             continue
         p = max(0.0, float(prob))
@@ -2198,6 +2267,7 @@ def _response_adjusted_ev_detail_from_result(
         "ev": anchor + adj_total / adj_mass - eq_value,
         "eq_probs": eq_probs,
         "adj_probs": adj_probs,
+        "valued_probs": valued_probs,
         "response_evs": adj_evs,
         "summary": summary,
     }
@@ -2698,6 +2768,22 @@ def _hero_aggression_quality(
         "draw_score": draw_score,
         "blocker_score": blocker_score,
     }
+
+
+def _hero_holds_made_hand(hero_combo: str, line_context: dict[str, Any]) -> bool:
+    """A pair made with a hole card, or better (kickers to a hand the board holds are not)."""
+    try:
+        hole = [Card.from_str(card) for card in _cards_from_combo(hero_combo or line_context.get("hero_combo") or "")]
+        board = [Card.from_str(str(card)) for card in list(line_context.get("board") or [])]
+    except Exception:
+        return False
+    if len(hole) != 2 or len(board) < 3:
+        return False
+    bucket = _range_bucket(hole, board)
+    if bucket in ("nuts", "strong"):
+        return True
+    board_ranks = {card.rank for card in board}
+    return bucket == "medium" and (hole[0].rank == hole[1].rank or any(card.rank in board_ranks for card in hole))
 
 
 def _blocker_score(hero_combo: str, board: Sequence[Any]) -> float:

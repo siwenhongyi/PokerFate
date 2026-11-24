@@ -398,6 +398,9 @@ def _bucket_only_collector(source: str):
                 hero_draw = dict(_sc._hero_draw_features(hero, board_cards))
                 hero_blockers = dict(_sc._hero_blocker_features(hero, board_cards))
             self._hand_predictions.setdefault(player_id, []).append({
+                # Kept until the hand ends: the probability the range gave to
+                # the cards that are shown is a score no bucket label enters.
+                "_weights": np.array(weights, dtype=np.float64) / total,
                 "hero_cards": [str(c) for c in hero],
                 "hero_bucket": hero_bucket,
                 "hero_made_subtype": hero_made_subtype,
@@ -448,6 +451,11 @@ def _bucket_only_collector(source: str):
             a, b = sorted(hcm.card_to_int(c) for c in actual_cards[:2])
             idx = hcm.COMBO_TO_IDX[(a, b)]
             for rec in self._hand_predictions.get(player_id, []):
+                rec = dict(rec)
+                combo_weights = rec.pop("_weights", None)
+                if combo_weights is not None:
+                    rec["p_combo"] = float(combo_weights[idx])
+                    rec["live_combos"] = int((combo_weights > 0).sum())
                 board = [Card.from_str(s) for s in rec["board"]]
                 actual_bucket = hcat.categorize_cards(actual_cards, board if board else [])
                 bucket_dist = rec["bucket_dist"]
@@ -524,6 +532,9 @@ def _run_task(task: dict[str, Any]) -> dict[str, Any]:
 
     os.environ.setdefault("PYTEST_CURRENT_TEST", "scripts/extract_range_calibration_rows_parallel.py")
     os.environ.update(_sample_env(sample_scale))
+    # The rows train the layers below the pre-action evidence (pokerfate/strategy/pre_action.py),
+    # which is applied on top of them in play: it must not be in what they are fitted on.
+    os.environ["PF_PRE_ACTION"] = "off"
 
     try:
         PokerFateAPI = importlib.import_module("pokerfate.api").PokerFateAPI

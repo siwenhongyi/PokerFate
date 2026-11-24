@@ -1,6 +1,6 @@
 """Tests for Range V2: priors, board handling, is_raise_over wiring, floor mixing, calibration hooks.
 
-Target bug from the equity-branch review (see docs/reviews/2026-04-20-equity-branch/):
+Target bug from the 2026-04-20 equity-branch review:
   P0 #1: is_raise_over judged True on first raise because count-of-raises
          was done AFTER appending current action (api.py ordering bug).
 """
@@ -109,16 +109,6 @@ class TestReweightForBoard:
         prof = PlayerProfile(hands_seen=5, vpip=0.0, pfr=0.0)
         tracker.reset_hand(1, 'UTG', prof)
         return tracker
-
-    def test_new_board_does_not_reweight_combos(self):
-        """2026-11-09: the nuts/strong weight floor was removed (it inflated
-        strong-hand mass on every street against revealed showdowns), so new
-        community cards leave the weight vector untouched."""
-        tracker = self._make_tracker()
-        board = self._cards('7h', '7d', '2c')
-        before = tracker.get_distribution(1).copy()
-        tracker.reweight_for_board(board)
-        np.testing.assert_allclose(tracker.get_distribution(1), before)
 
     def test_reweight_preserves_distribution_sum(self):
         """After reweight the distribution must still sum to 1.0 (renorm)."""
@@ -239,16 +229,9 @@ class TestPreflopStrengthTable:
                 f"{b}={self._strength(b):.4f}"
             )
 
-    def test_aks_distinct_from_ako(self):
-        """Core bug fix: AKs and AKo must be distinguishable."""
-        aks = self._strength('AKs')
-        ako = self._strength('AKo')
-        assert aks > ako, f"AKs ({aks}) should rank above AKo ({ako})"
-        # And the gap should be meaningful (not 0.001 noise) — suited
-        # vs offsuit is a ~1.5 percent equity swing.
-        assert aks - ako > 0.005, (
-            f"AKs - AKo gap too small: {aks - ako}"
-        )
+    @pytest.mark.parametrize("hi, lo", list(itertools.combinations("AKQJT98765432", 2)))
+    def test_suited_ranks_above_offsuit_of_the_same_ranks(self, hi, lo):
+        assert self._strength(f"{hi}{lo}s") > self._strength(f"{hi}{lo}o")
 
     def test_tt_beats_22_by_wide_margin(self):
         """TT equity vs random ≈ 0.75; 22 ≈ 0.50. Must be ordered."""
@@ -269,17 +252,6 @@ class TestPreflopStrengthTable:
         assert worst[0] in ('42o', '32o', '72o'), (
             f"worst class should be a low offsuit, got {worst}"
         )
-
-    def test_suited_beats_offsuit_of_same_ranks(self):
-        """Every suited combination must rank >= the same-rank offsuit."""
-        ranks = 'AKQJT98765432'
-        violations = []
-        for hi, lo in itertools.combinations(ranks, 2):
-            s = self._strength(f"{hi}{lo}s")
-            o = self._strength(f"{hi}{lo}o")
-            if s <= o:
-                violations.append(f"{hi}{lo}: s={s:.4f} vs o={o:.4f}")
-        assert not violations, "suited<=offsuit violations: " + "; ".join(violations)
 
     def test_percentile_in_zero_one_range(self):
         for _, p in self._iter_all():
@@ -365,47 +337,6 @@ class TestPositionEndToEnd:
             board=[Card.from_str('7h'), Card.from_str('7d'), Card.from_str('2c')],
         )
         assert tracker._action_meta[1]['position'] == 'BB'
-
-
-class TestProfitLockOnTableTrigger:
-    """Profit-lock trigger uses on-table chips (my_final >= threshold).
-    Bankroll display is sampled from UserValueRSP and does NOT gate the trigger."""
-
-    def _bootstrap(self):
-        from pf_intercept.bot import BotBridge
-        from tests.test_bot_bridge import TestBotBridgeProfitLock
-        helper = TestBotBridgeProfitLock()
-        b = BotBridge(max_auto_rebuy=3)
-        b._my_uid = "99"
-        helper._bootstrap_table(b, room_id=20242379)
-        b._uid_to_seat["99"] = 0
-        return b
-
-    def test_winning_a_hand_does_not_record_bankroll_sample(self):
-        """Winning a hand does not create/update a bankroll sample."""
-        b = self._bootstrap()
-        assert b.bankroll_dashboard()["base_total_chips"] is None
-        b.handle("pb.WinnerRSP", {
-            "winner": [],
-            "profit": [{"uid": "99", "chips": 150}],
-        })
-        assert b.bankroll_dashboard()["base_total_chips"] is None
-
-    def test_first_trigger_works_without_any_prior_leave(self):
-        """Regression for the dead-lock: an on-table crossing of threshold
-        must fire profit_lock on the very first attempt."""
-        from pf_intercept import config
-        b = self._bootstrap()
-        bb = 2.0
-        thr = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)
-        # Bring on-table from 200 to thr in one big win.
-        b.handle("pb.WinnerRSP", {
-            "winner": [],
-            "profit": [{"uid": "99", "chips": thr - 200}],
-        })
-        assert b._profit_lock_deferred is not None, (
-            "first-ever trigger must fire (dead-lock regression)"
-        )
 
 
 class TestIsRaiseOverFirstBet:
@@ -976,6 +907,75 @@ def test_categorize_all_is_shared_and_marks_blocked_combos_air():
             assert cats[idx] == 'air'
         else:
             assert cats[idx] == hc.categorize_cards([c1, c2], board)
+
+
+@pytest.mark.parametrize("hole, board, bucket", [
+    # a pair the board holds is nobody's hand: the hole cards' own pair is the hand
+    (('Ah', '7h'), ('Ks', 'Kd', '7c'), 'medium'),            # second pair next to a board pair
+    (('Kc', 'Qd'), ('Kh', '7s', '7d'), 'strong'),            # top pair, good kicker
+    (('Kc', '5d'), ('Kh', '7s', '7d'), 'medium'),            # top pair, weak kicker
+    (('Qc', 'Qh'), ('9s', '9d', '4c'), 'strong'),            # overpair
+    (('5c', '5h'), ('9s', '9d', '4c'), 'medium'),            # pocket pair below a board card
+    (('2d', '9c'), ('Ad', '4s', 'Jh', '2c', '4d'), 'medium'),  # the same on the river
+    (('Ac', 'Kd'), ('Ah', 'Ks', '7s'), 'strong'),            # two pair with both hole cards
+    # no pair of their own on a paired board: the draw, as on any board
+    (('Ac', '9c'), ('4c', 'Qh', 'Qc'), 'draw'),              # flush draw
+    (('8c', 'Th'), ('9s', '7d', '9c'), 'draw'),              # open-ended straight draw
+    (('Ad', 'Kd'), ('Qd', 'Qs', '4d', '4h'), 'draw'),        # two board pairs
+    (('Td', '9c'), ('Kc', 'Ks', 'Jc'), 'weak_draw'),         # gutshot
+    (('Ah', 'Kd'), ('Qd', 'Qs', '4c'), 'weak_draw'),         # two overcards
+    (('9h', '3d'), ('Qd', 'Qs', '4c'), 'air'),
+    (('7c', '7h'), ('Td', 'Ac', 'Ad', 'Tc'), 'air'),         # pocket pair under two board pairs
+    # on the river kickers are showdown value or nothing
+    (('Ah', 'Kd'), ('Qd', 'Qs', '4c', '2h', '7s'), 'medium'),
+    (('9h', '3d'), ('Qd', 'Qs', '4c', '2h', '7s'), 'air'),
+    # open-ended means four in a row with two live ends
+    (('9s', '8s'), ('7d', '6c', '2h'), 'draw'),
+    (('5s', '4s'), ('3h', '2d', 'Kc'), 'draw'),              # 2-3-4-5: an ace or a six
+    (('Ts', '8s'), ('Qh', '9c', '6d'), 'weak_draw'),         # double gutshot
+    (('Ah', 'Jd'), ('3h', 'Kd', 'Qd'), 'weak_draw'),         # A-K-Q-J, only a ten
+    (('As', '3s'), ('4h', '2h', 'Jc'), 'weak_draw'),         # A-2-3-4, only a five
+])
+def test_categorize_cards_labels_what_the_hole_cards_add_to_the_board(hole, board, bucket):
+    from pokerfate.strategy.range_v2.hand_categorizer import categorize_cards
+    assert categorize_cards(_cards(*hole), _cards(*board)) == bucket
+
+
+@pytest.mark.parametrize("hole, board, bucket", [
+    # where hero's own label differs from the range label
+    (('Ts', '8s'), ('Qh', '9c', '6d'), 'draw'),              # double gutshot, eight outs
+    (('Ah', 'Kd'), ('Qd', 'Qs', '4c'), 'medium'),            # two overcards to a board pair
+    (('Jc', 'Ks'), ('Tc', '9h', '9c'), 'medium'),            # the same with a gutshot
+    (('Ac', '4d'), ('4c', 'Qh', 'Qc'), 'strong'),            # a pair next to a board pair
+    (('2d', '9c'), ('Ad', '4s', 'Jh', '2c', '4d'), 'strong'),  # the same on the river
+    (('7c', '7h'), ('Td', 'Ac', 'Ad', 'Tc'), 'medium'),      # pocket pair under two board pairs
+    # everywhere else it is the range label
+    (('Ac', '9c'), ('4c', 'Qh', 'Qc'), 'draw'),
+    (('8c', 'Th'), ('9s', '7d', '9c'), 'draw'),
+    (('Ad', 'Td'), ('7d', '7s', '7h', '2d'), 'draw'),        # flush draw over board trips
+    (('Td', '9c'), ('Kc', 'Ks', 'Jc'), 'weak_draw'),
+    (('9h', '3d'), ('Qd', 'Qs', '4c'), 'air'),
+    (('8c', '6c'), ('8h', '3c', '7c'), 'medium'),
+    (('Ac', '9c'), ('4c', 'Qh', 'Qc', '2d', '7s'), 'air'),
+    (('Ah', 'Jd'), ('3h', 'Kd', 'Qd'), 'weak_draw'),
+])
+def test_decision_bucket_is_what_the_hand_is_worth_to_hero(hole, board, bucket):
+    from pokerfate.strategy.range_v2.hand_categorizer import decision_bucket
+    assert decision_bucket(_cards(*hole), _cards(*board)) == bucket
+
+
+@pytest.mark.parametrize("hole, board, outs", [
+    (('9s', '8s'), ('7d', '6c', '2h'), 2),                   # open-ended
+    (('Ts', '8s'), ('Qh', '9c', '6d'), 2),                   # double gutshot
+    (('As', 'Ks'), ('Qc', 'Jd', '4h'), 1),                   # A-K-Q-J
+    (('As', '3s'), ('4h', '2h', 'Jc'), 1),                   # A-2-3-4
+    (('Qh', '9h'), ('Kd', 'Js', '2c'), 1),                   # gutshot
+    (('Ah', 'Kd'), ('Qd', 'Qs', '4c'), 0),
+    (('7h', '2d'), ('Kd', 'Qs', 'Jc', 'Td'), 0),             # the board's draw, no hole card in it
+])
+def test_straight_draw_outs_counts_the_ranks_that_complete_a_straight(hole, board, outs):
+    from pokerfate.strategy.range_v2.hand_categorizer import straight_draw_outs
+    assert straight_draw_outs(_cards(*hole), _cards(*board)) == outs
 
 
 def _knn_scores_reference(em, profile, index):

@@ -54,7 +54,7 @@ def _feed(tracker: RoomRobotTracker, kind: str, msg: dict) -> None:
     elif kind == "pb.OtherEnterRoomBRC":
         uid = (msg.get("user") or {}).get("uid")
         if uid:
-            tracker.entered(uid, msg.get("num", 0), msg.get("rb_num", 0))
+            tracker.entered(uid)
     elif kind == "pb.OtherLeaveRoomBRC":
         uid = msg.get("uid")
         if uid is not None:
@@ -99,7 +99,7 @@ def show(title: str, c: Counter) -> None:
         print(f"   实际{labels[real]}的 {n} 手：当时判对 {right}（{100 * right / n:.1f}%）{'；' + parts if parts else ''}")
     src = {s: v for (r, s), v in c.items() if r == "source"}
     tot = sum(src.values()) or 1
-    print(f"   判定依据：服务器计数 {100 * src.get('rb_num', 0) / tot:.0f}%，名单与号段 {100 * src.get('labels', 0) / tot:.0f}%")
+    print(f"   判定依据：服务器计数 {100 * src.get('rb_num', 0) / tot:.0f}%，名单 {100 * src.get('labels', 0) / tot:.0f}%")
 
 
 def main(argv=None) -> None:
@@ -108,7 +108,7 @@ def main(argv=None) -> None:
     ap.add_argument("--registry", type=Path, default=None)
     args = ap.parse_args(argv)
     truth = RobotRegistry(args.registry, autosave=False)
-    print(f"真相取自当前名单：{truth.counts()}，号段 {truth.blocks()}")
+    print(f"真相取自当前名单：{truth.counts()}")
     cold = RobotRegistry(Path(tempfile.mkdtemp()) / "cold.json", autosave=False)
     show("冷启动（名单从空开始，只用回放到当时为止的服务器计数）", run(args.log, truth, cold))
     warm = RobotRegistry(Path(tempfile.mkdtemp()) / "warm.json", autosave=False)

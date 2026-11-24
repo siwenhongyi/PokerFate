@@ -184,7 +184,10 @@ def check_value(ctx: DecisionCtx) -> float:
     realization += bucket_adj
 
     if ctx.num_opponents > 1:
-        realization -= min(0.18, 0.06 * (ctx.num_opponents - 1))
+        # An opponent who pre-selected a check bets half as often when checked to: he
+        # takes half of an extra player's toll on what hero realises.
+        extra = max(0.0, (ctx.num_opponents - 1) - 0.5 * ctx.weak_reads)
+        realization -= min(0.18, 0.06 * extra)
     if ctx.board_sig.is_wet and ctx.hero_bucket in {"medium", "strong", "weak_draw", "draw"}:
         realization -= 0.05
     if 0 < float(ctx.spr or 0.0) <= 1.5 and ctx.hero_bucket in {"medium", "strong", "nuts"}:
