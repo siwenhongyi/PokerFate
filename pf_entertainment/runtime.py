@@ -18,7 +18,9 @@ class EntertainmentRuntime:
         *,
         web_host: str | None = "0.0.0.0",
         web_port: int | None = 9022,
+        live_source=None, radar_board=None,
     ) -> None:
+        self.live_source, self.radar_board = live_source, radar_board
         self.web_host = web_host
         self.web_port = web_port
         self._web = None
@@ -34,9 +36,15 @@ class EntertainmentRuntime:
                 runtime=self,
                 host=self.web_host,
                 port=self.web_port,
+                live_source=self.live_source, radar_board=self.radar_board,
             )
             await self._web.start()
             self.web_port = self._web.port
+
+    async def close(self):
+        if self._web is not None:
+            await self._web.close()
+            self._web = None
 
     def attach_session(self) -> datetime:
         self._connected_at = datetime.now()

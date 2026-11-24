@@ -90,13 +90,13 @@ class TablePolicyConfig:
     buyin_bb: int = 100
     ladder: tuple = ()
     tries_per_stake: int = 3
-    hop_delay: tuple = (5.0, 10.0)
+    hop_delay: tuple = (3.0, 5.0)
     stake_retry: tuple = (900.0, 3600.0)   # cool-down after a failed round: first, cap (doubling)
     max_fail_rounds: int = 3               # stop when every usable stake failed this many rounds
     probe_tries: int = 2                   # tables per stake on an upward trip from a good table
     probe_batch_sec: float = 600.0         # a trip also covers stakes due within this many seconds
     mixed_confirm_hands: int = 2
-    empty_grace_sec: float = 60.0
+    empty_grace_sec: float = 10.0
     wait_blind: bool = True
     leave_retry_sec: float = 90.0
     match_timeout_sec: float = 60.0
@@ -105,6 +105,27 @@ class TablePolicyConfig:
         if not self.ladder:
             self.ladder = default_ladder(self.home_bb)
         self.ladder = tuple(int(b) for b in self.ladder)
+
+
+def configured_policy(home_bb: int, buyin_bb: int = 100, stakes: str = "") -> TablePolicyConfig:
+    """Shared runtime settings for headless and proxy cash tables."""
+    from pf_intercept import config
+
+    ladder = parse_ladder(stakes, home_bb)
+    if ladder[0] != home_bb:
+        ladder = (home_bb,) + tuple(bb for bb in ladder if bb != home_bb)
+    return TablePolicyConfig(
+        home_bb=home_bb, buyin_bb=buyin_bb, ladder=ladder,
+        tries_per_stake=int(config.TABLE_SELECT_TRIES_PER_STAKE),
+        hop_delay=tuple(config.TABLE_SELECT_HOP_DELAY_SEC),
+        stake_retry=tuple(config.TABLE_SELECT_STAKE_RETRY_SEC),
+        max_fail_rounds=int(config.TABLE_SELECT_MAX_FAIL_ROUNDS),
+        probe_tries=int(config.TABLE_SELECT_PROBE_TRIES),
+        probe_batch_sec=float(config.TABLE_SELECT_PROBE_BATCH_SEC),
+        mixed_confirm_hands=int(config.TABLE_SELECT_MIXED_CONFIRM_HANDS),
+        empty_grace_sec=float(config.TABLE_SELECT_EMPTY_GRACE_SEC),
+        wait_blind=bool(config.TABLE_SELECT_WAIT_BLIND),
+    )
 
 
 @dataclass
@@ -322,6 +343,14 @@ class TablePolicy:
             return self._leave("better_stake", now, delayed=True, humans=humans, robots=robots,
                                rejected=False)
         return NONE
+
+    def on_errand(self, now: float, humans: int, robots: int) -> Step:
+        """Something has to be done away from the table: leave when this hand ends, as from a
+        table that was accepted, and search again afterwards. Only from a table we are playing
+        at; anywhere else a match is on its way already."""
+        if self.state != SEATED or not self.dealt:
+            return NONE
+        return self._leave("errand", now, delayed=True, humans=humans, robots=robots, rejected=False)
 
     def on_left(self, now: float, *, ours: bool) -> Step:
         """We are back in the lobby.  ``ours``: the policy asked for this leave."""

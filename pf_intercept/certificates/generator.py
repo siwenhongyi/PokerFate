@@ -5,7 +5,7 @@ Usage:
     python -m pf_intercept.gen_cert
 
 Output (in pf_intercept/certs/):
-    ca.crt          ← install this into Windows Trusted Root CA (double-click → install)
+    ca.crt          ← install this as a trusted root CA on the device that runs the game client
     server.crt      ← used by proxy (TLS server cert)
     server.key      ← used by proxy (TLS server private key)
 
@@ -108,14 +108,12 @@ def generate(server_host: str, certs_dir: Path, alt_hosts: list[str] | None = No
     _save_cert(srv_cert, certs_dir / "server.crt")
     print(f"Server cert: {certs_dir / 'server.crt'}")
     print()
-    print("Next step (Windows):")
-    print(f"  1. Copy {certs_dir / 'ca.crt'} to the Windows machine")
-    print(f"  2. Double-click ca.crt → Install Certificate → Local Machine → Trusted Root CAs")
-    print(f"  3. Add to hosts:  127.0.0.1  {server_host}")
-    if alt_hosts:
-        for host in alt_hosts:
-            print(f"                    127.0.0.1  {host}")
-    print(f"  4. Run proxy:     python -m pf_intercept.proxy")
+    print("Next steps (see pf_intercept/proxy/README.md):")
+    print(f"  1. Install {certs_dir / 'ca.crt'} as a trusted root CA on the device that runs the game client")
+    print("  2. Point the game domain at the machine running the proxy (the fake DNS, or the client's hosts file):")
+    for host in [server_host] + [h for h in (alt_hosts or []) if h != server_host]:
+        print(f"       <proxy machine IP>  {host}")
+    print("  3. Run:  python -m pf_intercept.launcher")
 
 
 if __name__ == "__main__":

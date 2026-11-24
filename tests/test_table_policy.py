@@ -181,18 +181,18 @@ def test_empty_table_waits_for_the_first_arrival():
     p = _policy()
     assert not p.on_enter(10000, 0, 0, 0.0)
     assert p.state == PROBING
-    assert not p.on_tick(30.0)                         # inside the grace period
-    step = p.on_seats_changed(0, 1, 31.0)              # a robot sat down first
+    assert not p.on_tick(9.9)                          # inside the grace period
+    step = p.on_seats_changed(0, 1, 9.99)              # a robot sat down first
     assert (step.kind, step.reason, step.delayed) == ("leave", "no_humans", False)
 
     p = _policy()
     p.on_enter(10000, 0, 0, 0.0)
-    assert not p.on_seats_changed(1, 0, 10.0)          # a human sat down first
+    assert not p.on_seats_changed(1, 0, 9.0)           # a human sat down first
     assert p.state == SEATED
 
     p = _policy()
     p.on_enter(10000, 0, 0, 0.0)
-    step = p.on_tick(60.0)                             # nobody came
+    step = p.on_tick(10.0)                             # nobody came
     assert (step.kind, step.reason) == ("leave", "empty_timeout")
 
 
@@ -201,17 +201,17 @@ def test_empty_table_after_play_survives_duplicate_events_and_restarts_on_next_v
     p.on_enter(10000, 1, 0, 0.0)
     p.on_dealt()
     assert not p.on_seats_changed(0, 0, 10.0)
-    assert not p.on_seats_changed(1, 0, 26.0)          # a human returns after 16 s
+    assert not p.on_seats_changed(1, 0, 16.0)          # a human returns after 6 s
     assert not p.on_tick(70.0, 1, 0)
     assert p.state == SEATED
 
     assert not p.on_seats_changed(0, 0, 80.0)
     assert not p.on_hand_end(0, 0, 82.0)
-    assert not p.on_seats_changed(0, 0, 100.0)
-    assert not p.on_tick(139.9, 0, 0)
-    step = p.on_tick(140.0, 0, 0)
+    assert not p.on_seats_changed(0, 0, 85.0)
+    assert not p.on_tick(89.9, 0, 0)
+    step = p.on_tick(90.0, 0, 0)
     assert (step.kind, step.reason, step.delayed, p.tries) == ("leave", "empty_timeout", False, 0)
-    assert not p.on_tick(141.0, 0, 0)
+    assert not p.on_tick(91.0, 0, 0)
 
 
 def test_reconnect_to_empty_table_with_cards_rechecks_arrivals_before_leaving():
@@ -347,7 +347,7 @@ def test_bridge_rematches_when_last_opponent_leaves_a_played_table(monkeypatch):
     b.handle("pb.SitDownRSP", {"seatid": 0})
     b._table_policy.on_dealt()
     assert b.handle("pb.OtherLeaveRoomBRC", {"uid": opponent, "num": 1}) is None
-    clock[0] += 60
+    clock[0] += 10
     leave = b.handle("pf.Tick", {"now": clock[0]})
     assert leave == ("pb.LeaveRoomREQ", {"seat_reserve": False, "is_switch_room": True}, 0.0)
     assert b._table_switch["reason"] == "empty_timeout"
@@ -405,6 +405,38 @@ def test_leaving_a_played_table_reports_the_running_result(monkeypatch):
     assert sent == []                                  # nothing before the server confirms
     b.handle("pb.LeaveRoomRSP", {"roomid": 21203448})
     assert sent == [("table_leave", {"reason": "no_humans", "session_delta_chips": -235_066})]
+
+
+def test_an_errand_leaves_a_played_table_after_the_hand_and_matches_again(monkeypatch):
+    """The session has something to do away from the table (the tasks' Omaha / AOF hands)."""
+    sent = []
+    monkeypatch.setattr("pf_intercept.bot.notify", lambda event, **f: sent.append((event, f)))
+    b = _bridge(monkeypatch)
+    assert b.handle("pf.Errand", {}) is None                # in the lobby: a match is on its way anyway
+    b.handle("pb.EnterRoomRSP", _enter([ME, "10700890", "10774146"]))
+    b.handle("pb.SitDownRSP", {"seatid": 0})
+    assert b.handle("pf.Errand", {}) is None                # not dealt in yet: the table is still being judged
+    b._table_policy.on_dealt()
+    b._session_poker_pnl = 12_000
+    assert b.handle("pf.Errand", {}) == ("pb.DelayLeaveRoomREQ", {"flag": True}, 0.0)
+    assert (b._table_switch["reason"], b._table_policy.state) == ("errand", LEAVING)
+    assert b.handle("pf.Errand", {}) is None                # one leave at a time
+    b.handle("pb.LeaveRoomRSP", {"roomid": 21203448})
+    assert sent == [("table_leave", {"reason": "errand", "session_delta_chips": 12_000})]
+    # A table that was fine: no stake is marked down, the search starts over at the same one.
+    p = b._table_policy
+    assert (p.state, p.tries, p.current_bb(), p.unavailable) == (SCHEDULED, 0, 10000, set())
+    assert not any(p.fail_rounds.values()) and not any(p.retry_at.values())
+    assert b.handle("pf.Tick", {"now": p.next_match_at})[0] == "pb.QuickStartREQ"
+
+
+def test_an_errand_waits_while_another_leave_owns_the_table(monkeypatch):
+    b = _bridge(monkeypatch)
+    b.handle("pb.EnterRoomRSP", _enter([ME, "10700890"]))
+    b.handle("pb.SitDownRSP", {"seatid": 0})
+    b._table_policy.on_dealt()
+    assert b._maybe_profit_lock_leave_reenter({0: 2_000_000})[0] == "pb.DelayLeaveRoomREQ"
+    assert b.handle("pf.Errand", {}) is None and b._table_switch is None
 
 
 def test_rejecting_a_table_on_arrival_sends_nothing(monkeypatch):
@@ -472,3 +504,135 @@ def test_policy_off_changes_nothing(monkeypatch):
     assert not b.wants_tick()
     assert b.handle("pb.EnterRoomRSP", _enter([ME, ROBOTS[0], ROBOTS[1]])) is None
     assert b.adjust_match_fields({"wait_blind": False}) == {"wait_blind": False}
+
+
+@pytest.mark.parametrize("proxy", [False, True], ids=["headless", "proxy"])
+def test_both_entries_follow_the_same_cash_table_lifecycle(monkeypatch, proxy):
+    from pf_intercept import config
+    from pf_intercept.table_policy import configured_policy
+
+    for uid in ROBOTS:
+        robots_mod.default_registry().confirm(uid, ROBOT, "test")
+    monkeypatch.setattr(config, "TABLE_SELECT_HOP_DELAY_SEC", (5.0, 5.0))
+    clock = [1000.0]
+    monkeypatch.setattr("pf_intercept.bot.time.time", lambda: clock[0])
+    b = BotBridge(max_auto_rebuy=5, auto_table_selection=proxy)
+    b.set_session_uid(int(ME))
+    monkeypatch.setattr(b, "_runtime_calibration_should_pause_play", lambda: None)
+    if not proxy:
+        b.configure_table_policy(configured_policy(5000))
+
+    leave = b.handle("pb.EnterRoomRSP", _enter([ME, ROBOTS[0]], bb=5000))
+    assert leave[0] == "pb.LeaveRoomREQ"
+    p = b._table_policy
+    assert p.cfg == configured_policy(5000)
+    loss_cap = b._loss_cap_chips()
+    assert b.handle("pb.LeaveRoomRSP", {})[0] == "pb.UserValueREQ"
+    b.handle("pb.UserValueRSP", {"type": 10100001, "value": "50000000"})
+    assert b.handle("pf.Tick", {"now": 1004.0}) is None
+    match = b.handle("pf.Tick", {"now": 1005.0})
+    assert match[0] == "pb.QuickStartREQ"
+    assert match[1]["boot"] == 5000
+    assert match[1]["byin_chips"] == 500000
+    assert match[1]["wait_blind"] is True
+    assert b._auto_rebuy_done == 0
+
+    # A server rejection advances the common ladder. A fallback table does not
+    # change the run's home stake or grant another loss budget.
+    b.handle("pb.QuickStartRSP", {"code": 123})
+    assert b.handle("pf.Tick", {"now": p.next_match_at})[1]["boot"] == 10000
+    assert b.handle("pb.EnterRoomRSP", _enter([ME, "20000001"], bb=10000)) is None
+    assert b._table_policy is p and p.cfg.home_bb == 5000
+    assert b._loss_cap_chips() == loss_cap
+
+    # The same empty-table timer also operates after a hand/table change.
+    b.handle("pb.OtherLeaveRoomBRC", {"uid": "20000001"})
+    assert b.handle("pf.Tick", {"now": p.deadline})[0] == "pb.LeaveRoomREQ"
+    b.stop_auto_rejoin()
+    assert b.handle("pf.Tick", {"now": 9e9}) is None
+
+
+@pytest.mark.parametrize("kind", ["spectator", "friend", "tournament", "practice", "failed"])
+def test_proxy_only_enables_selection_for_a_seated_cash_player(monkeypatch, kind):
+    b = BotBridge(auto_table_selection=True)
+    b.set_session_uid(int(ME))
+    msg = _enter([ME, ROBOTS[0]])
+    if kind == "spectator":
+        msg = _enter([ROBOTS[0]])
+    elif kind == "friend":
+        msg["friend_room_info"] = {"owner": ME}
+    elif kind == "tournament":
+        msg["sngroom_info"] = {"id": 1}
+    elif kind == "practice":
+        msg["game_type"] = 10010102
+    else:
+        msg["code"] = 123
+    b.handle("pb.EnterRoomRSP", msg)
+    assert not b.wants_tick()
+    assert b.handle("pf.Tick", {"now": 9e9}) is None
+
+
+def test_proxy_spectator_sits_then_manual_leave_does_not_rematch(monkeypatch):
+    b = BotBridge(auto_table_selection=True)
+    b.set_session_uid(int(ME))
+    monkeypatch.setattr(b, "_runtime_calibration_should_pause_play", lambda: None)
+    b.handle("pb.EnterRoomRSP", _enter(["20000001"]))
+    b.handle("pb.SitDownRSP", {"seatid": 1, "chips": "1000000"})
+    assert b.wants_tick() and b._table_policy.state == SEATED
+    # Match fields can have been populated by an earlier automatic switch.
+    b._auto_rejoin_fields = b._table_match_fields(10000)
+    b.note_client_table_request("pb.LeaveRoomREQ", {})
+    b.handle("pb.LeaveRoomRSP", {})
+    assert b._bankroll_pending_action is None
+    assert b.handle("pf.Tick", {"now": 9e9}) is None
+    assert b.handle("pb.QuickStartRSP", {"code": 123}) is None
+    b.handle("pb.EnterRoomRSP", _enter([ME, "20000001"]))
+    assert b._table_policy.state == SEATED
+
+
+def test_proxy_manual_delayed_leave_can_be_cancelled(monkeypatch):
+    b = BotBridge(auto_table_selection=True)
+    b.set_session_uid(int(ME))
+    monkeypatch.setattr(b, "_runtime_calibration_should_pause_play", lambda: None)
+    b.handle("pb.EnterRoomRSP", _enter([ME, "20000001"]))
+    b.note_client_table_request("pb.DelayLeaveRoomREQ", {"flag": True})
+    assert b.handle("pf.Tick", {"now": 9e9}) is None
+    b.note_client_table_request("pb.DelayLeaveRoomREQ", {"flag": False})
+    assert b._table_policy.state == SEATED
+    assert b._auto_rejoin_fields["boot"] == 10000
+    b.handle("pb.OtherLeaveRoomBRC", {"uid": "20000001"})
+    assert b.handle("pf.Tick", {"now": b._table_policy.deadline})[0] == "pb.LeaveRoomREQ"
+
+
+@pytest.mark.parametrize("manual_stop", [False, True])
+def test_proxy_lobby_reconnect_preserves_budget_and_manual_stop(monkeypatch, manual_stop):
+    b = BotBridge(max_auto_rebuy=0, auto_table_selection=True)
+    b.set_session_uid(int(ME))
+    monkeypatch.setattr(b, "_runtime_calibration_should_pause_play", lambda: None)
+    b.handle("pb.EnterRoomRSP", _enter([ME, "20000001"], bb=5000))
+    b._session_poker_pnl = -100000
+    if manual_stop:
+        b.note_client_table_request("pb.LeaveRoomREQ", {})
+    b.prepare_transport_reconnect()
+    # An existing room is restored by the client, without a new buy-in.
+    assert b.handle("pb.UserLocationRSP", {"roomid": 90}) is None
+    out = b.handle("pb.UserLocationRSP", {"roomid": 0})
+    if manual_stop:
+        assert out is None
+    else:
+        assert out[0] == "pb.QuickStartREQ"
+        assert out[1]["boot"] == 5000
+        assert 0 < out[1]["byin_chips"] <= 400000
+    assert b._auto_rebuy_done == 0
+    assert b._loss_cap_chips() == 500000
+
+
+def test_proxy_unexpected_leave_uses_the_shared_cash_recovery(monkeypatch):
+    b = BotBridge(max_auto_rebuy=5, auto_table_selection=True)
+    b.set_session_uid(int(ME))
+    monkeypatch.setattr(b, "_runtime_calibration_should_pause_play", lambda: None)
+    b.handle("pb.EnterRoomRSP", _enter([ME, "20000001"], bb=5000))
+    assert b.handle("pb.LeaveRoomRSP", {})[0] == "pb.UserValueREQ"
+    out = b.handle("pb.UserValueRSP", {"type": 10100001, "value": "50000000"})
+    assert out[0] == "pb.QuickStartREQ" and out[1]["boot"] == 5000
+    assert b._auto_rebuy_done == 0

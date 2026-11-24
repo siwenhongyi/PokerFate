@@ -655,6 +655,7 @@ class _HeadlessRuntime:
 async def start_live_web(
     observer: "LiveTableObserver", *, host: str = "127.0.0.1", port: int = 9022,
     bankroll_source: Callable[[], dict] | None = None,
+    radar_board=None,
 ):
     """Start the entertainment web server with live-table and bankroll snapshots.
 
@@ -665,7 +666,7 @@ async def start_live_web(
 
     server = EntertainmentWebServer(
         runtime=_HeadlessRuntime(bankroll_source), host=host, port=port,
-        live_source=observer.snapshot,
+        live_source=observer.snapshot, radar_board=radar_board,
     )
     await server.start()
     return server

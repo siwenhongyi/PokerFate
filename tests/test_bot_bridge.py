@@ -3,6 +3,8 @@
 import threading
 
 import pytest
+from dataclasses import replace
+from pf_intercept.options import RunOptions
 
 from pf_intercept import config
 from pf_intercept.bot import BotBridge
@@ -957,7 +959,7 @@ class TestBotBridgeProfitLock:
         self._bootstrap_table(b)
         b._uid_to_seat["99"] = 0
         bb = 2.0
-        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)
+        thr_chips = int(RunOptions().profit_lock_bb * bb)
         # Hero starts 200 chips; profit X → my_final = 200 + X.
         # To stay below threshold, profit = thr - 200 - 1.
         start = 200
@@ -980,7 +982,7 @@ class TestBotBridgeProfitLock:
         self._bootstrap_table(b, room_id=rid)
         b._uid_to_seat["99"] = 0
         bb = 2.0
-        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)
+        thr_chips = int(RunOptions().profit_lock_bb * bb)
         # Hero starts 200 chips; profit = thr - 200 → my_final = thr → trigger.
         start = 200
         profit = thr_chips - start
@@ -1044,7 +1046,7 @@ class TestBotBridgeProfitLock:
         rid = 111
         self._bootstrap_table(b, room_id=rid)
         b._uid_to_seat["99"] = 0
-        thr = int(config.PROFIT_LOCK_BB_THRESHOLD * 2.0)
+        thr = int(RunOptions().profit_lock_bb * 2.0)
         b.handle(
             "pb.WinnerRSP",
             {"winner": [], "profit": [{"uid": "99", "chips": thr - 200}]},
@@ -1067,7 +1069,7 @@ class TestBotBridgeProfitLock:
         self._bootstrap_table(b)
         b._uid_to_seat["99"] = 0
         bb = 2.0
-        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)
+        thr_chips = int(RunOptions().profit_lock_bb * bb)
         b.handle(
             "pb.WinnerRSP",
             {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
@@ -1085,7 +1087,7 @@ class TestBotBridgeProfitLock:
         b._my_uid = "99"
         self._bootstrap_table(b)
         b._uid_to_seat["99"] = 0
-        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * 2.0)
+        thr_chips = int(RunOptions().profit_lock_bb * 2.0)
         b.handle(
             "pb.WinnerRSP",
             {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
@@ -1112,7 +1114,7 @@ class TestBotBridgeProfitLock:
         b._my_uid = "99"
         self._bootstrap_table(b)
         b._uid_to_seat["99"] = 0
-        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * 2.0)
+        thr_chips = int(RunOptions().profit_lock_bb * 2.0)
         b.handle(
             "pb.WinnerRSP",
             {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
@@ -1137,7 +1139,7 @@ class TestBotBridgeProfitLock:
         b._my_uid = "99"
         self._bootstrap_table(b)
         b._uid_to_seat["99"] = 0
-        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * 2.0)
+        thr_chips = int(RunOptions().profit_lock_bb * 2.0)
         out = b.handle(
             "pb.WinnerRSP",
             {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
@@ -1152,7 +1154,7 @@ class TestBotBridgeProfitLock:
         b._my_uid = "99"
         self._bootstrap_table(b)
         b._uid_to_seat["99"] = 0
-        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * 2.0)
+        thr_chips = int(RunOptions().profit_lock_bb * 2.0)
         b.handle(
             "pb.WinnerRSP",
             {"winner": [], "profit": [{"uid": "99", "chips": thr_chips - 200}]},
@@ -1297,7 +1299,7 @@ class TestBankrollSampling:
         """Full cycle: trigger → leave → UserValueRSP sample → reenter."""
         b = self._setup()
         bb = 2.0
-        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)   # 400 for 200 BB at BB=2
+        thr_chips = int(RunOptions().profit_lock_bb * bb)   # 400 for 200 BB at BB=2
         # Bring on-table chips to exactly threshold (hero started 200).
         out = b.handle(
             "pb.WinnerRSP",
@@ -1331,7 +1333,7 @@ class TestBankrollSampling:
         earlier code gated on session PnL and the first trigger was unreachable."""
         b = self._setup()
         bb = 2.0
-        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)
+        thr_chips = int(RunOptions().profit_lock_bb * bb)
         assert b.bankroll_dashboard()["base_total_chips"] is None
         out = b.handle(
             "pb.WinnerRSP",
@@ -1347,7 +1349,7 @@ class TestBankrollSampling:
         """Even if the session's poker PnL is negative, on-table threshold fires."""
         b = self._setup()
         bb = 2.0
-        thr_chips = int(config.PROFIT_LOCK_BB_THRESHOLD * bb)
+        thr_chips = int(RunOptions().profit_lock_bb * bb)
         b.handle("pb.UserValueRSP", {"type": 10100001, "value": 100_000})
         b._session_poker_pnl = -10_000          # earlier tables in this run
         assert b.bankroll_dashboard()["session_delta_chips"] < 0
@@ -1461,7 +1463,7 @@ class TestTableTopup:
         b.stop_auto_rejoin()
         assert self._lose(b, 70) is None
         b = self._setup()
-        monkeypatch.setattr(config, "TOPUP_BELOW_BB", 0)
+        b.options = replace(b.options, topup_below_bb=0)
         assert self._lose(b, 70) is None
 
     def test_another_players_top_up_only_moves_his_stack(self, monkeypatch):
@@ -1950,8 +1952,8 @@ def test_hand_swing_includes_last_hand_detail(monkeypatch) -> None:
 
 
 def test_profit_lock_threshold_in_config() -> None:
-    assert isinstance(config.PROFIT_LOCK_BB_THRESHOLD, int)
-    assert config.PROFIT_LOCK_BB_THRESHOLD >= 1
+    assert isinstance(RunOptions().profit_lock_bb, int)
+    assert RunOptions().profit_lock_bb >= 1
 
 
 class _BoardApi:

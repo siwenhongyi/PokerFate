@@ -18,6 +18,7 @@ def test_table_leave_names_the_cause_and_carries_only_the_running_result() -> No
     assert format_bark_message("table_leave", {"reason": "outnumbered", "session_delta_chips": 164_376}) == (
         "选桌离桌 · 真人少于人机", "本次启动盈亏: +164.38k（筹码）", icon)
     assert format_bark_message("table_leave", {"reason": "retry"})[0] == "选桌离桌"
+    assert format_bark_message("table_leave", {"reason": "errand"})[0] == "离桌 · 去打任务手数（奥马哈 / AOF）"
     assert format_bark_options("table_leave", {}) == {}
 
 

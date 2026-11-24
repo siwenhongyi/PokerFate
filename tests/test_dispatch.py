@@ -10,11 +10,15 @@ from pathlib import Path
 
 import pytest
 
-from pf_intercept.headless import dispatch as dp
-from pf_intercept.headless import rewards as rw
+from pf_intercept.headless.lobby.activities import dispatch as dp
+from pf_intercept.headless.lobby.core import base as lb
+from pf_intercept.headless.lobby.routine import fund as fd
+from pf_intercept.headless.lobby.core import needs as nd
+from pf_intercept.headless.lobby.core import service as sv
+from pf_intercept.headless.lobby.routine import tasks as tk
 from pf_intercept.wire import codec
 
-NOW = dp.START + 30 * 86400
+NOW = dp.season()[0] + 30 * 86400
 TPL = Path(__file__).resolve().parents[1] / "pf_reverse" / "output" / "lua" / "src" / "tpl"
 
 
@@ -63,7 +67,7 @@ def setup(tmp_path, replies, *, skins=None, tickets=5, now=NOW):
 
     ready = asyncio.Event()
     ready.set()
-    svc = rw.RewardService(uid=42, authorization="session-secret", http_base="https://game.example",
+    svc = sv.RewardService(uid=42, authorization="session-secret", http_base="https://game.example",
                            chnl=3, version="1.7.0", on_credit=credit, ready=ready, post=http,
                            journal_path=tmp_path / "rewards.jsonl")
     clock = [now]
@@ -121,24 +125,34 @@ def no_pauses(monkeypatch):
     monkeypatch.setattr(dp, "PAUSE_SEC", 0)
 
 
-def test_tables_are_the_clients():
+def test_tables_are_read_from_the_client():
     events = lua_table("event_info")
-    assert {int(r["id"]): (int(r["campInt"]), int(r["event_level"])) for r in events} == dp.EVENTS
+    assert {int(r["id"]): (int(r["campInt"]), int(r["event_level"])) for r in events} == dp.events()
     # The star a player needs is the level, and only levels 4 and 5 have an egg reward.
     assert all(int(r["character_level"]) == int(r["event_level"]) for r in events)
     assert all((r["reward_bonus_item"] != "nil") == (int(r["event_level"]) >= 4) for r in events)
-    assert {int(r["id"]): int(r["campInt"]) for r in lua_table("character")} == dp.ROLE_CAMP
-    assert {int(r["id"]): (int(r["role"]), int(r["avatar"])) for r in lua_table("character_skin")} == dp.SKINS
+    assert {int(r["id"]): int(r["campInt"]) for r in lua_table("character")} == dp.role_camp()
+    assert {int(r["id"]): (int(r["role"]), int(r["avatar"])) for r in lua_table("character_skin")} == dp.outfits()
     passes = lua_table("passcard_info")
-    assert [int(r["level"]) for r in passes] == list(range(len(dp.PASS_COSTS)))
-    assert tuple(int(r["level_up_cost"]) for r in passes) == dp.PASS_COSTS
+    assert [int(r["level"]) for r in passes] == list(range(len(dp.pass_costs())))
+    assert tuple(int(r["level_up_cost"]) for r in passes) == dp.pass_costs()
     assert not any("10100001" in r["ordinary_rewards"] + r["advanced_rewards"] for r in passes)
     const = (TPL / "tpl_constdata.lua").read_text(encoding="utf-8")
-    for name, value in [("Dispatch_Start", dp.START), ("Dispatch_End", dp.END),
+    start, end = dp.season()
+    for name, value in [("Dispatch_Start", start), ("Dispatch_End", end),
                         ("Dispatch_Event_Num", dp.EVENT_SLOTS), ("Dispatch_Free_Refresh", dp.MAX_REFRESHES),
                         ("Dispatch_Ordinary_Character_Num", dp.ROLE_SENDS),
                         ("Dispatch_Ordinary_Skin_Num", dp.SKIN_SENDS)]:
         assert re.search(rf"\b{name} = {value},", const), name
+
+
+def test_nothing_is_sent_outside_the_season(tmp_path):
+    async def run():
+        worker, http, *_ = setup(tmp_path, [], now=dp.season()[1] + 1)
+        await worker.check()
+        assert not http.calls
+        assert journal(tmp_path, "dispatch_season")[-1]["open"] is False
+    asyncio.run(run())
 
 
 def test_role_list_request_is_in_the_protocol():
@@ -170,7 +184,7 @@ def test_finished_assignments_are_collected_and_only_egg_chips_are_money(tmp_pat
             ("/afk/passCardData", {"code": 0, "item_num": 5000, "data": {"ordinary": [0], "advanced": []}}),
             ("/task/dispatchTaskList", {"code": 0, "list": [{"id": 1, "status": 1}]}),
         ])
-        worker.service._dispatch_due = NOW + 300
+        worker.service.due["dispatch"] = NOW + 300
         await worker.check()
         assert not http.replies
         assert http.calls[0] == ("/afk/eventList", {"rec_item": True, "immediately": True})
@@ -191,7 +205,46 @@ def test_finished_assignments_are_collected_and_only_egg_chips_are_money(tmp_pat
         assert first["row_fields"] == ["end_ts", "event_id", "id", "role_id", "status"]
         assert "remain_free_dispatch_times" in first["fields"]
         # Woken when the running assignment ends instead of at the next poll.
-        assert worker.service._dispatch_due == NOW + 125
+        assert worker.service.due["dispatch"] == NOW + 125
+    asyncio.run(run())
+
+
+def test_an_assignment_id_goes_back_to_the_server_as_it_came(tmp_path):
+    """Live on 2026-11-21 the list held four finished assignments and not one was asked for:
+    the id of a row is the server's own text, not a number."""
+    async def run():
+        first, second = "6740f2c1a8b3d94e5f001a2b", "6740f2c1a8b3d94e5f001a2c"
+        left = [row(second, 100002, dp.FINISHED, NOW - 60, 1003), row(None, 100007, dp.FINISHED, NOW - 60, 1004)]
+        worker, http, _, credits, _ = setup(tmp_path, [
+            ("/afk/eventList", listing(row(first, 100001, dp.FINISHED, NOW - 60, 1001), *left, sends=0)),
+            ("/afk/recReward", {"code": 0, "exp": 300}),
+            ("/afk/recReward", {"code": -855}),
+            ("/afk/eventList", listing(*left, sends=0)),
+            ("/afk/passCardData", {"code": 0, "item_num": 20000, "has_pass_card": False,
+                                   "data": {"ordinary": [0, 1], "advanced": []}}),
+            ("/task/dispatchTaskList", {"code": 0, "season_reward": False, "list": [
+                {"id": 1, "status": 1, "task_id": 101000101, "current_value": 37},
+                {"id": 2, "status": 3, "task_id": 102100101, "current_value": 1}]}),
+        ])
+        await worker.check()
+        assert not http.replies and credits == []
+        assert http.calls[1:3] == [("/afk/recReward", {"id": first}), ("/afk/recReward", {"id": second})]
+        assert journal(tmp_path, "activity_result")[0]["id"] == first
+        assert journal(tmp_path, "dispatch_state")[0]["id_types"] == ["NoneType", "str"]
+        # A reward that waits and cannot be asked for is said, once.
+        unreadable, = journal(tmp_path, "dispatch_unreadable")
+        assert (unreadable["field"], unreadable["type"]) == ("id", "NoneType")
+        assert journal(tmp_path, "dispatch_blocked")[0]["action"] == f"collect:{second}"
+        # What the pass and the goals said is journalled too.
+        card, = journal(tmp_path, "dispatch_pass")
+        assert (card["summaries"], card["level"], card["paid"], card["ordinary"]) == (20000, 1, False, 2)
+        assert card["taken_fields"] == ["advanced", "ordinary"] and "item_num" in card["fields"]
+        goals, = journal(tmp_path, "dispatch_goals")
+        assert (goals["goals"], goals["season"], goals["id_types"]) == ({"1": 1, "3": 1}, False, ["int"])
+        assert goals["rows"] == [[101000101, 1, 37], [102100101, 3, 1]]     # goal, status, progress
+        http.replies.append(("/afk/eventList", listing(*left, sends=0)))
+        await worker.check()        # the refused one is left alone
+        assert not http.replies and len(journal(tmp_path, "dispatch_unreadable")) == 1
     asyncio.run(run())
 
 
@@ -241,6 +294,9 @@ def test_a_player_without_a_server_record_has_the_full_daily_count(tmp_path):
         await worker.check()
         assert [(p["event_id"], p["role_id_arr"], p["skin_id_arr"]) for e, p in http.calls if e == "/afk/dispatch"] == [
             (103001, [1006], [100601]), (103002, [1001], [100104])]
+        # Which players the account has is journalled as the server listed them.
+        roster, = journal(tmp_path, "dispatch_roster")
+        assert roster["roles"] == roster["usable"] == [1001, 1006]
     asyncio.run(run())
 
 
@@ -277,18 +333,19 @@ def test_a_refused_send_is_not_repeated_even_after_a_restart(tmp_path):
         await worker.check()          # the second assignment is not tried after the refusal
         await worker.check()
         blocked, = journal(tmp_path, "dispatch_blocked")
-        assert (blocked["action"], blocked["code"], blocked["until"]) == ("send", -859, NOW + dp.BLOCK_SEC)
+        assert (blocked["action"], blocked["code"], blocked["until"], blocked["reply"]) == (
+            "send", -859, NOW + lb.BLOCK_SEC, {"code": -859})
         assert len(journal(tmp_path, "dispatch_attempt")) == 1 and credits == []
 
         restarted = dp.Dispatch(worker.service, game)
         restarted.pass_due = restarted.tasks_due = False
-        clock[0] = NOW + dp.BLOCK_SEC - 1
+        clock[0] = NOW + lb.BLOCK_SEC - 1
         await restarted.check()
         assert not http.replies
 
         http.replies.extend([("/afk/eventList", state), ("/afk/dispatch", {"code": 0}),
                              ("/afk/dispatch", {"code": 0}), ("/afk/eventList", listing(sends=7))])
-        clock[0] = NOW + dp.BLOCK_SEC + 1
+        clock[0] = NOW + lb.BLOCK_SEC + 1
         await restarted.check()
         assert not http.replies
     asyncio.run(run())
@@ -298,7 +355,7 @@ def test_a_send_without_an_answer_reads_the_list_again_and_sends_are_bounded(tmp
     async def run():
         state = listing(row(21, 100001))
         worker, http, game, _, clock = setup(tmp_path, [("/afk/eventList", state), ("/afk/dispatch", None)])
-        with pytest.raises(rw.RewardAPIError) as failure:
+        with pytest.raises(lb.RewardAPIError) as failure:
             await worker.check()
         assert failure.value.code is None and not journal(tmp_path, "dispatch_blocked", "dispatched")
         # The next pass finds the assignment under way: it was sent after all.
@@ -329,21 +386,21 @@ def test_collect_refused_once_and_unanswered_collect_only_doubts_possible_chips(
             ("/afk/recReward", {"code": -862}),     # refused: skipped from now on
             ("/afk/recReward", None),               # SSS by a player of another camp: no egg, no chips
         ])
-        with pytest.raises(rw.RewardAPIError):
+        with pytest.raises(lb.RewardAPIError):
             await worker.check()
         assert credits == [] and not worker.service.uncertain
         assert [r["action"] for r in journal(tmp_path, "dispatch_blocked")] == ["collect:11"]
 
         http.replies.extend([("/afk/eventList", state), ("/afk/recReward", {"code": 0, "camp_quality": 6000}),
                              ("/afk/recReward", None)])   # SSS by a player of the camp: chips possible
-        with pytest.raises(rw.RewardAPIError):
+        with pytest.raises(lb.RewardAPIError):
             await worker.check()
         assert credits == [(0, True)] and worker.service.uncertain
         assert [e for e, _ in http.calls].count("/afk/recReward") == 4
 
         http.replies.extend([("/afk/eventList", listing(row(13, 100006, dp.FINISHED, NOW - 9, 1001), sends=0)),
                              ("/afk/recReward", {"code": 0, "reward_bonus": [10100001]})])   # unreadable egg
-        with pytest.raises(rw.RewardAPIError):
+        with pytest.raises(lb.RewardAPIError):
             await worker.check()
         assert credits == [(0, True), (0, True)] and worker.service.confirmed_chips == 0
     asyncio.run(run())
@@ -357,10 +414,10 @@ def test_a_used_up_list_is_drawn_again_with_a_free_refresh_only(tmp_path):
             ("/afk/refresh", {"code": 0}),
             ("/afk/eventList", listing(row(9, 100001), sends=5, refreshes=1)),
         ])
-        worker.service._dispatch_due = NOW + 300
+        worker.service.due["dispatch"] = NOW + 300
         await worker.check()
         assert http.calls[1] == ("/afk/refresh", {"camp_id": 0, "item_id": 0})
-        assert worker.service._dispatch_due == NOW + 5      # the new list is sent out on the next pass
+        assert worker.service.due["dispatch"] == NOW + 5      # the new list is sent out on the next pass
         assert not journal(tmp_path, "dispatch_attempt")
 
         for state in (
@@ -381,7 +438,7 @@ def test_a_used_up_list_is_drawn_again_with_a_free_refresh_only(tmp_path):
         await worker.check()
         await worker.check()
         assert not http.replies and journal(tmp_path, "dispatch_blocked")[0]["action"] == "refresh"
-        clock[0] += dp.BLOCK_SEC + 1
+        clock[0] += lb.BLOCK_SEC + 1
         http.replies.extend([("/afk/eventList", listing(*used, sends=5)), ("/afk/refresh", {"code": 0}),
                              ("/afk/eventList", listing(*used, sends=5)),
                              ("/afk/eventList", listing(*used, sends=5))])
@@ -472,8 +529,8 @@ def test_the_reward_worker_runs_dispatch_wakes_on_its_push_and_backs_off(tmp_pat
     from tests.test_headless_rewards import eventually, task_list
 
     async def run():
-        monkeypatch.setattr(rw, "RETRY_SEC", .02)
-        monkeypatch.setattr(rw, "RETRY_MAX_SEC", .08)
+        monkeypatch.setattr(sv, "RETRY_SEC", .02)
+        monkeypatch.setattr(sv, "RETRY_MAX_SEC", .08)
         calls = []
         down = [False]
 
@@ -497,69 +554,23 @@ def test_the_reward_worker_runs_dispatch_wakes_on_its_push_and_backs_off(tmp_pat
 
         ready = asyncio.Event()
         ready.set()
-        svc = rw.RewardService(uid=42, authorization="session-secret", http_base="https://game.example",
+        svc = sv.RewardService(uid=42, authorization="session-secret", http_base="https://game.example",
                                chnl=3, version="1.7.0", on_credit=credit, ready=ready, post=post,
                                journal_path=tmp_path / "rewards.jsonl")
         svc.observe_server_time(NOW)
-        svc.dispatch = dp.Dispatch(svc, Game({}, 0))
+        svc.attach(fd.Fund(svc, None))
+        svc.attach(tk.Tasks(svc, None))
+        svc.attach(dp.Dispatch(svc, Game({}, 0)))
         svc.start()
         await eventually(lambda: "/task/dispatchTaskList" in calls)
         assert calls.count("/afk/eventList") == 1 and calls.count("/afk/passCardData") == 1
-        svc.notify(rw.DISPATCH_TASK_REFRESH)          # a goal moved: the goals are read again
+        svc.notify(dp.DISPATCH_TASK_REFRESH)          # a goal moved: the goals are read again
         await eventually(lambda: calls.count("/task/dispatchTaskList") == 2)
         assert calls.count("/afk/passCardData") == 1 and calls.count("/task/list") == 1
         down[0] = True
-        svc.wake_dispatch(0)
+        svc.wake("dispatch", 0)
         await asyncio.sleep(.5)
         await svc.close()
         failed = [r for r in journal(tmp_path, "check_failed") if r["kind"] == "dispatch"]
         assert 3 <= len(failed) <= 12 and failed[0]["endpoint"] == "/afk/eventList" and failed[0]["code"] is None
     asyncio.run(run())
-
-
-def test_session_attaches_dispatch_unless_switched_off(monkeypatch, tmp_path):
-    from pf_intercept.headless import session as hs
-    from tests.test_headless import _FakeWS, _RecordingBridge, _login_result
-
-    async def connect(**flags):
-        ws = _FakeWS()
-
-        async def fake_connect(uri, **kwargs):
-            return ws
-
-        def offline_service(**kwargs):
-            return rw.RewardService(**kwargs, post=lambda *a, **k: None, journal_path=tmp_path / "rewards.jsonl")
-
-        monkeypatch.setattr(hs.websockets, "connect", fake_connect)
-        monkeypatch.setattr(hs, "RewardService", offline_service)
-        sess = hs.HeadlessSession(_login_result(), bridge=_RecordingBridge(), chnl=5, client_version="1.7.0", **flags)
-        ws.push("pb.UserLoginRSP", {"code": 0, "server_timestamp": 1})
-        await sess.connect()
-        return sess
-
-    async def run():
-        for flags, attached in (({}, True), ({"auto_dispatch": False}, False), ({"auto_rewards": False}, None)):
-            sess = await connect(**flags)
-            try:
-                if attached is None:
-                    assert sess._rewards is None
-                elif attached:
-                    assert isinstance(sess._rewards.dispatch, dp.Dispatch) and sess._rewards.dispatch.session is sess
-                else:
-                    assert sess._rewards.dispatch is None and sess._rewards.excursion is not None
-            finally:
-                await sess.close()
-    asyncio.run(run())
-
-
-def test_cli_switch():
-    from pf_intercept.headless import __main__ as cli
-
-    def parse(*argv):
-        import sys
-        from unittest.mock import patch
-        with patch.object(sys, "argv", ["headless", *argv]):
-            return cli._parse_args()
-
-    assert parse().no_auto_dispatch is False
-    assert parse("--no-auto-dispatch").no_auto_dispatch is True

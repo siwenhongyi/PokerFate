@@ -40,13 +40,15 @@ def _console_warnings_handler() -> logging.Handler:
     return h
 
 
-def configure_proxy_logging(logs_dir: Path) -> tuple[logging.Logger, logging.Logger]:
+def configure_proxy_logging(logs_dir: Path, *, verbose: bool = False) -> tuple[logging.Logger, logging.Logger]:
     logs_dir.mkdir(exist_ok=True)
 
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
+    root_logger.setLevel(logging.DEBUG if verbose else logging.INFO)
     root_logger.addHandler(_fh(logs_dir, "proxy.log"))
-    root_logger.addHandler(_console_warnings_handler())
+    console = _console_warnings_handler()
+    console.setLevel(logging.DEBUG if verbose else logging.INFO)
+    root_logger.addHandler(console)
 
     tcp_log = logging.getLogger("pf_tcp")
     tcp_log.setLevel(logging.INFO)

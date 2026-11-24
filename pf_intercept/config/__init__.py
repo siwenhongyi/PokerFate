@@ -27,11 +27,6 @@ EXTERNAL_DNS_SERVERS = [
 PROXY_HOST   = "0.0.0.0"
 WSS_PORT     = 9012
 
-# Local Web UI for entertainment side games.
-# Bind all local interfaces so phones / other LAN devices can open the UI.
-ENTERTAINMENT_WEB_HOST = "0.0.0.0"
-ENTERTAINMENT_WEB_PORT = 9022
-
 # Additional ports the game might hit on SERVER_HOST → TCP pass-through.
 PASSTHROUGH_PORTS: list[int] = [443, 80]
 
@@ -92,37 +87,8 @@ PF_CFR_FLOP_BOOK_ENABLED = _env_bool("PF_CFR_FLOP_BOOK_ENABLED", True)
 # 桌面降级为 overlimp/fold；关闭时恢复旧尺寸和旧 ISO 行为。
 PREFLOP_STICKY_POOL_ADJUST = _env_bool("PREFLOP_STICKY_POOL_ADJUST", True)
 
-# 盈利锁仓：一手结束时若 **桌上筹码 >= 该值（大盲倍数）** 则发
-# pb.DelayLeaveRoomREQ(flag=true)，走客户端菜单同款的「下一手离桌」协议；
-# 真正收到 pb.LeaveRoomRSP 成功后，再以 100BB 进同一房间。
-# 不在下一手 DealerInfo 后发即时 LeaveRoomREQ；服务端会把这视为牌局中离桌并返回 121。
-# （StandUpREQ 在客户端里基本未使用，服务端常不处理。）
-#
-# 语义：触发条件是「本手结束时桌上筹码的 BB 数」，一手一判，不累计。
-# 对游戏抽水不敏感 —— 桌上多少就是多少。
-#
-# 本次启动盈亏是服务端每手结算（WinnerRSP.profit）的累计，与钱包余额、活动奖励、
-# 小游戏输赢无关。Bot 在登录后和关键节点请求 pb.UserValueREQ(type=Gold) 只为展示
-# 钱包余额和总筹码。盈利锁仓触发条件只看当前桌上筹码，不看启动盈亏。
-PROFIT_LOCK_BB_THRESHOLD = 200
-
 # 离桌后等待多久再发 EnterRoomREQ（秒），给客户端切场景/进桌动画一点时间。
 PROFIT_LOCK_REENTER_DELAY_SEC = 4.0
-
-# 桌上补码：一手结束时若 **0 < 桌上筹码 < TOPUP_BELOW_BB 个大盲**，发客户端菜单「补充筹码」
-# 同款的 pb.SetRebyREQ(reby_chips=加多少)。服务端在下一手发牌前把筹码加到桌上，并广播
-# pb.RebyBRC(type="topup", chips=加上去的数量)；不用离桌。
-#
-# 加多少：补到不超过 TOPUP_TARGET_BB 的最大一档。档位是客户端滑块的档位
-# （tpl_constdata.PokerBuyinStep：20–30BB 每 1BB 一档，40–200BB 每 10BB 一档）。
-# 上限：净亏损上限（见 README「净亏损上限」）。本次启动已亏的 + 桌上筹码 + 这次补的，
-# 不超过 (1 + --max-auto-rebuy) 个 100BB 买入；破产买入、换桌重新买入过的是同一条。
-# 所以 --max-auto-rebuy 0 时只有本次启动是赚的才会补码。
-#
-# 为什么：筹码短的时候盲注照付、能赢的却随筹码缩小，9% 抽水下低筹码的全下要 54.9% 胜率才保本；
-# 实测筹码不到 70BB 的手连抽水前都是亏的。0 = 关闭。
-TOPUP_BELOW_BB = 70
-TOPUP_TARGET_BB = 100
 
 # EnterRoom 失败后必发 QuickStartREQ 随机配桌（逻辑在 bot 内固定，与 LobbyByinDialog 一致）。
 # 仅当本局从未缓存到 EnterRoomRSP.game_type / EnterRoomRSP.room_info.lobby_coin 时用下列默认：
@@ -133,10 +99,10 @@ PROFIT_LOCK_FALLBACK_LOBBY_COIN = 10100001
 # 发 QuickStart 前短暂延迟（秒），给客户端落到大厅状态。
 PROFIT_LOCK_QUICKSTART_DELAY_SEC = 0.5
 
-# 选桌（headless 现金桌）：桌上没有真人、或真人少于人机就换桌；同一场次连续不合格则换场。
-# 打法不受影响。没有开关（headless 进桌即生效）；--stakes 指定场次顺序。
+# 选桌（两种接入模式的现金桌）：桌上没有真人、或真人少于人机就换桌；同一场次连续不合格则换场。
+# --stakes 指定场次顺序，默认参数由共享 RunOptions 提供。
 TABLE_SELECT_TRIES_PER_STAKE = 3            # 同一场次连续多少张不合格的桌后换场
-TABLE_SELECT_HOP_DELAY_SEC = (5.0, 10.0)    # 两次匹配之间随机停顿
+TABLE_SELECT_HOP_DELAY_SEC = (3.0, 5.0)     # 两次匹配之间随机停顿
 # 场次是"偏好顺序"，不是单向阶梯：某场次一轮不合格后进入冷却（首次 15 分钟，逐次翻倍，最长 60 分钟），
 # 冷却结束就回探——哪怕此刻正在备选场次的好桌上打牌。
 TABLE_SELECT_STAKE_RETRY_SEC = (900.0, 3600.0)
@@ -144,7 +110,7 @@ TABLE_SELECT_MAX_FAIL_ROUNDS = 3            # 每个可用场次都连续失败�
 TABLE_SELECT_PROBE_TRIES = 2                # 从备选场次的好桌回探更优场次时，每个场次试几张桌
 TABLE_SELECT_PROBE_BATCH_SEC = 600.0        # 一次回探顺带探完这么多秒内也会到期的更优场次
 TABLE_SELECT_MIXED_CONFIRM_HANDS = 2        # 真人少于人机需连续多少手成立才离桌
-TABLE_SELECT_EMPTY_GRACE_SEC = 60.0         # 空桌等多久没人来就走
+TABLE_SELECT_EMPTY_GRACE_SEC = 10.0         # 空桌等多久没人来就走
 TABLE_SELECT_WAIT_BLIND = True              # 进桌等大盲再入局（先看桌，不白付盲注）
 
 GAME_HTTP_VERSION = "1.7.0"  # G_UPDATE_VERSION in versionconfig.lua; also sent as UserLoginREQ.ver
@@ -162,6 +128,7 @@ WATCH_S2C = {
     # Session setup (auto-detect seat & blinds, track player names)
     "pb.UserLoginRSP",  # after first login, request bankroll baseline
     "pb.SelfUserInfoRSP",  # learn my uid for reconnect seat re-detection
+    "pb.UserLocationRSP",  # proxy reconnect: restore a room or resume cash matchmaking
     "pb.UserValueRSP",  # bankroll samples for dashboard / exact node PnL
     "pb.EnterRoomRSP",
     "pb.SitDownRSP",

@@ -42,7 +42,9 @@ from pokerfate.calibration.spool_showdown_calibration import spool_backpressure_
 from pokerfate.core.robots import RoomRobotTracker, default_registry
 from pokerfate.core.seating import derive_seating
 from pf_intercept import config
-from pf_intercept.table_policy import Step, TablePolicy, TablePolicyConfig
+from pf_intercept.table_policy import Step, TablePolicy, TablePolicyConfig, configured_policy
+from pf_intercept.options import RunOptions
+from dataclasses import replace
 from pf_intercept.game_api.gamedata import GameDataHTTPContext, _sync_fetch, seed_from_server
 from pf_intercept.game_api.http import load_auth_token
 from pf_intercept.wire.action_types import ACTION_TYPE_TO_EVENT_ACTION, FOLD_ACTION_TYPES
@@ -270,7 +272,12 @@ class BotBridge:
       or None.
     """
 
-    def __init__(self, max_auto_rebuy: int = 1) -> None:
+    def __init__(self, max_auto_rebuy: int | None = None, *, auto_table_selection: bool = False,
+                 options: RunOptions | None = None) -> None:
+        self.options = options or RunOptions()
+        if max_auto_rebuy is not None:
+            self.options = replace(self.options, max_auto_rebuy=max_auto_rebuy)
+        max_auto_rebuy = self.options.max_auto_rebuy
         # Detected from game messages (may be pre-seeded by config)
         self._my_seat: int | None  = None
         self._my_uid:  str | None  = None
@@ -323,7 +330,7 @@ class BotBridge:
         self._bankroll_pending_action: dict | None = None
         self._bankroll_pending_reason: str = ""
         self._bankroll_profit_lock_count: int = 0
-        # 桌上补码（config.TOPUP_BELOW_BB）：已发出、还没到账的请求；被拒后到哪一手再试。
+        # 桌上补码（options.topup_below_bb）：已发出、还没到账的请求；被拒后到哪一手再试。
         self._topup_pending: dict | None = None
         self._topup_retry_hand: int = 0
         self._topup_budget_logged: bool = False
@@ -406,12 +413,14 @@ class BotBridge:
 
         # 人机识别：服务端 rb_num 计数 → 逐账号标签（pokerfate/core/robots.py）。
         # 选桌：桌上没有真人、或真人少于人机时离桌换桌 / 换场（table_policy.py）。
-        # 策略只在 headless 显式 configure_table_policy 后生效；识别始终运行。
+        # headless 显式配置起始场次；proxy 从客户端首次入座的现金桌确定起始场次。
         self._robots = default_registry()
         self._room_tracker = RoomRobotTracker(
             self._robots, None, on_label=self._on_robot_label, on_mismatch=self._on_robot_count_mismatch,
         )
         self._table_policy: TablePolicy | None = None
+        self._auto_table_selection = auto_table_selection
+        self._client_table_paused = False
         self._table_switch: dict | None = None      # 选桌发起的离桌，等待 LeaveRoomRSP
         self._table_log_path: Path | None = _TABLE_LOG_PATH
 
@@ -501,7 +510,7 @@ class BotBridge:
             self._table_room_id = rid
 
     def configure_auto_rejoin(self, fields: dict) -> None:
-        """Only headless cash matchmaking opts into unexpected-leave recovery."""
+        """Cash matchmaking fields used to recover an unexpected leave."""
         self._auto_rejoin_fields = dict(fields)
 
     def set_session_uid(self, uid: int) -> None:
@@ -591,7 +600,7 @@ class BotBridge:
     # ── 人机识别 / 选桌 ───────────────────────────────────────────────────────
 
     def configure_table_policy(self, cfg: TablePolicyConfig | None) -> None:
-        """Enable table selection (headless cash play). ``None`` turns it off."""
+        """Configure cash table selection. ``None`` turns it off."""
         self._table_policy = TablePolicy(cfg) if cfg is not None else None
         self._table_switch = None
         if cfg is not None:
@@ -600,6 +609,40 @@ class BotBridge:
                 "等大盲入座=%s",
                 list(cfg.ladder), cfg.tries_per_stake, cfg.wait_blind,
             )
+
+    def _enable_detected_table_policy(self) -> bool:
+        """Proxy: the first seated Hold'em cash table fixes the run's home stake."""
+        if (not self._auto_table_selection or self._table_policy is not None
+                or self._my_seat is None or self._my_seat < 0 or not self._table_room_id
+                or not self._bb or self._bb <= 0
+                or self._shutdown_requested or self._loss_stop
+                or self._tournament_passthrough or self._is_friend_room
+                or self._session_game_type != int(config.PROFIT_LOCK_FALLBACK_GAME_TYPE)
+                or self._session_lobby_coin != int(config.PROFIT_LOCK_FALLBACK_LOBBY_COIN)):
+            return False
+        self.configure_table_policy(configured_policy(self.options.bb or int(self._bb), self.options.buyin_bb, self.options.stakes))
+        self.configure_auto_rejoin(self._table_match_fields(int(self._bb)))
+        return True
+
+    def note_client_table_request(self, type_name: str, msg: dict) -> WireInject | None:
+        """A manual table operation takes precedence over proxy-initiated matching."""
+        if type_name == "pb.DelayLeaveRoomREQ" and not msg.get("flag"):
+            self._client_table_paused = False
+            if not self._table_policy_blocked() and self._table_room_id:
+                self.configure_auto_rejoin(self._table_match_fields(int(self._bb)))
+                comp = self._table_composition()
+                return self._table_step(self._table_policy.on_enter(
+                    int(self._bb), comp["humans"], comp["robots"], time.time(),
+                    dealt=self._hole_cards_count >= 2,
+                ))
+            return None
+        self._client_table_paused = True
+        self._table_switch = None
+        self._auto_rejoin_fields = None
+        self._profit_lock_cancel_reenter()
+        self._bankroll_pending_action = None
+        if self._table_policy is not None:
+            self._table_policy.on_left(time.time(), ours=False)
 
     def wants_tick(self) -> bool:
         return self._table_policy is not None
@@ -656,6 +699,10 @@ class BotBridge:
             or self._loss_stop
             or self._tournament_passthrough
             or self._is_friend_room
+            or self._client_table_paused
+            or (self._auto_table_selection and (
+                self._session_game_type != int(config.PROFIT_LOCK_FALLBACK_GAME_TYPE)
+                or self._session_lobby_coin != int(config.PROFIT_LOCK_FALLBACK_LOBBY_COIN)))
             or self._profit_lock_reenter is not None
             or self._profit_lock_deferred is not None
             or self._calibration_backpressure_leaving
@@ -769,9 +816,17 @@ class BotBridge:
         comp = self._table_composition()
         return self._table_step(self._table_policy.on_tick(now, comp["humans"], comp["robots"]))
 
+    def _on_errand(self, msg: dict) -> WireInject | None:
+        """The session has something to do away from the table (the tasks' Omaha / AOF hands):
+        leave when this hand ends. The match that follows is where the session does it."""
+        if self._table_policy_blocked() or self._table_switch is not None:
+            return None
+        comp = self._table_composition()
+        return self._table_step(self._table_policy.on_errand(time.time(), comp["humans"], comp["robots"]))
+
     def _on_quick_start_rsp(self, msg: dict) -> WireInject | None:
         code = _s2c_rsp_code(msg, 0)
-        if code == 0 or self._table_policy is None:
+        if code == 0 or self._table_policy_blocked():
             return None
         log.warning("[BOT] 选桌：QuickStartRSP code=%s，该场次本次运行不再尝试。", code)
         return self._table_step(self._table_policy.on_match_failed(code, time.time()))
@@ -993,7 +1048,7 @@ class BotBridge:
                 "profit_lock_trigger",
                 stack_chips=_chip_int(action.get("table_chips", 0), 0),
                 threshold_chips=_chip_int(action.get("threshold_chips", 0), 0),
-                lock_bb=_chip_int(action.get("lock_bb", config.PROFIT_LOCK_BB_THRESHOLD), int(config.PROFIT_LOCK_BB_THRESHOLD)),
+                lock_bb=_chip_int(action.get("lock_bb", self.options.profit_lock_bb), int(self.options.profit_lock_bb)),
                 room_id=_chip_int(action.get("room_id", 0), 0),
                 big_blind=_chip_int(action.get("big_blind", 0), 0),
                 **self._bankroll_notify_fields(sample),
@@ -1119,12 +1174,15 @@ class BotBridge:
             return None
         if   type_name == "pb.UserLoginRSP":    return self._on_user_login_rsp(msg)
         elif type_name == "pb.SelfUserInfoRSP": self._on_self_user_info(msg)
+        elif type_name == "pf.ClientRequest": return self.note_client_table_request(msg["type_name"], msg["msg"])
+        elif type_name == "pb.UserLocationRSP": return self._on_user_location_rsp(msg)
         elif type_name == "pb.UserValueRSP":    return self._on_user_value_rsp(msg)
-        elif type_name == "pb.SitDownRSP":      self._on_sit_down(msg)
+        elif type_name == "pb.SitDownRSP":      return self._on_sit_down(msg)
         elif type_name == "pb.SitDownBRC":       return self._on_sit_down_brc(msg)
         elif type_name == "pb.OtherEnterRoomBRC": return self._on_other_enter_room_brc(msg)
         elif type_name == "pb.QuickStartRSP":    return self._on_quick_start_rsp(msg)
         elif type_name == "pf.Tick":             return self._on_tick(msg)
+        elif type_name == "pf.Errand":           return self._on_errand(msg)
         elif type_name == "pb.StandUpRSP":      return self._on_stand_up_rsp(msg)
         elif type_name == "pb.StandUpBRC":      return self._on_stand_up_brc(msg)
         elif type_name == "pb.OtherLeaveRoomBRC":
@@ -1184,6 +1242,15 @@ class BotBridge:
             self._room_tracker.set_my_uid(uid)
             log.info("[BOT] My uid detected: %s", self._my_uid)
 
+    def _on_user_location_rsp(self, msg: dict) -> WireInject | None:
+        """Proxy reconnect: the client restores existing rooms; we resume a lost match."""
+        if (not self._auto_table_selection or self._table_policy is None
+                or _chip_int(msg.get("roomid", 0), 0) > 0):
+            return None
+        if not self.restore_lobby_after_disconnect() or self._table_policy_blocked() or not self._auto_rejoin_fields:
+            return None
+        return self._table_step(Step("match", "reconnect", bb=self._table_policy.current_bb()))
+
     def _on_user_value_rsp(self, msg: dict) -> WireInject | None:
         prop_type = _chip_int(msg.get("type", self._bankroll_prop_type()), self._bankroll_prop_type())
         if prop_type != self._bankroll_prop_type():
@@ -1200,7 +1267,11 @@ class BotBridge:
         sample = self._record_bankroll_sample(reason, _chip_int(msg.get("value", 0), 0))
         return self._complete_bankroll_action(pending, sample)
 
-    def _on_sit_down(self, msg: dict) -> None:
+    def _on_sit_down(self, msg: dict) -> WireInject | None:
+        if _s2c_rsp_code(msg, 0) != 0:
+            return None
+        was_paused = self._client_table_paused
+        self._client_table_paused = False
         seat = _chip_int(msg.get("seatid", 0), 0)
         if "seatid" not in msg:
             log.debug("[BOT] SitDownRSP missing seatid; assume 0")
@@ -1214,6 +1285,15 @@ class BotBridge:
                 self._my_chips = chips
                 if chips > 0 and self._bankroll_buyin_seq <= 0:
                     self._note_bankroll_buyin("sit_down")
+        enabled = self._enable_detected_table_policy()
+        if (enabled or (was_paused and self._auto_table_selection)) and not self._table_policy_blocked():
+            self.configure_auto_rejoin(self._table_match_fields(int(self._bb)))
+            comp = self._table_composition()
+            return self._table_step(self._table_policy.on_enter(
+                int(self._bb), comp["humans"], comp["robots"], time.time(),
+                dealt=self._hole_cards_count >= 2,
+            ))
+        return None
 
     def _on_reby_brc(self, msg: dict) -> None:
         code = _s2c_rsp_code(msg, 0)
@@ -1296,7 +1376,7 @@ class BotBridge:
 
     def _maybe_topup(self, final_stacks: dict[int, int]) -> WireInject | None:
         """A short stack at the end of a hand asks the server to add chips before the next deal."""
-        below_bb = float(getattr(config, "TOPUP_BELOW_BB", 0) or 0)
+        below_bb = float(self.options.topup_below_bb)
         if below_bb <= 0 or self._skip_profit_lock or self._shutdown_requested or self._loss_stop:
             return None
         if (
@@ -1325,7 +1405,7 @@ class BotBridge:
         stack = int(final_stacks.get(self._my_seat, 0))
         if stack <= 0 or stack >= int(below_bb * bb):
             return None
-        short = int(float(getattr(config, "TOPUP_TARGET_BB", 100)) * bb) - stack
+        short = int(float(_BUYIN_BB) * bb) - stack
         budget = self._loss_room(stack)
         chips = max((int(s * bb) for s in _TOPUP_STEPS_BB if int(s * bb) <= min(short, budget)), default=0)
         if chips <= 0:
@@ -1468,6 +1548,7 @@ class BotBridge:
 
         code = _s2c_rsp_code(msg, 0)
         if code == 0:
+            self._client_table_paused = False
             self._transport_can_match = None
             if self._bankroll_pending_buyin_reason == "unexpected_leave":
                 self._bankroll_pending_buyin_reason = ""
@@ -1583,8 +1664,14 @@ class BotBridge:
         seats = [(ss.get("player") or {}).get("uid") for ss in table_status.get("seat", [])]
         self._room_tracker.reset([u for u in seats if u is not None])
         self._table_switch = None
-        if self._table_policy is None or self._is_friend_room or self._shutdown_requested:
+        if self._auto_table_selection:
+            self._client_table_paused = self._my_uid is None or str(self._my_uid) not in {str(u) for u in seats}
+        if self._my_uid is not None and str(self._my_uid) in {str(u) for u in seats}:
+            self._enable_detected_table_policy()
+        if self._table_policy_blocked():
             return None
+        if self._auto_table_selection:
+            self.configure_auto_rejoin(self._table_match_fields(int(self._bb)))
         comp = self._table_composition()
         dealt = self._hole_cards_count >= 2
         step = self._table_policy.on_enter(int(self._bb or 0), comp["humans"], comp["robots"],
@@ -1710,7 +1797,7 @@ class BotBridge:
 
     def set_gamedata_session(self, *, authorization: str, http_base: str,
                              chnl: int, version: str) -> None:
-        """Bind headless HTTP to its own login/line, never the legacy token file."""
+        """Bind HTTP requests to the current login and selected server line."""
         context = GameDataHTTPContext(authorization, http_base, int(chnl), str(version))
         with self._gamedata_lock:
             if context != self._gamedata_session:
@@ -1721,8 +1808,9 @@ class BotBridge:
     def _gamedata_context(self) -> GameDataHTTPContext:
         if self._gamedata_session is not None:
             return self._gamedata_session
-        # MITM mode still gets its token from capture; headless always binds a
-        # context, even when its authorization is missing (no stale fallback).
+        # Standalone bridge callers may use the captured token. Both runtime
+        # sessions bind a context, even without authorization, so they never
+        # fall back to a token belonging to another login.
         return GameDataHTTPContext(load_auth_token() or "", config.GAMEDATA_HTTP_HOST,
                                    config.GAMEDATA_CHNL, config.GAME_HTTP_VERSION)
 
@@ -2798,7 +2886,7 @@ class BotBridge:
         """桌上筹码 >= 阈值则设置下一手离桌，并在离桌成功后以 100BB 进同一房间。
 
         设计：
-          触发条件 = 桌上筹码 my_final >= PROFIT_LOCK_BB_THRESHOLD × BB
+          触发条件 = 桌上筹码 my_final >= options.profit_lock_bb × BB
             - 对游戏抽水不敏感（桌上多少就带走多少）
             - 一手一判，不需要累计
           本次启动盈亏：
@@ -2823,7 +2911,7 @@ class BotBridge:
                 "[BOT] 盈利锁仓：尚无 table room_id，跳过（需 EnterRoomRSP.roomid 或 S2C 帧头 room_id）。",
             )
             return None
-        lock_bb = int(config.PROFIT_LOCK_BB_THRESHOLD)
+        lock_bb = int(self.options.profit_lock_bb)
         threshold = int(lock_bb * bb)
         my_final = int(final_stacks.get(self._my_seat, 0))
         if my_final < threshold:
@@ -2971,7 +3059,7 @@ class BotBridge:
             "delay_sec": delay,
             "table_chips": table_chips,
             "threshold_chips": _chip_int(pending.get("threshold_chips", 0), 0),
-            "lock_bb": _chip_int(pending.get("lock_bb", config.PROFIT_LOCK_BB_THRESHOLD), int(config.PROFIT_LOCK_BB_THRESHOLD)),
+            "lock_bb": _chip_int(pending.get("lock_bb", self.options.profit_lock_bb), int(self.options.profit_lock_bb)),
             "room_id": room_id,
             "big_blind": int(self._bb or 0),
         }

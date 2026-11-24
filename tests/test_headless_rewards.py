@@ -10,7 +10,10 @@ from datetime import datetime
 
 import pytest
 
-from pf_intercept.headless import rewards as rw
+from pf_intercept.headless.lobby.core import base as lb
+from pf_intercept.headless.lobby.routine import fund as fd
+from pf_intercept.headless.lobby.core import service as sv
+from pf_intercept.headless.lobby.routine import tasks as tk
 
 
 def task_list(**updates):
@@ -37,9 +40,11 @@ def service(tmp_path, post):
         credits.append((chips, uncertain))
 
     ready = asyncio.Event()
-    s = rw.RewardService(uid=42, authorization="session-secret", http_base="https://game.example/",
+    s = sv.RewardService(uid=42, authorization="session-secret", http_base="https://game.example/",
                          chnl=3, version="1.7.4", on_credit=credit, ready=ready,
                          post=post, journal_path=tmp_path / "rewards.jsonl")
+    s.attach(fd.Fund(s, None))
+    s.attach(tk.Tasks(s, None))
     return s, ready, credits
 
 
@@ -57,7 +62,7 @@ async def eventually(predicate, timeout=2):
     ("2026-11-09T19:00:00+08:00", "2026-11-10T07:00:00+08:00"),
 ])
 def test_fund_boundaries_are_utc8(stamp, expected):
-    assert rw.next_fund_boundary(datetime.fromisoformat(stamp).timestamp()) == datetime.fromisoformat(expected).timestamp()
+    assert fd.next_boundary(datetime.fromisoformat(stamp).timestamp()) == datetime.fromisoformat(expected).timestamp()
 
 
 def test_fund_claim_credentials_logging_and_state_recheck(tmp_path):
@@ -69,8 +74,8 @@ def test_fund_claim_credentials_logging_and_state_recheck(tmp_path):
             ("/activity/rebateStatus", {"code": 0, "status": 0}),
         ])
         s, _, credits = service(tmp_path, http)
-        await s.check_fund()
-        await s.check_fund()
+        await s.workers["fund"].check()
+        await s.workers["fund"].check()
         assert credits == [(1234, False)]
         assert s.claims == 1
         assert http.calls[1][1] == {"t": 1, "immediately": True}
@@ -92,11 +97,11 @@ def test_fund_settling_waits_then_claims(tmp_path):
             ("/activity/rebateStatus", {"code": 0, "status": 0}),
         ])
         s, _, credits = service(tmp_path, http)
-        s._fund_due = s.now() + 300
-        await s.check_fund()
+        s.due["fund"] = s.now() + 300
+        await s.workers["fund"].check()
         assert not credits
-        assert s._fund_due <= s.now() + rw.RETRY_SEC
-        assert s._settling_until > s.now()
+        assert s.due["fund"] <= s.now() + fd.RETRY_SEC
+        assert s.workers["fund"].settling_until > s.now()
     asyncio.run(run())
 
 
@@ -123,13 +128,13 @@ def test_tasks_filter_eligibility_use_instance_ids_and_claim_new_point_chests(tm
             ("/player/payInfo", {"code": 0, "data": {"monthly_card_exp": card_exp}}),
             ("/task/recReward", {"code": 0, "reward_chips": 100, "reward_point": 30, "item_list": []}),
             ("/task/list", after_daily),
-            ("/task/recPointReward", {"code": 0, "item_list": [{"item_id": rw.GOLD, "num": 200}, {"item_id": 99, "num": 3}]}),
+            ("/task/recPointReward", {"code": 0, "item_list": [{"item_id": lb.GOLD, "num": 200}, {"item_id": 99, "num": 3}]}),
             ("/task/list", after_chest),
             ("/task/recReward", {"code": 0, "reward_chips": 300, "item_list": []}),
             ("/task/list", task_list()),
         ])
         s, _, credits = service(tmp_path, http)
-        await s.check_tasks()
+        await s.workers["tasks"].check()
         assert http.calls[2][1] == {"task_cate": 1, "id_arr": expected_ids, "all": False}
         assert http.calls[4][1] == {"id": 2, "task_cate": 1}
         assert http.calls[6][1] == {"task_cate": 2, "id_arr": [81], "all": False}
@@ -146,9 +151,9 @@ def test_claim_timeout_requeries_instead_of_replaying_and_flags_unknown_profit(t
             ("/task/list", task_list(daily_list=[{"id": 7, "status": 3}])),
         ])
         s, _, credits = service(tmp_path, http)
-        with pytest.raises(rw.RewardAPIError):
-            await s.check_tasks()
-        await s.check_tasks()
+        with pytest.raises(lb.RewardAPIError):
+            await s.workers["tasks"].check()
+        await s.workers["tasks"].check()
         assert credits == [(0, True)]
         assert s.uncertain and s.claims == 0
         assert sum(url.endswith('/task/recReward') for url, *_ in http.calls) == 1
@@ -169,12 +174,12 @@ def test_challenge_and_chest_credit_confirmed_chips_only(tmp_path):
             ("/task/list", pending), ("/player/payInfo", {"code": 0, "data": {"monthly_card_exp": 0}}),
             ("/task/recReward", {"code": 0, "reward_chips": 120, "reward_point": 20}),
             ("/task/list", chest),
-            ("/task/recPointReward", {"code": 0, "item_list": [{"item_id": rw.GOLD, "num": 250},
+            ("/task/recPointReward", {"code": 0, "item_list": [{"item_id": lb.GOLD, "num": 250},
                                                                {"item_id": 99, "num": 10}]}),
             ("/task/list", task_list()),
         ])
         s, _, credits = service(tmp_path, http)
-        await s.check_tasks()
+        await s.workers["tasks"].check()
         assert http.calls[2][1] == {"task_cate": 6, "id_arr": [91], "all": False}
         assert http.calls[4][1] == {"task_cate": 6, "id": 2}
         assert credits == [(120, False), (250, False)] and s.confirmed_chips == 370
@@ -189,8 +194,8 @@ def test_auth_failure_pauses_http_until_new_session(tmp_path):
         ready.set()
         s.start()
         await eventually(lambda: s._task.done())
-        s.notify(rw.TASK_REFRESH)
-        s.notify(rw.GAME_REBATE_SETTLE)
+        s.notify(tk.TASK_REFRESH)
+        s.notify(fd.GAME_REBATE_SETTLE)
         await s.close()
         assert len(http.calls) == 1 and not credits
         assert s._auth_failed
@@ -214,9 +219,9 @@ def test_startup_waits_for_baseline_then_pushes_wake_and_coalesce(tmp_path):
         ready.set()
         await eventually(lambda: len(http.calls) == 2)
         for _ in range(20):
-            s.notify(rw.TASK_REFRESH)
+            s.notify(tk.TASK_REFRESH)
         await eventually(lambda: len(http.calls) == 3)
-        s.notify(rw.GAME_REBATE_SETTLE)
+        s.notify(fd.GAME_REBATE_SETTLE)
         await eventually(lambda: len(http.calls) == 6)
         await s.close()
         assert credits == [(10, False)]
@@ -233,15 +238,16 @@ def test_cross_phase_and_poll_fallback_without_push(tmp_path, monkeypatch):
             ("/task/list", task_list()),
         ])
         s, ready, _ = service(tmp_path, http)
-        monkeypatch.setattr(rw, 'POLL_SEC', .08)
+        monkeypatch.setattr(lb, 'POLL_SEC', .08)
+        monkeypatch.setattr(fd, 'POLL_SEC', .08)
         ready.set()
         s.start()
         await eventually(lambda: len(http.calls) == 2)
-        s._boundary = s.now() - 1
+        s.workers["fund"].boundary = s.now() - 1
         s._wake.set()
         await eventually(lambda: len(http.calls) == 4)
         await s.close()
-        assert s._settling_until > s.now()
+        assert s.workers["fund"].settling_until > s.now()
     asyncio.run(run())
 
 
@@ -277,11 +283,11 @@ def test_poker_pnl_is_the_settled_hands_and_nothing_else():
     from pf_intercept.bot import BotBridge
     b = BotBridge()
     b._my_uid = '7'
-    b.handle('pb.UserValueRSP', {'type': rw.GOLD, 'value': 1000})
+    b.handle('pb.UserValueRSP', {'type': lb.GOLD, 'value': 1000})
     # A reward reaches the wallet, a side-game round is lost, another round's result is unknown:
     # none of it is poker.
     b.record_reward_credit(100)
-    b.handle('pb.UserValueRSP', {'type': rw.GOLD, 'value': 1100})
+    b.handle('pb.UserValueRSP', {'type': lb.GOLD, 'value': 1100})
     b.record_sidegame_result(-30)
     b.record_reward_credit(0, uncertain=True)
     assert b.bankroll_dashboard()['session_delta_chips'] == 0
@@ -301,14 +307,14 @@ def test_poker_pnl_is_the_settled_hands_and_nothing_else():
     d = b.bankroll_dashboard()
     assert d['session_delta_chips'] == 210
     assert (d['reward_chips'], d['sidegame_net_chips'], d['rewards_uncertain']) == (100, -30, True)
-    b.handle('pb.UserValueRSP', {'type': rw.GOLD, 'value': 5000})         # whatever the wallet says
+    b.handle('pb.UserValueRSP', {'type': lb.GOLD, 'value': 5000})         # whatever the wallet says
     assert b.bankroll_dashboard()['samples'][-1]['delta_chips'] == 210
 
 
 @pytest.mark.parametrize('result', [
     {'code': 0},
     {'code': 0, 'reward_chips': 'unreadable'},
-    {'code': 0, 'item_list': [{'item_id': rw.GOLD}]},
+    {'code': 0, 'item_list': [{'item_id': lb.GOLD}]},
 ])
 def test_malformed_success_is_uncertain_not_zero_reward(tmp_path, result):
     async def run():
@@ -317,8 +323,8 @@ def test_malformed_success_is_uncertain_not_zero_reward(tmp_path, result):
             ('/task/recReward', result),
         ])
         s, _, credits = service(tmp_path, http)
-        with pytest.raises(rw.RewardAPIError):
-            await s.check_tasks()
+        with pytest.raises(lb.RewardAPIError):
+            await s.workers["tasks"].check()
         assert credits == [(0, True)]
         assert s.claims == 0
     asyncio.run(run())
@@ -332,20 +338,20 @@ def test_retry_delay_doubles_to_the_cap_per_check(tmp_path):
 
 def test_failing_checks_back_off_and_unexpected_errors_reach_the_journal(tmp_path, monkeypatch):
     async def run():
-        monkeypatch.setattr(rw, "RETRY_SEC", .02)
-        monkeypatch.setattr(rw, "RETRY_MAX_SEC", .08)
+        monkeypatch.setattr(sv, "RETRY_SEC", .02)
+        monkeypatch.setattr(sv, "RETRY_MAX_SEC", .08)
         s, ready, _ = service(tmp_path, ScriptedHTTP([]))
         task_passes = []
 
         async def rejected():
-            raise rw.RewardAPIError("/activity/rebateStatus", 500)
+            raise lb.RewardAPIError("/activity/rebateStatus", 500)
 
         async def broken_twice():
             task_passes.append(1)
             if len(task_passes) <= 2:
                 raise KeyError("status")
 
-        s.check_fund, s.check_tasks = rejected, broken_twice
+        s.workers["fund"].check, s.workers["tasks"].check = rejected, broken_twice
         ready.set()
         s.start()
         await asyncio.sleep(.5)

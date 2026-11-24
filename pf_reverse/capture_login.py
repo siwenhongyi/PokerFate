@@ -15,7 +15,9 @@ local.
 Usage: don't invoke mitmdump directly — run
     python -m pf_intercept.headless.harvest_session
 which starts mitmdump with this addon, prints the phone-side setup steps, and
-exits once a fresh session has been captured.
+exits once a fresh session has been captured.  In proxy mode the launcher's
+mitmweb loads it too, ahead of force_domain.py: the proxy takes the HTTP
+credentials of the client's own login from this file.
 
 Do NOT filter by hostname (e.g. "only intercept hosts containing poker-fate"):
 the real client's candidate login addresses (see Constants.lua G_HTTP_URL /

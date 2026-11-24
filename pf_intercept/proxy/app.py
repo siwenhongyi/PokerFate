@@ -3,20 +3,22 @@ PokerFate WSS MITM Proxy  (hosts-redirect edition)
 
 Setup (one-time):
     1. python -m pf_intercept.gen_cert           # generate certs/
-    2. Install certs/ca.crt into Windows Trusted Root CAs
-    3. Add to C:\\Windows\\System32\\drivers\\etc\\hosts:
-           127.0.0.1  <SERVER_HOST>
-    4. python -m pf_intercept.proxy
+    2. Install certs/ca.crt as a trusted root CA on the device that runs the game client
+    3. Point <SERVER_HOST> at this machine: the fake DNS (pf_intercept.dns_server),
+       or the client's hosts file
+    4. python -m pf_intercept.proxy           # or pf_intercept.launcher (macOS / Linux only)
        (Seat ID and blinds are auto-detected from game messages)
        Bark: device key in local/secrets/bark_key.txt (first line)
 
 Traffic flow:
-    Game  ->  127.0.0.1:9012  (TLS, WSS MITM)  ->  Real Server :9012
+    Game  ->  this machine :9012  (TLS, WSS MITM)  ->  Real Server :9012
 """
 
 import argparse
 import asyncio
 import os
+import logging
+import signal
 import time
 from pathlib import Path
 
@@ -26,7 +28,6 @@ from pf_intercept.config import (
     PROXY_HOST, WSS_PORT, PASSTHROUGH_PORTS,
     SERVER_HOST, SERVER_WSS_PORT,
     SERVER_CERT,
-    WATCH_S2C, WATCH_C2S,
     PREFERRED_WSS_HOSTS,
 )
 from pf_intercept.wire.framing import FrameBuffer, encode_frame
@@ -53,6 +54,8 @@ from pf_intercept.proxy.routes import (
 )
 from pf_intercept.proxy.tls import _make_client_ssl, _make_server_ssl
 from pf_entertainment import EntertainmentRuntime
+from pf_intercept.options import RunOptions, add_run_arguments
+from pf_intercept.headless.process import RunningProcess, request_stop, ProcessControlError
 from pf_notify.client import notify
 from pf_notify.config import load_bark_key_file, set_bark_key
 from pokerfate.logger import archive_runtime_logs_on_startup
@@ -73,9 +76,8 @@ _EVENT_LOOP_LAG_WARN_SEC = float(os.environ.get("PF_EVENT_LOOP_LAG_WARN_SEC", "1
 _BOT_INJECT_TTL_SEC = float(os.environ.get("PF_BOT_INJECT_TTL_SEC", "12.0"))
 
 
-log, tcp_log = configure_proxy_logging(_LOGS_DIR)
+log, tcp_log = logging.getLogger("pf_proxy"), logging.getLogger("pf_tcp")
 
-from pf_intercept import config
 from pf_intercept.wire import codec
 
 
@@ -142,7 +144,7 @@ async def _do_inject(
     bot: BotWorkerClient,
     inject: dict,
     session_id: int,
-) -> None:
+) -> bool:
     """Fire-and-forget coroutine: encode and send a bot action to the server."""
     if not _is_active_wss_session(session_id):
         log.info("[BOT→S] skip injection from stale WSS session #%s", session_id)
@@ -189,17 +191,15 @@ async def _do_inject(
             "[BOT→S] %s encode failed (pb2 missing / ParseDict error) — skipping injection",
             inject_type,
         )
-        bot.notify_inject_failed(inject_type)
         return
 
-    if inject_type == "pb.UserValueREQ":
+    if inject_type in {"pb.UserValueREQ", "pb.QuickStartREQ"}:
         inject_room_id = 0
 
     if inject_room_id == 0 and inject_type in (
         "pb.DelayLeaveRoomREQ",
         "pb.LeaveRoomREQ",
         "pb.EnterRoomREQ",
-        "pb.QuickStartREQ",
         "pb.RebyREQ",
         "pb.SetRebyREQ",
     ):
@@ -213,35 +213,11 @@ async def _do_inject(
     log.info("[BOT→S] %s room_id=%s %s", inject_type, inject_room_id, inject_fields)
     try:
         await server_ws.send(wire)
+        return True
     except Exception as exc:
         log.warning("[BOT→S] inject send failed: %s", exc)
-        bot.notify_inject_failed(inject_type)
 
 
-async def _c2s_analysis_worker(
-    buf: FrameBuffer,
-    queue: asyncio.Queue,
-    session_id: int,
-    heartbeat: HeartbeatTrace,
-) -> None:
-    """Consume raw C2S bytes and log watched message types (runs concurrently with forwarding)."""
-    while True:
-        raw = await queue.get()
-        if raw is None:
-            break
-        for frame in buf.feed(raw):
-            if frame.type_name == "pb.HeartBeatREQ":
-                _seq, pending = heartbeat.note_req()
-                if pending >= 2:
-                    log.warning(
-                        "[HB] session #%s heartbeat request pending=%d; %s",
-                        heartbeat.session_id,
-                        pending,
-                        heartbeat.summary(),
-                    )
-            if frame.type_name in WATCH_C2S:
-                msg = codec.decode(frame.type_name, frame.pb_body)
-                log.debug("[C→S] %s  %s", frame.type_name, msg)
 
 
 async def _s2c_analysis_worker(
@@ -283,9 +259,6 @@ async def _s2c_analysis_worker(
                         pending,
                         heartbeat.summary(),
                     )
-            bot.submit_room_seen(session_id=session_id, room_id=frame.room_id)
-            if frame.type_name not in WATCH_S2C:
-                continue
             msg = codec.decode(frame.type_name, frame.pb_body)
             if msg is None:
                 log.warning("[S→C] %s  (decode failed — run pf_intercept/tools/gen_pb2.sh first)", frame.type_name)
@@ -299,41 +272,25 @@ async def _s2c_analysis_worker(
             )
 
 
-async def _pipe_c2s(
-    client_ws,
-    server_ws,
-    buf: FrameBuffer,
-    session_id: int,
-    heartbeat: HeartbeatTrace,
-) -> None:
-    """Game client → real server: forward immediately, analyze asynchronously."""
-    analysis_queue: asyncio.Queue = asyncio.Queue()
-    analysis_task = asyncio.create_task(
-        _c2s_analysis_worker(buf, analysis_queue, session_id, heartbeat)
-    )
-    msg_count = 0
-    try:
-        async for raw in client_ws:
-            msg_count += 1
-            if isinstance(raw, str):
-                raw = raw.encode()
-            # Forward first — analysis must not block the relay path
-            send_started = time.monotonic()
-            await server_ws.send(raw)
-            send_ms = (time.monotonic() - send_started) * 1000.0
-            if send_ms >= 500:
-                log.warning(
-                    "[WSS] session #%s c2s send to upstream slow %.0fms bytes=%d; %s",
-                    session_id,
-                    send_ms,
-                    len(raw),
-                    heartbeat.summary(),
-                )
-            analysis_queue.put_nowait(raw)
-    finally:
-        analysis_queue.put_nowait(None)   # signal worker to exit
-        await analysis_task
-        log.info("[WSS] session #%s pipe c2s ended; messages=%d", session_id, msg_count)
+async def _pipe_c2s(client_ws, server_ws, buf, session_id, heartbeat) -> None:
+    async for raw in client_ws:
+        if not _is_active_wss_session(session_id):
+            return
+        if isinstance(raw, str):
+            raw = raw.encode()
+        for frame in buf.feed(raw):
+            name = frame.type_name
+            if name == "pb.HeartBeatREQ":
+                heartbeat.note_req()
+            elif name.endswith("REQ") and name != "pb.ActionREQ":
+                msg = codec.decode(name, frame.pb_body)
+                if msg is not None:
+                    allowed = await _bot.call("client_request", {"session_id": session_id,
+                                              "type_name": name, "msg": msg}, timeout=15)
+                    if not allowed:
+                        log.info("[C→S] %s handled by shared session", name)
+                        continue
+            await server_ws.send(encode_frame(name, frame.room_id, frame.pb_body))
 
 
 async def _pipe_s2c(
@@ -395,14 +352,29 @@ async def _bot_inject_worker(
     queue: asyncio.Queue,
     session_id: int,
 ) -> None:
-    while True:
-        inject = await queue.get()
-        if inject is None:
-            return
-        if not _is_active_wss_session(session_id):
-            log.info("[BOT→S] stop injection worker for stale WSS session #%s", session_id)
-            return
-        asyncio.create_task(_do_inject(server_ws, bot, inject, session_id))
+    async def deliver(inject):
+        ok = False
+        try:
+            ok = bool(await _do_inject(server_ws, bot, inject, session_id))
+        finally:
+            if inject.get("send_id"):
+                bot.notify_wire_sent(session_id, inject["send_id"], ok)
+    pending = set()
+    try:
+        while True:
+            inject = await queue.get()
+            if inject is None or not _is_active_wss_session(session_id):
+                return
+            if inject.get("kind") == "close_transport":
+                await _close_ws_quietly(server_ws, reason="session recovery")
+                return
+            task = asyncio.create_task(deliver(inject))
+            pending.add(task)
+            task.add_done_callback(pending.discard)
+    finally:
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
 
 
 async def _event_loop_lag_watch(session_id: int) -> None:
@@ -419,11 +391,11 @@ async def _event_loop_lag_watch(session_id: int) -> None:
         expected = now + interval
 
 
-async def _run_wss_pair(client_ws, server_ws, session_id: int) -> None:
+async def _run_wss_pair(client_ws, server_ws, session_id: int, upstream: str = "") -> None:
     bot = _bot
     if bot is None:
         raise RuntimeError("BotWorker not initialised (main() must run first)")
-    inject_queue = bot.register_session(session_id)
+    inject_queue = bot.register_session(session_id, upstream)
     ent_token = None
     if _entertainment is not None:
         ent_token = _entertainment.attach_session()
@@ -595,7 +567,7 @@ async def _handle_wss(client_ws) -> None:
                     _wss_down_notice_active = False
                 server_ws = upstream_ws
                 _active_server_ws = upstream_ws
-                await _run_wss_pair(client_ws, server_ws, session_id)
+                await _run_wss_pair(client_ws, server_ws, session_id, upstream_uri)
         except (OSError, asyncio.TimeoutError) as net_err:
             # Network-level failure (TCP connect / TLS timeout): refresh DNS and retry once.
             log.warning(
@@ -624,7 +596,8 @@ async def _handle_wss(client_ws) -> None:
                         _wss_down_notice_active = False
                     server_ws = upstream_ws
                     _active_server_ws = upstream_ws
-                    await _run_wss_pair(client_ws, server_ws, session_id)
+                    await _run_wss_pair(client_ws, server_ws, session_id,
+                                        f"wss://{fresh_route.wss_upstream_host}:{fresh_route.wss_tcp_port}")
             else:
                 raise
     except websockets.exceptions.ConnectionClosed as exc:
@@ -674,124 +647,106 @@ def _load_bark_key_from_file() -> None:
         log.info("[Bark] no key in %s; push disabled", _DEFAULT_BARK_KEY_FILE)
 
 
-async def main(
-    max_auto_rebuy: int = 1,
-    profit_lock_bb: int | None = None,
-) -> None:
+async def main(options: RunOptions | None = None, stop: asyncio.Event | None = None) -> None:
     global _bot, _entertainment
+    from pf_entertainment.remote_live.publisher import start_remote_live
+    from pf_intercept.headless.lobby.radar.board import Board as RadarBoard
+    options = options or RunOptions()
+    stop = stop or asyncio.Event()
     archive_runtime_logs_on_startup(_PROJECT_ROOT / "pokerfate" / "logs")
-    _load_bark_key_from_file()
+    if options.no_notify:
+        set_bark_key(None)
+    else:
+        _load_bark_key_from_file()
     if not Path(SERVER_CERT).exists():
-        print("ERROR: certs not found. Run:  python -m pf_intercept.gen_cert")
-        return
-
-    if profit_lock_bb is not None:
-        config.PROFIT_LOCK_BB_THRESHOLD = profit_lock_bb
-
-    _bot = BotWorkerClient(
-        max_auto_rebuy=max_auto_rebuy,
-        profit_lock_bb=profit_lock_bb,
-    )
-    await _bot.start()
-    start_calibration_spool_worker()
-    _entertainment = EntertainmentRuntime(
-        web_host=config.ENTERTAINMENT_WEB_HOST,
-        web_port=config.ENTERTAINMENT_WEB_PORT,
-    )
-    _entertainment.set_bot_dashboard_handler(_bot.bankroll_dashboard)
-    await _entertainment.start()
-    log.info(
-        "[BOT] Waiting for SitDownRSP and EnterRoomRSP to detect seat / blinds "
-        "(max_auto_rebuy=%d, profit_lock_bb=%d)",
-        max_auto_rebuy,
-        config.PROFIT_LOCK_BB_THRESHOLD,
-    )
-    log.info(
-        "[HB] heartbeat trace enabled; wss_gap_warn=%.1fs loop_lag_warn=%.1fs",
-        _WSS_GAP_WARN_SEC,
-        _EVENT_LOOP_LAG_WARN_SEC,
-    )
-    print(
-        f"[proxy] Bot 初始化完成  max_rebuy={max_auto_rebuy}  "
-        f"profit_lock={config.PROFIT_LOCK_BB_THRESHOLD}BB"
-    )
-    print(f"[proxy] BotWorker 已启动  pid={_bot.pid}  日志={_LOGS_DIR / 'bot_worker.log'}")
-    print(
-        f"[proxy] 心跳监控  wss_gap_warn={_WSS_GAP_WARN_SEC:.1f}s  "
-        f"loop_lag_warn={_EVENT_LOOP_LAG_WARN_SEC:.1f}s"
-    )
-    server_ssl = _make_server_ssl()
-
-    await websockets.serve(
-        _handle_wss,
-        PROXY_HOST,
-        WSS_PORT,
-        ssl=server_ssl,
-        # The game has its own heartbeat. Avoid proxy-initiated pings killing
-        # the phone side on jittery office Wi-Fi.
-        ping_interval=None,
-        ping_timeout=None,
-    )
-    log.info("WSS MITM   %s:%d  →  wss://<domain>:%d  (dynamic per-connection)", PROXY_HOST, WSS_PORT, SERVER_WSS_PORT)
-    print(f"[proxy] WSS MITM 已启动  {PROXY_HOST}:{WSS_PORT}  →  wss://<domain>:{SERVER_WSS_PORT}")
-
-    for port in PASSTHROUGH_PORTS:
-        if port == WSS_PORT:
-            log.warning("Skipping passthrough on WSS port %d", WSS_PORT)
-            continue
-        await asyncio.start_server(
-            lambda r, w, p=port: handle_passthrough(
-                r,
-                w,
-                p,
-                real_server_sni=lambda: _real_server_sni,
-                log=log,
-                tcp_log=tcp_log,
-            ),
-            PROXY_HOST, port,
-        )
-        log.info("TCP passthrough %s:%d  (target host from SNI/Host)", PROXY_HOST, port)
-        print(f"[proxy] TCP passthrough 已启动  {PROXY_HOST}:{port}")
-
-    for _h in PREFERRED_WSS_HOSTS:
-        log.info("hosts entry:  127.0.0.1  %s", _h)
-        print(f"[proxy] hosts entry:  127.0.0.1  {_h}")
-    print("[proxy] 等待连接中... (Ctrl+C 停止)")
+        raise FileNotFoundError("certs not found. Run: python -m pf_intercept.gen_cert")
+    _bot = BotWorkerClient(options=options)
+    servers, publisher = [], None
     try:
-        await asyncio.Future()
+        await _bot.start()
+        start_calibration_spool_worker()
+        _entertainment = EntertainmentRuntime(
+            web_host=None if options.no_web else options.web_host, web_port=options.web_port,
+            live_source=_bot.live_snapshot, radar_board=RadarBoard())
+        _entertainment.set_bot_dashboard_handler(_bot.bankroll_dashboard)
+        await _entertainment.start()
+        publisher = start_remote_live(_bot.live_snapshot, money_source=_bot.bankroll_dashboard,
+                                      enabled=not options.no_remote_live)
+        servers.append(await websockets.serve(_handle_wss, PROXY_HOST, WSS_PORT, ssl=_make_server_ssl(),
+                                              ping_interval=None, ping_timeout=None))
+        for port in PASSTHROUGH_PORTS:
+            if port == WSS_PORT:
+                continue
+            servers.append(await asyncio.start_server(
+                lambda r, w, p=port: handle_passthrough(r, w, p, real_server_sni=lambda: _real_server_sni,
+                                                       log=log, tcp_log=tcp_log), PROXY_HOST, port))
+        log.info("[RUN_OPTIONS] %s", options)
+        print(f"[proxy] 已启动 pid={os.getpid()} worker={_bot.pid}；等待客户端登录")
+        waits = [asyncio.create_task(stop.wait()), asyncio.create_task(_bot.failed.wait())]
+        try:
+            await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+            if _bot.failed.is_set():
+                raise RuntimeError("bot 工作进程已退出，停止代理与上传")
+        finally:
+            for task in waits:
+                task.cancel()
+            await asyncio.gather(*waits, return_exceptions=True)
+        if _active_server_ws is not None:
+            try:
+                await _bot.call("graceful_leave", timeout=55)
+            except Exception:
+                log.exception("[proxy] 优雅离桌未完成，关闭连接")
     finally:
+        for server in servers:
+            server.close()
+        await asyncio.gather(*(server.wait_closed() for server in servers), return_exceptions=True)
+        await _close_ws_quietly(_active_client_ws, reason="proxy stopped")
+        await _close_ws_quietly(_active_server_ws, reason="proxy stopped")
+        if publisher is not None:
+            await publisher.close()
+        if _entertainment is not None:
+            await _entertainment.close()
         stop_calibration_spool_worker()
-        if _bot is not None:
-            await _bot.stop()
+        await _bot.stop()
 
 
-def _parse_proxy_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="PokerFate WSS MITM proxy (auto seat/blinds; optional auto-rebuy cap)",
-    )
-    p.add_argument(
-        "--max-auto-rebuy",
-        type=int,
-        default=1,
-        metavar="N",
-        choices=range(1, 21),
-        help="本房间筹码清零时最多自动续入次数（1–20，默认 1）",
-    )
-    p.add_argument(
-        "--profit-lock-bb",
-        type=int,
-        default=None,
-        metavar="BB",
-        help=f"盈利锁仓阈值（大盲倍数），达到后离桌再以 100BB 进房（默认用 pf_intercept.config 的值 {config.PROFIT_LOCK_BB_THRESHOLD}）",
-    )
-    return p.parse_args()
+def _parse_proxy_args(argv=None) -> argparse.Namespace:
+    return add_run_arguments(argparse.ArgumentParser(description="PokerFate MITM 代理")).parse_args(argv)
+
+
+_PID_FILE = _LOGS_DIR / "proxy.pid"
+
+
+def run(args=None, before_start=None, cleanup=None) -> int:
+    """Parse/stop/lock before launching helpers, then handle signals through graceful leave."""
+    args = args or _parse_proxy_args()
+    if args.stop:
+        try:
+            pid = request_stop(_PID_FILE)
+            print(f"[proxy] 已向 PID {pid} 请求优雅停止" if pid else "[proxy] 没有运行实例")
+            return 0
+        except (ProcessControlError, OSError) as exc:
+            print(f"[proxy] 停止失败：{exc}")
+            return 2
+    stop = asyncio.Event()
+    previous = {sig: signal.signal(sig, lambda *_: stop.set()) for sig in (signal.SIGINT, signal.SIGTERM)}
+    try:
+        with RunningProcess(_PID_FILE):
+            configure_proxy_logging(_LOGS_DIR, verbose=args.verbose)
+            if before_start is not None and not stop.is_set():
+                before_start()
+            if not stop.is_set():
+                asyncio.run(main(RunOptions.from_namespace(args), stop))
+        return 0
+    except (ProcessControlError, OSError, RuntimeError) as exc:
+        log.error("[proxy] 启动失败：%s", exc)
+        return 2
+    finally:
+        if cleanup is not None:
+            cleanup()
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
 
 
 if __name__ == "__main__":
-    _args = _parse_proxy_args()
-    asyncio.run(
-        main(
-            max_auto_rebuy=_args.max_auto_rebuy,
-            profit_lock_bb=_args.profit_lock_bb,
-        )
-    )
+    raise SystemExit(run())

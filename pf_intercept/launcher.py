@@ -2,15 +2,14 @@
 PokerFate 一键启动器
 
 整合三个服务到一个命令：
-  1. mitmweb   — HTTP 代理，拦截登录响应并强制域名连接
-  2. dns_server — 劫持游戏域名 DNS 到本机（需 root/管理员权限）
+  1. mitmweb   — HTTP 代理，记录登录凭证（大厅自动化和对手历史要用），再改写登录响应强制域名连接
+  2. dns_server — 劫持游戏域名 DNS 到本机（需 root）
   3. proxy     — WSS MITM 代理 + Bot 决策引擎
 
-用法:
-    # macOS / Linux（DNS 部分自动请求 sudo）
-    python -m pf_intercept.launcher
+只支持 macOS / Linux。
 
-    # Windows（DNS 部分通过 UAC 弹窗提权）
+用法:
+    # DNS 部分自动请求 sudo
     python -m pf_intercept.launcher
 
     # 透传 proxy 参数
@@ -26,10 +25,8 @@ PokerFate 一键启动器
 from __future__ import annotations
 
 import asyncio
-import ctypes  # used only on Windows; stdlib, harmless on other platforms
 import logging
 import os
-import platform
 import pty
 import shutil
 import signal
@@ -40,17 +37,20 @@ import time
 from pathlib import Path
 
 from pf_intercept import config
-from pf_intercept.proxy import _parse_proxy_args, main as proxy_main
+from pf_intercept.proxy.app import _parse_proxy_args, run as proxy_run
 
 log = logging.getLogger(__name__)
 
-_IS_WIN = platform.system() == "Windows"
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # mitmweb 默认参数
 _MITMWEB_PORT = 8080
 _MITMWEB_IGNORE = config.MITM_IGNORE_HOSTS
 _FORCE_DOMAIN_SCRIPT = _PROJECT_ROOT / "pf_reverse" / "force_domain.py"
+# The proxy's session takes its HTTP credentials from the capture of this very login
+# (ProxySession.identify checks uid and key), so the capture has to run here too.  Loaded
+# first: mitmproxy calls addons in order, and force_domain rewrites the server list.
+_CAPTURE_LOGIN_SCRIPT = _PROJECT_ROOT / "pf_reverse" / "capture_login.py"
 
 # 子进程引用（模块级，供 cleanup 访问）
 _mitmweb_proc: subprocess.Popen | None = None
@@ -81,10 +81,7 @@ def _stop_subprocess(proc: subprocess.Popen | None, name: str) -> None:
         return
     print(f"[launcher] 停止 {name} (pid={proc.pid})")
     try:
-        if _IS_WIN:
-            proc.terminate()
-        else:
-            os.kill(proc.pid, signal.SIGTERM)
+        os.kill(proc.pid, signal.SIGTERM)
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         proc.kill()
@@ -107,6 +104,7 @@ def _start_mitmweb() -> subprocess.Popen | None:
         mitmweb,
         "--listen-port", str(_MITMWEB_PORT),
         "--ignore-hosts", _MITMWEB_IGNORE,
+        "-s", str(_CAPTURE_LOGIN_SCRIPT),
         "-s", str(_FORCE_DOMAIN_SCRIPT),
         "--no-web-open-browser",
     ]
@@ -147,24 +145,10 @@ def _start_dns_elevated() -> subprocess.Popen | None:
     """以 root/管理员权限启动 dns_server 子进程。
 
     主进程保持普通用户运行，只有 DNS 需要 root（端口 53）。
-    macOS/Linux 走 PTY + sudo 路径（触发 Touch ID / 密码提示）。
-    Windows 走 UAC 提权，该分支**必须**在 sudo 路径之前检查 —
-    否则 Windows 会掉到 `os.geteuid()`（Unix 专属）直接抛 AttributeError。
-
-    已知局限：Windows UAC 路径 ShellExecuteW 启动的独立窗口进程不返回
-    Popen 句柄（`return None`）。launcher `_cleanup` 因此不会 kill 它，
-    Ctrl+C 退出后 DNS 服务窗口变成孤儿需要用户手动关闭。
+    走 PTY + sudo 路径（触发 Touch ID / 密码提示）。
     """
     python = sys.executable
     dns_cmd = [python, "-m", "pf_intercept.dns_server"]
-
-    if _IS_WIN:
-        print("[launcher] 启动 dns_server（UAC 提权）...")
-        ctypes.windll.shell32.ShellExecuteW(
-            None, "runas", python, "-m pf_intercept.dns_server", None, 1,
-        )
-        print("[launcher] dns_server UAC 已请求（独立窗口运行）")
-        return None
 
     env_path = _venv_path()
 
@@ -238,31 +222,14 @@ def _parse_launcher_args() -> tuple[bool, bool, list[str]]:
 # ── 主流程 ───────────────────────────────────────────────────────────────────
 
 
-async def _run(skip_mitmweb: bool, skip_dns: bool, proxy_argv: list[str]) -> None:
+def _start_helpers(skip_mitmweb, skip_dns):
     global _mitmweb_proc, _dns_proc
-
-    # ── 1. mitmweb（子进程，不需要 root） ──
     if not skip_mitmweb:
         _mitmweb_proc = _start_mitmweb()
-
-    # ── 2. dns_server（子进程，需要 root，自动提权） ──
     if not skip_dns:
         _dns_proc = _start_dns_elevated()
         if _dns_proc is None:
-            print("[launcher] DNS 服务未启动，proxy 仍将启动（需 hosts 文件生效）")
-
-    # ── 3. Proxy（当前进程，不需要 root） ──
-    saved_argv = sys.argv
-    sys.argv = ["proxy"] + proxy_argv
-    try:
-        args = _parse_proxy_args()
-    finally:
-        sys.argv = saved_argv
-
-    await proxy_main(
-        max_auto_rebuy=args.max_auto_rebuy,
-        profit_lock_bb=args.profit_lock_bb,
-    )
+            print("[launcher] DNS 未启动，请通过 hosts 等方式转发游戏域名")
 
 
 def _cleanup() -> None:
@@ -270,24 +237,11 @@ def _cleanup() -> None:
     _stop_subprocess(_mitmweb_proc, "mitmweb")
 
 
-def main() -> None:
+def main() -> int:
     skip_mitmweb, skip_dns, proxy_argv = _parse_launcher_args()
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s  %(levelname)-5s  %(message)s",
-        datefmt="%H:%M:%S",
-    )
-
-    try:
-        asyncio.run(_run(skip_mitmweb, skip_dns, proxy_argv))
-    except KeyboardInterrupt:
-        print("\n[launcher] Ctrl+C，正在停止所有服务...")
-    finally:
-        _cleanup()
-
-    print("[launcher] 已退出")
+    args = _parse_proxy_args(proxy_argv)
+    return proxy_run(args, before_start=lambda: _start_helpers(skip_mitmweb, skip_dns), cleanup=_cleanup)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

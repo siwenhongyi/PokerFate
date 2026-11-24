@@ -1,327 +1,193 @@
 # PokerFate
 
-德州扑克 AI bot，通过 MITM 代理接入 PokerFate 游戏客户端，实时拦截协议并自动决策。
+PokerFate 德州扑克游戏的自动打牌程序。
 
----
+它有两种接入方式。纯 API 模式（headless）用保存的登录凭证直接连接游戏服务器。
+代理模式作为 MITM 代理跟着游戏客户端运行。两种方式共用同一套对局逻辑、决策引擎、对手模型、选桌和大厅自动化。
 
-## 架构总览
+## 功能
 
-```
-游戏客户端
-    │  WSS (TLS)
-    ▼
-pf_intercept/proxy/         ← MITM 代理包，拦截并解码 Protobuf 帧
-    │  S2C 事件流
-    ▼
-pf_intercept/bot/bridge.py  ← BotBridge：将游戏事件翻译为 API 调用，注入 C2S 行动
-    │
-    ▼
-pokerfate/api.py             ← 对外接口：手牌管理、决策请求、对手建模
-    │
-    ├── bot/poker_bot.py     ← 核心决策引擎（preflop + postflop + GTO）
-    ├── bot/opponent_model.py← 对手统计建模（VPIP/PFR/AF/3bet/cbet/WTSD）
-    └── strategy/            ← 翻前策略、翻后策略、GTO 数学、range 估算
-```
+- **决策**：翻前用规则引擎；单挑翻牌查离线 CFR 翻牌书；单挑转牌、河牌用本地 solver 实时求解；其余情况回到规则引擎。
+- **对手建模**：按 UID 累计对手统计，并参考服务器的历史数据。用服务器的人机计数识别平台机器人，人机的牌不参与学习。
+- **牌桌与资金**：自动选桌，离开没有真人或人机多于真人的桌子；盈利锁仓、桌上补码、整轮净亏损上限。
+- **大厅自动化**：领取基金、任务、签到、邮件和各类活动奖励，并完成任务需要的小游戏、竞猜和互动。
+- **观看与通知**：本机 Web 显示实时牌桌和资金；可选的 VPS 只读观看页；Bark 手机通知。
 
----
+## 运行环境
 
-## 模块说明
+- macOS 或 Linux。进程锁和 DNS 提权用到 Unix 接口，Windows 上无法启动 bot。
+- Python 3.12 及以上。
+- mitmproxy：采集登录凭证和代理模式要用，不在 `requirements.txt` 里。
+- Rust 工具链：编译实时求解用的 solver。可以不装，此时转牌、河牌改用规则引擎。
+- 一部装有游戏的手机：首次使用和凭证过期时，用它登录一次。
 
-### `pokerfate/` — AI 引擎
+## 安装
 
-核心决策层，不依赖游戏客户端，可独立使用。
-
-| 文件 | 职责 |
-|------|------|
-| `api.py` | 外部接入接口，详见 `pokerfate/INTEGRATION.md` |
-| `bot/poker_bot.py` | 主决策逻辑，整合 preflop/postflop/GTO/range |
-| `bot/opponent_model.py` | 对手建模：统计 VPIP/PFR/AF 等，输出可剥削调整 |
-| `strategy/preflop.py` | 翻前策略：基于手牌强度百分位 + 位置 |
-| `strategy/postflop.py` | 翻后策略兼容层，封装 `strategy/v3/` 决策引擎 |
-| `strategy/v3/` | 翻后目的选择、下注尺度、攻防决策 |
-| `strategy/gto.py` | GTO 数学：pot odds、MDF、SPR、下注尺度 |
-| `strategy/range_v2/` | range equity：1326 组合建模、Bayesian range tracker、range equity |
-| `core/hand_evaluator.py` | 7张牌最优5张评估 |
-| `core/equity.py` | 蒙特卡洛胜率计算 |
-| `core/game_state.py` | 游戏状态数据结构 |
-
-**决策流程**：
-
-```
-request_action()
-    ├── preflop → 手牌强度百分位 × 位置系数 × 对手类型调整
-    └── postflop → Bayesian range tracker → range equity → v3 engine
-```
-
----
-
-### `pf_intercept/` — MITM 代理层
-
-拦截游戏客户端与服务器的 WebSocket 流量，解码 Protobuf，驱动 bot 决策并注入行动。
-
-| 文件 | 职责 |
-|------|------|
-| `launcher.py` | 代理模式一键启动器：mitmweb + 伪 DNS + proxy，见下文「快速启动（代理模式）」 |
-| `proxy/` | 主代理包：WSS runtime、TCP 透传、路由选择、TLS、日志和监控 |
-| `bot/bridge.py` | BotBridge：状态机管理（seat/blinds/筹码/锁仓），翻译游戏事件 |
-| `config/` | 所有可调参数（服务器地址、盈利锁仓阈值、delay 等） |
-| `wire/codec.py` | Protobuf 编解码（基于逆向得到的 pb 定义） |
-| `wire/framing.py` | 游戏私有帧格式解析 |
-| `wire/pb/` | 逆向得到的 Protobuf 定义编译结果 |
-| `dns/server.py` | 伪 DNS 服务（Android 模式下将游戏域名解析到本机） |
-| `certificates/generator.py` | 生成本地 CA + 服务端证书（一次性操作） |
-| `game_api/` | 游戏 REST API helper：签名请求和玩家统计接口 |
-| `tools/gen_pb2.sh` | 根据 `pf_reverse/output/proto/Proto` 重新生成 `wire/pb` |
-
-**关键自动行为（BotBridge）**：
-
-- **比赛房完全旁路**：进入 SNG / MTT / 好友 SNG（`EnterRoomRSP` 的 game_type 或 `sngroom_info` / `mttroom_info`）后，程序只做识别，不决策、不注入、不采集、不记资金、不推送，由玩家手动打；进入下一个非比赛房自动恢复托管
-- **seat / blinds 自检测**：从 `SitDownRSP` / `EnterRoomRSP` 自动识别
-- **盈利锁仓**：现金桌筹码达到阈值（默认 200BB）后自动离桌，以 100BB 重进，避免亏还回去；好友房不触发
-- **净亏损上限**：本次启动最多净亏 (1 + `--max-auto-rebuy`) 个 100BB 买入（按启动场次的大盲算）。
-  破产买入、桌上补码、换桌或异常离桌后的重新买入都先过这一条：已亏的 + 桌上的 + 要带的不超过上限。
-  放不下 100BB 就带上限还容得下的最大一档，连最小一档（20BB）都放不下就停在大厅并推送 `loss_stop`。
-  赢到的已经在净盈亏里，所以盈利锁仓不再增加次数，也不再单独数破产买入的次数
-- **自动续入**：筹码清零后自动 rebuy，买多少、买不买由净亏损上限决定
-- **桌上补码**：一手结束时桌上筹码低于 70BB（没输光），用客户端「补充筹码」同款的 `pb.SetRebyREQ`
-  在桌上补到不超过 100BB 的最大一档，下一手发牌前到账，不用离桌；好友房不触发。
-  补多少受净亏损上限约束
-- **人类延迟模拟**：按 street/动作类型/底池大小随机注入思考延迟
-
----
-
-### `pf_notify/` — 手机推送
-
-通过 [Bark](https://bark.day.app) 向 iPhone 推送。Bark App 里的设备 Key 写在 `local/secrets/bark_key.txt` 的第一行；没有这个文件就不推送。
-
-会推送的场景：
-
-- 筹码清零，自动续入
-- 桌上补码到账
-- 盈利锁仓触发，准备离桌
-- 净亏损到上限，停在大厅
-- 选桌让 bot 离开一张打过牌的桌子（没有真人、真人少于人机等）
-- 选桌在所有场次都找不到合格的牌桌，停在大厅
-- 单手盈亏达到 20BB
-- 第一次遇到没有历史数据的对手（每次启动最多一次）；对手历史数据接口鉴权失败
-- 校准队列积压：积压到提醒线、积压到暂停线（停止新对局）、恢复
-- 仅 proxy 模式：WebSocket 异常断开、恢复
-
-比赛房（SNG/MTT）和好友房里不发牌桌相关的提醒，比赛房连断线提醒也不发；校准队列提醒由独立的 worker 发，不看房间。
-
----
-
-### `pf_reverse/` — 逆向工程
-
-协议逆向过程的产出与笔记，见 `pf_reverse/REVERSE_NOTES.md`。不参与运行时。
-
-客户端更新后，直接用新 APK 重建 proto/lua，再重新生成 pb：
+在项目根目录执行：
 
 ```bash
-.venv/bin/python pf_reverse/extract_resources.py ~/Downloads/PokerFate_Android.apk
-bash pf_intercept/tools/gen_pb2.sh
-```
-
----
-
-### `local/` — 本机数据（不入库）
-
-目录名叫 `data` 的都入库（如 `pokerfate/data/`：翻牌书、GTO 表、拟合出的模型）；只在本机才有的东西全部放在顶层 `local/`，由 `.gitignore` 的一条规则忽略。
-
-| 子目录 | 内容 |
-|------|------|
-| `local/secrets/` | 凭证和密钥：`bark_key.txt`（Bark 设备 Key，第一行）、`auth_token.txt`（游戏 REST API 鉴权 token，由 `force_domain.py` 登录时自动写入）、`headless_session.json`、`login_capture/`、`remote_live.json`（及它旁边的服务器证书和上传锁） |
-| `local/state/` | 不含凭证的小文件：`ip_cache.json`（DNS 解析结果缓存）、`discovered_server.json`、`selected_route.json`、`force_domain_original_response.json`、`hero_names.json` |
-| `local/models/` | bot 运行中学出来并不断改写的模型：`opponents.json`、`robots.json`、`range_v2_empirical_model.json` |
-| `local/training/` | 从对局里抽出的训练样本（`*.rows.jsonl`、`river_value_sizing.*.jsonl`）和它的工作队列 `live_spool/` |
-
----
-
-纯 API 模式的基金、每日／每周任务自动领取默认开启，配置、日志与异常处理见
-[自动领取说明](pf_intercept/headless/README.md)。
-
-## 快速启动（代理模式）
-
-日常只用一条命令。`pf_intercept/launcher.py` 会把代理模式需要的三样东西一次拉起来：
-
-```bash
-.venv/bin/python -m pf_intercept.launcher
-```
-
-| 顺序 | 启动的东西 | 作用 |
-|------|-----------|------|
-| 1 | `mitmweb`（子进程，端口 `8080`） | HTTP 代理，挂载 `pf_reverse/force_domain.py`：从登录响应提取 `authorization` token 写入 `local/secrets/auth_token.txt`；过滤服务器列表，只保留证书覆盖范围内的域名服务器，首选域名记到 `local/state/discovered_server.json` |
-| 2 | 伪 DNS `pf_intercept.dns_server`（子进程，端口 `53`） | 把游戏域名解析到本机，其余域名转发上游正常解析 |
-| 3 | proxy（launcher 进程本身） | WSS MITM（`9012`）、`443` / `80` 透传、bot 决策、牌局 Web（`9022`） |
-
-launcher 的行为：
-
-- **权限**：只有伪 DNS 需要 root（53 端口）。macOS / Linux 下 launcher 自己调 `sudo`，会要密码或 Touch ID；
-  Windows 下弹 UAC。launcher 本身用普通用户运行即可，不需要给整条命令加 `sudo`。
-- **mitmweb**：在 `PATH` 里找 `mitmweb` 命令，找不到就打印提示并跳过。只装在 `.venv` 里时先
-  `source .venv/bin/activate` 再启动。输出写到项目根目录的 `logs/mitmweb.log`，不自动打开浏览器。
-- **伪 DNS 起不来**（取消授权、53 端口被占、30 秒内没就绪）：只跳过这一项，proxy 照常启动，
-  这时要靠 hosts 文件把游戏域名指到本机。
-- **停止**：Ctrl+C，mitmweb 和伪 DNS 跟着一起停。例外是 Windows：伪 DNS 跑在 UAC 拉起的独立窗口里，要手动关。
-
-### 1. 一次性准备
-
-**证书**
-
-```bash
-.venv/bin/python -m pf_intercept.gen_cert
-```
-
-输出到 `pf_intercept/certs/`，将 `ca.crt` 安装为受信任根 CA。没有证书时 proxy 报 `certs not found` 后直接退出。
-
-**mitmproxy**（不在 `requirements.txt` 里）
-
-```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python -m pip install mitmproxy
+cargo build --release --manifest-path pokerfate/solver/pf_solver/Cargo.toml
 ```
 
-**Android 手机**（和电脑在同一局域网）
+solver 的构建和加载规则见[决策引擎](pokerfate/decision/README.md#构建本地-solver)。
 
-1. Wi-Fi 设置 → 代理 → 手动，填电脑的局域网 IP 和端口 `8080`。登录请求经过 mitmweb。
-2. Wi-Fi 设置 → 修改 DNS 为电脑的局域网 IP。游戏的 WSS 连接由伪 DNS 引到本机 proxy。
-3. 首次使用安装 mitmproxy 的 CA 证书（手机浏览器访问 `mitm.it` 下载后安装）。
+## 快速开始
 
-**Windows 客户端**（和 proxy 在同一台机器，用 hosts 文件代替伪 DNS）
+以下是纯 API 模式。代理模式见[下文](#代理模式)。
 
-在 `C:\Windows\System32\drivers\etc\hosts` 添加：
+### 1. 采集登录凭证
 
-```
-127.0.0.1  ga-foreign.poker-fate.com
-```
-
-启动时加 `--no-dns`。proxy 启动时也会打印需要的 hosts 条目。
-
-### 2. 启动
+游戏登录需要客户端里网易易盾 SDK 生成的风控 token，程序无法自己登录。
+首次使用和凭证过期时，让手机经过临时代理登录一次：
 
 ```bash
-.venv/bin/python -m pf_intercept.launcher --max-auto-rebuy 3 --profit-lock-bb 200
-```
-
-launcher 自己的参数：
-
-- `--no-mitmweb`：不拉起 mitmweb（已在别处运行，或不需要）。
-- `--no-dns`：不拉起伪 DNS（用 hosts 文件代替）。
-
-其余参数原样交给 proxy：
-
-- `--max-auto-rebuy N`：净亏损上限，本次启动最多净亏 (1+N) 个 100BB 买入。代理模式只接受 1–20，默认 1（即 200BB）。
-- `--profit-lock-bb BB`：盈利锁仓阈值；不传则使用 `pf_intercept.config` 的 `PROFIT_LOCK_BB_THRESHOLD`。
-
-启动后打开游戏客户端正常登录、进桌，proxy 自动检测 seat/blinds 并开始决策。
-
-### 3. 牌局 Web
-
-默认监听 `0.0.0.0:9022`：本机打开 `http://127.0.0.1:9022`，局域网内用电脑 IP 访问牌局与资金看板。
-启动时会打印实际地址（`[proxy] 牌局 Web ...`）。
-
-牌局 Web 随 proxy 一起启动，没有命令行开关；地址和端口在 `pf_intercept/config/` 的
-`ENTERTAINMENT_WEB_HOST` / `ENTERTAINMENT_WEB_PORT`。
-
-### 4. 单独启动各部分
-
-排查问题、或者只需要其中一部分时用。launcher 做的就是下面三条：
-
-```bash
-# proxy（参数同上：--max-auto-rebuy、--profit-lock-bb）
-.venv/bin/python -m pf_intercept.proxy
-
-# 伪 DNS
-sudo .venv/bin/python -m pf_intercept.dns_server
-
-# mitmweb
-mitmweb --listen-port 8080 --ignore-hosts "xiaomi.com|xiaomi.net|miui.com|aliyuncs.com" -s pf_reverse/force_domain.py
-```
-
-`--ignore-hosts` 用的是排除法：只排除已知与游戏无关的推送 / 云存储域名，其余全部拦截；不要反过来只放行游戏域名。
-真机登录可能走裸 IP（见 `pf_reverse/output/lua/src/app/Constants.lua` 的 `G_HTTP_URL_2/_3/_4`），
-域名白名单会直接漏掉这些连接。这串值的唯一来源是 `pf_intercept.config.MITM_IGNORE_HOSTS`，launcher 用的也是它。
-
----
-
-## 快速启动（纯 API / headless 模式）
-
-跟上面的代理模式是两条独立的路：headless 不需要设备常驻连代理、不需要 DNS 劫持，直接用 WSS 连游戏服务器。
-代价是拿凭证本身仍然离不开一台真机——登录接口需要游戏客户端自带的网易易盾风控 SDK 在运行时生成的动态 token，
-这段 SDK 没法在纯 Python 里复现，所以不存在"完全不用设备就能登录"的办法；
-但只需要**登录这一步**在真机上做一次，拿到凭证之后的日常对局就不再需要设备或代理了。
-
-### 1. 首次获取凭证（新用户，或凭证过期后重做一次）
-
-凭证存在 `local/secrets/headless_session.json`，约 30 天过期；过期后 `pf_intercept.headless` 会报
-`ResumeError`（提示"请重新薅凭证"），重复这一步即可。
-
-```bash
+source .venv/bin/activate
 .venv/bin/python -m pf_intercept.headless.harvest_session
 ```
 
-这个脚本会自己拉起 `mitmdump` 挂载 `pf_reverse/capture_login.py`：
+第一行让脚本能在 `PATH` 里找到 `mitmdump`。然后按终端提示操作：
 
-- 默认不加 `--mode upstream`；只有当脚本探测到本机直连不了游戏服务器时，才会去读
-  `https_proxy`/`HTTPS_PROXY`/`all_proxy` 等环境变量，复用你已经配置好的本地代理/VPN——
-  不会凭空假设一个代理端口。
-- `--ignore-hosts` 用的是排除法（见 `pf_intercept.config.MITM_IGNORE_HOSTS`），不是只放行游戏域名；
-  真机登录可能走裸 IP（`Constants.lua` 的 `G_HTTP_URL_2/_3/_4`），域名白名单会漏掉这些连接。
+1. 手机和电脑连同一个局域网，把手机 Wi-Fi 代理设为终端打印的 IP 和端口（默认 `8080`）。
+2. 第一次使用时，在手机浏览器打开 `http://mitm.it`，安装并信任 mitmproxy 根证书。
+3. 打开游戏，退出账号后重新登录。
+4. 终端显示凭证已更新、脚本退出后，恢复手机原来的代理设置。
 
-脚本启动后按提示操作：
+凭证保存在 `local/secrets/headless_session.json`，通常约 30 天有效。参数和排错见 [headless 运行说明](pf_intercept/headless/README.md#登录凭证)。
 
-1. 手机 Wi-Fi 设置 → 代理 → 手动，填脚本打印出来的局域网 IP 和端口（默认 `8080`）
-2. 首次使用本机 mitmproxy 需要装根证书（手机浏览器访问 `mitm.it`）
-3. 手机上正常打开 PokerFate app，用真实账号登录一次
+### 2. 启动
 
-脚本看到 `capture_login.py` 写出新的 `local/secrets/headless_session.json` 后会自动停掉 mitmdump 并退出；
-之后不再需要这台手机。
-
-### 2. 启动 headless
+进大盲 10,000 的现金桌，每次买入 100BB：
 
 ```bash
-.venv/bin/python -m pf_intercept.headless --bb 10000 --buyin-bb 50
+.venv/bin/python -m pf_intercept.headless --bb 10000 --buyin-bb 100
 ```
 
-常用参数：
+浏览器打开 <http://127.0.0.1:9022> 查看实时牌桌和资金。不传 `--bb` 时只登录，保持连接 30 秒后退出。
 
-- `--bb`：进桌的大盲（不传则只登录+心跳，不进桌）。
-- `--buyin-bb`：买入多少个大盲，默认 100。
-- `--max-auto-rebuy` / `--profit-lock-bb`：含义同代理模式；headless 下 `--max-auto-rebuy` 还可以传 `0`（净亏一个买入即停）。
-- `--topup-below-bb`：桌上筹码低于多少个大盲就在桌上补码（默认 70，`0` 关闭）。
-- `--no-web`：不启动实时对局 Web（默认启动，监听 `0.0.0.0:9022`，手机同 WiFi 可看）。
-- `--stop`：校验 `pf_intercept/logs/headless.pid` 对应实例后发送优雅停止请求，不登录游戏。
+```bash
+nohup .venv/bin/python -m pf_intercept.headless --bb 10000 --buyin-bb 100 \
+  > /dev/null 2>&1 & disown
+```
 
-优雅停止（终端或 PyCharm 启动均适用）：
+程序自己写文件日志，丢掉控制台输出不影响日志。但参数错误和“已有实例在运行”只打印在控制台，
+所以后台启动后要确认 `pf_intercept/logs/headless.pid` 已生成、`headless.log` 有新内容。
+
+### 3. 停止
 
 ```bash
 .venv/bin/python -m pf_intercept.headless --stop
 ```
 
-PID 由 bot 自动维护，退出后删除；同一项目通过文件锁防止重复启动。
-停止请求发送后仍需等待离桌及收尾，详见 [运行说明](pf_intercept/headless/README.md)。
+bot 会打完当前手再离桌退出。命令返回时进程可能还没退出，重启前等 PID 文件消失。前台运行时也可以按 `Ctrl+C`。
 
-日志见 `pf_intercept/logs/headless.log`；基金/任务自动领取见
-[自动领取说明](pf_intercept/headless/README.md)。
+## 代理模式
 
----
-
-## 关键配置（`pf_intercept/config/`）
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `PROFIT_LOCK_BB_THRESHOLD` | `200` | 触发盈利锁仓的筹码阈值（BB 倍数） |
-| `PROFIT_LOCK_REENTER_DELAY_SEC` | `4.0` | 离桌后等待多久再重进（秒） |
-| `TOPUP_BELOW_BB` | `70` | 一手结束时桌上筹码低于这个数（BB 倍数）就在桌上补码；`0` 关闭 |
-| `TOPUP_TARGET_BB` | `100` | 补码补到不超过这个数的最大一档（20–30BB 每 1BB 一档，40BB 起每 10BB 一档） |
-| `ACTION_INJECT_DELAY_MAX_SEC` | `3.0` | 模拟人类思考的最长延迟（秒） |
-| `GAMEDATA_HTTP_HOST` | `ga-foreign.poker-fate.com` | 拉取玩家统计的 API 域名 |
-
----
-
-## 依赖
+游戏客户端照常登录和显示，代理在中间解码消息，并替客户端行动。
+需要先生成证书、设置手机代理和 DNS，步骤见[代理模式说明](pf_intercept/proxy/README.md)。准备好后：
 
 ```bash
-.venv/bin/python -m pip install -r requirements.txt
+source .venv/bin/activate
+.venv/bin/python -m pf_intercept.launcher --bb 10000
 ```
 
-Python 3.12+。完整依赖以 `requirements.txt` 为准；其中包含 AI 决策运行依赖、WSS 代理依赖、测试工具、重拟合脚本的依赖，以及客户端更新后同步 lua / proto 用的工具。代理模式的 launcher 和 headless 取凭证脚本用到的 `mitmproxy` 不在其中，按上面的步骤单独安装。
+## 命令行参数
+
+两种入口使用同一套参数（[pf_intercept/options.py](pf_intercept/options.py)）。`--help` 列出全部参数：
+
+```bash
+.venv/bin/python -m pf_intercept.headless --help
+```
+
+| 参数类别 | 说明 |
+|---|---|
+| 选桌、买入、锁仓、补码、净亏损上限 | [对手信息与牌桌管理](pf_intercept/bot/README.md#控制参数) |
+| 凭证文件、停止、通知、调试输出 | [headless 运行说明](pf_intercept/headless/README.md#进程参数) |
+| 本机 Web、远程上传 | [Web 说明](pf_entertainment/README.md#监听与开关) |
+| 大厅自动化总开关和各模块开关 | [大厅自动化](pf_intercept/headless/lobby/README.md#关闭功能) |
+
+策略开关是环境变量，默认值就是实战配置，一般不用设置，见[决策引擎](pokerfate/decision/README.md#引擎与开关)。
+
+## 文档
+
+第一次使用：读完本页，再看对手信息与牌桌管理、大厅自动化和 Web。
+改策略或接入其他牌桌：看决策引擎和 API 接入。游戏客户端更新后：看客户端协议与资源参考。
+
+| 内容 | 文档 |
+|---|---|
+| 凭证采集、进程管理、断线重连与排错 | [headless 运行说明](pf_intercept/headless/README.md) |
+| 证书、设备设置、组件与端口 | [代理模式](pf_intercept/proxy/README.md) |
+| 对手信息、人机识别、选桌与资金限制 | [对手信息与牌桌管理](pf_intercept/bot/README.md) |
+| 活动、任务、日常与奖励记账 | [大厅自动化](pf_intercept/headless/lobby/README.md) |
+| 本机 Web、实时牌桌与资金展示 | [Web 说明](pf_entertainment/README.md) |
+| VPS 观看服务的部署与维护 | [远程 Live](pf_entertainment/remote_live/README.md) |
+| 决策链路、规则引擎、范围层、solver 与翻牌书 | [决策引擎](pokerfate/decision/README.md) |
+| 把决策引擎接入其他牌桌系统 | [API 接入](pokerfate/INTEGRATION.md) |
+| 回放、重新拟合模型 | [离线脚本](scripts/README.md) |
+| 客户端协议、资源与版本维护 | [客户端协议与资源参考](pf_reverse/REVERSE_NOTES.md) |
+
+## 目录结构
+
+```text
+headless（直接连接） ─┐
+                    ├─ BotBridge ─ PokerFateAPI ─ 决策引擎
+proxy（客户端代理） ─┘       │
+                      对手模型、牌桌管理、大厅自动化
+```
+
+| 目录 | 职责 |
+|---|---|
+| `pokerfate/` | 可单独接入的决策引擎、对手模型、solver 和翻牌书；`pokerfate/data/` 是随仓库提供的模型和翻牌书 |
+| `pf_intercept/` | 游戏连接、协议解码、对局桥接、选桌和大厅自动化 |
+| `pf_entertainment/` | 本机 Web 和 VPS 观看服务 |
+| `pf_notify/` | Bark 手机通知 |
+| `pf_reverse/` | 客户端协议、安装包资源和热更新读取 |
+| `scripts/` | 回放和重新拟合模型的脚本 |
+| `analysis/` | 离线分析工具，读本机的实战日志；每个模块开头写了用途和用法 |
+| `tests/` | 单元测试 |
+| `local/` | 只在本机的凭证、状态、模型和样本，Git 忽略 |
+
+## 本地数据
+
+`local/` 不进 Git，新克隆的仓库里没有，程序运行时按需创建。
+
+| 目录 | 内容 | 丢失后 |
+|---|---|---|
+| `local/secrets/` | 登录凭证 `headless_session.json`；原始登录抓包 `login_capture/`（含账号密码明文）；代理模式登录时写入的 `auth_token.txt`；Bark 设备 Key `bark_key.txt`；远程 Live 配置和证书 | 重新采集或重新配置 |
+| `local/state/` | 线路缓存、服务器发现记录；离线工具用来认出自己账号的 `hero_names.json`；雷达忽略列表 `lobby_ignores.json` | 缓存会自动重建；后两个要重新填写 |
+| `local/models/` | 运行中累计的对手统计 `opponents.json`（含 hero 胜率校准）、人机名单 `robots.json`、范围层经验模型 `range_v2_empirical_model.json` | 从零积累；人机名单可从网络日志重建，经验模型可用脚本重建 |
+| `local/training/` | 训练样本、河牌价值尺度样本、摊牌样本队列 `live_spool/` | 只能靠实战重新积累 |
+| `local/notes/` | 个人笔记 | — |
+
+需要手机通知时，把 [Bark](https://bark.day.app) 的设备 Key 写进 `local/secrets/bark_key.txt` 第一行；
+没有这个文件就不发通知。通知覆盖牌桌切换、资金限制、大额单手盈亏和运行异常。
+
+实战日志同样只在本机，重新拟合模型要用它们，建议定期备份 `local/` 和各个 `logs/` 目录。
+
+## 日志
+
+| 文件 | 内容 |
+|---|---|
+| `pf_intercept/logs/headless.log` | headless 的登录、连接、收发消息、运行状态和大厅 `[REWARDS]` 记录 |
+| `pf_intercept/logs/proxy.log`、`tcp.log`、`bot_worker.log` | 代理的连接、透传和 bot 工作进程；每次代理启动时覆盖 |
+| `logs/mitmweb.log` | launcher 启动的 HTTP 抓包进程输出 |
+| `pf_intercept/logs/table_select.jsonl` | 选桌依据、场次和进出桌记录 |
+| `pf_intercept/logs/rewards.jsonl` | 大厅的领取、消耗和失败明细 |
+| `pokerfate/logs/pokerfate.log` | 策略决策和逐手结算（JSONL）；每次启动时上一份内容并入 `pokerfate/logs/archive/` |
+| `pf_entertainment/logs/web.log` | Web 启动、访问地址和请求处理异常 |
+
+`headless.log` 记录了发出的登录消息，里面有登录 key，不要外传。
+
+## 开发与测试
+
+```bash
+.venv/bin/python -m pytest -q
+```
+
+- 测试只允许连接本机：`tests/conftest.py` 拦截其他网络连接和域名解析，并清掉代理环境变量。
+- 测试读仓库里的安装包配置表，不读本机同步的热更新。
+- 测试中创建的 `PokerFateAPI` 默认不写对手模型和日志。
+- 没有编译 solver 时，依赖它的测试会跳过。
+- 改了协议定义后要重新生成 Python 绑定，见[客户端协议与资源参考](pf_reverse/REVERSE_NOTES.md#版本维护)。

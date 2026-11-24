@@ -3,6 +3,7 @@
  *   #table           the live table (live-table.js)
  *   #money           the session result and the account (live-money.js)
  *   #hands[/<id>]    the hands played, and one hand read street by street
+ *   #radar           what the activity radar finds undone, and the ignore list (radar-view.js)
  *
  * live-views.js switches between them.  The table and the money view are shared with the VPS
  * viewer; the hands exist only here.
@@ -46,6 +47,20 @@
     const urls = runtime.web_urls && runtime.web_urls.length ? runtime.web_urls.join("  ") : (runtime.web_url || "");
     $("app-status").textContent = urls;
     window.PFMoney.render(runtime.bot_dashboard || {});
+  }
+
+  // ── radar ───────────────────────────────────────────────────────────────────
+  window.PFRadar.mount($("radar-root"), {
+    async post(body) {
+      const res = await fetch("/api/radar", { method: "POST", cache: "no-store",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
+      return data;
+    },
+  });
+  async function refreshRadar() {
+    window.PFRadar.render(await api("/api/radar"));
   }
 
   // ── hands: the list ─────────────────────────────────────────────────────────
@@ -231,7 +246,8 @@
 
   // ── which view is shown, and what it polls ──────────────────────────────────
   window.PFViews.start(
-    { table: [refreshLive, 700], money: [refreshMoney, 2000], hands: [() => (page === 1 ? loadHands() : null), 5000] },
+    { table: [refreshLive, 700], money: [refreshMoney, 2000], hands: [() => (page === 1 ? loadHands() : null), 5000],
+      radar: [refreshRadar, 60000] },
     {
       // A hand open over the list on a phone: nothing behind it needs redrawing.
       covered: (view) => view === "hands" && phone.matches && $("hand-sheet").classList.contains("open"),

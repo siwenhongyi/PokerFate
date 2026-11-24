@@ -10,6 +10,7 @@ import time
 import pytest
 
 from pf_intercept.headless import login as hl
+from pf_intercept.headless import lobby
 from pf_intercept.headless import session as hs
 from pf_intercept.wire import codec
 from pf_intercept.wire.framing import FrameBuffer, encode_frame
@@ -179,7 +180,8 @@ async def _connect_with_fake(monkeypatch, bridge, login_code=0, *, auto_rewards=
 
     monkeypatch.setattr(hs.websockets, "connect", fake_connect)
     monkeypatch.setattr(hs, "HEARTBEAT_INTERVAL_SEC", 0.05)
-    sess = hs.HeadlessSession(_login_result(), bridge=bridge, chnl=5, client_version="1.7.0", auto_rewards=auto_rewards)
+    sess = hs.HeadlessSession(_login_result(), bridge=bridge, chnl=5, client_version="1.7.0", auto_rewards=auto_rewards,
+                              off={flag for flag, _ in lobby.switches()})
     ws.push("pb.UserLoginRSP", {"code": login_code, "server_timestamp": 1})
     await sess.connect()
     return sess, ws
@@ -518,7 +520,7 @@ def test_headless_cli_web_follows_current_session_on_server_fallback(monkeypatch
 
 def test_rewards_http_does_not_block_heartbeats_or_actions_and_notice_wakes_worker(monkeypatch, tmp_path):
     import threading
-    from pf_intercept.headless.rewards import RewardService
+    from pf_intercept.headless.lobby.core.service import RewardService
     from tests.test_headless_rewards import eventually, task_list
 
     async def run():
@@ -538,7 +540,10 @@ def test_rewards_http_does_not_block_heartbeats_or_actions_and_notice_wakes_work
                 return task_list()
             if url.endswith('/activity/rebate'):
                 return {"code": 0, "status": 1, "reward": 20}
-            return {"code": 0, "status": 1 if len(calls) == 3 else 0}
+            # The fund is ready at its second status read, the one the notice below asks for;
+            # every other read (other activities included) answers that nothing is there.
+            ready = sum(u.endswith('/activity/rebateStatus') for u in calls) == 2
+            return {"code": 0, "status": 1 if url.endswith('/activity/rebateStatus') and ready else 0}
 
         def create_service(**kwargs):
             return RewardService(**kwargs, post=post, journal_path=tmp_path / 'rewards.jsonl')
@@ -592,7 +597,7 @@ def test_a_reward_or_an_unknown_side_game_result_never_touches_poker_pnl(monkeyp
 
 
 def test_activity_request_reserves_a_timed_out_reply_type_for_a_bounded_time(monkeypatch):
-    from pf_intercept.headless.rewards import RewardAPIError
+    from pf_intercept.headless.lobby.core.base import RewardAPIError
     from tests.test_headless_rewards import eventually
 
     async def run():

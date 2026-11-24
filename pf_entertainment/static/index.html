@@ -17,6 +17,8 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 16.5l5-6 4 3.2 8-9.2"/><path d="M3.5 20.5h17"/></svg>资金</a>
       <a class="tab" href="#hands" data-tab="hands">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3.5" width="10.5" height="14.5" rx="2"/><path d="M9 21h8.5a2 2 0 0 0 2-2V8"/></svg>对局</a>
+      <a class="tab" href="#radar" data-tab="radar">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4"/><path d="M12 12l5.6-5.6"/></svg>雷达</a>
     </nav>
     <div class="top-status"><span id="app-status" class="wide-only"></span></div>
   </header>
@@ -28,6 +30,10 @@
 
     <section id="view-money" class="view" hidden>
       <div id="money-root"></div>
+    </section>
+
+    <section id="view-radar" class="view" hidden>
+      <div id="radar-root"></div>
     </section>
 
     <section id="view-hands" class="view" hidden>
@@ -73,6 +79,7 @@
   <script src="/static/live-table.js"></script>
   <script src="/static/live-money.js"></script>
   <script src="/static/live-views.js"></script>
+  <script src="/static/radar-view.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

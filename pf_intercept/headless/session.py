@@ -32,9 +32,10 @@ from pf_intercept import config
 from pf_intercept.bot import BotBridge
 from pf_intercept.headless.login import LoginResult, ServerEntry
 from pf_intercept.headless.network import configure_server_proxy_bypass
-from pf_intercept.headless.rewards import RewardAPIError, RewardService
-from pf_intercept.headless.dispatch import Dispatch
-from pf_intercept.headless.excursion import Excursion
+from pf_intercept.headless import lobby
+from pf_intercept.headless.lobby.doers import taskhands
+from pf_intercept.headless.lobby.core.base import RewardAPIError
+from pf_intercept.headless.lobby.core.service import RewardService
 from pf_intercept.wire import codec
 from pf_intercept.wire.framing import FrameBuffer, encode_frame
 
@@ -75,6 +76,12 @@ class SessionStats:
     last_rx_at: float = 0.0
 
 
+def _lobby_alert(title: str, body: str) -> None:
+    """A lobby finding the user has to act on, to the phone (nothing without a Bark key)."""
+    from pf_notify.client import notify
+    notify("lobby_alert", title=title, body=body)
+
+
 def _ws_ssl_context() -> ssl.SSLContext:
     # Game servers are addressed by raw IP (wss://1.2.3.4:9013) with a
     # certificate for the domain, so hostname/CA verification cannot pass.
@@ -103,15 +110,17 @@ class HeadlessSession:
         bridge: BotBridge | None = None,
         chnl: int = int(config.GAMEDATA_CHNL),
         client_version: str = str(config.GAME_HTTP_VERSION),
-        max_auto_rebuy: int = 1,
+        max_auto_rebuy: int | None = None,
         auto_rewards: bool = True,
-        auto_dispatch: bool = True,
+        off=(),
+        auto_taskhands: bool = True,
         reconnect_enabled: bool = False,
         on_frame: Callable[[str, dict], Awaitable[None] | None] | None = None,
         table_policy=None,
+        options=None,
     ) -> None:
         self.login = login
-        self.bridge = bridge if bridge is not None else BotBridge(max_auto_rebuy=max_auto_rebuy)
+        self.bridge = bridge if bridge is not None else BotBridge(max_auto_rebuy=max_auto_rebuy, options=options)
         if table_policy is not None:
             configure_policy = getattr(self.bridge, "configure_table_policy", None)
             if callable(configure_policy):
@@ -134,7 +143,11 @@ class HeadlessSession:
         self._pending_hb = 0
         self._tasks: list[asyncio.Task] = []
         self._auto_rewards = auto_rewards
-        self._auto_dispatch = auto_dispatch
+        self._off = frozenset(off)      # switches of lobby workers turned off (lobby.switches())
+        # The tasks' Omaha / AOF hands, played once per start before the real game.
+        self._task_hands = taskhands.TaskHands(self) if auto_taskhands else None
+        self._seat = None       # taskhands.Seat while the bot sits at a task table: nothing of it reaches the bridge
+        self._match_lock = asyncio.Lock()   # held from the errand to the real match request it precedes
         self._rewards: RewardService | None = None
         self._bankroll_ready = asyncio.Event()
         self._activity_pending: dict[str, asyncio.Future] = {}
@@ -220,6 +233,7 @@ class HeadlessSession:
         self._room_code = None
         self._restoring = self.reconnect_enabled
         self._wire_room_id = None
+        self._seat = None       # a new connection asks the server where the bot sits
         self._bridge_queue = asyncio.Queue()
         servers = self.login.servers
         if not servers:
@@ -229,25 +243,7 @@ class HeadlessSession:
         configure_server_proxy_bypass(servers, http_fallback=config.GAMEDATA_HTTP_HOST)
         self._server = servers[server_index % len(servers)]
         http_base = self._server.http_host or f"https://{config.GAMEDATA_HTTP_HOST}"
-        bind_gamedata = getattr(self.bridge, "set_gamedata_session", None)
-        if callable(bind_gamedata):
-            bind_gamedata(authorization=self.login.authorization, http_base=http_base,
-                          chnl=self.chnl, version=self.client_version)
-        bind_uid = getattr(self.bridge, "set_session_uid", None)
-        if callable(bind_uid):
-            bind_uid(self.login.uid)
-        if self._auto_rewards and self._rewards is None:
-            self._rewards = RewardService(
-                uid=self.login.uid, authorization=self.login.authorization,
-                http_base=http_base,
-                chnl=self.chnl, version=self.client_version,
-                on_credit=self._on_reward_credit, ready=self._bankroll_ready,
-            )
-            self._rewards.excursion = Excursion(self._rewards, self)
-            if self._auto_dispatch:
-                self._rewards.dispatch = Dispatch(self._rewards, self)
-        elif self._rewards is not None:
-            self._rewards.set_http_base(http_base)
+        self.configure_lobby(http_base)
         host, port = _split_wss(self._server.server_host)
         log.info("[WSS] connecting %s:%d", host, port)
         self._ws = await websockets.connect(
@@ -277,6 +273,27 @@ class HeadlessSession:
         await self.send("pb.UserValueREQ", {"type": int(config.PROFIT_LOCK_FALLBACK_LOBBY_COIN)})
         if self._rewards is not None:
             self._rewards.start()
+
+    def configure_lobby(self, http_base: str) -> None:
+        bind_gamedata = getattr(self.bridge, "set_gamedata_session", None)
+        if callable(bind_gamedata):
+            bind_gamedata(authorization=self.login.authorization, http_base=http_base,
+                          chnl=self.chnl, version=self.client_version)
+        bind_uid = getattr(self.bridge, "set_session_uid", None)
+        if callable(bind_uid):
+            bind_uid(self.login.uid)
+        if self._auto_rewards and self._rewards is None:
+            self._rewards = RewardService(
+                uid=self.login.uid, authorization=self.login.authorization,
+                http_base=http_base,
+                chnl=self.chnl, version=self.client_version,
+                on_credit=self._on_reward_credit, ready=self._bankroll_ready,
+                alert=_lobby_alert,
+            )
+            # Every registered worker (lobby/__init__.py) whose switch is not off.
+            lobby.attach(self._rewards, self, self._off)
+        elif self._rewards is not None:
+            self._rewards.set_http_base(http_base)
 
     async def _wait_login(self) -> None:
         deadline = time.monotonic() + LOGIN_RSP_TIMEOUT_SEC
@@ -398,13 +415,24 @@ class HeadlessSession:
             await self._wait_state(self._room_ready, "EnterRoomRSP", ROOM_SYNC_TIMEOUT_SEC)
             if self._room_code != 0:
                 raise SessionClosed(f"恢复牌桌失败 code={self._room_code}")
-            log.info("[RECONNECT] 已恢复原牌桌 room=%d，未请求额外买入", room_id)
-        else:
+            if self._seat is not None:
+                # The seat is at a task table (left there by a crash or a lost connection): the
+                # strategy engine never plays it. Stand up and go on as from the lobby.
+                log.warning("[RECONNECT] 原座位在任务桌 room=%d，先离桌", room_id)
+                await self._seat.leave()
+                self._seat = None
+                room_id = 0
+            else:
+                log.info("[RECONNECT] 已恢复原牌桌 room=%d，未请求额外买入", room_id)
+        if room_id <= 0:
             async with self._bridge_lock:
                 lobby = getattr(self.bridge, "restore_lobby_after_disconnect", None)
                 can_match = await asyncio.to_thread(lobby) if callable(lobby) else True
                 self._refresh_bankroll_snapshot()
             if big_blind > 0 and can_match and not self._stopping:
+                if self._task_hands is not None:
+                    async with self._match_lock:
+                        await self._task_hands.run()    # the tasks' Omaha / AOF hands; the real game comes after
                 self._room_ready.clear()
                 if not await self.quick_start(big_blind=big_blind, buyin_bb=buyin_bb):
                     raise SessionClosed("重新匹配请求未送达")
@@ -476,7 +504,7 @@ class HeadlessSession:
             if future.done() and not future.cancelled():
                 future.exception()
         if int(reply.get("code", 0)) != 0:
-            raise RewardAPIError(name, reply["code"])
+            raise RewardAPIError(name, reply["code"], reply)
         return reply
 
     def activity_table(self):
@@ -484,6 +512,18 @@ class HeadlessSession:
         if not room or self.bridge.room_id_for_c2s(0) != room:
             return 0, None
         return room, self.bridge.activity_emoji_target()
+
+    async def lobby_baseline(self) -> None:
+        """In the lobby the wallet alone is the bankroll. Taking the baseline here lets the
+        reward worker run before a table is joined."""
+        self._restoring = False
+        await self.send("pb.UserValueREQ", {"type": int(config.PROFIT_LOCK_FALLBACK_LOBBY_COIN)}, room_id=0)
+
+    def table_game(self) -> int:
+        """The game of the table the bot sits at, 0 in the lobby."""
+        if self._seat is not None:
+            return self._seat.game
+        return LOBBY_HOLDEM_GAME_TYPE if self.current_room_id() else 0
 
     async def on_sidegame_result(self, net):
         async with self._bridge_lock:
@@ -566,29 +606,30 @@ class HeadlessSession:
                 await self._connection_lost("recv loop ended")
 
     async def _on_s2c(self, type_name: str, room_id: int, pb_body: bytes) -> None:
+        if (type_name not in _SESSION_TYPES and type_name not in config.WATCH_S2C
+                and type_name not in self._activity_pending):
+            return
+        msg = codec.decode(type_name, pb_body)
+        if msg is None:
+            future = self._activity_pending.pop(type_name, None)
+            if future is not None and not future.done():
+                future.set_exception(RewardAPIError(type_name))
+            log.warning("[S→C] %s decode failed (%d bytes)", type_name, len(pb_body))
+            return
+        await self.feed_message(type_name, room_id, msg)
+
+    async def feed_message(self, type_name: str, room_id: int, msg: dict) -> None:
         if type_name == "pb.HeartBeatRSP":
             self._pending_hb = 0
             if self._rewards is not None:
-                msg = codec.decode(type_name, pb_body)
-                if msg is not None:
-                    self._rewards.observe_server_time(msg.get("server_timestamp"))
+                self._rewards.observe_server_time(msg.get("server_timestamp"))
             return
         future = self._activity_pending.pop(type_name, None)
         if future is not None:
             self._activity_late.pop(type_name, None)
-            reply = codec.decode(type_name, pb_body)
             if not future.done():
-                if reply is None:
-                    future.set_exception(RewardAPIError(type_name))
-                else:
-                    future.set_result(reply)
-            if type_name not in config.WATCH_S2C and type_name not in _SESSION_TYPES:
-                return
+                future.set_result(msg)
         if type_name not in _SESSION_TYPES and type_name not in config.WATCH_S2C:
-            return
-        msg = codec.decode(type_name, pb_body)
-        if msg is None:
-            log.warning("[S→C] %s decode failed (%d bytes)", type_name, len(pb_body))
             return
         log.info("[S→C] %s %s", type_name, msg)
         if type_name in {"pb.UserLogoutRSP", "pb.ServerStopBRC"}:
@@ -628,6 +669,19 @@ class HeadlessSession:
                 log.warning("[WSS] QuickStartRSP code=%s（进桌失败）", code)
                 self._room_code = code
                 self._room_ready.set()
+
+        if self._seat is None and type_name == "pb.EnterRoomRSP" and taskhands.is_task_table(msg):
+            # Restored into a task table, which nobody here asked for: restore_or_start gives it up.
+            self._seat = taskhands.Seat(self, int(msg.get("game_type", 0) or 0))
+            self._seat.room = int(msg.get("roomid", room_id) or room_id)
+            self._room_code = int(msg.get("code", 0) or 0)
+            self._room_ready.set()
+        if self._seat is not None and (type_name in taskhands.FRAMES or type_name == "pb.UserValueRSP"):
+            # A task table is not the strategy engine's, nor the live view's; and the wallet while
+            # chips sit there is no bankroll sample.
+            if type_name in taskhands.FRAMES:
+                self._seat.feed(type_name, msg)
+            return
 
         if self.on_frame is not None:
             out = self.on_frame(type_name, msg)
@@ -723,6 +777,21 @@ class HeadlessSession:
         if guard is not None and not self.bridge.injection_guard_is_current(guard):
             self.stats.injects_dropped += 1
             return
+        if type_name == "pb.QuickStartREQ" and self._task_hands is not None:
+            # A new table is being matched: the tasks' Omaha / AOF hands are played first.
+            if self._match_lock.locked():
+                # An earlier match request is on that errand already; this one repeats it.
+                self.stats.injects_dropped += 1
+                return
+            async with self._match_lock:
+                try:
+                    await self._task_hands.run()
+                except ConnectionError as exc:
+                    await self._connection_lost(str(exc))
+                if self._closed.is_set() or self._stopping or (
+                        generation is not None and generation != self._generation):
+                    self.stats.injects_dropped += 1
+                    return
         rid = 0 if type_name == "pb.QuickStartREQ" else self.bridge.room_id_for_c2s(frame_room_id)
         ok = await self.send(type_name, fields, room_id=rid)
         if ok:
@@ -752,6 +821,11 @@ class HeadlessSession:
                 if callable(wants_tick) and wants_tick() and self.logged_in and not self._stopping:
                     self._bridge_queue.put_nowait(
                         ("pf.Tick", {"now": time.time()}, 0, time.monotonic(), self._wire_turn))
+                if self._task_hands is not None and self.logged_in and self._task_hands.wants_break():
+                    # A new game day's task hands: ask the table to be left when this hand ends.
+                    # The match that follows goes through the errand first.
+                    self._bridge_queue.put_nowait(
+                        ("pf.Errand", {"reason": "task_hands"}, 0, time.monotonic(), self._wire_turn))
         except asyncio.CancelledError:
             raise
 

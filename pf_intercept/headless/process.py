@@ -57,7 +57,7 @@ class RunningProcess:
         file = self.lock_path.open("a+", encoding="utf-8")
         if not _try_lock(file):
             file.close()
-            raise ProcessControlError("已有 headless 实例运行；请先用 --stop 优雅停止")
+            raise ProcessControlError("已有实例运行；请先用本入口的 --stop 优雅停止")
         self._file = file
         temporary = self.pid_path.with_name(f".{self.pid_path.name}.{self.pid}.tmp")
         try:

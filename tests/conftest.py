@@ -149,3 +149,11 @@ def _client_tables_are_the_installers(monkeypatch):
 
     monkeypatch.setattr(tables.TABLES, "roots", [tables.TPL])
     monkeypatch.setattr(tables.TABLES, "manifest", None)
+
+
+@pytest.fixture(autouse=True)
+def _lobby_ignores_are_the_projects(monkeypatch):
+    """Tests never read or write the user's own ignore list (local/state/lobby_ignores.json)."""
+    from pf_intercept.headless.lobby.core import ignore
+
+    monkeypatch.setattr(ignore.IGNORES, "external_path", None)

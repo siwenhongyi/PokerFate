@@ -44,6 +44,8 @@ BARK_EVENT_ICONS: dict[str, str] = {
     "hand_swing_down": f"{_FE}/Chart%20Decreasing/3D/chart_decreasing_3d.png",
     "gamedata_no_history": f"{_FE}/Ghost/3D/ghost_3d.png",
     "gamedata_auth_failed": f"{_FE}/Key/3D/key_3d.png",
+    # 大厅事务：活动雷达的发现、服务器开了表里没有的一期等（标题和正文由调用方给出）。
+    "lobby_alert": f"{_FE}/Satellite%20Antenna/3D/satellite_antenna_3d.png",
 }
 
 _WSS_NOTICE_ID = "pokerfate-wss-disconnected"
@@ -54,6 +56,7 @@ _TABLE_LEAVE_TITLES: dict[str, str] = {
     "outnumbered": "选桌离桌 · 真人少于人机",
     "empty_timeout": "选桌离桌 · 桌上没人了",
     "better_stake": "选桌离桌 · 回优先场次",
+    "errand": "离桌 · 去打任务手数（奥马哈 / AOF）",
 }
 
 

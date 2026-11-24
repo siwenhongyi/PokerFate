@@ -1,4 +1,4 @@
-"""Color game packets used by the daily excursion task."""
+"""Color game packets, used by the side-game entry (pf_intercept/headless/lobby/sidegames.py)."""
 
 def color_bet(level: int, stake: int, source: int) -> dict:
     return {'bets': [{'id': 101, 'value': stake}], 'lvl': level, 'from_game_type': source}

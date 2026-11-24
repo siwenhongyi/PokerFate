@@ -20,7 +20,9 @@ What's left here:
 
 from __future__ import annotations
 
+import json
 import logging
+from pf_intercept import config
 import time
 import urllib.request
 from dataclasses import dataclass, field
@@ -81,3 +83,21 @@ def measure_ping(http_host: str, *, timeout: float = 4.0) -> float:
     except Exception as exc:
         log.debug("[PING] %s 不可达: %s", url, exc)
         return float("inf")
+
+
+def load_session(path: Path):
+    """Load saved credentials and routes → (LoginResult, chnl, client_version)."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        entries = [ServerEntry(s["server_host"], s.get("http_host", "")) for s in data.get("servers", [])]
+        uid = int(data["uid"])
+        rdkey = str(data["rdkey"])
+    except FileNotFoundError:
+        raise LoginError(f"会话凭证不存在: {path}（请在设备上登录一次薅凭证）")
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise LoginError(f"会话凭证无效 {path}: {exc}（请重新薅凭证）")
+    if not entries:
+        raise LoginError(f"会话凭证里没有服务器列表: {path}")
+    result = LoginResult(uid=uid, rdkey=rdkey, authorization=str(data.get("authorization", "")),
+                         servers=entries, code=0, login_ip=str(data.get("login_ip", "")))
+    return result, int(data.get("chnl", config.GAMEDATA_CHNL)), str(data.get("version", config.GAME_HTTP_VERSION))

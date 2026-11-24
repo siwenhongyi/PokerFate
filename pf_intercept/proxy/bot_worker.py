@@ -7,12 +7,12 @@ import os
 import queue
 import sys
 import time
-import traceback
 import uuid
 from pathlib import Path
 from typing import Any
 
-from pf_intercept import config
+from pf_intercept.options import RunOptions
+from dataclasses import asdict, replace
 from pf_notify.config import load_bark_key_file, set_bark_key
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -25,7 +25,7 @@ _BOT_GUARD_CHECK_TIMEOUT_SEC = float(
     os.environ.get("PF_BOT_GUARD_CHECK_TIMEOUT_SEC", "0.75")
 )
 _BOT_WORKER_STOP_TIMEOUT_SEC = float(
-    os.environ.get("PF_BOT_WORKER_STOP_TIMEOUT_SEC", "5.0")
+    os.environ.get("PF_BOT_WORKER_STOP_TIMEOUT_SEC", "60.0")
 )
 
 
@@ -41,7 +41,7 @@ def _configure_worker_logging(logs_dir: Path) -> None:
     root.addHandler(file_handler)
 
     console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.setLevel(logging.WARNING)
+    console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(fmt)
     root.addHandler(console_handler)
 
@@ -64,10 +64,6 @@ def _load_bark_key_for_worker(
     return False
 
 
-def _queue_put(q, payload: dict[str, Any]) -> None:
-    q.put(payload)
-
-
 def _queue_put_best_effort(q, payload: dict[str, Any]) -> None:
     try:
         q.put_nowait(payload)
@@ -76,49 +72,6 @@ def _queue_put_best_effort(q, payload: dict[str, Any]) -> None:
             "[BOT_WORKER] outbound queue full, dropping %s",
             payload.get("kind"),
         )
-
-
-def _iter_injects(result: tuple | list | None) -> tuple[tuple, ...]:
-    if result is None:
-        return ()
-    if isinstance(result, list):
-        return tuple(item for item in result if item is not None)
-    if isinstance(result, tuple) and result and isinstance(result[0], tuple):
-        return tuple(item for item in result if item is not None)
-    return (result,)
-
-
-def _inject_payload(
-    *,
-    bridge,
-    session_id: int,
-    frame_room_id: int,
-    inject: tuple,
-) -> dict[str, Any] | None:
-    if not inject:
-        return None
-    inject_type = str(inject[0])
-    fields = dict(inject[1] or {}) if len(inject) >= 2 else {}
-    delay_sec = float(inject[2] or 0.0) if len(inject) >= 3 else 0.0
-    guard = bridge.injection_guard_for(inject)
-    return {
-        "kind": "inject",
-        "session_id": int(session_id),
-        "type_name": inject_type,
-        "fields": fields,
-        "delay_sec": max(0.0, delay_sec),
-        "room_id": int(bridge.room_id_for_c2s(frame_room_id)),
-        "guard": list(guard) if guard is not None else None,
-        "created_at": time.monotonic(),
-    }
-
-
-def _snapshot_payload(bridge) -> dict[str, Any]:
-    return {
-        "kind": "snapshot",
-        "settings": bridge.runtime_settings(),
-        "dashboard": bridge.bankroll_dashboard(),
-    }
 
 
 def _handle_call(bridge, method: str, payload: dict[str, Any]) -> Any:
@@ -137,152 +90,107 @@ def _handle_call(bridge, method: str, payload: dict[str, Any]) -> Any:
 
 
 def _bot_worker_main(to_worker, from_worker, options: dict[str, Any]) -> None:
-    _configure_worker_logging(_LOGS_DIR)
-    log = logging.getLogger("pf_bot_worker")
-    _load_bark_key_for_worker(log)
-    bridge = None
+    logs_dir = Path(options.pop("logs_dir", _LOGS_DIR))
+    _configure_worker_logging(logs_dir)
+    opts = RunOptions(**options)
+    if opts.no_notify:
+        set_bark_key(None)
+    else:
+        _load_bark_key_for_worker(logging.getLogger("pf_bot_worker"))
+    if opts.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        for h in logging.getLogger().handlers:
+            h.setLevel(logging.DEBUG)
     try:
-        from pf_intercept.bot import BotBridge
+        asyncio.run(_worker_loop(to_worker, from_worker, opts))
+    except BaseException as exc:
+        _queue_put_best_effort(from_worker, {"kind": "fatal", "error": f"{type(exc).__name__}: {exc}"})
+        raise
 
-        profit_lock_bb = options.get("profit_lock_bb")
-        if profit_lock_bb is not None:
-            config.PROFIT_LOCK_BB_THRESHOLD = int(profit_lock_bb)
 
-        bridge = BotBridge(
-            max_auto_rebuy=int(options.get("max_auto_rebuy", 1)),
-        )
-        _queue_put(
-            from_worker,
-            {
-                "kind": "ready",
-                "pid": os.getpid(),
-                "settings": bridge.runtime_settings(),
-                "dashboard": bridge.bankroll_dashboard(),
-            },
-        )
-        log.info("[BOT_WORKER] ready pid=%s options=%s", os.getpid(), options)
-
+async def _worker_loop(to_worker, from_worker, options):
+    from pf_intercept.bot import BotBridge
+    from pf_intercept.proxy.session import ProxySession
+    bridge = BotBridge(options=options, auto_table_selection=not bool(options.bb))
+    emit = lambda payload: _queue_put_best_effort(from_worker, payload)
+    session = ProxySession(bridge, options, emit)
+    last_payload = None
+    def snapshot(kind="snapshot"):
+        nonlocal last_payload
+        payload = {"settings": bridge.runtime_settings(), "dashboard": session.bankroll_dashboard(),
+                   "live": session.observer.snapshot()}
+        if kind == "ready" or payload != last_payload:
+            emit({"kind": kind, "pid": os.getpid(), **payload})
+            last_payload = payload
+    async def call(item):
+        try:
+            method, payload = item.get("method"), item.get("payload") or {}
+            if method == "client_request":
+                result = (await session.client_request(payload["type_name"], payload["msg"])
+                          if payload.get("session_id") == session.session_id else False)
+            elif method == "graceful_leave":
+                await session.graceful_leave()
+                result = True
+            else:
+                result = _handle_call(bridge, method, payload)
+            emit({"kind": "response", "call_id": item["call_id"], "result": result})
+        except Exception as exc:
+            logging.getLogger("pf_bot_worker").exception("worker call failed")
+            emit({"kind": "response", "call_id": item["call_id"], "error": str(exc)})
+    snapshot("ready")
+    logging.getLogger("pf_bot_worker").info("[RUN_OPTIONS] %s", asdict(options))
+    last_snapshot = 0.0
+    calls = set()
+    try:
         while True:
-            item = to_worker.get()
-            if not isinstance(item, dict):
-                continue
+            try:
+                item = await asyncio.to_thread(to_worker.get, True, 0.2)
+            except queue.Empty:
+                item = {}
             kind = item.get("kind")
             if kind == "shutdown":
-                log.info("[BOT_WORKER] shutdown requested")
                 break
-
-            if kind == "room_seen":
-                bridge.note_seen_room_id(int(item.get("room_id") or 0))
-                continue
-
-            if kind == "notify_inject_failed":
-                bridge.notify_inject_failed(str(item.get("type_name") or ""))
-                continue
-
-            if kind == "call":
-                call_id = str(item.get("call_id") or "")
-                try:
-                    result = _handle_call(
-                        bridge,
-                        str(item.get("method") or ""),
-                        dict(item.get("payload") or {}),
-                    )
-                    _queue_put(from_worker, {"kind": "response", "call_id": call_id, "result": result})
-                except Exception as exc:
-                    log.exception("[BOT_WORKER] call failed method=%s", item.get("method"))
-                    _queue_put(
-                        from_worker,
-                        {
-                            "kind": "response",
-                            "call_id": call_id,
-                            "error": f"{type(exc).__name__}: {exc}",
-                        },
-                    )
-                continue
-
-            if kind != "s2c_msg":
-                continue
-
-            session_id = int(item.get("session_id") or 0)
-            frame_room_id = int(item.get("room_id") or 0)
-            type_name = str(item.get("type_name") or "")
-            msg = dict(item.get("msg") or {})
-
-            bridge.note_seen_room_id(frame_room_id)
-            started = time.monotonic()
-            try:
-                result = bridge.handle(type_name, msg)
-            except Exception:
-                log.exception("[BOT_WORKER] bridge.handle failed type=%s", type_name)
-                result = None
-            handle_ms = (time.monotonic() - started) * 1000.0
-            injects = _iter_injects(result)
-            log.info(
-                "[BOT_HANDLE] session=%s type=%s handle_ms=%.1f injects=%d",
-                session_id,
-                type_name,
-                handle_ms,
-                len(injects),
-            )
-            if handle_ms >= 500:
-                log.warning(
-                    "[BOT_HANDLE_SLOW] session=%s type=%s handle_ms=%.1f",
-                    session_id,
-                    type_name,
-                    handle_ms,
-                )
-            for inject in injects:
-                payload = _inject_payload(
-                    bridge=bridge,
-                    session_id=session_id,
-                    frame_room_id=frame_room_id,
-                    inject=inject,
-                )
-                if payload is not None:
-                    _queue_put_best_effort(from_worker, payload)
-            if type_name in {
-                "pb.DealerInfoRSP",
-                "pb.EnterRoomRSP",
-                "pb.SitDownRSP",
-                "pb.UserValueRSP",
-                "pb.WinnerRSP",
-                "pb.LeaveRoomRSP",
-                "pb.StandUpRSP",
-                "pb.StandUpBRC",
-                "pb.OtherLeaveRoomBRC",
-                "pb.NoticeRebyRSP",
-                "pb.RebyBRC",
-            }:
-                _queue_put_best_effort(from_worker, _snapshot_payload(bridge))
-    except BaseException as exc:
-        traceback.print_exc()
-        try:
-            _queue_put(
-                from_worker,
-                {
-                    "kind": "fatal",
-                    "error": f"{type(exc).__name__}: {exc}",
-                    "traceback": traceback.format_exc(),
-                },
-            )
-        except Exception:
-            pass
-        raise
+            if kind == "session_open":
+                await session.attach(int(item["session_id"]), item.get("upstream", ""))
+            elif kind == "session_close":
+                await session.detach(int(item["session_id"]))
+            elif kind == "call":
+                task = asyncio.create_task(call(item))
+                calls.add(task)
+                task.add_done_callback(calls.discard)
+            elif item.get("session_id") == session.session_id:
+                if kind == "s2c_msg":
+                    await session.feed_message(item["type_name"], int(item.get("room_id") or 0), item["msg"])
+                elif kind == "wire_sent":
+                    session.sent(item["send_id"], item["ok"])
+            if time.monotonic() - last_snapshot >= 0.3:
+                snapshot()
+                last_snapshot = time.monotonic()
     finally:
-        if bridge is not None:
-            bridge.close()
-        logging.getLogger("pf_bot_worker").info("[BOT_WORKER] exited")
+        for task in calls:
+            task.cancel()
+        await asyncio.gather(*calls, return_exceptions=True)
+        await session.close("worker shutdown")
+        snapshot()
 
 
 class BotWorkerClient:
     def __init__(
         self,
         *,
-        max_auto_rebuy: int,
-        profit_lock_bb: int | None,
+        max_auto_rebuy: int | None = None,
+        profit_lock_bb: int | None = None,
+        options: RunOptions | None = None,
+        logs_dir: Path | None = None,
     ) -> None:
-        self.max_auto_rebuy = int(max_auto_rebuy)
-        self.profit_lock_bb = profit_lock_bb
+        self.options = options or RunOptions()
+        if max_auto_rebuy is not None:
+            self.options = replace(self.options, max_auto_rebuy=int(max_auto_rebuy))
+        if profit_lock_bb is not None:
+            self.options = replace(self.options, profit_lock_bb=profit_lock_bb)
+        self.logs_dir = logs_dir
+        self.max_auto_rebuy = self.options.max_auto_rebuy
+        self.profit_lock_bb = self.options.profit_lock_bb
         self.log = logging.getLogger("pf_proxy")
 
         self._ctx = multiprocessing.get_context("spawn")
@@ -296,8 +204,11 @@ class BotWorkerClient:
         self._session_queues: dict[int, asyncio.Queue] = {}
         self._settings_cache: dict[str, Any] | None = None
         self._dashboard_cache: dict[str, Any] | None = None
+        self._live_cache: dict[str, Any] = {}
         self._dropped_inbound = 0
         self._closed = False
+        self._stopping = False
+        self.failed = asyncio.Event()
 
     @property
     def pid(self) -> int | None:
@@ -311,10 +222,9 @@ class BotWorkerClient:
             return
         self._loop = asyncio.get_running_loop()
         self._ready = self._loop.create_future()
-        options = {
-            "max_auto_rebuy": self.max_auto_rebuy,
-            "profit_lock_bb": self.profit_lock_bb,
-        }
+        options = asdict(self.options)
+        if self.logs_dir is not None:
+            options["logs_dir"] = str(self.logs_dir)
         self._proc = self._ctx.Process(
             target=_bot_worker_main,
             args=(self._to_worker, self._from_worker, options),
@@ -326,8 +236,9 @@ class BotWorkerClient:
         self.log.info("[BOT_WORKER] started pid=%s", self.pid)
 
     async def stop(self) -> None:
-        self._closed = True
+        self._stopping = True
         if self._proc is None:
+            self._closed = True
             return
         if self._proc.is_alive():
             try:
@@ -344,6 +255,7 @@ class BotWorkerClient:
             self._proc.kill()
             await asyncio.to_thread(self._proc.join, 1.0)
 
+        self._closed = True
         if self._reader_task is not None:
             self._reader_task.cancel()
             await asyncio.gather(self._reader_task, return_exceptions=True)
@@ -356,24 +268,15 @@ class BotWorkerClient:
             pass
         self.log.info("[BOT_WORKER] stopped exitcode=%s", self._proc.exitcode)
 
-    def register_session(self, session_id: int) -> asyncio.Queue:
+    def register_session(self, session_id: int, upstream: str = "") -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue()
         self._session_queues[int(session_id)] = q
+        self._submit_nowait({"kind": "session_open", "session_id": int(session_id), "upstream": upstream})
         return q
 
     def unregister_session(self, session_id: int) -> None:
         self._session_queues.pop(int(session_id), None)
-
-    def submit_room_seen(self, *, session_id: int, room_id: int) -> None:
-        if int(room_id or 0) == 0:
-            return
-        self._submit_nowait(
-            {
-                "kind": "room_seen",
-                "session_id": int(session_id),
-                "room_id": int(room_id),
-            }
-        )
+        self._submit_nowait({"kind": "session_close", "session_id": int(session_id)})
 
     def submit_s2c(
         self,
@@ -394,19 +297,17 @@ class BotWorkerClient:
             }
         )
 
-    def notify_inject_failed(self, type_name: str) -> None:
-        self._submit_nowait(
-            {
-                "kind": "notify_inject_failed",
-                "type_name": str(type_name or ""),
-            }
-        )
-
     def runtime_settings(self) -> dict | None:
         return dict(self._settings_cache) if isinstance(self._settings_cache, dict) else None
 
     def bankroll_dashboard(self) -> dict | None:
         return dict(self._dashboard_cache) if isinstance(self._dashboard_cache, dict) else None
+
+    def live_snapshot(self) -> dict:
+        return dict(self._live_cache)
+
+    def notify_wire_sent(self, session_id, send_id, ok):
+        self._submit_nowait({"kind": "wire_sent", "session_id": session_id, "send_id": send_id, "ok": ok})
 
     async def injection_guard_is_current(self, guard) -> bool:
         if guard is None:
@@ -487,7 +388,9 @@ class BotWorkerClient:
                 except queue.Empty:
                     if self._proc is not None and not self._proc.is_alive():
                         err = RuntimeError(f"bot worker exited exitcode={self._proc.exitcode}")
-                        self.log.warning("[BOT_WORKER] exited unexpectedly exitcode=%s", self._proc.exitcode)
+                        (self.log.info if self._stopping else self.log.warning)("[BOT_WORKER] exited exitcode=%s", self._proc.exitcode)
+                        if not self._stopping:
+                            self._mark_failed()
                         self._fail_pending(err)
                         if self._ready is not None and not self._ready.done():
                             self._ready.set_exception(err)
@@ -500,10 +403,18 @@ class BotWorkerClient:
             raise
         except Exception as exc:
             self.log.exception("[BOT_WORKER] output drain failed: %s", exc)
+            self._mark_failed()
             self._fail_pending(exc)
 
     def _handle_worker_message(self, item: dict[str, Any]) -> None:
         kind = item.get("kind")
+        if kind in {"snapshot", "ready"} and isinstance(item.get("live"), dict):
+            self._live_cache = dict(item["live"])
+        if kind == "close_transport":
+            q = self._session_queues.get(int(item.get("session_id", 0)))
+            if q is not None:
+                q.put_nowait(item)
+            return
         if kind == "ready":
             self._settings_cache = dict(item.get("settings") or {})
             self._dashboard_cache = dict(item.get("dashboard") or {})
@@ -537,11 +448,16 @@ class BotWorkerClient:
         if kind == "fatal":
             err = RuntimeError(str(item.get("error") or "bot worker fatal error"))
             self.log.error("[BOT_WORKER] fatal: %s", err)
+            self._mark_failed()
             self._fail_pending(err)
             if self._ready is not None and not self._ready.done():
                 self._ready.set_exception(err)
             return
         self.log.debug("[BOT_WORKER] ignored message kind=%s", kind)
+
+    def _mark_failed(self):
+        self._live_cache = {**self._live_cache, "connected": False, "connection_status": "disconnected"}
+        self.failed.set()
 
     def _fail_pending(self, exc: BaseException) -> None:
         for fut in list(self._pending.values()):

@@ -2,8 +2,9 @@
 mitmproxy addon: 过滤登录响应中的 IP 直连服务器，保留所有域名服务器。
 将第一个可用域名服务器写入 local/state/discovered_server.json。
 
-用法:
-    mitmweb --ignore-hosts "xiaomi.com|xiaomi.net|miui.com|aliyuncs.com" -s pf_reverse/force_domain.py
+用法（capture_login.py 放在前面：它要记录改写之前的登录响应）:
+    mitmweb --ignore-hosts "xiaomi.com|xiaomi.net|miui.com|aliyuncs.com" \
+        -s pf_reverse/capture_login.py -s pf_reverse/force_domain.py
 
 （--ignore-hosts 的值见 pf_intercept.config.MITM_IGNORE_HOSTS，与 launcher.py 保持一致）
 """

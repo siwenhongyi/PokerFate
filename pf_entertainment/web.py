@@ -90,6 +90,7 @@ class EntertainmentWebServer:
         host: str = "127.0.0.1",
         port: int = 9022,
         live_source: Any = None,
+        radar_board: Any = None,
     ) -> None:
         self.runtime = runtime
         self.host = host
@@ -97,6 +98,9 @@ class EntertainmentWebServer:
         # Optional callable returning the live-table snapshot dict for /api/live
         # (set in headless play so the web can draw the table without the client).
         self.live_source = live_source
+        # Optional object behind the 雷达 tab (pf_intercept/headless/lobby/radar/board.py):
+        # state() -> dict and change(body) -> dict, both slow enough to run in a thread.
+        self.radar_board = radar_board
         self.log = get_logger()
         self._server: asyncio.AbstractServer | None = None
 
@@ -112,6 +116,12 @@ class EntertainmentWebServer:
             self.port = int(self._server.sockets[0].getsockname()[1])
         self.log.info("[牌局 Web] Web 已启动 http://%s:%d", self.host, self.port)
         self.log.info("[牌局 Web] Web 可访问地址: %s", ", ".join(web_access_urls(self.host, self.port)))
+
+    async def close(self) -> None:
+        if self._server is not None:
+            self._server.close()
+            await self._server.wait_closed()
+            self._server = None
 
     async def _handle_client(
         self,
@@ -208,6 +218,8 @@ class EntertainmentWebServer:
                     ),
                 }
             )
+        if request.path == "/api/radar" and request.method in ("GET", "POST"):
+            return await self._radar(request)
         if request.method == "GET" and request.path == "/api/hand":
             hand_id = self._int_query(request, "id", 0)
             try:
@@ -215,6 +227,24 @@ class EntertainmentWebServer:
             except KeyError as exc:
                 return self._json_response({"ok": False, "error": str(exc)}, status=404)
         return self._json_response({"ok": False, "error": "not found"}, status=404)
+
+    async def _radar(self, request: _HttpRequest) -> tuple[int, dict[str, str], bytes]:
+        """The 雷达 tab: GET the findings and the ignore list, POST one decision on an item."""
+        if self.radar_board is None:
+            return self._json_response({"ok": True, "available": False})
+        try:
+            if request.method == "GET":
+                state = await asyncio.to_thread(self.radar_board.state)
+            else:
+                if len(request.body) > 4096:
+                    return self._json_response({"ok": False, "error": "请求太大"}, status=400)
+                body = json.loads(request.body.decode("utf-8") or "{}")
+                if not isinstance(body, dict):
+                    raise ValueError("请求不是一个对象")
+                state = await asyncio.to_thread(self.radar_board.change, body)
+        except (ValueError, UnicodeDecodeError) as exc:
+            return self._json_response({"ok": False, "error": str(exc)}, status=400)
+        return self._json_response({"ok": True, "available": True, **state})
 
     def _int_query(self, request: _HttpRequest, name: str, default: int) -> int:
         values = request.query.get(name)
