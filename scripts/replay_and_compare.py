@@ -225,7 +225,7 @@ def _replay_hand(api, hand: dict, hero_id: int) -> list[dict]:
             new_action = decision.action
             new_amount = float(decision.amount or 0)
             # API-level diagnostics carry decision_source plus the flop_book /
-            # realtime_cfr blocks; the bot-level dict only covers local decisions.
+            # realtime_cfr blocks; the bot-level dict only covers rule engine decisions.
             try:
                 diag = dict(api.last_decision_diagnostics() or {})
             except Exception:
@@ -791,7 +791,7 @@ def main() -> None:
                     help="Stop at hand index (exclusive); -1 = no limit")
     ap.add_argument("--opponents-model", type=Path, default=None,
                     help="load this persisted opponent model read-only before "
-                         "replaying (the live bot loads pokerfate/data/local_models/"
+                         "replaying (the live bot loads local/models/"
                          "opponents.json; replay never writes it back)")
     ap.add_argument("--seed", type=int, default=42,
                     help="Seed used to pin RNG behavior for reproducibility")

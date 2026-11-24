@@ -24,7 +24,7 @@ from typing import Dict, List, Optional
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[A-Za-z]")
 _DEFAULT_LOGS_DIR = pathlib.Path(__file__).resolve().parent / "logs"
 _DEFAULT_LOG_FILE = str(_DEFAULT_LOGS_DIR / "pokerfate.log")
-_DEFAULT_RUNTIME_LOG_NAMES = ("pokerfate.log", "pokerfate_console.log", "g5.log")
+_DEFAULT_RUNTIME_LOG_NAMES = ("pokerfate.log", "pokerfate_console.log")
 
 
 # ---------------------------------------------------------------------------
@@ -431,7 +431,6 @@ class PokerLogger:
         timing: Optional[Dict] = None,
         river_relative: Optional[Dict] = None,
         street_relative: Optional[Dict] = None,
-        decision_id: Optional[str] = None,
         extra: Optional[Dict] = None,
     ):
         """Log the bot's own decision.
@@ -454,8 +453,6 @@ class PokerLogger:
             for key, value in extra.items():
                 if value is not None and key not in rec:
                     rec[key] = value
-        if decision_id is not None:
-            rec["decision_id"] = decision_id
         if equity_random is not None:
             rec["equity_random"] = round(equity_random, 3)
         if spr is not None:
@@ -519,76 +516,7 @@ class PokerLogger:
             self._raw(f"      📊 [PokerGTO]  {pg_key} {hand} → {pg}{source_note}", dim=True)
             self._raw(f"      📊 [Greenline]  {key} {hand} → {gl}", dim=True)
 
-    def g5_shadow_decision(
-        self,
-        *,
-        status: str,
-        street: str = "",
-        action: str = "",
-        amount: float = 0.0,
-        reasoning: str = "",
-        elapsed_ms: Optional[float] = None,
-        result: Optional[Dict] = None,
-        reason: str = "",
-    ) -> None:
-        """Log a non-authoritative g5 decision for comparison."""
-        status_key = str(status or "").lower()
-        rec: Dict = {
-            "event": "g5_shadow_decision",
-            "hand": self._hand_num[0],
-            "status": status_key,
-        }
-        if street:
-            rec["street"] = street
-        if action:
-            rec["action"] = action
-            rec["amount"] = amount
-        if reasoning:
-            rec["reasoning"] = reasoning
-        if elapsed_ms is not None:
-            rec["elapsed_ms"] = round(float(elapsed_ms), 1)
-        if result is not None:
-            rec["result"] = result
-        if reason:
-            rec["reason"] = reason
-        self._file(rec)
-        if not self._console:
-            return
-
-        if status_key == "folded":
-            self._raw("      ◇ g5已提前弃牌", dim=True)
-            return
-
-        if status_key == "disabled":
-            suffix = f"  {reason}" if reason else ""
-            self._raw(f"      ◇ g5跳过{suffix}", dim=True)
-            return
-
-        if status_key in {"unavailable", "error"}:
-            suffix = f"  {reason}" if reason else ""
-            self._raw(f"      ◇ g5不可用{suffix}", dim=True)
-            return
-
-        if status_key != "ok":
-            return
-
-        cn = _ACTION_CN.get(action, action or "unknown")
-        if action == "raise":
-            action_col = f"{cn} {amount:.0f}"
-        elif action == "call":
-            action_col = cn
-        elif action == "fold":
-            action_col = cn
-        else:
-            action_col = cn
-
-        detail = reasoning.strip()
-        if elapsed_ms is not None:
-            rpc = f"rpc={float(elapsed_ms):.0f}ms"
-            detail = f"{detail}  {rpc}" if detail else rpc
-        self._raw(f"      ◇ g5决策  {action_col:<12}  {detail}", dim=True)
-
-    def local_shadow_decision(
+    def rule_engine_shadow_decision(
         self,
         *,
         status: str,
@@ -600,10 +528,10 @@ class PokerLogger:
         diagnostics: Optional[Dict] = None,
         reason: str = "",
     ) -> None:
-        """Log a non-authoritative PokerFate decision while g5 is active."""
+        """Log what the PokerFate rule engine would have done while the flop book or solver decided."""
         status_key = str(status or "").lower()
         rec: Dict = {
-            "event": "local_shadow_decision",
+            "event": "rule_engine_shadow_decision",
             "hand": self._hand_num[0],
             "status": status_key,
         }
@@ -626,7 +554,7 @@ class PokerLogger:
 
         if status_key in {"unavailable", "error"}:
             suffix = f"  {reason}" if reason else ""
-            self._raw(f"      ◇ 本地旁路不可用{suffix}", dim=True)
+            self._raw(f"      ◇ 规则引擎旁路不可用{suffix}", dim=True)
             return
         if status_key != "ok":
             return
@@ -641,7 +569,7 @@ class PokerLogger:
         if elapsed_ms is not None:
             rpc = f"calc={float(elapsed_ms):.0f}ms"
             detail = f"{detail}  {rpc}" if detail else rpc
-        self._raw(f"      ◇ 本地旁路  {action_col:<12}  {detail}", dim=True)
+        self._raw(f"      ◇ 规则引擎旁路  {action_col:<12}  {detail}", dim=True)
 
     def hand_result(
         self,

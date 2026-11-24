@@ -17,7 +17,7 @@ from pf_notify.config import load_bark_key_file, set_bark_key
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _LOGS_DIR = _PROJECT_ROOT / "pf_intercept" / "logs"
-_DEFAULT_BARK_KEY_FILE = _PROJECT_ROOT / "data" / "bark_key.txt"
+_DEFAULT_BARK_KEY_FILE = _PROJECT_ROOT / "local" / "secrets" / "bark_key.txt"
 
 _BOT_IPC_MAX_QUEUE = int(os.environ.get("PF_BOT_IPC_MAX_QUEUE", "5000"))
 _BOT_CALL_TIMEOUT_SEC = float(os.environ.get("PF_BOT_CALL_TIMEOUT_SEC", "3.0"))

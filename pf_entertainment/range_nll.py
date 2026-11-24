@@ -1,7 +1,7 @@
 """Live check of the opponent-range model against the hands opponents showed.
 
 After every showdown the bot writes what it believed about each opponent at each step
-(``data/runtime_calibration/*.rows.jsonl``).  This module reads those rows and answers two
+(``local/training/*.rows.jsonl``).  This module reads those rows and answers two
 questions about the model the bot is running now:
 
   * bucket calibration   postflop, is the predicted share of each strength bucket what
@@ -29,7 +29,7 @@ from typing import Any, Callable, Optional
 from pokerfate.core.robots import RobotRegistry
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_RUNTIME_ROOT = ROOT / "data" / "runtime_calibration"
+DEFAULT_RUNTIME_ROOT = ROOT / "local" / "training"
 # The file bucket_ml_calibration loads.  Not imported from there: that pulls in LightGBM.
 BUCKET_MODEL = ROOT / "pokerfate" / "data" / "runtime_calibration" / "runtime_lgbm_bucket_model.json"
 BUCKETS = ("nuts", "strong", "medium", "draw", "weak_draw", "air")

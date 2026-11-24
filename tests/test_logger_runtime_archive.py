@@ -9,13 +9,13 @@ from pokerfate.logger import PokerLogger, archive_runtime_logs_on_startup
 def test_archive_runtime_logs_on_startup_uses_daily_archive_folder(tmp_path):
     logs_dir = tmp_path / "logs"
     logs_dir.mkdir()
-    for name in ("pokerfate_console.log", "pokerfate.log", "g5.log"):
+    for name in ("pokerfate_console.log", "pokerfate.log"):
         (logs_dir / name).write_text(f"{name} old\n", encoding="utf-8")
 
     archive_runtime_logs_on_startup(logs_dir)
 
     date_key = datetime.now().strftime("%Y-%m-%d")
-    for name in ("pokerfate_console", "pokerfate", "g5"):
+    for name in ("pokerfate_console", "pokerfate"):
         assert (logs_dir / f"{name}.log").read_text(encoding="utf-8") == ""
         archived = logs_dir / "archive" / f"{date_key}.{name}.bak.log"
         assert archived.read_text(encoding="utf-8") == f"{name}.log old\n"

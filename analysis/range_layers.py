@@ -2,7 +2,7 @@
 
     # 1. rows with the bucket model off (the formula layer alone), following the table rule
     .venv/bin/python -m scripts.json_log_to_replay --json-log <logs...> --out replay.jsonl
-    DECISION_ENGINE=local PF_BUCKET_ML=off PF_G5_SHADOW_ENABLED=0 \\
+    DECISION_ENGINE=rule_engine PF_BUCKET_ML=off \\
         .venv/bin/python -m scripts.extract_range_calibration_rows_parallel \\
         --replay replay.jsonl --mode bucket --out rows.jsonl --parts-dir parts
     # 2. this report

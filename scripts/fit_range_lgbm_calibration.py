@@ -305,7 +305,7 @@ def main() -> None:
                     help="use this blend instead of selecting it on --val-rows: for the final fit on "
                          "all sessions, after the gates were passed and alpha chosen on a real hold-out")
     ap.add_argument("--robot-registry", type=Path, default=None,
-                    help="robot registry file (default pokerfate/data/local_models/robots.json)")
+                    help="robot registry file (default local/models/robots.json)")
     args = ap.parse_args()
 
     raw_train_rows = _load_rows(args.train_rows)

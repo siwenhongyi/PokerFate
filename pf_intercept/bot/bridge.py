@@ -41,7 +41,7 @@ from typing import TypeAlias
 from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
 from pokerfate.calibration.spool_showdown_calibration import spool_backpressure_status
 from pokerfate.core.robots import RoomRobotTracker, default_registry
-from pokerfate.core.seating import derive_seating, standard_blind_seats
+from pokerfate.core.seating import derive_seating
 from pf_intercept import config
 from pf_intercept.table_policy import Step, TablePolicy, TablePolicyConfig
 from pf_intercept.game_api.collcard import _sync_collect_game
@@ -67,7 +67,6 @@ _BANKROLL_REASONS: dict[str, str] = {
     "unexpected_leave": "异常离桌重进前",
     "stand_up": "站起后余额刷新",
     "auto_rebuy": "破产买入前",
-    "room_escape": "连续破产换桌",
     "profit_lock": "盈利锁仓离桌",
     "table_switch": "选桌换桌",
     "topup": "桌上补码后余额刷新",
@@ -299,7 +298,6 @@ class BotBridge:
         self._bankroll_pending_action: dict | None = None
         self._bankroll_pending_reason: str = ""
         self._bankroll_profit_lock_count: int = 0
-        self._bankroll_room_escape_count: int = 0
         # 桌上补码（config.TOPUP_BELOW_BB）：已发出、还没到账的请求；被拒后到哪一手再试。
         self._topup_pending: dict | None = None
         self._topup_retry_hand: int = 0
@@ -362,7 +360,6 @@ class BotBridge:
         self._my_chips: int       = 0
         self._street_bets: dict[int, int] = {}
         self._my_forced_post_this_street: bool = False
-        self._external_disabled_for_forced_post: bool = False
         self._folded:   set[int]  = set()
         self._all_seats: list[int] = []
         self._announced_stages: set[int] = set()
@@ -377,9 +374,6 @@ class BotBridge:
         self._pending_showdown: dict[int, list[str]] = {}   # seat → [card_str, ...]
         self._pending_winner_types: dict[int, int] = {}     # seat → server hand type int
 
-        # 房间逃离：连续破产计数（盈利锁仓会清零）；Leave 后 QuickStart
-        self._room_escape_bust_count: int = 0
-        self._room_escape_reenter: dict[str, object] | None = None  # {"quickstart": True, ...}
         self._calibration_backpressure_leaving: bool = False
 
         # 人机识别：服务端 rb_num 计数 → 逐账号标签（pokerfate/core/robots.py）。
@@ -422,7 +416,6 @@ class BotBridge:
             "loss_cap_chips": self._loss_cap_chips(),
             "loss_stop": self._loss_stop,
             "profit_lock_count": self._bankroll_profit_lock_count,
-            "room_escape_count": self._bankroll_room_escape_count,
             "topup_count": self._topup_count,
             "topup_chips": self._topup_chips_total,
             "last_sample_at": self._bankroll_last_sample_at,
@@ -496,9 +489,8 @@ class BotBridge:
         if self._transport_can_match is None:
             self._transport_can_match = (
                 (self._my_seat is None or self._current_table_chips() > 0
-                 or pending_kind in {"unexpected_leave", "profit_lock", "room_escape"}
-                 or self._bankroll_pending_buyin_reason in {"unexpected_leave", "profit_lock", "room_escape",
-                                                            "table_switch"})
+                 or pending_kind in {"unexpected_leave", "profit_lock"}
+                 or self._bankroll_pending_buyin_reason in {"unexpected_leave", "profit_lock", "table_switch"})
                 and not self._shutdown_requested and not self._is_friend_room
                 and not self._tournament_passthrough and not self._calibration_backpressure_leaving
                 and not (self._table_policy is not None and self._table_policy.stopped)
@@ -511,7 +503,6 @@ class BotBridge:
         self._last_hero_action_notify_sig = None
         self._last_hero_action_notify_at = 0.0
         self._profit_lock_cancel_reenter()
-        self._room_escape_reenter = None
         self._topup_pending = None
         self._bankroll_pending_action = None
         self._bankroll_pending_reason = ""
@@ -546,13 +537,9 @@ class BotBridge:
         if inject_type in {"pb.LeaveRoomREQ", "pb.DelayLeaveRoomREQ"} and (
             self._profit_lock_reenter is not None
             or self._profit_lock_deferred is not None
-            or self._room_escape_reenter is not None
         ):
             log.warning("[BOT] %s 未发出，已取消对应离桌后续。", inject_type)
-            if self._profit_lock_reenter is not None or self._profit_lock_deferred is not None:
-                self._profit_lock_cancel_reenter()
-            if inject_type == "pb.LeaveRoomREQ":
-                self._room_escape_reenter = None
+            self._profit_lock_cancel_reenter()
         elif inject_type == "pb.EnterRoomREQ" and self._profit_lock_awaiting_enter:
             log.warning("[BOT] 盈利锁仓：EnterRoom 未发出。")
             self._profit_lock_awaiting_enter = False
@@ -636,7 +623,6 @@ class BotBridge:
             or self._is_friend_room
             or self._profit_lock_reenter is not None
             or self._profit_lock_deferred is not None
-            or self._room_escape_reenter is not None
             or self._calibration_backpressure_leaving
         )
 
@@ -769,10 +755,6 @@ class BotBridge:
         self._profit_lock_reenter = None
         self._profit_lock_awaiting_enter = False
         self._profit_lock_last_enter_fields = None
-
-    def _clear_room_escape_stats_for_rematch(self) -> None:
-        """换桌匹配前清零统计，避免回到同房时立刻再次触发逃离。"""
-        self._room_escape_bust_count = 0
 
     def _bankroll_prop_type(self) -> int:
         return int(config.PROFIT_LOCK_FALLBACK_LOBBY_COIN)
@@ -964,25 +946,6 @@ class BotBridge:
             )
             return "pb.RebyREQ", {"is_reby": True, "chips": rebuy_chips}, 0.0
 
-        if kind == "room_escape":
-            self._bankroll_room_escape_count += 1
-            self._notify(
-                "room_escape",
-                bust_count=_chip_int(action.get("bust_count", 0), 0),
-                bust_need=_chip_int(action.get("bust_need", 0), 0),
-                byin_chips=_chip_int(action.get("byin_chips", 0), 0),
-                room_id=_chip_int(action.get("room_id", 0), 0),
-                big_blind=_chip_int(action.get("big_blind", 0), 0),
-                rebuy_window_sec=_chip_int(action.get("rebuy_window_sec", 0), 0),
-                **self._bankroll_notify_fields(sample),
-            )
-            qs = self._profit_lock_quick_start_fallback("房间逃离")
-            if qs is None:
-                log.warning("[BOT] 房间逃离：无法 QuickStart（BB 未知）。")
-            else:
-                self._bankroll_pending_buyin_reason = "room_escape"
-            return qs
-
         if kind == "profit_lock":
             self._bankroll_profit_lock_count += 1
             fields = dict(action.get("enter_fields") or {})
@@ -1077,7 +1040,6 @@ class BotBridge:
             return None
         self._calibration_backpressure_leaving = True
         self._profit_lock_cancel_reenter()
-        self._room_escape_reenter = None
         self._profit_lock_deferred = None
 
         backlog_gb = float(status.get("backlog_gb", 0.0) or 0.0)
@@ -1152,13 +1114,6 @@ class BotBridge:
     def close(self) -> None:
         with self._gamedata_lock:
             self._gamedata_closed = True
-        self._close_api()
-
-    def _close_api(self) -> None:
-        if self._api is not None:
-            close = getattr(self._api, "close_g5_shadow", None)
-            if callable(close):
-                close()
 
     def _set_my_seat(self, seat: int, reason: str) -> None:
         if seat < 0:
@@ -1174,7 +1129,6 @@ class BotBridge:
             # historical model while a new table is already dealing cards.
             return
         # Recreate API when seat changes (reconnect / table rejoin).
-        self._close_api()
         self._api = None
 
     def _on_user_login_rsp(self, msg: dict) -> WireInject | None:
@@ -1314,7 +1268,6 @@ class BotBridge:
             or self._profit_lock_reenter is not None
             or self._profit_lock_deferred is not None
             or self._table_switch is not None
-            or self._room_escape_reenter is not None
         ):
             return None
         bb = float(self._bb or 0.0)
@@ -1436,7 +1389,6 @@ class BotBridge:
             )
         self._tournament_passthrough = True
         self._profit_lock_cancel_reenter()
-        self._room_escape_reenter = None
         self._bankroll_pending_action = None
         self._bankroll_pending_reason = ""
         self._bankroll_pending_buyin_reason = ""
@@ -1454,7 +1406,6 @@ class BotBridge:
 
         self._profit_lock_reenter = None
         self._profit_lock_deferred = None
-        self._room_escape_reenter = None
 
         if "game_type" in msg:
             self._session_game_type = _chip_int(msg.get("game_type"), 0)
@@ -1482,10 +1433,9 @@ class BotBridge:
         code = _s2c_rsp_code(msg, 0)
         if code == 0:
             self._transport_can_match = None
-            self._clear_room_escape_stats_for_rematch()
             if self._bankroll_pending_buyin_reason == "unexpected_leave":
                 self._bankroll_pending_buyin_reason = ""
-            if self._bankroll_pending_buyin_reason in {"profit_lock", "room_escape", "table_switch"}:
+            if self._bankroll_pending_buyin_reason in {"profit_lock", "table_switch"}:
                 self._note_bankroll_buyin(self._bankroll_pending_buyin_reason)
         fallback_inject: tuple[str, dict, float] | None = None
         if self._profit_lock_awaiting_enter:
@@ -1613,22 +1563,18 @@ class BotBridge:
         self._table_log("enter", decision=step.kind if step else self._table_policy.state, dealt=dealt)
         return self._table_step(step)
 
-    def _profit_lock_quick_start_fallback(
-        self,
-        context: str = "盈利锁仓",
-    ) -> WireInject | None:
+    def _profit_lock_quick_start_fallback(self) -> WireInject | None:
         """按大厅 QuickStart 随机配桌（LobbyByinDialog 同款字段）。"""
         pause_status = self._runtime_calibration_should_pause_play()
         if pause_status is not None:
             log.warning(
-                "[BOT] %s：校准队列积压，取消 QuickStart。backlog=%.1fGB",
-                context,
+                "[BOT] 盈利锁仓：校准队列积压，取消 QuickStart。backlog=%.1fGB",
                 float(pause_status.get("backlog_gb", 0.0) or 0.0),
             )
             return None
         bb = float(self._bb or 0.0)
         if bb <= 0:
-            log.warning("[BOT] %s：无法 QuickStart（BB 未知）。", context)
+            log.warning("[BOT] 盈利锁仓：无法 QuickStart（BB 未知）。")
             return None
         gt = self._session_game_type or int(config.PROFIT_LOCK_FALLBACK_GAME_TYPE)
         lc = self._session_lobby_coin or int(config.PROFIT_LOCK_FALLBACK_LOBBY_COIN)
@@ -1648,8 +1594,7 @@ class BotBridge:
         if _chip_int(fields.get("byin_chips", 0), 0) <= 0:
             return None
         log.warning(
-            "[BOT] %s：%.1fs 后发送 QuickStartREQ（随机桌，同盲注/100BB）: %s",
-            context,
+            "[BOT] 盈利锁仓：%.1fs 后发送 QuickStartREQ（随机桌，同盲注/100BB）: %s",
             delay,
             fields,
         )
@@ -1942,7 +1887,6 @@ class BotBridge:
         self._max_bet = 0
         self._street_bets = {}
         self._my_forced_post_this_street = False
-        self._external_disabled_for_forced_post = False
         self._folded = set()
         self._announced_stages = set()
         self._hole_cards_count = 0
@@ -2117,11 +2061,6 @@ class BotBridge:
         """Best-effort restore of per-hand bridge state from EnterRoomRSP after reconnect."""
         if not table_status:
             return
-        if table_status.get("is_playing") is True:
-            invalidate = getattr(self._api, "invalidate_g5_shadow", None)
-            if callable(invalidate):
-                # This also covers preflop reconnects, where there is no board.
-                invalidate("reconnected_without_full_history")
         stage = _chip_int(table_status.get("stage", self._stage or 1), self._stage or 1)
         if stage > 0:
             self._stage = stage
@@ -2296,15 +2235,8 @@ class BotBridge:
             small_blind=sb,
             equity_iterations=3000,
             verbose=True,
-            decision_engine=getattr(config, "DECISION_ENGINE", "local"),
+            decision_engine=getattr(config, "DECISION_ENGINE", "cfr"),
             cfr_flop_book_enabled=getattr(config, "PF_CFR_FLOP_BOOK_ENABLED", True),
-            g5_timeout_sec=getattr(config, "G5_TIMEOUT_SEC", 1.5),
-            g5_recent_hands_count=getattr(config, "G5_RECENT_HANDS", 100),
-            g5_randomly_sample_actions=getattr(config, "G5_RANDOMLY_SAMPLE_ACTIONS", False),
-            g5_preflop_charts_level=getattr(config, "G5_PREFLOP_CHARTS_LEVEL", 4),
-            g5_shadow_decisions=getattr(config, "G5_SHADOW_DECISIONS", True),
-            g5_observer_enabled=getattr(config, "PF_G5_SHADOW_ENABLED", True),
-            g5_shadow_server_actions=True,
         )
         self._apply_preflop_sticky_pool_adjust(
             bool(getattr(config, "PREFLOP_STICKY_POOL_ADJUST", True))
@@ -2354,11 +2286,6 @@ class BotBridge:
         self._all_seats = [si["seatid"] for si in start_info]
         dealer_seat = _chip_int(msg.get("dealer", 0), 0)
         blind_fields_present = "small_blind" in msg or "big_blind" in msg
-        small_blind_seat = (
-            _chip_int(msg.get("small_blind", 0), 0)
-            if blind_fields_present
-            else None
-        )
         big_blind_seat = (
             _chip_int(msg.get("big_blind", 0), 0)
             if blind_fields_present
@@ -2369,18 +2296,6 @@ class BotBridge:
             dealer_seat,
             big_blind=big_blind_seat,
         ).labels
-        inferred_sb, inferred_bb = standard_blind_seats(self._all_seats, dealer_seat)
-        blind_layout_is_standard = (
-            small_blind_seat is None
-            or big_blind_seat is None
-            or small_blind_seat not in self._all_seats
-            or big_blind_seat not in self._all_seats
-            or (
-                dealer_seat in self._all_seats
-                and small_blind_seat == inferred_sb
-                and big_blind_seat == inferred_bb
-            )
-        )
         self._seat_chips = {}
         self._hand_start_chips = {}
 
@@ -2414,20 +2329,6 @@ class BotBridge:
             dealer_id=self._dealer_player_id(dealer_seat),
             hand_number=self._hand_seq,
         )
-        if not blind_layout_is_standard:
-            invalidate = getattr(self._api, "invalidate_g5_shadow", None)
-            if callable(invalidate):
-                invalidate("nonstandard_blind_layout")
-            log.info(
-                "[BOT] G5 非标准盲位布局，保留外部决策；由物理座位+sitting_out 建模兜底: "
-                "dealer=%s sb=%s bb=%s expected_sb=%s expected_bb=%s",
-                dealer_seat,
-                small_blind_seat,
-                big_blind_seat,
-                inferred_sb,
-                inferred_bb,
-            )
-
         # 盈利锁仓：若 WinnerRSP 后的 DelayLeaveRoomREQ 没有及时确认，新手牌开始时再补发一次。
         # 不再发 LeaveRoomREQ；实战证明新手牌开始后服务端会返回 121（playing cannot leave）。
         pending = self._profit_lock_reenter
@@ -2512,37 +2413,7 @@ class BotBridge:
         if hand_chips is not None:
             self._seat_chips[seat] = _chip_int(hand_chips)
 
-        if (
-            action_type in (10, 11, 14)
-            and chips > 0
-            and not self._external_disabled_for_forced_post
-        ):
-            self._external_disabled_for_forced_post = True
-            log.info(
-                "[BOT] G5 忽略强制补盲禁用: seat=%s action_type=%s chips=%s",
-                seat,
-                action_type,
-                chips,
-            )
-
         action_str = ACTION_TYPE_TO_EVENT_ACTION.get(action_type)
-
-        if callable(getattr(self._api, "record_g5_actual_action", None)):
-            if action_type in (10, 11, 14) and chips > 0:
-                self._api.invalidate_g5_shadow("unsupported_forced_post")
-            elif action_str is not None:
-                # An all-in at/below the previous maximum is a call in G5.
-                observed_action = action_str
-                other_max = max((v for s, v in self._street_bets.items() if s != seat), default=0)
-                if observed_action == "raise" and total_street_bet <= other_max:
-                    observed_action = "call"
-                self._api.record_g5_actual_action(
-                    player_id=self._seat_to_player_id(seat), action=observed_action,
-                    amount_added=chips, total_bet_after=total_street_bet,
-                    street=_STAGE_TO_STREET.get(self._stage, "preflop"),
-                )
-            elif action_type not in ACTION_TYPE_TO_EVENT_ACTION:
-                self._api.invalidate_g5_shadow(f"unknown_action_type:{action_type}")
 
         if seat == self._my_seat:
             self._my_bet = total_street_bet
@@ -2551,7 +2422,13 @@ class BotBridge:
             if hand_chips is not None:
                 self._my_chips = _chip_int(hand_chips)
             if action_str is not None:
-                self._reconcile_hero_server_action_for_g5(action_str, action_type)
+                self._pending_hero_wire_action = None
+                record = getattr(self._api, "record_hero_execution", None)
+                if callable(record):
+                    record(
+                        action=action_str, amount_added=chips, total_bet_after=total_street_bet,
+                        street=_STAGE_TO_STREET.get(self._stage, "preflop"),
+                    )
             return   # don't feed our own actions into the opponent model
 
         if self._pending_hero_wire_action:
@@ -2607,16 +2484,10 @@ class BotBridge:
             street_fb = _STAGE_TO_STREET.get(self._stage, "preflop")
             if call_need == 0:
                 fb = BotDecision(action="check", amount=0.0)
-                self._disable_g5_for_unmirrored_hero_action(
-                    "hero fallback before full hole cards",
-                )
                 self._remember_hero_wire_action(fb, notify_sig=notify_sig)
                 delay_sec = _inject_delay_before_action(street_fb, fb, self._pot, self._bb or 0.0)
                 return "pb.ActionREQ", {"action_type": 2, "chips": 0}, delay_sec
             fb = BotDecision(action="fold", amount=0.0)
-            self._disable_g5_for_unmirrored_hero_action(
-                "hero fallback before full hole cards",
-            )
             self._remember_hero_wire_action(fb, notify_sig=notify_sig)
             delay_sec = _inject_delay_before_action(street_fb, fb, self._pot, self._bb or 0.0)
             return "pb.ActionREQ", {"action_type": 1, "chips": 0}, delay_sec
@@ -2722,38 +2593,6 @@ class BotBridge:
         self._pending_hero_wire_action = dict(context)
         self._last_hero_action_context = dict(context)
 
-    def _reconcile_hero_server_action_for_g5(self, action: str, action_type: int) -> None:
-        expected = self._pending_hero_wire_action
-        self._pending_hero_wire_action = None
-        current = {
-            "gameid": str(self._current_gameid or ""),
-            "stage": int(self._stage),
-            "action": str(action or "").lower(),
-        }
-        if expected and self._hero_action_matches_expected(expected, current):
-            return
-        self._disable_g5_for_unmirrored_hero_action(
-            "hero server action not mirrored by request_action: "
-            f"action={action} action_type={action_type} expected={expected}",
-        )
-
-    @staticmethod
-    def _hero_action_matches_expected(expected: dict, current: dict) -> bool:
-        if str(expected.get("gameid") or "") != str(current.get("gameid") or ""):
-            return False
-        if int(expected.get("stage") or 0) != int(current.get("stage") or 0):
-            return False
-        expected_action = str(expected.get("action") or "").lower()
-        current_action = str(current.get("action") or "").lower()
-        if expected_action == "raise":
-            return current_action == "raise"
-        return expected_action == current_action
-
-    def _disable_g5_for_unmirrored_hero_action(self, reason: str) -> None:
-        if self._api is None:
-            return
-        self._api.disable_external_decision_current_hand(reason)
-
     def _on_show_hand(self, msg: dict) -> None:
         """Capture ShowHandRSP — hole cards revealed at showdown."""
         for info in msg.get("info", []):
@@ -2775,7 +2614,6 @@ class BotBridge:
 
         winner_list = msg.get("winner", [])
         winner_ids: list[int] = []
-        winner_payouts: dict[int, int] = {}
         total_pot = 0
 
         # Build winner_ids and total_pot from winner list.
@@ -2795,7 +2633,6 @@ class BotBridge:
 
             player_id = self._seat_to_player_id(seat)
             winner_ids.append(player_id)
-            winner_payouts[player_id] = winner_payouts.get(player_id, 0) + chips
 
             # Capture server-provided hand type (authoritative)
             hand_type = w.get("type")
@@ -2834,7 +2671,6 @@ class BotBridge:
             winner_ids=winner_ids,
             pot=total_pot,
             final_stacks=self._seat_map_to_player_ids(final_stacks),
-            winner_payouts=winner_payouts,
             showdown_hands=(
                 self._seat_showdown_to_player_ids(self._pending_showdown)
                 if self._pending_showdown else None
@@ -2990,7 +2826,6 @@ class BotBridge:
         }
         self._profit_lock_deferred = dict(pending)
         self._profit_lock_reenter = dict(pending)
-        self._room_escape_bust_count = 0
         msg = (
             f"[BOT] 盈利锁仓：桌上筹码 {my_final} >= {threshold}（{lock_bb}BB），"
             "已设置服务端下一手离桌，"
@@ -3024,7 +2859,7 @@ class BotBridge:
         return None
 
     def _on_leave_room_rsp(self, msg: dict) -> WireInject | None:
-        """盈利锁仓：离桌成功后带买入重新进房；房间逃离：离桌后 QuickStart。"""
+        """离桌确认：盈利锁仓带买入重新进房，选桌换桌重新匹配，其余有筹码的离桌按异常离桌重进。"""
         code = _s2c_rsp_code(msg, 0)
         was_seated = bool(self._table_room_id) and self._my_seat is not None
         chips_before_leave = self._current_table_chips()
@@ -3036,7 +2871,6 @@ class BotBridge:
             self._hand_seq += 1
             if self._shutdown_requested:
                 self._profit_lock_cancel_reenter()
-                self._room_escape_reenter = None
                 self._bankroll_pending_action = None
                 return self._mark_my_left_table("leave_room")
         if self._calibration_backpressure_leaving:
@@ -3078,21 +2912,6 @@ class BotBridge:
             if self._table_policy is not None:
                 self._table_policy.on_left(time.time(), ours=False)
 
-        esc = self._room_escape_reenter
-        if esc is not None and esc.get("quickstart"):
-            code = _s2c_rsp_code(msg, 0)
-            if code not in (0, 2, 3):
-                log.warning("[BOT] 房间逃离：LeaveRoomRSP code=%s，取消 QuickStart。", code)
-                self._room_escape_reenter = None
-                return None
-            self._room_escape_reenter = None
-            self._mark_my_table_chips_zero()
-            action = dict(esc)
-            action["kind"] = "room_escape"
-            log.warning("[BOT] 房间逃离：已离桌，先采样余额再 QuickStart 换桌。")
-            return self._request_bankroll_sample("room_escape", action=action)
-
-        code = _s2c_rsp_code(msg, 0)
         pending = self._profit_lock_reenter
         if pending is None:
             if code in (0, 2, 3):
@@ -3168,28 +2987,6 @@ class BotBridge:
 
         self._auto_rebuy_done += 1
         rebuy_nth = self._auto_rebuy_done
-
-        esc_enabled = bool(config.ROOM_ESCAPE_ENABLED)
-        bust_need = max(1, int(config.ROOM_ESCAPE_CONSECUTIVE_BUSTS))
-        if esc_enabled:
-            self._room_escape_bust_count += 1
-            if self._room_escape_bust_count >= bust_need:
-                bust_count = self._room_escape_bust_count
-                self._clear_room_escape_stats_for_rematch()
-                self._room_escape_reenter = {
-                    "quickstart": True,
-                    "bust_count": bust_count,
-                    "bust_need": bust_need,
-                    "byin_chips": rebuy_chips,
-                    "room_id": _chip_int(self._table_room_id, 0),
-                    "big_blind": int(self._bb or 0),
-                    "rebuy_window_sec": reby_left_time,
-                }
-                log.warning(
-                    "[BOT] 房间逃离：连续破产 %d 次（中间无盈利锁仓），离桌后 QuickStart 换桌。",
-                    bust_need,
-                )
-                return "pb.LeaveRoomREQ", {"seat_reserve": False}, 0.0
 
         self._mark_my_table_chips_zero()
         action = {

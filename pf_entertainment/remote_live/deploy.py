@@ -48,7 +48,7 @@ def deploy(config_path: Path):
     if payload["tls_mode"] == "self-signed":
         cert = subprocess.check_output([*ssh_args(cfg.ssh_host), "cat /etc/pokerfate-live/tls/cert.pem"], timeout=20)
         config_path.with_name("remote_live_server.crt").write_bytes(cert)
-        print("已通过 SSH 保存服务器公钥证书到 data/remote_live_server.crt（未导入系统信任库）")
+        print("已通过 SSH 保存服务器公钥证书到 local/secrets/remote_live_server.crt（未导入系统信任库）")
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ import numpy as np
 
 
 CAT_ORDER = ("nuts", "strong", "medium", "draw", "weak_draw", "air")
-MODEL_DIR = Path(__file__).resolve().parents[2] / "data" / "local_models"
+MODEL_DIR = Path(__file__).resolve().parents[3] / "local" / "models"
 MODEL_FILE = MODEL_DIR / "range_v2_empirical_model.json"
 # Upper bound on how much the pool action table may displace the GTO
 # likelihood row. The table's own ``blend`` is n/(n+prior_weight); the cap

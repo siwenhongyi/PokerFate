@@ -65,8 +65,8 @@ def test_nonstandard_blinds_preserve_physical_order_for_cfr(street):
     hero_id, villain_id, button_id = 10262053, 10482879, 10489861
     api = PokerFateAPI(
         my_player_id=hero_id, big_blind=10000, small_blind=5000,
-        autosave_path=None, log_file=None, g5_model_path=None,
-        enable_showdown_calibration=False, decision_engine="local",
+        autosave_path=None, log_file=None,
+        enable_showdown_calibration=False, decision_engine="rule_engine",
     )
     # Hand 3: button=3, hero=seat 1/BB, villain=seat 4/UTG+1.
     # Deliberately shuffle players: physical seats, not list order or blind
@@ -206,8 +206,8 @@ def test_raise_to_cap_and_call_comparison_use_same_total_units():
 def _live_api():
     api = PokerFateAPI(
         my_player_id=1, big_blind=10000, small_blind=5000, equity_iterations=10,
-        autosave_path=None, log_file=None, g5_model_path=None,
-        enable_showdown_calibration=False, decision_engine="local",
+        autosave_path=None, log_file=None,
+        enable_showdown_calibration=False, decision_engine="rule_engine",
     )
     api.new_hand([PlayerInfo(1, "Hero", 1000000, "BB"), PlayerInfo(2, "Villain", 1000000, "BTN")], dealer_id=2)
     api.deal_hole_cards(["Ac", "Ad"])
@@ -228,19 +228,19 @@ def test_postflop_allin_increment_becomes_total_once(monkeypatch):
     assert api._action_history[-1][1] == Action(ActionType.RAISE, 120000)
 
 
-@pytest.mark.parametrize("source", ["local", "cfr", "book"])
+@pytest.mark.parametrize("source", ["rule_engine", "cfr", "book"])
 @pytest.mark.parametrize("requested,stack,expected", [(8000, 99311, 10000), (8000, 6000, 6000), (15000, 99311, 15000)])
 def test_bet_floor_is_applied_before_recording_and_sending(monkeypatch, source, requested, stack, expected):
     api = _live_api()
     recorded = []
     monkeypatch.setattr(api._log, "decision", lambda **kwargs: recorded.append(kwargs))
     chosen = Action(ActionType.RAISE, requested)
-    if source == "local":
+    if source == "rule_engine":
         monkeypatch.setattr(api._bot, "decide", lambda *args, **kwargs: chosen)
     else:
         entry = "_decide_with_realtime_cfr" if source == "cfr" else "_decide_with_flop_book"
         monkeypatch.setattr(api, entry, lambda *args, **kwargs: chosen)
-        monkeypatch.setattr(api, "_local_shadow_decide", lambda *args, **kwargs: None)
+        monkeypatch.setattr(api, "_rule_engine_shadow_decide", lambda *args, **kwargs: None)
     bridge = BotBridge()
     bridge._api = api
     bridge._my_seat = 1
@@ -317,8 +317,8 @@ def test_unseated_button_keeps_physical_order():
 
     api = PokerFateAPI(
         my_player_id=10262053, big_blind=10000, small_blind=5000,
-        autosave_path=None, log_file=None, g5_model_path=None,
-        enable_showdown_calibration=False, decision_engine="local",
+        autosave_path=None, log_file=None,
+        enable_showdown_calibration=False, decision_engine="rule_engine",
     )
     # The bridge now labels by action order: hero acts first on every street, so
     # this is a blind battle (SB vs BB), not a button hand.
@@ -339,8 +339,8 @@ def test_api_without_labels_derives_them_from_seats_and_dealer_seat():
     the dealer chip on empty seat 3 makes seat 2 the button, not the lowest seat."""
     api = PokerFateAPI(
         my_player_id=10262053, big_blind=10000, small_blind=5000,
-        autosave_path=None, log_file=None, g5_model_path=None,
-        enable_showdown_calibration=False, decision_engine="local",
+        autosave_path=None, log_file=None,
+        enable_showdown_calibration=False, decision_engine="rule_engine",
     )
     api.new_hand([
         PlayerInfo(10262053, "Hero", 1000000, seat_index=0),

@@ -37,8 +37,8 @@ def fmt_dec(d: dict, bb: float, verbose: bool = True) -> str:
             out += "\n      safety=" + json.dumps(r["safety"], ensure_ascii=False)[:900]
     if d.get("flop_book") and verbose:
         out += "\n      book=" + json.dumps(d["flop_book"], ensure_ascii=False)[:500]
-    if d.get("local_shadow_action"):
-        out += f"\n      local_shadow={d['local_shadow_action']} {d.get('local_shadow_amount')}"
+    if d.get("rule_engine_shadow_action"):
+        out += f"\n      rule_engine_shadow={d['rule_engine_shadow_action']} {d.get('rule_engine_shadow_amount')}"
     if d.get("river_relative") and verbose:
         out += "\n      river_relative=" + json.dumps(d["river_relative"], ensure_ascii=False)[:300]
     if d.get("fallbacks"):

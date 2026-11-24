@@ -49,7 +49,7 @@ def collect(hands, street="river"):
                        hero_t=ht, board_t=btr, hero_cls=strength_class(ht, btr), bucket=d.get("hero_bucket"),
                        bet_frac=s["bet_frac"], size_pot=s.get("size_pot"), bets_before=s["bets_before"],
                        hand=h["hole"], board=b, delta=h["delta_bb"], is_last=(k == len(hero_spots) - 1),
-                       local_shadow=d.get("local_shadow_action"), purpose=d.get("final_purpose"),
+                       rule_engine_shadow=d.get("rule_engine_shadow_action"), purpose=d.get("final_purpose"),
                        hero_bet_earlier=any(x["hero"] and x["act"] == "raise" and x["i"] < s["i"] for x in spots),
                        need=(tc / ((pot + tc) * KEEP) if tc > 0 else None), allin_call=tc >= s["stack_bb"] - 0.01,
                        cfr=d.get("realtime_cfr"), w=None, truth=None, vil_t=None, last_street=last_street)
@@ -117,7 +117,7 @@ def report(rows, title):
     block("全部", fac)
     block("面对首次下注", [r for r in fac if r["bets_before"] == 1])
     block("面对加注(hero 已下注)", [r for r in fac if r["bets_before"] >= 2])
-    for src in ("realtime_cfr", "pokerfate", "flop_book"):
+    for src in ("realtime_cfr", "rule_engine", "flop_book"):
         block(f"来源={src}", [r for r in fac if r["src"] == src])
     for cls in ("air(不超过公共牌)", "一对级", "两对+"):
         block(f"hero牌力={cls}", [r for r in fac if r["hero_cls"] == cls])

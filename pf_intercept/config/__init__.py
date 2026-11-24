@@ -73,12 +73,10 @@ SMALL_BLIND: float | None = None   # None = auto-detect
 ACTION_INJECT_DELAY_MAX_SEC = 3.0
 
 # 决策引擎：
-#   未设置            = cfr（2026-11-11 起的实战默认，和启动命令里显式写 DECISION_ENGINE=cfr 等价）
-#   非法/local        = PokerFate 纯本地
-#   g5_all          = 翻前/翻后都由 g5 接管，PokerFate 旁路对照
-#   g5              = 翻前 PokerFate；翻后 g5 接管
-#   cfr             = 翻前 PokerFate；翻牌可选离线 CFR 书；转/河实时 CFR，miss/超时回退 PokerFate
-# 可用环境变量覆盖：DECISION_ENGINE=g5_all / g5 / cfr / local
+#   未设置或其他值     = cfr（2026-11-11 起的实战默认；未知的名字会在日志里记一条 decision_engine_unknown）
+#   rule_engine     = 只用规则引擎
+#   cfr             = 翻前规则引擎；翻牌可选离线 CFR 书；转/河实时 CFR，miss/超时回退规则引擎
+# 可用环境变量覆盖：DECISION_ENGINE=cfr / rule_engine
 _DEFAULT_DECISION_ENGINE = "cfr"
 DECISION_ENGINE = os.environ.get(
     "DECISION_ENGINE",
@@ -86,21 +84,13 @@ DECISION_ENGINE = os.environ.get(
 ).strip().lower().replace("-", "_")
 
 # CFR 翻牌书独立开关（会写入 session_config 的 A/B 配置快照）。
-# 关闭时翻牌走本地，转牌/河牌仍实时求解；仅在 cfr 模式下使用。
+# 关闭时翻牌走规则引擎，转牌/河牌仍实时求解；仅在 cfr 模式下使用。
 PF_CFR_FLOP_BOOK_ENABLED = _env_bool("PF_CFR_FLOP_BOOK_ENABLED", True)
-# CFR/local 同点对照：异步重放真实行动，不参与实战决策。
-PF_G5_SHADOW_ENABLED = _env_bool("PF_G5_SHADOW_ENABLED", True)
 
 # 粘池翻前调整：默认开启。
 # 开启时 RFI +1bb，ISO 使用 4bb + 1bb/limper，并把边缘 ISO 在粘/多 limper
 # 桌面降级为 overlimp/fold；关闭时恢复旧尺寸和旧 ISO 行为。
 PREFLOP_STICKY_POOL_ADJUST = _env_bool("PREFLOP_STICKY_POOL_ADJUST", True)
-G5_TIMEOUT_SEC = 8.0
-G5_RECENT_HANDS = 100
-G5_RANDOMLY_SAMPLE_ACTIONS = False
-G5_PREFLOP_CHARTS_LEVEL = 4
-# 仅 g5 模式需要预翻牌 shadow 来保持 g5 翻后状态；local/非法不启用。
-G5_SHADOW_DECISIONS = True
 
 # 盈利锁仓：一手结束时若 **桌上筹码 >= 该值（大盲倍数）** 则发
 # pb.DelayLeaveRoomREQ(flag=true)，走客户端菜单同款的「下一手离桌」协议；
@@ -143,10 +133,6 @@ PROFIT_LOCK_FALLBACK_LOBBY_COIN = 10100001
 # 发 QuickStart 前短暂延迟（秒），给客户端落到大厅状态。
 PROFIT_LOCK_QUICKSTART_DELAY_SEC = 0.5
 
-# 房间逃离：连续破产达次数后离桌并以 QuickStart 随机换桌（逻辑类似盈利锁仓后的兜底）。
-# 中间若出现盈利锁仓会清零破产计数。发起 QuickStart 前会清零本策略统计，避免池子小回到同房时立刻再次逃离。
-ROOM_ESCAPE_ENABLED = True
-
 # 选桌（headless 现金桌）：桌上没有真人、或真人少于人机就换桌；同一场次连续不合格则换场。
 # 打法不受影响。没有开关（headless 进桌即生效）；--stakes 指定场次顺序。
 TABLE_SELECT_TRIES_PER_STAKE = 3            # 同一场次连续多少张不合格的桌后换场
@@ -160,7 +146,6 @@ TABLE_SELECT_PROBE_BATCH_SEC = 600.0        # 一次回探顺带探完这么多�
 TABLE_SELECT_MIXED_CONFIRM_HANDS = 2        # 真人少于人机需连续多少手成立才离桌
 TABLE_SELECT_EMPTY_GRACE_SEC = 60.0         # 空桌等多久没人来就走
 TABLE_SELECT_WAIT_BLIND = True              # 进桌等大盲再入局（先看桌，不白付盲注）
-ROOM_ESCAPE_CONSECUTIVE_BUSTS = 2
 
 # 自动收藏牌局：WinnerRSP 结算后，仅对我方获胜的特殊牌型调用 /collCard/update。
 # 与盈利锁仓一致，SNG / 好友局会跳过。

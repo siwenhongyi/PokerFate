@@ -34,7 +34,7 @@ HUMAN = "human"
 SUSPECT = "suspect"
 UNKNOWN = "unknown"
 
-DEFAULT_PATH = Path(__file__).resolve().parents[1] / "data" / "local_models" / "robots.json"
+DEFAULT_PATH = Path(__file__).resolve().parents[2] / "local" / "models" / "robots.json"
 
 # A run of proven robots whose neighbouring UIDs are at most this far apart is treated as one
 # allocation block; unproven UIDs inside a block are "suspect".

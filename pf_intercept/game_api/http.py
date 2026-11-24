@@ -22,7 +22,7 @@ log = logging.getLogger("pf_http")
 GAME_HTTP_SSL_CTX = ssl.create_default_context(cafile=certifi.where())
 _SALT = "Z3r0w0nd3rd3!3z4jz89z9DLbg&8Gjt("
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_TOKEN_FILE = _PROJECT_ROOT / "data" / "auth_token.txt"
+_TOKEN_FILE = _PROJECT_ROOT / "local" / "secrets" / "auth_token.txt"
 _UNITY_USER_AGENT = "UnityPlayer/2022.3.62f3 (UnityWebRequest/1.0, libcurl/8.10.1-DEV)"
 
 

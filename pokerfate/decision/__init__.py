@@ -1,10 +1,5 @@
-"""Optional external decision engines."""
+"""Solver-backed decision engines: the offline flop book and realtime CFR."""
 
-from pokerfate.decision.g5_engine import (
-    DecisionEngineError,
-    G5EngineOptions,
-    G5JsonDecisionEngine,
-)
 from pokerfate.decision.flop_book import (
     FlopBookDecisionContext,
     FlopBookDecisionEngine,
@@ -17,12 +12,9 @@ from pokerfate.decision.realtime_cfr import (
 )
 
 __all__ = [
-    "DecisionEngineError",
     "FlopBookDecisionContext",
     "FlopBookDecisionEngine",
     "FlopBookOptions",
-    "G5EngineOptions",
-    "G5JsonDecisionEngine",
     "RealtimeCFRDecisionContext",
     "RealtimeCFRDecisionEngine",
     "RealtimeCFROptions",

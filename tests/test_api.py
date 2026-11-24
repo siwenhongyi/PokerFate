@@ -7,7 +7,6 @@ import pytest
 from pokerfate.api import PokerFateAPI, PlayerInfo, ActionEvent, BotDecision
 from pokerfate.core.card import Card
 from pokerfate.core.game_state import Action, ActionType, GameState, Player
-from pokerfate.decision.g5_model import G5ActionModel
 
 
 def make_api(verbose=False) -> PokerFateAPI:
@@ -60,44 +59,6 @@ class TestAPILifecycle:
 
         start_hand(api)
         assert api._hand_number == 43
-
-    def test_hand_over_persists_g5_native_action_model(self, tmp_path):
-        g5_path = tmp_path / "g5_stats.json"
-        api = PokerFateAPI(
-            my_player_id=0,
-            big_blind=10,
-            small_blind=5,
-            equity_iterations=50,
-            g5_model_path=str(g5_path),
-            enable_showdown_calibration=False,
-        )
-        api.new_hand(
-            players=[
-                PlayerInfo(0, "Hero", 1000, "BTN"),
-                PlayerInfo(1, "Villain", 1000, "SB"),
-                PlayerInfo(2, "Other", 1000, "BB"),
-            ],
-            dealer_id=0,
-        )
-        api.deal_hole_cards(["As", "Ah"])
-        api.notify_action(ActionEvent(1, "call", 5, "preflop"))
-        api.notify_action(ActionEvent(2, "check", 0, "preflop"))
-        api.hand_over(
-            winner_ids=[0],
-            pot=30,
-            final_stacks={0: 1020, 1: 990, 2: 990},
-            my_profit_delta=20,
-        )
-
-        # Live saves are asynchronous; graceful close flushes the checkpoint.
-        api.close_g5_shadow()
-        model = G5ActionModel.load(g5_path)
-        villain = model.players["uid:1"]
-        other = model.players["uid:2"]
-        assert villain.vpip_positive == 1
-        assert villain.vpip_total == 1
-        assert other.vpip_positive == 0
-        assert other.vpip_total == 1
 
     def test_hand_over_builds_push_detail(self):
         api = make_api()
@@ -1017,95 +978,7 @@ class TestSeatManagement:
         assert api._bot.opponent_model.get(3).raise_count == raise_count_before
 
 
-class TestExternalDecisionEngine:
-    class FakeG5Engine:
-        def __init__(self):
-            self.actions = []
-            self.finished = []
-            self.decide_calls = 0
-            self.last_result = {
-                "action": "Raise",
-                "byAmount": 10,
-                "checkCallEV": 1.2,
-                "betRaiseEV": 3.4,
-                "message": "fake g5",
-            }
-
-        def start_hand(self, **kwargs):
-            self.started = kwargs
-
-        def deal_hole_cards(self, cards):
-            self.hole_cards = cards
-
-        def deal_board(self, cards, street):
-            self.board = (cards, street)
-
-        def notify_action(self, **kwargs):
-            self.actions.append(kwargs)
-
-        def decide(self, gs, *, hero_player_id, my_current_bet_this_street):
-            self.decide_calls += 1
-            return Action(ActionType.RAISE, 12.0)
-
-        def finish_hand(self, **kwargs):
-            self.finished.append(kwargs)
-
-        def disable_current_hand(self, reason):
-            self.disabled_reason = reason
-
-    def _enable_fake_g5(self, api, engine):
-        api._external_decision_engine = engine
-        api._external_decision_engine_enabled = True
-        api._external_decision_engine_active = True
-        api._external_decision_engine_shadow = False
-        api._external_decision_engine_mode = "g5_all"
-        api._external_decision_engine_name = "g5"
-
-    def _enable_shadow_g5(self, api, engine):
-        api._external_decision_engine = engine
-        api._external_decision_engine_enabled = True
-        api._external_decision_engine_active = False
-        api._external_decision_engine_shadow = True
-        api._external_decision_engine_mode = "local"
-        api._external_decision_engine_name = "g5"
-
-    def _enable_hybrid_g5(self, api, engine):
-        api._external_decision_engine = engine
-        api._external_decision_engine_enabled = True
-        api._external_decision_engine_active = True
-        api._external_decision_engine_shadow = True
-        api._external_decision_engine_mode = "postflop"
-        api._external_decision_engine_name = "g5"
-
-    def test_runtime_set_decision_engine_reconfigures_engine(self, monkeypatch):
-        api = make_api()
-        calls = []
-
-        class OldEngine:
-            def __init__(self):
-                self.closed = False
-
-            def close(self):
-                self.closed = True
-
-        old = OldEngine()
-        api._external_decision_engine = old
-        api._external_decision_engine_enabled = True
-
-        def fake_configure(**kwargs):
-            calls.append(kwargs)
-            api._external_decision_engine_name = "g5"
-            api._external_decision_engine_mode = kwargs["decision_engine"]
-
-        monkeypatch.setattr(api, "_configure_decision_engine", fake_configure)
-
-        status = api.set_decision_engine("g5_all")
-
-        assert old.closed is True
-        assert calls[-1]["decision_engine"] == "g5_all"
-        assert status["requested"] == "g5_all"
-        assert status["engine"] == "g5"
-        assert status["mode"] == "g5_all"
+class TestDecisionEngine:
 
     def test_cfr_without_flop_book_decision_engine_status(self, monkeypatch):
         monkeypatch.setenv("PF_CFR_FLOP_BOOK_ENABLED", "0")
@@ -1129,13 +1002,12 @@ class TestExternalDecisionEngine:
         assert status["mode"] == "turn_river"
         assert status["enabled"] is True
         assert status["active"] is True
-        assert status["shadow"] is False
         assert status["realtime_cfr"] is True
         assert status["flop_book"] is False
         assert status["flop_book_requested"] is False
 
         # Changing the main engine must preserve the independent book switch.
-        api.set_decision_engine("local")
+        api.set_decision_engine("rule_engine")
         status = api.set_decision_engine("cfr")
         assert status["mode"] == "turn_river"
         assert status["realtime_cfr"] is True
@@ -1158,7 +1030,6 @@ class TestExternalDecisionEngine:
         assert status["mode"] == "flop_book_turn_river"
         assert status["enabled"] is True
         assert status["active"] is True
-        assert status["shadow"] is False
         assert status["realtime_cfr"] is True
         assert status["flop_book"] is True
         assert status["flop_book_requested"] is True
@@ -1200,376 +1071,31 @@ class TestExternalDecisionEngine:
         assert weights[combo_index("AsKs")] > 0.0
         assert weights[combo_index("KhKd")] == 0.0
 
-    @pytest.mark.parametrize("engine", ["unknown-engine", "realtime_cfr", "realtime-cfr"])
-    def test_invalid_decision_engine_is_pure_local(self, engine):
-        api = PokerFateAPI(
-            my_player_id=0,
-            big_blind=2.0,
-            small_blind=1.0,
-            autosave_path=None,
-            decision_engine=engine,
-        )
+    @pytest.mark.parametrize("engine", ["", "unknown-engine", "pokerfate"])
+    def test_missing_or_unknown_decision_engine_runs_cfr(self, engine):
+        def status_of(name):
+            api = PokerFateAPI(
+                my_player_id=0,
+                big_blind=2.0,
+                small_blind=1.0,
+                autosave_path=None,
+                decision_engine=name,
+            )
+            return api.decision_engine_status()
 
-        status = api.decision_engine_status()
+        status, cfr = status_of(engine), status_of("cfr")
 
-        assert status["requested"] == engine.replace("-", "_")
-        assert status["engine"] == "local"
-        assert status["enabled"] is False
-        assert status["active"] is False
-        assert status["shadow"] is False
-        assert status["realtime_cfr"] is False
-        assert status["flop_book"] is False
+        assert status.pop("requested") == (engine.replace("-", "_") or "cfr")
+        assert cfr.pop("requested") == "cfr"
+        assert status == cfr
 
     @pytest.mark.parametrize("engine", ["realtime_cfr", "realtime-cfr"])
     def test_removed_engine_cannot_be_selected_at_runtime(self, engine):
         api = PokerFateAPI(decision_engine="cfr", cfr_flop_book_enabled=False)
         before = api.decision_engine_status()
-        with pytest.raises(ValueError, match="must be local, g5, g5_all, or cfr"):
+        with pytest.raises(ValueError, match="must be rule_engine or cfr"):
             api.set_decision_engine(engine)
         assert api.decision_engine_status() == before
-
-    def test_external_engine_decision_is_used_and_recorded(self):
-        api = make_api()
-        fake = self.FakeG5Engine()
-        self._enable_fake_g5(api, fake)
-
-        start_hand(api)
-        api.deal_hole_cards(["Ac", "Kd"])
-        decision = api.request_action(
-            "preflop",
-            pot=5.0,
-            current_bet=2.0,
-            to_call=0.0,
-            my_stack=198.0,
-            my_current_bet_this_street=2.0,
-            is_bb_option=True,
-        )
-
-        assert decision == BotDecision("raise", 12.0)
-        assert api.last_decision_diagnostics()["decision_source"] == "g5"
-        assert fake.actions[-1]["player_id"] == 0
-        assert fake.actions[-1]["amount_added"] == 10.0
-        assert fake.actions[-1]["total_bet_after"] == 12.0
-
-    def test_hybrid_g5_uses_local_preflop_then_g5_postflop(self):
-        api = make_api()
-        fake = self.FakeG5Engine()
-        self._enable_hybrid_g5(api, fake)
-        api._bot.decide = lambda gs, pid, is_bb_option=False: Action(ActionType.CHECK, 0.0)
-
-        start_hand(api)
-        api.deal_hole_cards(["Ac", "Kd"])
-        preflop = api.request_action(
-            "preflop",
-            pot=3.0,
-            current_bet=0.0,
-            to_call=0.0,
-            my_stack=200.0,
-        )
-
-        assert preflop == BotDecision("check", 0.0)
-        assert api.last_decision_diagnostics()["decision_source"] == "pokerfate"
-        assert api.last_decision_diagnostics()["g5_shadow"]["action"] == "raise"
-        assert fake.actions[-1]["action"] == "raise"
-
-        api.deal_board(["As", "7d", "2c"], "flop")
-        flop = api.request_action(
-            "flop",
-            pot=13.0,
-            current_bet=0.0,
-            to_call=0.0,
-            my_stack=200.0,
-        )
-
-        assert flop == BotDecision("raise", 12.0)
-        diag = api.last_decision_diagnostics()
-        assert diag["decision_source"] == "g5"
-        assert diag["local_shadow"]["status"] == "ok"
-        assert fake.decide_calls == 2
-
-    def test_hybrid_g5_preflop_fold_keeps_local_postflop(self):
-        class FoldingG5(self.FakeG5Engine):
-            def decide(self, gs, *, hero_player_id, my_current_bet_this_street):
-                self.decide_calls += 1
-                self.last_result = {
-                    "action": "Fold",
-                    "byAmount": 0,
-                    "checkCallEV": -1.0,
-                    "betRaiseEV": -2.0,
-                    "message": "fake fold",
-                }
-                return Action(ActionType.FOLD, 0.0)
-
-        api = make_api()
-        fake = FoldingG5()
-        self._enable_hybrid_g5(api, fake)
-        api._bot.decide = lambda gs, pid, is_bb_option=False: Action(ActionType.CALL, 0.0)
-
-        start_hand(api)
-        api.deal_hole_cards(["Ac", "Kd"])
-        preflop = api.request_action(
-            "preflop",
-            pot=5.0,
-            current_bet=2.0,
-            to_call=2.0,
-            my_stack=200.0,
-        )
-        assert preflop == BotDecision("call", 0.0)
-        assert api.last_decision_diagnostics()["g5_shadow"]["action"] == "fold"
-
-        api.deal_board(["As", "7d", "2c"], "flop")
-        flop = api.request_action(
-            "flop",
-            pot=7.0,
-            current_bet=0.0,
-            to_call=0.0,
-            my_stack=198.0,
-        )
-        assert flop == BotDecision("call", 0.0)
-        assert api.last_decision_diagnostics()["decision_source"] == "pokerfate"
-        assert api.last_decision_diagnostics()["g5_shadow"]["status"] == "folded"
-        assert fake.decide_calls == 1
-
-    def test_shadow_g5_decision_is_recorded_but_not_used(self):
-        api = make_api()
-        fake = self.FakeG5Engine()
-        self._enable_shadow_g5(api, fake)
-        api._bot.decide = lambda gs, pid, is_bb_option=False: Action(ActionType.CHECK, 0.0)
-
-        start_hand(api)
-        api.deal_hole_cards(["Ac", "Kd"])
-        decision = api.request_action(
-            "preflop",
-            pot=3.0,
-            current_bet=0.0,
-            to_call=0.0,
-            my_stack=200.0,
-        )
-
-        diag = api.last_decision_diagnostics()
-        assert decision == BotDecision("check", 0.0)
-        assert diag["decision_source"] == "pokerfate"
-        assert diag["g5_shadow"]["status"] == "ok"
-        assert diag["g5_shadow"]["action"] == "raise"
-        assert fake.decide_calls == 1
-        assert fake.actions[-1]["player_id"] == 0
-        assert fake.actions[-1]["action"] == "raise"
-        assert fake.actions[-1]["amount_added"] == 10.0
-        assert fake.actions[-1]["total_bet_after"] == 10.0
-
-    def test_shadow_g5_raise_uses_current_street_bet_not_total_hand_money(self):
-        api = make_api()
-        fake = self.FakeG5Engine()
-        self._enable_shadow_g5(api, fake)
-
-        shadow = {
-            "status": "ok",
-            "result": {
-                "action": "Raise",
-                "byAmount": 30,
-                "heroMoneyInPot": 105,
-            },
-        }
-        api._notify_external_engine_shadow_action(
-            shadow,
-            street="flop",
-            my_current_bet_this_street=5,
-        )
-
-        assert fake.actions[-1]["player_id"] == 0
-        assert fake.actions[-1]["action"] == "raise"
-        assert fake.actions[-1]["amount_added"] == 30.0
-        assert fake.actions[-1]["total_bet_after"] == 35.0
-
-    def test_shadow_g5_follows_g5_line_after_local_fold(self):
-        class ShadowLineG5(self.FakeG5Engine):
-            def __init__(self):
-                super().__init__()
-                self.player_to_act_id = 0
-                self._results = [
-                    {
-                        "action": "Call",
-                        "byAmount": 2,
-                        "amountToCall": 2,
-                        "heroMoneyInPot": 0,
-                        "checkCallEV": 1.0,
-                        "betRaiseEV": -1.0,
-                        "message": "g5 calls",
-                    },
-                    {
-                        "action": "Check",
-                        "byAmount": 0,
-                        "amountToCall": 0,
-                        "heroMoneyInPot": 2,
-                        "checkCallEV": 0.0,
-                        "betRaiseEV": -1.0,
-                        "message": "g5 checks",
-                    },
-                ]
-
-            def decide(self, gs, *, hero_player_id, my_current_bet_this_street):
-                self.last_result = self._results[self.decide_calls]
-                self.decide_calls += 1
-                if self.last_result["action"] == "Call":
-                    return Action(ActionType.CALL, 0.0)
-                return Action(ActionType.CHECK, 0.0)
-
-            def notify_action(self, **kwargs):
-                super().notify_action(**kwargs)
-                self.player_to_act_id = 1 if kwargs["player_id"] == 0 else 0
-
-        api = make_api()
-        fake = ShadowLineG5()
-        self._enable_shadow_g5(api, fake)
-        api._bot.decide = lambda gs, pid, is_bb_option=False: Action(ActionType.FOLD, 0.0)
-
-        start_hand(api)
-        api.deal_hole_cards(["Ac", "Kd"])
-        decision = api.request_action(
-            "preflop",
-            pot=5.0,
-            current_bet=2.0,
-            to_call=2.0,
-            my_stack=200.0,
-        )
-
-        assert decision == BotDecision("fold", 0.0)
-        assert fake.actions[-1]["player_id"] == 0
-        assert fake.actions[-1]["action"] == "call"
-
-        api.notify_action(ActionEvent(1, "check", 0.0, "preflop"))
-
-        assert fake.decide_calls == 2
-        assert fake.actions[-1]["player_id"] == 0
-        assert fake.actions[-1]["action"] == "check"
-
-    def test_shadow_g5_fold_stops_future_shadow_decisions_this_hand(self):
-        class FoldingG5(self.FakeG5Engine):
-            def __init__(self):
-                super().__init__()
-                self.last_result = {
-                    "action": "Fold",
-                    "byAmount": 0,
-                    "checkCallEV": -1.0,
-                    "betRaiseEV": -2.0,
-                    "message": "fake fold",
-                }
-
-            def decide(self, gs, *, hero_player_id, my_current_bet_this_street):
-                self.decide_calls += 1
-                return Action(ActionType.FOLD, 0.0)
-
-        api = make_api()
-        fake = FoldingG5()
-        self._enable_shadow_g5(api, fake)
-        api._bot.decide = lambda gs, pid, is_bb_option=False: Action(ActionType.CALL, 0.0)
-
-        start_hand(api)
-        api.deal_hole_cards(["Ac", "Kd"])
-        first = api.request_action(
-            "preflop",
-            pot=5.0,
-            current_bet=2.0,
-            to_call=2.0,
-            my_stack=200.0,
-        )
-        assert first == BotDecision("call", 0.0)
-        assert api.last_decision_diagnostics()["g5_shadow"]["action"] == "fold"
-        assert fake.decide_calls == 1
-        assert fake.actions == []
-
-        second = api.request_action(
-            "flop",
-            pot=7.0,
-            current_bet=0.0,
-            to_call=0.0,
-            my_stack=198.0,
-        )
-        assert second == BotDecision("call", 0.0)
-        assert api.last_decision_diagnostics()["g5_shadow"]["status"] == "folded"
-        assert fake.decide_calls == 1
-
-    def test_shadow_g5_ignores_forced_post_disable_quietly(self):
-        api = make_api()
-        fake = self.FakeG5Engine()
-        self._enable_shadow_g5(api, fake)
-        api._bot.decide = lambda gs, pid, is_bb_option=False: Action(ActionType.CHECK, 0.0)
-
-        start_hand(api)
-        api.deal_hole_cards(["Ac", "Kd"])
-        api.disable_external_decision_current_hand(
-            "unsupported forced post: seat=1 action_type=11 chips=10000"
-        )
-        decision = api.request_action(
-            "preflop",
-            pot=3.0,
-            current_bet=0.0,
-            to_call=0.0,
-            my_stack=200.0,
-        )
-
-        diag = api.last_decision_diagnostics()["g5_shadow"]
-        assert decision == BotDecision("check", 0.0)
-        assert diag["status"] == "ok"
-        assert diag["action"] == "raise"
-        assert not diag.get("warning")
-        assert "强制补盲" not in diag["reasoning"]
-        assert fake.decide_calls == 1
-        assert not hasattr(fake, "disabled_reason")
-
-    def test_external_engine_failure_falls_back_to_local_bot(self):
-        class FailingG5(self.FakeG5Engine):
-            def decide(self, gs, *, hero_player_id, my_current_bet_this_street):
-                raise RuntimeError("g5 out of sync")
-
-        api = make_api()
-        fake = FailingG5()
-        self._enable_fake_g5(api, fake)
-        api._bot.decide = lambda gs, pid, is_bb_option=False: Action(ActionType.CHECK, 0.0)
-
-        start_hand(api)
-        api.deal_hole_cards(["Ac", "Kd"])
-        decision = api.request_action(
-            "preflop",
-            pot=3.0,
-            current_bet=0.0,
-            to_call=0.0,
-            my_stack=200.0,
-        )
-
-        assert decision == BotDecision("check", 0.0)
-        assert api.last_decision_diagnostics()["decision_source"] == "pokerfate"
-        assert "g5 out of sync" in api._external_decision_engine_error
-
-    def test_shadow_disabled_does_not_report_stale_g5_unavailable(self):
-        api = make_api()
-        api._external_decision_engine_shadow = False
-        api._external_decision_engine_error = "solver_failed_or_timeout"
-        gs = GameState(
-            players=[
-                Player(0, "PokerFate", 200.0, hole_cards=[Card.from_str("Ac"), Card.from_str("Kd")]),
-                Player(1, "Opponent", 200.0),
-            ],
-            big_blind=2.0,
-        )
-
-        shadow = api._shadow_decide_with_external_engine(
-            gs,
-            street="preflop",
-            my_current_bet_this_street=0.0,
-        )
-
-        assert shadow is None
-
-    def test_new_hand_clears_transient_external_engine_error(self):
-        api = make_api()
-        fake = self.FakeG5Engine()
-        self._enable_fake_g5(api, fake)
-        api._external_decision_engine_error = "g5 out of sync"
-
-        start_hand(api)
-
-        assert api._external_decision_engine_error == ""
 
     def test_new_hand_clears_realtime_cfr_error(self):
         api = PokerFateAPI(
@@ -1590,75 +1116,15 @@ class TestExternalDecisionEngine:
         assert api._external_decision_engine_error == ""
         assert api.decision_engine_status()["error"] == ""
 
-    def test_external_engine_hand_disable_skips_g5_until_next_hand(self):
-        class DisabledG5(self.FakeG5Engine):
-            def __init__(self):
-                super().__init__()
-                self.decide_calls = 0
 
-            def decide(self, gs, *, hero_player_id, my_current_bet_this_street):
-                self.decide_calls += 1
-                return Action(ActionType.RAISE, 12.0)
-
-        api = make_api()
-        fake = DisabledG5()
-        self._enable_fake_g5(api, fake)
-        api._bot.decide = lambda gs, pid, is_bb_option=False: Action(ActionType.CHECK, 0.0)
-
-        start_hand(api)
-        api.disable_external_decision_current_hand("manual_test_disable")
-        decision = api.request_action(
-            "preflop",
-            pot=3.0,
-            current_bet=0.0,
-            to_call=0.0,
-            my_stack=200.0,
-        )
-
-        assert decision == BotDecision("check", 0.0)
-        assert fake.decide_calls == 0
-        assert fake.actions == []
-        assert fake.disabled_reason == "manual_test_disable"
-
-        start_hand(api)
-        assert api._external_decision_hand_disabled_reason == ""
-
-    def test_active_g5_ignores_forced_post_disable(self):
-        api = make_api()
-        fake = self.FakeG5Engine()
-        self._enable_fake_g5(api, fake)
-        api._bot.decide = lambda gs, pid, is_bb_option=False: Action(ActionType.CHECK, 0.0)
-
-        start_hand(api)
-        api.disable_external_decision_current_hand("unsupported forced post")
-        decision = api.request_action(
-            "preflop",
-            pot=3.0,
-            current_bet=0.0,
-            to_call=0.0,
-            my_stack=200.0,
-        )
-
-        assert decision == BotDecision("raise", 12.0)
-        assert fake.decide_calls == 1
-        assert not hasattr(fake, "disabled_reason")
-
-    def test_hand_over_sends_gross_winner_payouts_to_external_engine(self):
-        api = make_api()
-        fake = self.FakeG5Engine()
-        self._enable_fake_g5(api, fake)
-
-        start_hand(api)
-        api.hand_over(
-            winner_ids=[1],
-            pot=57.0,
-            winner_payouts={1: 57.0},
-            final_stacks={0: 170.0, 1: 230.0},
-            showdown_hands={1: ["As", "Ah"]},
-        )
-
-        assert fake.finished[-1]["winner_payouts"] == {1: 57.0}
-        assert "showdown_hands" not in fake.finished[-1]
+def test_record_hero_execution_logs_the_server_amounts(monkeypatch):
+    api = PokerFateAPI(my_player_id=0, big_blind=2.0, autosave_path=None)
+    start_hand(api)
+    events = []
+    monkeypatch.setattr(api._log, "raw", events.append)
+    api.record_hero_execution(action="raise", amount_added=90.0, total_bet_after=100.0, street="Flop")
+    assert events == [{"event": "hero_execution", "hand": api._hand_number, "street": "flop",
+                       "action": "raise", "amount_added": 90.0, "total_bet_after": 100.0}]
 
 
 class TestFoldToCbetAnyFirstFlopBet:

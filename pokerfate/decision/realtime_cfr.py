@@ -138,7 +138,7 @@ class RealtimeCFRDecisionContext:
 
 
 class RealtimeCFRDecisionEngine:
-    """Best-effort turn/river realtime CFR search with local fallback reasons."""
+    """Best-effort turn/river realtime CFR search with rule engine fallback reasons."""
 
     def __init__(self, options: Optional[RealtimeCFROptions] = None):
         self.options = options or RealtimeCFROptions()
@@ -475,7 +475,7 @@ class RealtimeCFRDecisionEngine:
         effective_stack_bb = max(0.0, effective_stack / bb)
         # Solver chips are bb×10 integers; anything under 0.1bb rounds to a
         # zero stack and the tree build rejects it. Such spots are a forced
-        # check/call anyway, so let the local engine handle them.
+        # check/call anyway, so let the rule engine handle them.
         if pot_bb <= 0.0 or effective_stack_bb < MIN_SOLVER_STACK_BB:
             self._fallback(
                 "invalid_pot_or_stack",

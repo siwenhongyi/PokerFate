@@ -39,7 +39,7 @@ def test_server_kick_rejoins_without_changing_rebuy_budget(monkeypatch):
     assert rejoin[0] == "pb.QuickStartREQ"
     assert rejoin[1]["boot"] == 10000 and rejoin[1]["byin_chips"] == 1000000
     assert (b._auto_rebuy_done, b._max_auto_rebuy) == (2, 5)
-    assert b._bankroll_profit_lock_count == b._bankroll_room_escape_count == 0
+    assert b._bankroll_profit_lock_count == 0
     assert b.handle("pb.UserValueRSP", {"type": 10100001, "value": "105363439"}) is None
 
 
@@ -570,9 +570,6 @@ def test_dealer_info_uses_server_blind_seats_for_positions(monkeypatch) -> None:
         def new_hand(self, **kwargs):
             calls.append(kwargs)
 
-        def disable_external_decision_current_hand(self, reason):
-            self.disabled_reason = reason
-
     b = BotBridge()
     b._api = FakeAPI()
     b._my_seat = 2
@@ -627,9 +624,6 @@ def test_dealer_info_empty_dealer_seat_labels_by_action_order(monkeypatch) -> No
         def new_hand(self, **kwargs):
             calls.append(kwargs)
 
-        def invalidate_g5_shadow(self, reason):
-            self.invalidated = reason
-
     b = BotBridge()
     b._api = FakeAPI()
     b._my_seat = 0
@@ -661,7 +655,6 @@ def test_dealer_info_empty_dealer_seat_labels_by_action_order(monkeypatch) -> No
         10583348: "BB",
     }
     assert calls[0]["dealer_id"] == -4          # the physical dealer seat still reaches the API
-    assert b._api.invalidated == "nonstandard_blind_layout"
 
 
 def test_dealer_info_heads_up_empty_dealer_seat_uses_the_named_blinds(monkeypatch) -> None:
@@ -670,9 +663,6 @@ def test_dealer_info_heads_up_empty_dealer_seat_uses_the_named_blinds(monkeypatc
     class FakeAPI:
         def new_hand(self, **kwargs):
             calls.append(kwargs)
-
-        def invalidate_g5_shadow(self, reason):
-            pass
 
     b = BotBridge()
     b._api = FakeAPI()
@@ -693,25 +683,41 @@ def test_dealer_info_heads_up_empty_dealer_seat_uses_the_named_blinds(monkeypatc
     assert {p.player_id: p.position for p in calls[0]["players"]} == {10262053: "BB", 10332601: "BTN"}
 
 
-def test_force_big_blind_keeps_external_engine_available_for_current_hand() -> None:
-    class FakeAPI:
-        def __init__(self):
-            self.disabled_reason = ""
-
-        def disable_external_decision_current_hand(self, reason):
-            self.disabled_reason = reason
-
+def test_forced_big_blind_post_is_hero_bet() -> None:
     b = BotBridge()
-    b._api = FakeAPI()
+    b._api = object()
     b._my_seat = 2
 
     b._on_action_brc(
         {"seatid": 2, "action_type": 11, "chips": 1000, "hand_chips": 99000}
     )
 
-    assert b._api.disabled_reason == ""
     assert b._my_forced_post_this_street is True
     assert b._my_bet == 1000
+
+
+@pytest.mark.parametrize("action_type, chips, recorded", [
+    (4, 3000, [("raise", 3000, 3000, "flop")]),      # raise
+    (17, 99000, [("raise", 99000, 99000, "flop")]),  # all-in over the others
+    (1, 0, [("fold", 0, 0, "flop")]),
+    (11, 1000, []),                                  # forced big blind: not a decision
+])
+def test_hero_action_confirmed_by_the_server_is_recorded(action_type, chips, recorded) -> None:
+    class FakeAPI:
+        def __init__(self):
+            self.executions = []
+
+        def record_hero_execution(self, *, action, amount_added, total_bet_after, street):
+            self.executions.append((action, amount_added, total_bet_after, street))
+
+    b = BotBridge()
+    b._api = FakeAPI()
+    b._my_seat = 2
+    b._stage = 2
+
+    b._on_action_brc({"seatid": 2, "action_type": action_type, "chips": chips, "hand_chips": 100000 - chips})
+
+    assert b._api.executions == recorded
 
 
 def test_pending_gamedata_seed_migrates_legacy_archive_before_get() -> None:
@@ -1485,7 +1491,6 @@ class TestNetLossCap:
         if monkeypatch is not None:
             sent = []
             monkeypatch.setattr("pf_intercept.bot.notify", lambda event, **f: sent.append((event, f)))
-            monkeypatch.setattr(config, "ROOM_ESCAPE_ENABLED", False)
             return b, sent
         return b
 
@@ -1688,7 +1693,6 @@ def test_tournament_drops_pending_cash_actions() -> None:
     b._profit_lock_reenter = {"quickstart": True}
     b._profit_lock_deferred = {"pending": True}
     b._profit_lock_awaiting_enter = True
-    b._room_escape_reenter = {"quickstart": True}
     b._bankroll_pending_action = {"kind": "auto_rebuy"}
     b._bankroll_pending_reason = "auto_rebuy"
     b._pending_injects = [("pb.ActionREQ", {})]
@@ -1698,7 +1702,6 @@ def test_tournament_drops_pending_cash_actions() -> None:
     assert b._profit_lock_reenter is None
     assert b._profit_lock_deferred is None
     assert b._profit_lock_awaiting_enter is False
-    assert b._room_escape_reenter is None
     assert b._bankroll_pending_action is None
     assert b._bankroll_pending_reason == ""
     assert b._pending_injects == []
@@ -1998,69 +2001,3 @@ def test_profit_lock_threshold_in_config() -> None:
     assert config.PROFIT_LOCK_BB_THRESHOLD >= 1
 
 
-def test_room_escape_two_busts_then_quickstart(monkeypatch) -> None:
-    """连续破产 2 次（仍可自动续入）：第二弹离桌并以 QuickStart 换桌。"""
-    import pf_intercept.bot as bot_mod
-
-    notified = []
-    monkeypatch.setattr(
-        bot_mod,
-        "notify",
-        lambda event, **fields: notified.append((event, fields)),
-    )
-
-    b = BotBridge(max_auto_rebuy=5)
-    b._my_seat = 0
-    b._my_uid = "7"
-    b._bb = 1000.0
-    b._table_room_id = 42
-    b._session_game_type = 10010101
-    b._session_lobby_coin = 10100001
-    # The hand that busted us. A side-game round of unknown result must not hide it.
-    b.handle("pb.WinnerRSP", {"winner": [], "profit": [{"uid": "7", "chips": "-100000"}]})
-    b.record_reward_credit(0, uncertain=True)
-    r1 = b.handle("pb.NoticeRebyRSP", {"seatid": 0, "reby_left_time": 30})
-    assert r1 is not None
-    assert r1[0] == "pb.UserValueREQ"
-    reby = b.handle("pb.UserValueRSP", {"type": 10100001, "value": 1_000_000})
-    assert reby[0] == "pb.RebyREQ"
-    assert b._room_escape_bust_count == 1
-    assert b._auto_rebuy_done == 1
-    r2 = b.handle("pb.NoticeRebyRSP", {"seatid": 0, "reby_left_time": 30})
-    assert r2 is not None
-    assert r2[0] == "pb.LeaveRoomREQ"
-    assert r2[1]["seat_reserve"] is False
-    assert b._auto_rebuy_done == 2
-    assert b._room_escape_reenter == {
-        "quickstart": True,
-        "bust_count": 2,
-        "bust_need": 2,
-        "byin_chips": 100_000,
-        "room_id": 42,
-        "big_blind": 1000,
-        "rebuy_window_sec": 30,
-    }
-    assert [event for event, _fields in notified] == ["auto_rebuy"]
-    r3 = b.handle("pb.LeaveRoomRSP", {"code": 0})
-    assert r3 is not None
-    assert r3[0] == "pb.UserValueREQ"
-    r4 = b.handle("pb.UserValueRSP", {"type": 10100001, "value": 900_000})
-    assert notified[-1][0] == "room_escape"
-    assert notified[-1][1] == {
-        "bust_count": 2,
-        "bust_need": 2,
-        "byin_chips": 100_000,
-        "room_id": 42,
-        "big_blind": 1000,
-        "rebuy_window_sec": 30,
-        "current_total_chips": 900_000,
-        "wallet_chips": 900_000,
-        "table_chips": 0,
-        "session_delta_chips": -100_000,
-        "session_delta_bb": -100.0,
-    }
-    assert r4 is not None
-    assert r4[0] == "pb.QuickStartREQ"
-    assert r4[1]["byin_chips"] == 100_000
-    assert b._room_escape_reenter is None
-    assert b._bankroll_room_escape_count == 1

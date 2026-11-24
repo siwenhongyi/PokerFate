@@ -20,7 +20,6 @@ from pokerfate.calibration.showdown_calibration import CalibrationResult
 
 _SCHEMA = "runtime_range_calibration_v2"
 _RIVER_VALUE_SIZING_SCHEMA = "runtime_river_value_sizing_v1"
-_RANGE_COMPARE_SCHEMA = "runtime_range_compare_169_v1"
 _EXPERIMENT_FLAG_DEFAULTS = {
     "PF_TURN_FLOP_RELATIVE_GUARD": "1",
     "PF_BUCKET_ML": "lgbm",
@@ -44,7 +43,7 @@ def _json_safe(value: Any) -> Any:
 
 
 def _default_root() -> Path:
-    return Path(__file__).resolve().parents[2] / "data" / "runtime_calibration"
+    return Path(__file__).resolve().parents[2] / "local" / "training"
 
 
 def _repo_root() -> Path:
@@ -180,38 +179,6 @@ class RuntimeCalibrationRecorder:
         }
         out.update(_json_safe(row))
         path = self.root / f"river_value_sizing.{split}.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(out, ensure_ascii=False, sort_keys=True))
-            f.write("\n")
-        return 1
-
-    def write_range_compare(
-        self,
-        row: dict[str, Any],
-        *,
-        big_blind: float,
-        hand_id: int,
-        source: str = "runtime",
-    ) -> int:
-        """Append one hand-level PokerFate-vs-g5 169-range comparison row."""
-        split = self._split_for_hand(hand_id)
-        out = {
-            "schema": _RANGE_COMPARE_SCHEMA,
-            "source": source,
-            "session_id": self.session_id,
-            "recorded_at": int(time.time()),
-            "strategy_version": self.strategy_version,
-            "experiment_flags": dict(self.experiment_flags),
-            "git_commit": self.git_meta.get("git_commit", "unknown"),
-            "git_dirty": bool(self.git_meta.get("git_dirty", False)),
-            "git_diff_hash": self.git_meta.get("git_diff_hash", ""),
-            "split": split,
-            "bb": float(big_blind or 0.0),
-            "hand": int(hand_id),
-        }
-        out.update(_json_safe(row))
-        path = self.root / f"range_compare.{split}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(out, ensure_ascii=False, sort_keys=True))

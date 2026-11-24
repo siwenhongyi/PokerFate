@@ -10,7 +10,6 @@ from pokerfate.calibration.showdown_calibration import (
 from pokerfate.calibration.async_showdown_calibration import AsyncShowdownCalibrator
 from pokerfate.calibration.spool_showdown_calibration import (
     FileSpoolShowdownCalibrator,
-    FileSpoolRangeCompareCollector,
     run_spool_worker_once,
 )
 from pokerfate.calibration.runtime_recorder import RuntimeCalibrationRecorder
@@ -21,7 +20,6 @@ __all__ = [
     'ShowdownCalibrator',
     'AsyncShowdownCalibrator',
     'FileSpoolShowdownCalibrator',
-    'FileSpoolRangeCompareCollector',
     'run_spool_worker_once',
     'RuntimeCalibrationRecorder',
 ]

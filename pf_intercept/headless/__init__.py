@@ -2,10 +2,10 @@
 
 Replaces the MITM chain (DNS hijack + certs + mitmweb + proxy) with a direct
 WSS connection, resuming a session harvested from one real device login
-(data/headless_session.json, git-ignored — see harvest_session) instead of
+(local/secrets/headless_session.json, git-ignored — see harvest_session) instead of
 performing /login itself:
 
-    resume data/headless_session.json -> uid, rdkey, authorization, server list
+    resume local/secrets/headless_session.json -> uid, rdkey, authorization, server list
     WSS  pb.UserLoginREQ        -> pb.UserLoginRSP
     WSS  pb.HeartBeatREQ / 5s   -> keep-alive (server drops after 2 misses)
     WSS  pb.QuickStartREQ       -> server seats us; from there BotBridge drives

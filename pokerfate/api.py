@@ -29,19 +29,16 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shlex
-import sys
 import time
 import traceback
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional
 
 from pokerfate.bot.poker_bot import PokerBot
 from pokerfate.calibration import (
     FileSpoolShowdownCalibrator,
-    FileSpoolRangeCompareCollector,
     RuntimeCalibrationRecorder,
 )
 from pokerfate.core.card import Card
@@ -56,14 +53,10 @@ from pokerfate.decision import (
     FlopBookDecisionContext,
     FlopBookDecisionEngine,
     FlopBookOptions,
-    G5EngineOptions,
-    G5JsonDecisionEngine,
     RealtimeCFRDecisionContext,
     RealtimeCFRDecisionEngine,
     RealtimeCFROptions,
 )
-from pokerfate.decision.g5_model import G5ActionModel, stable_player_name
-from pokerfate.decision.g5_shadow import G5ShadowObserver
 from pokerfate.logger import PokerLogger
 from pokerfate.strategy.range_v2.action_model import ActionContext
 from pokerfate.strategy.range_v2.empirical_model import empirical_action_likelihood
@@ -81,14 +74,15 @@ _UNSET = object()  # sentinel for log_file default
 _init_data()
 
 _DEFAULT_LOG_FILE    = str(Path(__file__).resolve().parent / "logs" / "pokerfate.log")
-_DEFAULT_MODEL_DIR = Path(__file__).resolve().parent / "data" / "local_models"
-_DEFAULT_G5_LOG_FILE = str(Path(__file__).resolve().parent / "logs" / "g5.log")
+_DEFAULT_MODEL_DIR = Path(__file__).resolve().parents[1] / "local" / "models"
+# DECISION_ENGINE names. Anything else, a missing value included, runs the default.
+_DECISION_ENGINES = ("cfr", "rule_engine")
+_DEFAULT_DECISION_ENGINE = "cfr"
 _POSTFLOP_STREET_RANK = {"flop": 1, "turn": 2, "river": 3}
 
 
 # Opponent data is keyed by uid only (no per-stake split).
 _DEFAULT_OPPONENTS_PATH = _DEFAULT_MODEL_DIR / "opponents.json"
-_DEFAULT_G5_MODEL_PATH = _DEFAULT_MODEL_DIR / "g5_stats.json"
 
 _PUSH_STREET_LABELS = {
     "preflop": "翻前",
@@ -253,18 +247,9 @@ class PokerFateAPI:
         enable_showdown_calibration: bool = True,
         decision_seed: Optional[int] = None,
         decision_engine: Optional[str] = None,
-        g5_worker_cmd: Optional[str] = None,
-        g5_timeout_sec: Optional[float] = None,
-        g5_recent_hands_count: int = 100,
-        g5_randomly_sample_actions: bool = False,
-        g5_preflop_charts_level: int = 4,
-        g5_shadow_decisions: Optional[bool] = None,
-        g5_model_path: Optional[str] = _UNSET,
         realtime_cfr_timeout_sec: Optional[float] = None,
         realtime_cfr_solver_lib: Optional[str] = None,
         cfr_flop_book_enabled: Optional[bool] = None,
-        g5_observer_enabled: Optional[bool] = None,
-        g5_shadow_server_actions: bool = False,
     ):
         """
         Parameters
@@ -289,7 +274,7 @@ class PokerFateAPI:
             Key events (decisions, results) are always printed regardless.
         cfr_flop_book_enabled : bool or None
             Whether cfr uses the offline flop book. None reads
-            PF_CFR_FLOP_BOOK_ENABLED (default on); off uses local on the flop.
+            PF_CFR_FLOP_BOOK_ENABLED (default on); off uses the rule engine on the flop.
         """
         self.my_player_id = my_player_id
         self.big_blind = big_blind
@@ -303,14 +288,6 @@ class PokerFateAPI:
         self.autosave_path = autosave_path
         if log_file is _UNSET:
             log_file = None if _in_test else _DEFAULT_LOG_FILE
-        self._g5_log_file = None if _in_test else _DEFAULT_G5_LOG_FILE
-        self._g5_model_path = (
-            None if _in_test else str(_DEFAULT_G5_MODEL_PATH)
-        ) if g5_model_path is _UNSET else g5_model_path
-        self._g5_action_model = (
-            G5ActionModel.load(self._g5_model_path, prepare_save_cache=True)
-            if self._g5_model_path else None
-        )
         self._log = PokerLogger(
             log_file=log_file,
             console=True,
@@ -322,12 +299,8 @@ class PokerFateAPI:
             equity_iterations=equity_iterations,
         )
         self._bot._range_tracker.set_big_blind(self.big_blind)
-        self._external_decision_engine = None
-        self._external_decision_engine_enabled = False
-        self._external_decision_engine_active = False
-        self._external_decision_engine_shadow = False
-        self._external_decision_engine_mode = "local"
-        self._external_decision_engine_name = "local"
+        self._external_decision_engine_mode = "rule_engine"
+        self._external_decision_engine_name = "rule_engine"
         self._external_decision_engine_error = ""
         self._flop_book_engine: Optional[FlopBookDecisionEngine] = None
         self._flop_book_enabled = False
@@ -357,54 +330,12 @@ class PokerFateAPI:
         self._external_decision_engine_requested = str(
             decision_engine if decision_engine is not None else os.environ.get("DECISION_ENGINE", "cfr")
         ).strip().lower()
-        self._external_decision_hand_disabled_reason = ""
-        self._external_decision_shadow_hero_folded = False
-        self._external_decision_shadow_warning = ""
-        self._g5_worker_cmd = g5_worker_cmd
-        self._g5_timeout_sec = g5_timeout_sec
-        self._g5_recent_hands_count = int(g5_recent_hands_count)
-        self._g5_randomly_sample_actions = bool(g5_randomly_sample_actions)
-        self._g5_preflop_charts_level = int(g5_preflop_charts_level)
-        self._g5_shadow_decisions = (
-            (not _in_test) if g5_shadow_decisions is None else bool(g5_shadow_decisions)
-        )
-        self._g5_observer_enabled = (
-            os.environ.get("PF_G5_SHADOW_ENABLED", "0" if _in_test else "1").strip().lower()
-            in {"1", "true", "yes", "on"}
-            if g5_observer_enabled is None else bool(g5_observer_enabled)
-        )
-        self._g5_shadow_server_actions = bool(g5_shadow_server_actions)
-        self._g5_observer = None
-        if self._g5_observer_enabled:
-            self._g5_observer = G5ShadowObserver(
-                G5EngineOptions(
-                    worker_cmd=str(g5_worker_cmd or "").strip() or self._default_g5_worker_cmd(),
-                    timeout_sec=float(g5_timeout_sec) if g5_timeout_sec is not None else 8.0,
-                    game_name="pokerfate_observer",
-                    recent_hands_count=self._g5_recent_hands_count,
-                    randomly_sample_actions=self._g5_randomly_sample_actions,
-                    preflop_charts_level=self._g5_preflop_charts_level,
-                    validate_replay_state=True,
-                    # Seeds are frozen on the main thread, never loaded by the worker.
-                    model_file=None,
-                ),
-                self._log.raw,
-            )
-        self._configure_decision_engine(
-            decision_engine=decision_engine,
-            g5_worker_cmd=self._g5_worker_cmd,
-            g5_timeout_sec=self._g5_timeout_sec,
-            g5_recent_hands_count=self._g5_recent_hands_count,
-            g5_randomly_sample_actions=self._g5_randomly_sample_actions,
-            g5_preflop_charts_level=self._g5_preflop_charts_level,
-            g5_shadow_decisions=self._g5_shadow_decisions,
-        )
+        self._configure_decision_engine(decision_engine=decision_engine)
         self._log_session_config()
 
         # Auto-load opponent data (+ embedded showdown/learner data) from disk on startup
         if autosave_path:
             self._load_persisted_model(str(autosave_path))
-            self._bootstrap_g5_action_model_from_opponents()
 
         # Session-level state: persists across hands
         self._session_stacks: Dict[int, float] = {}   # player_id -> last known stack
@@ -435,9 +366,7 @@ class PokerFateAPI:
         self._last_hand_push_detail: str = ""
         self._last_auto_collect_reasons: list[str] = []
         self._pending_river_value_sizing_rows: list[dict[str, Any]] = []
-        self._g5_hand_start_players: list[dict[str, Any]] = []
         self._runtime_calibration_recorder = None
-        self._range_compare_collector = None
         self._runtime_collection_enabled = False
         self._runtime_collection_skip_reason = ""
         self._last_decision_diagnostics: dict[str, Any] = {}
@@ -464,10 +393,6 @@ class PokerFateAPI:
             tracker._prediction_hook = _prediction_hook_filtered
             tracker._name_resolver = lambda pid: self._session_names.get(pid, str(pid))
             self._runtime_calibration_recorder = RuntimeCalibrationRecorder()
-            self._range_compare_collector = FileSpoolRangeCompareCollector(
-                logger=self._log,
-                big_blind=self.big_blind,
-            )
             self._runtime_collection_enabled = True
         else:
             self._calibrator = None
@@ -527,31 +452,6 @@ class PokerFateAPI:
             showdown_data=self._showdown_persistence_data(),
         )
 
-    def _save_g5_action_model(self, player_names=None) -> None:
-        if self._g5_action_model is None or not self._g5_model_path:
-            return
-        hand = self._hand_number if hasattr(self, "_hand_number") else 0
-        def saved(error, elapsed_ms):
-            self._log.raw({
-                "event": "g5_model_save_failed" if error else "g5_model_saved",
-                "path": self._g5_model_path, "hand": hand,
-                "mode": "background_checkpoint", "elapsed_ms": round(elapsed_ms, 1),
-                **({"reason": error} if error else {}),
-            })
-        self._g5_action_model.save_async(self._g5_model_path, player_names=player_names, on_saved=saved)
-
-    def _bootstrap_g5_action_model_from_opponents(self) -> None:
-        if self._g5_action_model is None:
-            return
-        changed = self._g5_action_model.seed_from_opponent_model(self._bot.opponent_model)
-        if changed:
-            self._save_g5_action_model()
-            self._log.raw({
-                "event": "g5_model_bootstrap",
-                "path": self._g5_model_path,
-                "vpip_seeded": changed,
-            })
-
     def _log_session_config(self) -> None:
         """Record every strategy switch in force for this session.
 
@@ -581,23 +481,12 @@ class PokerFateAPI:
             }
         except Exception as exc:  # pragma: no cover - diagnostics only
             resolved = {"error": str(exc)}
-        resolved["DECISION_ENGINE"] = (
-            self._external_decision_engine_requested
-            if self._external_decision_engine_name != "local" else "local"
-        )
+        resolved["DECISION_ENGINE"] = self._external_decision_engine_name
         resolved["PF_CFR_FLOP_BOOK_ENABLED"] = self._flop_book_requested
         cfr_options = getattr(self._realtime_cfr_engine, "options", None)
         if cfr_options is not None:
             resolved["PF_CFR_CHEAP_CALL_POT_TOLERANCE"] = float(cfr_options.cheap_call_pot_tolerance)
             resolved["PF_CFR_CHEAP_CALL_MIN_SHOWDOWN"] = float(cfr_options.cheap_call_min_showdown_value)
-        resolved["PF_G5_SHADOW_ENABLED"] = self._g5_observer_enabled
-        resolved["G5_SHADOW_MODE"] = "real_history_v1"
-        resolved["G5_SHADOW_ACTIVE"] = (
-            self._g5_observer_enabled and self._external_decision_engine_name in {"local", "cfr"}
-        )
-        resolved["G5_SHADOW_ACTION_HISTORY"] = (
-            "server_confirmed" if self._g5_shadow_server_actions else "api_applied"
-        )
         env = {
             k: v for k, v in os.environ.items()
             if k.startswith("PF_") or k in {
@@ -624,8 +513,6 @@ class PokerFateAPI:
         self.small_blind = float(small_blind)
         self._default_stack = 100.0 * self.big_blind
         self._bot._range_tracker.set_big_blind(self.big_blind)
-        if self._range_compare_collector is not None:
-            self._range_compare_collector.set_big_blind(self.big_blind)
 
     def set_runtime_collection_enabled(self, enabled: bool, reason: str = "") -> None:
         """Enable/disable realtime training-row collection for this room.
@@ -638,59 +525,34 @@ class PokerFateAPI:
         if not enabled:
             self._runtime_calibration_recorder = None
             self._pending_river_value_sizing_rows = []
-            if self._range_compare_collector is not None:
-                self._range_compare_collector.discard_hand()
             return
         if (
             self._runtime_calibration_recorder is None
             and self._calibrator is not None
         ):
             self._runtime_calibration_recorder = RuntimeCalibrationRecorder()
-        if (
-            self._range_compare_collector is None
-            and self._calibrator is not None
-        ):
-            self._range_compare_collector = FileSpoolRangeCompareCollector(
-                logger=self._log,
-                big_blind=self.big_blind,
-            )
 
-    def _configure_decision_engine(
-        self,
-        *,
-        decision_engine: Optional[str],
-        g5_worker_cmd: Optional[str],
-        g5_timeout_sec: Optional[float],
-        g5_recent_hands_count: int,
-        g5_randomly_sample_actions: bool,
-        g5_preflop_charts_level: int,
-        g5_shadow_decisions: bool,
-    ) -> None:
+    def _configure_decision_engine(self, *, decision_engine: Optional[str]) -> None:
         requested_engine = (
             decision_engine
             if decision_engine is not None
-            else os.environ.get("DECISION_ENGINE", "cfr")
+            else os.environ.get("DECISION_ENGINE", "")
         )
-        engine_name = str(requested_engine or "local").strip().lower().replace("-", "_")
+        requested_name = str(requested_engine or "").strip().lower().replace("-", "_")
         self._flop_book_error = ""
         self._realtime_cfr_error = ""
-        if engine_name in {"", "pokerfate"}:
-            engine_name = "local"
-        self._external_decision_engine_requested = engine_name or "local"
-        valid_engines = {"local", "g5", "g5_all", "cfr"}
-        invalid_engine = engine_name not in valid_engines
-        if invalid_engine:
-            self._external_decision_engine_error = (
-                f"unknown decision engine: {engine_name}; using local"
-            )
+        self._external_decision_engine_requested = requested_name or _DEFAULT_DECISION_ENGINE
+        engine_name = requested_name or _DEFAULT_DECISION_ENGINE
+        if engine_name not in _DECISION_ENGINES:
+            # An unknown name is no engine of its own: the default runs and the log says so.
             self._log.raw({
-                "event": "decision_engine_disabled",
-                "engine": str(requested_engine or ""),
-                "reason": self._external_decision_engine_error,
+                "event": "decision_engine_unknown",
+                "engine": requested_name,
+                "reason": f"unknown decision engine: {requested_name}; using {_DEFAULT_DECISION_ENGINE}",
             })
-            return
+            engine_name = _DEFAULT_DECISION_ENGINE
 
-        if engine_name == "local":
+        if engine_name == "rule_engine":
             return
 
         if engine_name == "cfr":
@@ -711,8 +573,8 @@ class PokerFateAPI:
                 self._flop_book_enabled = False
                 self._realtime_cfr_engine = None
                 self._realtime_cfr_enabled = False
-                self._external_decision_engine_name = "local"
-                self._external_decision_engine_mode = "local"
+                self._external_decision_engine_name = "rule_engine"
+                self._external_decision_engine_mode = "rule_engine"
                 self._external_decision_engine_error = str(exc)
                 self._log.raw({
                     "event": "decision_engine_disabled",
@@ -725,9 +587,6 @@ class PokerFateAPI:
             self._realtime_cfr_enabled = True
             self._flop_book_engine = flop_book_engine
             self._flop_book_enabled = flop_book_engine is not None
-            self._external_decision_engine_enabled = False
-            self._external_decision_engine_active = False
-            self._external_decision_engine_shadow = False
             self._external_decision_engine_mode = (
                 "flop_book_turn_river" if self._flop_book_enabled else "turn_river"
             )
@@ -745,98 +604,19 @@ class PokerFateAPI:
             })
             return
 
-        active = engine_name in {"g5", "g5_all"}
-        active_mode = "g5_all" if engine_name == "g5_all" else "postflop"
-        shadow = bool(g5_shadow_decisions) and engine_name == "g5"
-
-        cmd = str(g5_worker_cmd or "").strip() or self._default_g5_worker_cmd()
-
-        timeout = float(g5_timeout_sec) if g5_timeout_sec is not None else 8.0
-        recent_hands = int(g5_recent_hands_count)
-        charts_level = int(g5_preflop_charts_level)
-        sample_actions = bool(g5_randomly_sample_actions)
-        try:
-            engine = G5JsonDecisionEngine(
-                G5EngineOptions(
-                    worker_cmd=str(cmd),
-                    timeout_sec=timeout,
-                    recent_hands_count=recent_hands,
-                    randomly_sample_actions=sample_actions,
-                    preflop_charts_level=charts_level,
-                    log_file=self._g5_log_file,
-                    model_file=self._g5_model_path,
-                )
-            )
-            preflight = engine.preflight()
-            self._external_decision_engine = engine
-            self._external_decision_engine_enabled = True
-            self._external_decision_engine_active = active
-            self._external_decision_engine_shadow = shadow
-            self._external_decision_engine_mode = active_mode
-            self._external_decision_engine_name = "g5"
-            self._log.raw({
-                "event": "decision_engine_enabled",
-                "engine": "g5",
-                "mode": active_mode if active else "shadow",
-                "requested_engine": str(requested_engine or ""),
-                "invalid_engine_fallback": invalid_engine,
-                "worker_cmd": cmd,
-                "timeout_sec": timeout,
-                "recent_hands_count": recent_hands,
-                "preflop_charts_level": charts_level,
-                "log_file": self._g5_log_file,
-                "model_file": self._g5_model_path,
-                "preflight": preflight,
-            })
-        except Exception as exc:
-            try:
-                engine.close()  # type: ignore[name-defined]
-            except Exception:
-                pass
-            self._external_decision_engine = None
-            self._external_decision_engine_enabled = False
-            self._external_decision_engine_active = False
-            self._external_decision_engine_shadow = False
-            self._external_decision_engine_mode = "local"
-            self._external_decision_engine_error = str(exc)
-            self._log.raw({
-                "event": "decision_engine_disabled",
-                "engine": "g5",
-                "mode": "active" if active else "shadow",
-                "reason": str(exc),
-            })
-
-    @staticmethod
-    def _default_g5_worker_cmd() -> str:
-        root = Path(__file__).resolve().parent.parent
-        script = root / "scripts" / "g5_json_worker.py"
-        return f"{shlex.quote(sys.executable)} {shlex.quote(str(script))}"
-
     def set_decision_engine(self, decision_engine: str) -> dict[str, Any]:
         """Reconfigure DECISION_ENGINE at runtime."""
-        value = str(decision_engine or "local").strip().lower().replace("-", "_")
-        if value in {"", "pokerfate"}:
-            value = "local"
-        if value not in {"local", "g5", "g5_all", "cfr"}:
-            raise ValueError("decision_engine must be local, g5, g5_all, or cfr")
+        value = str(decision_engine or "").strip().lower().replace("-", "_") or _DEFAULT_DECISION_ENGINE
+        if value not in _DECISION_ENGINES:
+            raise ValueError("decision_engine must be rule_engine or cfr")
 
-        old = self._external_decision_engine
-        if old is not None:
-            try:
-                old.close()
-            except Exception:
-                pass
         if self._flop_book_engine is not None:
             try:
                 self._flop_book_engine.close()
             except Exception:
                 pass
-        self._external_decision_engine = None
-        self._external_decision_engine_enabled = False
-        self._external_decision_engine_active = False
-        self._external_decision_engine_shadow = False
-        self._external_decision_engine_mode = "local"
-        self._external_decision_engine_name = "local"
+        self._external_decision_engine_mode = "rule_engine"
+        self._external_decision_engine_name = "rule_engine"
         self._external_decision_engine_error = ""
         self._flop_book_engine = None
         self._flop_book_enabled = False
@@ -844,21 +624,8 @@ class PokerFateAPI:
         self._realtime_cfr_engine = None
         self._realtime_cfr_enabled = False
         self._realtime_cfr_error = ""
-        self._external_decision_hand_disabled_reason = ""
-        self._external_decision_shadow_hero_folded = False
-        self._external_decision_shadow_warning = ""
         self._external_decision_engine_requested = value
-        self._configure_decision_engine(
-            decision_engine=value,
-            g5_worker_cmd=self._g5_worker_cmd,
-            g5_timeout_sec=self._g5_timeout_sec,
-            g5_recent_hands_count=self._g5_recent_hands_count,
-            g5_randomly_sample_actions=self._g5_randomly_sample_actions,
-            g5_preflop_charts_level=self._g5_preflop_charts_level,
-            g5_shadow_decisions=self._g5_shadow_decisions,
-        )
-        if self._players and value in {"g5", "g5_all"}:
-            self._disable_external_engine_current_hand("decision_engine_changed_mid_hand")
+        self._configure_decision_engine(decision_engine=value)
         self._log.raw({
             "event": "decision_engine_runtime_set",
             "requested_engine": value,
@@ -869,20 +636,11 @@ class PokerFateAPI:
 
     def decision_engine_status(self) -> dict[str, Any]:
         return {
-            "requested": self._external_decision_engine_requested or "local",
+            "requested": self._external_decision_engine_requested or _DEFAULT_DECISION_ENGINE,
             "engine": self._external_decision_engine_name,
             "mode": self._external_decision_engine_mode,
-            "enabled": bool(
-                self._external_decision_engine_enabled
-                or self._realtime_cfr_enabled
-                or self._flop_book_enabled
-            ),
-            "active": bool(
-                self._external_decision_engine_active
-                or self._realtime_cfr_enabled
-                or self._flop_book_enabled
-            ),
-            "shadow": bool(self._external_decision_engine_shadow),
+            "enabled": bool(self._realtime_cfr_enabled or self._flop_book_enabled),
+            "active": bool(self._realtime_cfr_enabled or self._flop_book_enabled),
             "realtime_cfr": bool(self._realtime_cfr_enabled),
             "flop_book": bool(self._flop_book_enabled),
             "flop_book_requested": self._flop_book_requested,
@@ -894,187 +652,7 @@ class PokerFateAPI:
                 if self._realtime_cfr_enabled
                 else self._external_decision_engine_error
             ),
-            "hand_disabled_reason": self._external_decision_hand_disabled_reason,
         }
-
-    def _external_engine_ready(self) -> bool:
-        return bool(
-            self._external_decision_engine_enabled
-            and self._external_decision_engine is not None
-        )
-
-    def _external_engine_active_for_street(self, street: str) -> bool:
-        if (
-            not self._external_engine_ready()
-            or not self._external_decision_engine_active
-            or self._external_decision_hand_disabled_reason
-        ):
-            return False
-        mode = str(self._external_decision_engine_mode or "").lower()
-        if mode in {"", "local", "g5_all"}:
-            return True
-        return mode == "postflop" and str(street or "").lower() != "preflop"
-
-    def _record_external_engine_error(self, phase: str, exc: Exception) -> None:
-        self._external_decision_engine_error = str(exc)
-        self._log.raw({
-            "event": "decision_engine_fallback",
-            "engine": self._external_decision_engine_name,
-            "phase": phase,
-            "reason": str(exc),
-        })
-
-    def _disable_external_engine_current_hand(self, reason: str) -> None:
-        self._external_decision_hand_disabled_reason = str(reason or "disabled")
-        if self._external_decision_engine is None:
-            return
-        disable = getattr(
-            self._external_decision_engine,
-            "disable_current_hand",
-            None,
-        )
-        if callable(disable):
-            try:
-                disable(reason)
-            except Exception:
-                pass
-
-    def disable_external_decision_current_hand(self, reason: str) -> None:
-        """Disable the external engine for this hand and keep local fallback active."""
-        if not self._external_engine_ready():
-            return
-        reason_text = str(reason)
-        if reason_text.startswith("unsupported forced post"):
-            return
-        if self._external_decision_hand_disabled_reason:
-            return
-        self._log.raw({
-            "event": "decision_engine_hand_disabled",
-            "engine": self._external_decision_engine_name,
-            "reason": reason_text,
-        })
-        self._disable_external_engine_current_hand(reason_text)
-
-    def _external_engine_start_hand(self) -> None:
-        if not self._external_engine_ready():
-            return
-        try:
-            self._external_decision_engine.start_hand(
-                players=self._players,
-                dealer_id=self._dealer_id,
-                seat_indices=self._hand_seat_indices,
-                dealer_seat_index=self._dealer_seat_index,
-                hand_number=self._hand_number,
-                hero_player_id=self.my_player_id,
-                big_blind=self.big_blind,
-                small_blind=self.small_blind,
-            )
-        except Exception as exc:
-            self._record_external_engine_error("start_hand", exc)
-            self._disable_external_engine_current_hand(str(exc))
-
-    def _external_engine_deal_hole_cards(self) -> None:
-        if (
-            not self._external_engine_ready()
-            or self._external_decision_hand_disabled_reason
-        ):
-            return
-        try:
-            self._external_decision_engine.deal_hole_cards(
-                [str(c) for c in self._hole_cards],
-            )
-        except Exception as exc:
-            self._record_external_engine_error("hole_cards", exc)
-            self._disable_external_engine_current_hand(str(exc))
-
-    def _external_engine_deal_board(self, cards: Sequence[str], street: str) -> None:
-        if (
-            not self._external_engine_ready()
-            or self._external_decision_hand_disabled_reason
-        ):
-            return
-        try:
-            self._external_decision_engine.deal_board(cards, street)
-        except Exception as exc:
-            self._record_external_engine_error("board", exc)
-            self._disable_external_engine_current_hand(str(exc))
-
-    def _external_engine_notify_action(
-        self,
-        *,
-        player_id: int,
-        action: str,
-        amount_added: float,
-        total_bet_after: float,
-        street: str,
-    ) -> None:
-        if (
-            not self._external_engine_ready()
-            or self._external_decision_hand_disabled_reason
-        ):
-            return
-        try:
-            self._external_decision_engine.notify_action(
-                player_id=player_id,
-                action=action,
-                amount_added=amount_added,
-                total_bet_after=total_bet_after,
-                street=street,
-            )
-        except Exception as exc:
-            self._record_external_engine_error("action", exc)
-            self._disable_external_engine_current_hand(str(exc))
-
-    def _external_engine_finish_hand(
-        self,
-        *,
-        winner_ids: List[int],
-        pot: float,
-        winner_payouts: Optional[Dict[int, float]],
-        final_stacks: Optional[Dict[int, float]],
-    ) -> None:
-        if (
-            not self._external_engine_ready()
-            or self._external_decision_hand_disabled_reason
-        ):
-            return
-        try:
-            self._external_decision_engine.finish_hand(
-                winner_ids=winner_ids,
-                pot=pot,
-                winner_payouts=winner_payouts,
-                final_stacks=final_stacks,
-            )
-        except Exception as exc:
-            self._record_external_engine_error("finish_hand", exc)
-            self._disable_external_engine_current_hand(str(exc))
-
-    def _record_g5_action_model_hand(self) -> None:
-        if self._g5_action_model is None or not self._g5_model_path:
-            return
-        if self._hand_skip_learning:
-            return
-        try:
-            skip = {stable_player_name(pid) for pid in self._hand_robot_ids}
-            changed = self._g5_action_model.record_hand(
-                players=self._g5_hand_start_players,
-                dealer_id=self._dealer_id,
-                action_history=self._action_history,
-                big_blind=self.big_blind,
-                small_blind=self.small_blind,
-                skip_names=skip,
-            )
-            if changed:
-                self._save_g5_action_model([
-                    stable_player_name(p["player_id"]) for p in self._g5_hand_start_players
-                    if p["player_id"] not in self._hand_robot_ids
-                ])
-        except Exception as exc:
-            self._log.raw({
-                "event": "g5_model_save_failed",
-                "path": self._g5_model_path,
-                "reason": str(exc),
-            })
 
     def _decide_with_realtime_cfr(
         self,
@@ -1415,183 +993,6 @@ class PokerFateAPI:
             street_filters=street_filters or None,
         )
 
-    def _decide_with_external_engine(
-        self,
-        gs: GameState,
-        *,
-        street: str,
-        my_current_bet_this_street: float,
-    ) -> Optional[Action]:
-        if (
-            not self._external_engine_active_for_street(street)
-        ):
-            return None
-        try:
-            return self._external_decision_engine.decide(
-                gs,
-                hero_player_id=self.my_player_id,
-                my_current_bet_this_street=my_current_bet_this_street,
-            )
-        except Exception as exc:
-            self._record_external_engine_error("decide", exc)
-            self._disable_external_engine_current_hand(str(exc))
-            return None
-
-    def _shadow_decide_with_external_engine(
-        self,
-        gs: GameState,
-        *,
-        street: str,
-        my_current_bet_this_street: float,
-        force_shadow: bool = False,
-    ) -> Optional[dict[str, Any]]:
-        if self._external_decision_shadow_hero_folded:
-            return {"status": "folded"}
-        if self._external_decision_hand_disabled_reason == "g5_shadow_folded":
-            self._external_decision_shadow_hero_folded = True
-            return {"status": "folded"}
-        if not force_shadow and self._external_engine_active_for_street(street):
-            return None
-        if not self._external_decision_engine_shadow:
-            return None
-        if not self._external_engine_ready():
-            if self._external_decision_engine_error:
-                return {
-                    "status": "unavailable",
-                    "reason": self._external_decision_engine_error,
-                }
-            return None
-        if self._external_decision_hand_disabled_reason:
-            return {
-                "status": "disabled",
-                "reason": self._external_decision_hand_disabled_reason,
-            }
-
-        t0 = time.perf_counter()
-        try:
-            action = self._external_decision_engine.decide(
-                gs,
-                hero_player_id=self.my_player_id,
-                my_current_bet_this_street=my_current_bet_this_street,
-            )
-        except Exception as exc:
-            self._record_external_engine_error("shadow_decide", exc)
-            self._disable_external_engine_current_hand(str(exc))
-            return {"status": "error", "reason": str(exc)}
-
-        elapsed_ms = (time.perf_counter() - t0) * 1000
-        decision = self._to_decision(action)
-        result = (
-            self._external_decision_engine.last_result
-            if self._external_decision_engine is not None
-            else {}
-        )
-        warning = self._external_decision_shadow_warning
-        reasoning = self._g5_decision_reasoning(result)
-        if warning:
-            reasoning = f"{reasoning} | {self._g5_shadow_warning_text(warning)}"
-        shadow = {
-            "status": "ok",
-            "decision": decision,
-            "result": result,
-            "elapsed_ms": elapsed_ms,
-            "reasoning": reasoning,
-            "warning": warning,
-        }
-        if decision.action == "fold":
-            self._external_decision_shadow_hero_folded = True
-            self._disable_external_engine_current_hand("g5_shadow_folded")
-        return shadow
-
-    def _g5_shadow_action_payload(
-        self,
-        shadow: Optional[dict[str, Any]],
-        *,
-        my_current_bet_this_street: float,
-    ) -> Optional[tuple[str, float, float]]:
-        if not shadow or str(shadow.get("status") or "") != "ok":
-            return None
-        result = shadow.get("result") if isinstance(shadow.get("result"), dict) else {}
-        decision = shadow.get("decision")
-
-        raw_action = str(result.get("action") or "").strip().lower()
-        if raw_action in {"bet", "raise", "allin", "all-in"}:
-            action = "raise"
-        elif raw_action in {"check", "call", "fold"}:
-            action = raw_action
-        elif isinstance(decision, BotDecision):
-            action = decision.action
-        else:
-            return None
-
-        if action == "fold":
-            return None
-
-        try:
-            amount_added = float(result.get("byAmount", result.get("by_amount", 0.0)) or 0.0)
-        except (TypeError, ValueError):
-            amount_added = 0.0
-        if action == "check":
-            amount_added = 0.0
-        total_bet_after = float(my_current_bet_this_street or 0.0) + max(0.0, amount_added)
-        return action, max(0.0, amount_added), total_bet_after
-
-    def _notify_external_engine_shadow_action(
-        self,
-        shadow: Optional[dict[str, Any]],
-        *,
-        street: str,
-        my_current_bet_this_street: float,
-    ) -> None:
-        if (
-            not self._external_engine_ready()
-            or self._external_engine_active_for_street(street)
-            or not self._external_decision_engine_shadow
-            or self._external_decision_hand_disabled_reason
-        ):
-            return
-        payload = self._g5_shadow_action_payload(
-            shadow,
-            my_current_bet_this_street=my_current_bet_this_street,
-        )
-        if payload is None:
-            return
-        action, amount_added, total_bet_after = payload
-        self._external_engine_notify_action(
-            player_id=self.my_player_id,
-            action=action,
-            amount_added=amount_added,
-            total_bet_after=total_bet_after,
-            street=street,
-        )
-
-    def _log_g5_shadow_decision(
-        self,
-        shadow: dict[str, Any],
-        *,
-        street: str,
-    ) -> None:
-        shadow_decision = shadow.get("decision")
-        shadow_action = ""
-        shadow_amount = 0.0
-        if isinstance(shadow_decision, BotDecision):
-            shadow_action = shadow_decision.action
-            shadow_amount = shadow_decision.amount
-        self._log.g5_shadow_decision(
-            status=str(shadow.get("status") or ""),
-            street=street,
-            action=shadow_action,
-            amount=shadow_amount,
-            reasoning=str(shadow.get("reasoning") or ""),
-            elapsed_ms=shadow.get("elapsed_ms"),
-            result=(
-                shadow.get("result")
-                if isinstance(shadow.get("result"), dict)
-                else None
-            ),
-            reason=str(shadow.get("reason") or ""),
-        )
-
     def _bot_decision_state_snapshot(self) -> dict[str, Any]:
         return {
             "decision_index": self._decision_index,
@@ -1629,7 +1030,7 @@ class PokerFateAPI:
         )
         self._bot._my_street_actions = dict(snapshot.get("my_street_actions") or {})
 
-    def _local_shadow_decide(
+    def _rule_engine_shadow_decide(
         self,
         gs: GameState,
         *,
@@ -1676,7 +1077,7 @@ class PokerFateAPI:
         finally:
             self._restore_bot_decision_state(snapshot)
 
-    def _log_local_shadow_decision(
+    def _log_rule_engine_shadow_decision(
         self,
         shadow: dict[str, Any],
         *,
@@ -1688,7 +1089,7 @@ class PokerFateAPI:
         if isinstance(shadow_decision, BotDecision):
             shadow_action = shadow_decision.action
             shadow_amount = shadow_decision.amount
-        self._log.local_shadow_decision(
+        self._log.rule_engine_shadow_decision(
             status=str(shadow.get("status") or ""),
             street=street,
             action=shadow_action,
@@ -1704,7 +1105,7 @@ class PokerFateAPI:
         )
 
     @staticmethod
-    def _local_shadow_diagnostics(shadow: dict[str, Any]) -> dict[str, Any]:
+    def _rule_engine_shadow_diagnostics(shadow: dict[str, Any]) -> dict[str, Any]:
         out: dict[str, Any] = {"status": str(shadow.get("status") or "")}
         decision = shadow.get("decision")
         if isinstance(decision, BotDecision):
@@ -1721,7 +1122,7 @@ class PokerFateAPI:
         return out
 
     @staticmethod
-    def _log_metrics_from_local_shadow(
+    def _log_metrics_from_rule_engine_shadow(
         shadow: Optional[dict[str, Any]],
         fallback_mode: str,
     ) -> tuple[float, Optional[float], Optional[float], str]:
@@ -1786,149 +1187,12 @@ class PokerFateAPI:
                 out[category] = prob
         return self._rounded_range_map(out)
 
-    @staticmethod
-    def _g5_ranges_by_pid(result: Optional[dict[str, Any]]) -> dict[str, dict[str, float]]:
-        if not isinstance(result, dict):
-            return {}
-        by_pid = result.get("ranges_by_player_id")
-        if isinstance(by_pid, dict):
-            return {
-                str(pid): PokerFateAPI._rounded_range_map(dict(range_map or {}))
-                for pid, range_map in by_pid.items()
-                if isinstance(range_map, dict)
-            }
-        rows = result.get("ranges")
-        if not isinstance(rows, list):
-            return {}
-        out: dict[str, dict[str, float]] = {}
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            pid = row.get("player_id")
-            range_map = row.get("range_169")
-            if pid is None or not isinstance(range_map, dict):
-                continue
-            out[str(pid)] = PokerFateAPI._rounded_range_map(range_map)
-        return out
-
-    def _maybe_record_range_compare_snapshot(
-        self,
-        *,
-        gs: GameState,
-        street: str,
-        decision: BotDecision,
-        decision_source: str,
-        g5_result: Optional[dict[str, Any]],
-        pot: float,
-        current_bet: float,
-        to_call: float,
-        my_stack: float,
-    ) -> None:
-        if not self._runtime_collection_enabled:
-            return
-        if self._range_compare_collector is None or self._hand_skip_learning:
-            return
-        g5_ranges = self._g5_ranges_by_pid(g5_result)
-        if not g5_ranges:
-            return
-        opponents = []
-        for player in gs.active_players:
-            if player.player_id == self.my_player_id:
-                continue
-            if player.player_id in self._hand_robot_ids:
-                continue
-            pf_range = self._pf_range_169_for_player(player.player_id)
-            g5_range = g5_ranges.get(str(player.player_id), {})
-            if not pf_range or not g5_range:
-                continue
-            opponents.append({
-                "player_id": int(player.player_id),
-                "name": self._session_names.get(player.player_id, player.name),
-                "position": self._hand_positions.get(player.player_id, ""),
-                "stack": float(player.stack or 0.0),
-                "current_bet": float(player.current_bet or 0.0),
-                "pf_range_169": pf_range,
-                "g5_range_169": g5_range,
-            })
-        if not opponents:
-            return
-        self._range_compare_collector.record_decision_snapshot({
-            "decision_index": int(self._decision_index or 0),
-            "street": str(street or "").lower(),
-            "decision_source": str(decision_source or ""),
-            "hero_action": decision.action,
-            "hero_amount": float(decision.amount or 0.0),
-            "hero_cards": [str(c) for c in self._hole_cards],
-            "board": [str(c) for c in self._board],
-            "pot": float(pot or 0.0),
-            "current_bet": float(current_bet or 0.0),
-            "to_call": float(to_call or 0.0),
-            "my_stack": float(my_stack or 0.0),
-            "opponents": opponents,
-        })
-
-    def _remember_adopted_hero_action_for_local_bot(
+    def _remember_adopted_hero_action_for_rule_engine(
         self,
         street: str,
         decision: BotDecision,
     ) -> None:
         self._bot._my_street_actions[str(street or "").lower()] = str(decision.action or "")
-
-    def _maybe_shadow_auto_decide_after_real_fold(self, street: str) -> None:
-        if (
-            not self._external_decision_engine_shadow
-            or not self._external_engine_ready()
-            or self._external_decision_hand_disabled_reason
-        ):
-            return
-        my_player = self._get_my_player()
-        if my_player is None or not my_player.is_folded:
-            return
-        player_to_act_id = getattr(self._external_decision_engine, "player_to_act_id", None)
-        if player_to_act_id != self.my_player_id:
-            return
-
-        street_key = street.lower()
-        current_bet = self._current_street_max_bet()
-        my_current = float(my_player.current_bet or 0.0)
-        gs = self._build_game_state(
-            street=street_key,
-            pot=self._last_known_pot,
-            current_bet=current_bet,
-            my_stack=float(my_player.stack or 0.0),
-            my_current_bet_this_street=my_current,
-        )
-        shadow = self._shadow_decide_with_external_engine(
-            gs,
-            street=street_key,
-            my_current_bet_this_street=my_current,
-            force_shadow=True,
-        )
-        if shadow is None:
-            return
-        self._log_g5_shadow_decision(shadow, street=street_key)
-        self._notify_external_engine_shadow_action(
-            shadow,
-            street=street_key,
-            my_current_bet_this_street=my_current,
-        )
-
-    @staticmethod
-    def _g5_decision_reasoning(result: dict[str, Any]) -> str:
-        if not result:
-            return "g5 decision"
-        parts = ["g5 decision"]
-        cc_ev = result.get("checkCallEV", result.get("check_call_ev"))
-        br_ev = result.get("betRaiseEV", result.get("bet_raise_ev"))
-        if cc_ev is not None or br_ev is not None:
-            parts.append(f"ccEV={cc_ev} brEV={br_ev}")
-        spent = result.get("timeSpentSeconds", result.get("time_spent_seconds"))
-        if spent is not None:
-            parts.append(f"t={spent}s")
-        msg = str(result.get("message") or "").strip()
-        if msg:
-            parts.append(msg)
-        return " | ".join(parts)
 
     @staticmethod
     def _realtime_cfr_decision_reasoning(result: dict[str, Any]) -> str:
@@ -2054,38 +1318,6 @@ class PokerFateAPI:
             parts.append(f"t={float(elapsed):.0f}ms")
         return " | ".join(parts)
 
-    @staticmethod
-    def _g5_shadow_warning_text(reason: str) -> str:
-        text = str(reason or "").strip()
-        if text.startswith("unsupported forced post:"):
-            detail = text.split(":", 1)[1].strip()
-            return f"已忽略强制补盲 {detail}".strip()
-        return text
-
-    @staticmethod
-    def _g5_shadow_diagnostics(shadow: dict[str, Any]) -> dict[str, Any]:
-        diag: dict[str, Any] = {"status": str(shadow.get("status") or "")}
-        decision = shadow.get("decision")
-        if isinstance(decision, BotDecision):
-            diag["action"] = decision.action
-            diag["amount"] = decision.amount
-        reason = str(shadow.get("reason") or "").strip()
-        if reason:
-            diag["reason"] = reason
-        elapsed_ms = shadow.get("elapsed_ms")
-        if elapsed_ms is not None:
-            diag["elapsed_ms"] = round(float(elapsed_ms), 1)
-        reasoning = str(shadow.get("reasoning") or "").strip()
-        if reasoning:
-            diag["reasoning"] = reasoning
-        warning = str(shadow.get("warning") or "").strip()
-        if warning:
-            diag["warning"] = warning
-        result = shadow.get("result")
-        if isinstance(result, dict):
-            diag["result"] = result
-        return diag
-
     # ------------------------------------------------------------------
     # Hand lifecycle events
     # ------------------------------------------------------------------
@@ -2131,9 +1363,6 @@ class PokerFateAPI:
         self._pending_river_value_sizing_rows = []
         self._decision_index = 0
         self._last_decision_diagnostics = {}
-        self._external_decision_hand_disabled_reason = ""
-        self._external_decision_shadow_hero_folded = False
-        self._external_decision_shadow_warning = ""
         self._flop_book_error = ""
         self._street_start_ranges = {}
         self._hero_reach_filters = {}
@@ -2146,7 +1375,7 @@ class PokerFateAPI:
             self._realtime_cfr_engine._last_result = {}
             self._realtime_cfr_engine._last_error = ""
             self._realtime_cfr_engine.last_hero_reach_update = {}
-        if self._external_engine_ready() or self._realtime_cfr_enabled or self._flop_book_enabled:
+        if self._realtime_cfr_enabled or self._flop_book_enabled:
             self._external_decision_engine_error = ""
         self._my_stack_start: float = 0.0  # set after resolving stacks below
 
@@ -2248,23 +1477,6 @@ class PokerFateAPI:
         # (a no-op on 6-max labels) so every consumer sees the same seat.
         self._hand_positions_raw: Dict[int, str] = dict(self._hand_positions)
         self._hand_positions = relabel_positions_by_button(self._hand_positions)
-        self._g5_hand_start_players = [
-            {
-                "player_id": p.player_id,
-                "name": p.name,
-                "g5_name": stable_player_name(p.player_id),
-                "stack": float(p.stack or 0.0),
-                "position": self._hand_positions.get(p.player_id, ""),
-                "seat_index": self._hand_seat_indices.get(p.player_id),
-            }
-            for p in self._players
-        ]
-        if self._range_compare_collector is not None:
-            self._range_compare_collector.start_hand(
-                self._hand_number,
-                players=list(self._g5_hand_start_players),
-                hero_id=self.my_player_id,
-            )
 
         # Record my stack at the start of this hand for delta calculation
         my_p = self._get_my_player()
@@ -2281,19 +1493,6 @@ class PokerFateAPI:
             player_names=player_names,
             player_positions=player_positions,
         )
-        self._external_engine_start_hand()
-        if self._g5_observer is not None:
-            from pokerfate.decision.g5_model import table_type_for_player_count
-            table_type = table_type_for_player_count(6 if self._hand_seat_indices else len(self._players))
-            seeds = self._g5_action_model.seed_payload_for(
-                [stable_player_name(p.player_id) for p in self._players], table_type=table_type,
-            ) if self._g5_action_model is not None else []
-            self._g5_observer.start_hand(
-                players=self._players, dealer_id=self._dealer_id,
-                seat_indices=self._hand_seat_indices, dealer_seat_index=self._dealer_seat_index,
-                hand_number=self._hand_number, hero_player_id=self.my_player_id,
-                big_blind=self.big_blind, small_blind=self.small_blind, seed_payload=seeds,
-            )
 
         self._log.hand_start(
             hand_number=self._hand_number,
@@ -2331,16 +1530,12 @@ class PokerFateAPI:
 
         # Range V2: card removal for bot's hole cards
         self._bot.set_hole_cards(self._hole_cards)
-        self._external_engine_deal_hole_cards()
-        if self._g5_observer is not None:
-            self._g5_observer.hole_cards(cards)
 
         self._log.hole_cards(cards)
 
     def restore_board(self, cards: List[str]) -> None:
         """重连时静默恢复公共牌，不触发日志/统计（仅还原 _board 状态）。"""
         self._board = [Card.from_str(c) for c in cards]
-        self.invalidate_g5_shadow("reconnected_without_full_history")
 
     def deal_board(self, cards: List[str], street: str, pot: Optional[float] = None) -> None:
         """Notify the bot of new community cards.
@@ -2371,11 +1566,7 @@ class PokerFateAPI:
             self._last_known_pot = pot
         self._street_base_pot = display_pot
         self._street_base_street = street.lower()
-        self._external_engine_deal_board([str(c) for c in new_cards], street)
-        if self._g5_observer is not None:
-            self._g5_observer.board(cards, street)
         self._log.board(street, cards, pot=display_pot)
-        self._maybe_shadow_auto_decide_after_real_fold(street)
 
         # Track flop_seen for WTSD denominator: all non-hero, non-folded players
         if street.lower() == 'flop':
@@ -2386,6 +1577,23 @@ class PokerFateAPI:
     # ------------------------------------------------------------------
     # Action notification
     # ------------------------------------------------------------------
+
+    def record_hero_execution(
+        self, *, action: str, amount_added: float, total_bet_after: float, street: str,
+    ) -> None:
+        """Log the server's confirmation of hero's own action: what actually went in.
+
+        ``decision`` records what the engine asked for; the table can execute a different
+        amount (wire rounding, an all-in, a minimum raise), and log analysis follows this.
+        """
+        self._log.raw({
+            "event": "hero_execution",
+            "hand": self._hand_number,
+            "street": str(street or "").lower(),
+            "action": action,
+            "amount_added": amount_added,
+            "total_bet_after": total_bet_after,
+        })
 
     def notify_action(self, event: ActionEvent) -> None:
         """Notify the bot of any player's action (for opponent modeling).
@@ -2405,11 +1613,6 @@ class PokerFateAPI:
         amount_added, total_bet_after = self._normalize_action_amounts(
             event, player, street_max_before,
         )
-        if not self._g5_shadow_server_actions:
-            self.record_g5_actual_action(
-                player_id=event.player_id, action=action_name, amount_added=amount_added,
-                total_bet_after=total_bet_after, street=street_key,
-            )
 
         # Compute spot types BEFORE appending current action to history
         is_3bet_spot = self._detect_3bet_spot(event)
@@ -2461,14 +1664,6 @@ class PokerFateAPI:
             player, action_name, amount_added, total_bet_after,
         )
         self._record_street_contribution(event.player_id, amount_added)
-        self._external_engine_notify_action(
-            player_id=event.player_id,
-            action=action_name,
-            amount_added=amount_added,
-            total_bet_after=total_bet_after,
-            street=street_key,
-        )
-        self._maybe_shadow_auto_decide_after_real_fold(street_key)
 
         self._bot.observe_action(
             player_id=event.player_id,
@@ -2633,7 +1828,7 @@ class PokerFateAPI:
         )
 
         t0 = time.perf_counter()
-        decision_source = "pokerfate"
+        decision_source = "rule_engine"
         action = self._decide_with_flop_book(
             gs,
             street=street_key,
@@ -2647,15 +1842,7 @@ class PokerFateAPI:
             )
             if action is not None:
                 decision_source = "realtime_cfr"
-            else:
-                action = self._decide_with_external_engine(
-                    gs,
-                    street=street_key,
-                    my_current_bet_this_street=my_current_bet_this_street,
-                )
-        if action is not None and decision_source not in {"realtime_cfr", "flop_book"}:
-            decision_source = self._external_decision_engine_name
-        elif action is None:
+        if action is None:
             self._bot.set_next_decision_seed(
                 self._next_decision_seed(
                     street=street_key,
@@ -2698,20 +1885,10 @@ class PokerFateAPI:
             "decision_select_ms": round(float(elapsed_ms), 1),
         }
         decision = self._to_decision(action)
-        g5_shadow = None
-        local_shadow = None
-        external_cfr_sources = {"flop_book", "realtime_cfr"}
-        if decision_source not in {"g5", *external_cfr_sources}:
+        rule_engine_shadow = None
+        if decision_source in {"flop_book", "realtime_cfr"}:
             shadow_t0 = time.perf_counter()
-            g5_shadow = self._shadow_decide_with_external_engine(
-                gs,
-                street=street_key,
-                my_current_bet_this_street=my_current_bet_this_street,
-            )
-            decision_timing["g5_shadow_ms"] = round((time.perf_counter() - shadow_t0) * 1000.0, 1)
-        elif decision_source in {"g5", *external_cfr_sources}:
-            shadow_t0 = time.perf_counter()
-            local_shadow = self._local_shadow_decide(
+            rule_engine_shadow = self._rule_engine_shadow_decide(
                 gs,
                 street=street_key,
                 pot=pot,
@@ -2720,47 +1897,7 @@ class PokerFateAPI:
                 my_stack=my_stack,
                 is_bb_option=is_bb_option,
             )
-            decision_timing["local_shadow_ms"] = round((time.perf_counter() - shadow_t0) * 1000.0, 1)
-
-        observer_decision_id = None
-        if self._g5_observer is not None and self._external_decision_engine_name in {"local", "cfr"}:
-            try:
-                observer_decision_id = self._g5_observer.submit(
-                    gs, my_current_bet=my_current_bet_this_street,
-                    decision=decision, source=decision_source, local_shadow=local_shadow,
-                )
-            except Exception as exc:
-                self._log.raw({"event": "g5_shadow_decision", "mode": "real_history_v1",
-                               "hand": self._hand_number, "street": street_key,
-                               "status": "error", "reason": f"snapshot_failed: {exc}"})
-
-        g5_result_for_range_compare = None
-        if decision_source == "g5":
-            g5_result_for_range_compare = (
-                self._external_decision_engine.last_result
-                if self._external_decision_engine is not None
-                else {}
-            )
-        elif isinstance(g5_shadow, dict) and g5_shadow.get("status") == "ok":
-            shadow_result = g5_shadow.get("result")
-            if isinstance(shadow_result, dict):
-                g5_result_for_range_compare = shadow_result
-        range_compare_t0 = time.perf_counter()
-        self._maybe_record_range_compare_snapshot(
-            gs=gs,
-            street=street_key,
-            decision=decision,
-            decision_source=decision_source,
-            g5_result=g5_result_for_range_compare,
-            pot=pot,
-            current_bet=current_bet,
-            to_call=to_call,
-            my_stack=my_stack,
-        )
-        decision_timing["range_compare_snapshot_ms"] = round(
-            (time.perf_counter() - range_compare_t0) * 1000.0,
-            1,
-        )
+            decision_timing["rule_engine_shadow_ms"] = round((time.perf_counter() - shadow_t0) * 1000.0, 1)
 
         # Record bot's own action into _action_history so that
         # _classify_preflop_action's total-raise counter sees a correct
@@ -2800,55 +1937,11 @@ class PokerFateAPI:
                 my_live, decision.action, amount_added, total_bet_after,
             )
             self._record_street_contribution(self.my_player_id, amount_added)
-            if (
-                self._external_engine_ready()
-                and not self._external_decision_hand_disabled_reason
-                and self._external_engine_active_for_street(street_key)
-            ):
-                self._external_engine_notify_action(
-                    player_id=self.my_player_id,
-                    action=decision.action,
-                    amount_added=amount_added,
-                    total_bet_after=total_bet_after,
-                    street=street_key,
-                )
-            elif g5_shadow is not None:
-                self._notify_external_engine_shadow_action(
-                    g5_shadow,
-                    street=street_key,
-                    my_current_bet_this_street=my_current_bet_this_street,
-                )
-        if not self._g5_shadow_server_actions:
-            self.record_g5_actual_action(
-                player_id=self.my_player_id, action=decision.action, amount_added=amount_added,
-                total_bet_after=total_bet_after, street=street_key,
-            )
         decision_timing["apply_action_ms"] = round((time.perf_counter() - apply_action_t0) * 1000.0, 1)
 
         diagnostics_t0 = time.perf_counter()
-        if decision_source == "g5":
-            self._remember_adopted_hero_action_for_local_bot(street_key, decision)
-            g5_result = (
-                self._external_decision_engine.last_result
-                if self._external_decision_engine is not None
-                else {}
-            )
-            self._last_decision_diagnostics = {
-                "decision_source": "g5",
-                "final_purpose": "",
-                "g5": g5_result,
-            }
-            if local_shadow is not None:
-                self._last_decision_diagnostics["local_shadow"] = (
-                    self._local_shadow_diagnostics(local_shadow)
-                )
-            log_equity, log_equity_random, log_spr, log_equity_mode = (
-                self._log_metrics_from_local_shadow(local_shadow, "g5")
-            )
-            log_reasoning = self._g5_decision_reasoning(g5_result)
-            log_gto_refs = None
-        elif decision_source == "flop_book":
-            self._remember_adopted_hero_action_for_local_bot(street_key, decision)
+        if decision_source == "flop_book":
+            self._remember_adopted_hero_action_for_rule_engine(street_key, decision)
             flop_result = (
                 self._flop_book_engine.last_result
                 if self._flop_book_engine is not None
@@ -2859,17 +1952,17 @@ class PokerFateAPI:
                 "final_purpose": "flop_book",
                 "flop_book": flop_result,
             }
-            if local_shadow is not None:
-                self._last_decision_diagnostics["local_shadow"] = (
-                    self._local_shadow_diagnostics(local_shadow)
+            if rule_engine_shadow is not None:
+                self._last_decision_diagnostics["rule_engine_shadow"] = (
+                    self._rule_engine_shadow_diagnostics(rule_engine_shadow)
                 )
             log_equity, log_equity_random, log_spr, log_equity_mode = (
-                self._log_metrics_from_local_shadow(local_shadow, "flop_book")
+                self._log_metrics_from_rule_engine_shadow(rule_engine_shadow, "flop_book")
             )
             log_reasoning = self._flop_book_decision_reasoning(flop_result)
             log_gto_refs = None
         elif decision_source == "realtime_cfr":
-            self._remember_adopted_hero_action_for_local_bot(street_key, decision)
+            self._remember_adopted_hero_action_for_rule_engine(street_key, decision)
             cfr_result = (
                 self._realtime_cfr_engine.last_result
                 if self._realtime_cfr_engine is not None
@@ -2880,24 +1973,20 @@ class PokerFateAPI:
                 "final_purpose": "realtime_cfr",
                 "realtime_cfr": cfr_result,
             }
-            if local_shadow is not None:
-                self._last_decision_diagnostics["local_shadow"] = (
-                    self._local_shadow_diagnostics(local_shadow)
+            if rule_engine_shadow is not None:
+                self._last_decision_diagnostics["rule_engine_shadow"] = (
+                    self._rule_engine_shadow_diagnostics(rule_engine_shadow)
                 )
             log_equity, log_equity_random, log_spr, log_equity_mode = (
-                self._log_metrics_from_local_shadow(local_shadow, "realtime_cfr")
+                self._log_metrics_from_rule_engine_shadow(rule_engine_shadow, "realtime_cfr")
             )
             log_reasoning = self._realtime_cfr_decision_reasoning(cfr_result)
             log_gto_refs = None
         else:
             self._last_decision_diagnostics = {
                 **self._bot.last_decision_diagnostics,
-                "decision_source": "pokerfate",
+                "decision_source": "rule_engine",
             }
-            if g5_shadow is not None:
-                self._last_decision_diagnostics["g5_shadow"] = (
-                    self._g5_shadow_diagnostics(g5_shadow)
-                )
             log_equity = self._bot.last_equity
             log_equity_random = self._bot.last_equity_random
             log_spr = self._bot.last_spr
@@ -2932,17 +2021,19 @@ class PokerFateAPI:
             gto_refs=log_gto_refs,
             elapsed_ms=elapsed_ms,
             timing=decision_timing,
-            decision_id=observer_decision_id,
             river_relative=(
                 self.last_decision_diagnostics()
                 .get("river_relative", {})
             ),
-            extra=self._decision_log_extra(decision_source, local_shadow),
+            extra={
+                **self._decision_log_extra(decision_source, rule_engine_shadow),
+                # the server's values handed to request_action, for log analysis
+                "current_bet": float(current_bet),
+                "my_current_bet": float(my_current_bet_this_street),
+            },
         )
-        if g5_shadow is not None:
-            self._log_g5_shadow_decision(g5_shadow, street=street_key)
-        if local_shadow is not None:
-            self._log_local_shadow_decision(local_shadow, street=street_key)
+        if rule_engine_shadow is not None:
+            self._log_rule_engine_shadow_decision(rule_engine_shadow, street=street_key)
         self._maybe_record_river_value_sizing_decision(
             street_key=street_key,
             decision=decision,
@@ -2959,7 +2050,7 @@ class PokerFateAPI:
     def _decision_log_extra(
         self,
         decision_source: str,
-        local_shadow: Optional[dict[str, Any]],
+        rule_engine_shadow: Optional[dict[str, Any]],
     ) -> dict[str, Any]:
         """Engine diagnostics for the structured ``decision`` log record.
 
@@ -2985,7 +2076,7 @@ class PokerFateAPI:
             return out or None
 
         try:
-            if decision_source == "pokerfate":
+            if decision_source == "rule_engine":
                 for key in (
                     "final_purpose", "decision_reason", "arbitration_mode",
                     "hero_bucket", "hero_made_subtype", "facing_action",
@@ -3067,29 +2158,14 @@ class PokerFateAPI:
                     "strategy": _round_map(fb.get("strategy")),
                     "exploit_mode": (fb.get("exploit") or {}).get("mode") if isinstance(fb.get("exploit"), dict) else None,
                 }
-            if isinstance(local_shadow, dict) and local_shadow.get("status") == "ok":
-                shadow_decision = local_shadow.get("decision")
+            if isinstance(rule_engine_shadow, dict) and rule_engine_shadow.get("status") == "ok":
+                shadow_decision = rule_engine_shadow.get("decision")
                 if shadow_decision is not None:
-                    extra["local_shadow_action"] = getattr(shadow_decision, "action", None)
-                    extra["local_shadow_amount"] = getattr(shadow_decision, "amount", None)
+                    extra["rule_engine_shadow_action"] = getattr(shadow_decision, "action", None)
+                    extra["rule_engine_shadow_amount"] = getattr(shadow_decision, "amount", None)
         except Exception as exc:  # diagnostics must never break a decision
             extra["extra_error"] = f"{type(exc).__name__}: {exc}"
         return extra
-
-    def record_g5_actual_action(self, **payload) -> None:
-        """Append an executed action, including hero's server confirmation, to shadow only."""
-        if self._g5_observer is not None:
-            self._g5_observer.action(**payload)
-
-    def invalidate_g5_shadow(self, reason: str) -> None:
-        if self._g5_observer is not None:
-            self._g5_observer.invalidate(reason)
-
-    def close_g5_shadow(self) -> None:
-        if self._g5_observer is not None:
-            self._g5_observer.close()
-        if self._g5_action_model is not None:
-            self._g5_action_model.close_writer()
 
     def _maybe_record_river_value_sizing_decision(
         self,
@@ -3426,7 +2502,6 @@ class PokerFateAPI:
         winner_ids: List[int],
         pot: float,
         final_stacks: Optional[Dict[int, float]] = None,
-        winner_payouts: Optional[Dict[int, float]] = None,
         showdown_hands: Optional[Dict[int, List[str]]] = None,
         winner_hand_types: Optional[Dict[int, int]] = None,
         my_profit_delta: Optional[float] = None,
@@ -3444,10 +2519,6 @@ class PokerFateAPI:
             Strongly recommended: pass this so the API tracks stacks
             accurately across hands, buy-ins, and rebuys.
             If omitted, stacks are estimated from observed actions.
-        winner_payouts : dict, optional
-            {player_id: chips_awarded_from_pot}. This is the gross pot share,
-            not stack delta. It is used by external engines such as g5 whose
-            hand history stores Wins actions at showdown.
         showdown_hands : dict, optional
             {player_id: ["Ac", "Kd"]} — revealed hands at showdown.
         winner_hand_types : dict, optional
@@ -3574,26 +2645,6 @@ class PokerFateAPI:
             showdown_hands=sd_by_name or None,
             hand_combos=hand_combos or None,
             my_combo=my_combo,
-        )
-        if self._range_compare_collector is not None and self._runtime_collection_enabled:
-            try:
-                if self._hand_skip_learning:
-                    self._range_compare_collector.discard_hand()
-                else:
-                    self._range_compare_collector.record_showdown(
-                        shown_cards=showdown_hands or {},
-                        final_board=self._board,
-                        hero_cards=self._hole_cards,
-                    )
-                    self._range_compare_collector.finalize_hand()
-            except Exception:
-                traceback.print_exc()
-        self._record_g5_action_model_hand()
-        self._external_engine_finish_hand(
-            winner_ids=winner_ids,
-            pot=pot,
-            winner_payouts=winner_payouts,
-            final_stacks=final_stacks,
         )
         self._flush_river_value_sizing_rows(
             winner_ids=winner_ids,

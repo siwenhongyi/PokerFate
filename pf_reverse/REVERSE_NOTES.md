@@ -264,7 +264,7 @@ pf_reverse/output/
 | 工具 | 用途 |
 |------|------|
 | `UnityPy` | 读取 Unity Asset Bundle |
-| `Il2CppDumper` 6.7.46 | 提取 IL2CPP C# 类结构 + 字符串表（本地放在 `pf_reverse/poker_chase/tools/`，不入库）|
+| `Il2CppDumper` 6.7.46 | 提取 IL2CPP C# 类结构 + 字符串表（本地放在 `local/tools/`，不入库）|
 | `objdump`（Xcode 自带 llvm） | ARM64 反汇编、`-R` 查动态重定位 |
 | `jadx` | 反编译 Java 层（classes.dex，目前没用上）|
 | Python XENC / XXTEA | 自实现解密，见 `extract_resources.py` |

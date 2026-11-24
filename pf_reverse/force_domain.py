@@ -1,6 +1,6 @@
 """
 mitmproxy addon: 过滤登录响应中的 IP 直连服务器，保留所有域名服务器。
-将第一个可用域名服务器写入 data/discovered_server.json。
+将第一个可用域名服务器写入 local/state/discovered_server.json。
 
 用法:
     mitmweb --ignore-hosts "xiaomi.com|xiaomi.net|miui.com|aliyuncs.com" -s pf_reverse/force_domain.py
@@ -20,10 +20,10 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 from pf_intercept.config import PREFERRED_WSS_HOSTS, SERVER_WSS_PORT  # single source of truth
 
-_DISCOVERED_FILE = _REPO_ROOT / "data" / "discovered_server.json"
-_ORIGINAL_RESPONSE_FILE = _REPO_ROOT / "data" / "force_domain_original_response.json"
-_SELECTED_ROUTE_FILE = _REPO_ROOT / "data" / "selected_route.json"
-_TOKEN_FILE = _REPO_ROOT / "data" / "auth_token.txt"
+_DISCOVERED_FILE = _REPO_ROOT / "local" / "state" / "discovered_server.json"
+_ORIGINAL_RESPONSE_FILE = _REPO_ROOT / "local" / "state" / "force_domain_original_response.json"
+_SELECTED_ROUTE_FILE = _REPO_ROOT / "local" / "state" / "selected_route.json"
+_TOKEN_FILE = _REPO_ROOT / "local" / "secrets" / "auth_token.txt"
 _IP_PATTERN = re.compile(r"wss?://\d+\.\d+\.\d+\.\d+")
 _PREFERRED_HOSTS = set(PREFERRED_WSS_HOSTS)
 
@@ -189,6 +189,7 @@ class ForceDomain:
         # 取第一个写入 discovered_server.json，方便排查服务端下发情况。
         chosen = client_server["server_host"]
         try:
+            _DISCOVERED_FILE.parent.mkdir(parents=True, exist_ok=True)
             _DISCOVERED_FILE.write_text(json.dumps({"server_host": chosen}))
             print(f"[force_domain] 首选服务器: {chosen}  → {_DISCOVERED_FILE.name}")
             print("[force_domain] 提示: 确保 hosts 文件包含对应域名的重定向")

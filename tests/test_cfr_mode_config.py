@@ -25,7 +25,7 @@ def test_session_config_logs_effective_book_switch(monkeypatch, raw, override, e
     else:
         monkeypatch.setenv("PF_CFR_FLOP_BOOK_ENABLED", raw)
     # Constructor arguments are authoritative even when the environment differs.
-    monkeypatch.setenv("DECISION_ENGINE", "local")
+    monkeypatch.setenv("DECISION_ENGINE", "rule_engine")
     events = []
     monkeypatch.setattr("pokerfate.api.PokerLogger.raw", lambda self, event: events.append(event))
     api = PokerFateAPI(
@@ -44,14 +44,14 @@ def test_session_config_logs_effective_book_switch(monkeypatch, raw, override, e
     assert api.decision_engine_status()["flop_book"] is expected
 
     events.clear()
-    api.set_decision_engine("local")
+    api.set_decision_engine("rule_engine")
     api.set_decision_engine("cfr")
     snapshots = [event for event in events if event["event"] == "session_config"]
-    assert [event["resolved"]["DECISION_ENGINE"] for event in snapshots] == ["local", "cfr"]
+    assert [event["resolved"]["DECISION_ENGINE"] for event in snapshots] == ["rule_engine", "cfr"]
     assert all(event["resolved"]["PF_CFR_FLOP_BOOK_ENABLED"] is expected for event in snapshots)
 
 
-def test_book_off_uses_local_flop_and_cfr_on_both_later_streets(monkeypatch):
+def test_book_off_uses_rule_engine_flop_and_cfr_on_both_later_streets(monkeypatch):
     api = PokerFateAPI(
         my_player_id=0,
         decision_engine="cfr",
@@ -61,7 +61,7 @@ def test_book_off_uses_local_flop_and_cfr_on_both_later_streets(monkeypatch):
     calls = []
 
     def local_decide(gs, player_id, is_bb_option=False):
-        calls.append("local")
+        calls.append("rule_engine")
         return Action(ActionType.CHECK)
 
     def cfr_decide(ctx):
@@ -70,38 +70,22 @@ def test_book_off_uses_local_flop_and_cfr_on_both_later_streets(monkeypatch):
 
     monkeypatch.setattr(api._bot, "decide", local_decide)
     monkeypatch.setattr(api._realtime_cfr_engine, "decide", cfr_decide)
-    monkeypatch.setattr(api, "_local_shadow_decide", lambda *args, **kwargs: None)
+    monkeypatch.setattr(api, "_rule_engine_shadow_decide", lambda *args, **kwargs: None)
     api.new_hand(
         [PlayerInfo(0, "Hero", 200.0, "BTN"), PlayerInfo(1, "Villain", 200.0, "BB")],
         dealer_id=0,
     )
     api.deal_hole_cards(["As", "Ah"])
     for street, board, expected_source in [
-        ("flop", ["Kh", "2c", "3d"], "pokerfate"),
+        ("flop", ["Kh", "2c", "3d"], "rule_engine"),
         ("turn", ["9s"], "realtime_cfr"),
         ("river", ["Tc"], "realtime_cfr"),
     ]:
         api.deal_board(board, street=street, pot=20.0)
         api.request_action(street, pot=20.0, current_bet=0, to_call=0, my_stack=200.0)
         assert api.last_decision_diagnostics()["decision_source"] == expected_source
-    assert calls == ["local", "cfr", "cfr"]
+    assert calls == ["rule_engine", "cfr", "cfr"]
     assert api._flop_book_engine is None
-
-
-def test_session_config_distinguishes_g5_all_from_g5(monkeypatch):
-    class FakeG5:
-        def __init__(self, options):
-            pass
-
-        def preflight(self):
-            return {}
-
-    events = []
-    monkeypatch.setattr("pokerfate.api.G5JsonDecisionEngine", FakeG5)
-    monkeypatch.setattr("pokerfate.api.PokerLogger.raw", lambda self, event: events.append(event))
-    PokerFateAPI(decision_engine="g5_all", enable_showdown_calibration=False)
-    snapshot = next(event for event in events if event["event"] == "session_config")
-    assert snapshot["resolved"]["DECISION_ENGINE"] == "g5_all"
 
 
 def test_bridge_passes_book_switch_to_api(monkeypatch):

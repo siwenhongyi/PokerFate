@@ -1067,7 +1067,7 @@ class PokerBot:
         # 加注金额不超过对手有效可投入的上限（超出无意义）。
         # 有效上限 = 对手剩余筹码 + 对手本街已投入（因为 amount 是 bot 的总额语义）。
         if action_str == 'raise' and amount > 0:
-            # The local postflop engine sizes additional chips against the
+            # The rule engine sizes additional chips against the
             # remaining stack. Convert once to the public raise-to contract.
             amount += player.current_bet
             acting_effective = [

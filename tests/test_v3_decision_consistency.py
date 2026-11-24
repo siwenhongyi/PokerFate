@@ -363,7 +363,7 @@ def test_fold_override_rescues_marginal_tracker_compressed_equity() -> None:
 # That direction was deleted - over 15,187 live hands the promoted calls lost
 # against folding, and the committed low-SPR rescues these fixtures describe
 # were the worst of them (12 calls, -267bb). The spots stay as fixtures of what
-# the vote itself does. See docs/candidates/local_engine_audit_2026-11-17.
+# the vote itself does. See the rule engine audit of 2026-11-17.
 
 
 def test_vote_fold_stands_in_low_spr_commit_spot() -> None:

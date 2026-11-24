@@ -27,7 +27,7 @@ RAKE = 0.09
 
 
 def _load_hero_names() -> set:
-    p = Path(__file__).resolve().parents[1] / "data" / "hero_names.json"
+    p = Path(__file__).resolve().parents[1] / "local" / "state" / "hero_names.json"
     try:
         d = json.loads(p.read_text(encoding="utf-8"))
         return {d.get("current", "")} | set(d.get("aliases") or [])
@@ -76,8 +76,6 @@ def parse_file(path: Path, hero_names: Optional[set] = None, file_tag: str = "")
     session = 0
     session_cfg: dict = {}
     pending_fallbacks: list = []
-    exec_by_id: dict = {}
-    ctx_by_id: dict = {}
 
     def close(reason: str):
         nonlocal cur
@@ -116,20 +114,18 @@ def parse_file(path: Path, hero_names: Optional[set] = None, file_tag: str = "")
         if e == "decision_engine_fallback":
             pending_fallbacks.append({"component": d.get("component"), "reason": d.get("reason"), "ts": d.get("ts")})
             continue
-        if e == "g5_shadow_execution":
-            exec_by_id[d.get("decision_id")] = d.get("executed_action") or {}
-            continue
-        if e == "g5_shadow_decision":
-            c = d.get("context") or {}
-            ctx_by_id[d.get("decision_id")] = {
-                k: c.get(k) for k in ("pot", "current_bet", "my_current_bet") if k in c}
-            continue
         if cur is None or d.get("hand") != cur["hand"]:
             if e in ("hole_cards", "board", "opponent_action", "decision", "hand_result"):
                 stats["orphan_events"] += 1
             continue
         if e == "hole_cards":
             cur["hole"] = list(d.get("cards") or [])
+        elif e == "hero_execution":
+            # the server's confirmation of hero's last decision on this street
+            for r in reversed(cur["raw"]):
+                if r.get("hero") and r["street"] == d.get("street") and "executed" not in r["dec"]:
+                    r["dec"]["executed"] = {k: d.get(k) for k in ("amount_added", "total_bet_after")}
+                    break
         elif e == "board":
             cur["board"][d["street"]] = list(d["cards"])
             cur["raw"].append({"t": "board", "street": d["street"], "cards": list(d["cards"]), "ts": d.get("ts")})
@@ -166,17 +162,17 @@ def parse_file(path: Path, hero_names: Optional[set] = None, file_tag: str = "")
     close("eof")
     _infer_bb(hands)
     for h in hands:
-        _reconstruct(h, hero_names, exec_by_id, ctx_by_id, stats)
+        _reconstruct(h, hero_names, stats)
     stats["hands"] = len(hands)
     return hands, dict(stats)
 
 
-def _reconstruct(h: Hand, hero_names: set, exec_by_id: dict, ctx_by_id: dict, stats: Counter) -> None:
+def _reconstruct(h: Hand, hero_names: set, stats: Counter) -> None:
     """Turn the raw event stream into an ordered action list with chip accounting.
 
     Chip truth, in order of trust:
-      1. hero ``decision.pot`` / ``to_call`` and ``g5_shadow_decision.context`` (server values
-         handed to request_action) and ``g5_shadow_execution`` (server-confirmed hero chips);
+      1. hero ``decision.pot`` / ``to_call`` / ``current_bet`` / ``my_current_bet`` (server values
+         handed to request_action) and ``hero_execution`` (server-confirmed hero chips);
       2. our own replay of opponent actions (raise = street total, call = chips added);
       3. ``opponent_action.pot_before_action`` — the bot's estimate, NOT trusted: it double-counts
          a blind when a blind seat raises and misses out-of-turn posts.
@@ -238,8 +234,8 @@ def _reconstruct(h: Hand, hero_names: set, exec_by_id: dict, ctx_by_id: dict, st
         ex = {}
         if r["hero"]:
             dec = r["dec"]
-            ex = exec_by_id.get(dec.get("decision_id")) or {}
-            ctx = ctx_by_id.get(dec.get("decision_id")) or {}
+            ex = dec.get("executed") or {}
+            ctx = {k: dec[k] for k in ("current_bet", "my_current_bet") if k in dec}
             logged_pot = r.get("pot_logged") or 0.0
             logged_tc = r.get("to_call_logged") or 0.0
             if "my_current_bet" in ctx and "current_bet" in ctx:

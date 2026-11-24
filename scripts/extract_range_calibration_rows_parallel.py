@@ -267,8 +267,8 @@ def _attach_inline_calibrator(api: Any, calibrator: Any) -> None:
     """Wire a synchronous calibrator into a replay API and seal off live data.
 
     The API's own `enable_showdown_calibration=True` path uses the file spool
-    (async worker processes under data/runtime_calibration/live_spool) and the
-    runtime row recorder (appends to data/runtime_calibration/*.rows.jsonl).
+    (async worker processes under local/training/live_spool) and the
+    runtime row recorder (appends to local/training/*.rows.jsonl).
     Neither belongs in a replay: the spool never returns rows to this process
     and the recorder would pollute the live training set (it did, 2026-11-11).
     """
@@ -315,7 +315,6 @@ def _attach_inline_calibrator(api: Any, calibrator: Any) -> None:
     tracker._name_resolver = lambda pid: api._session_names.get(pid, str(pid))
     api._calibrator = calibrator
     api._runtime_calibration_recorder = None
-    api._range_compare_collector = None
     api._runtime_collection_enabled = False
     api.set_runtime_collection_enabled = lambda *a, **k: None
 

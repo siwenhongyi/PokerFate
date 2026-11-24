@@ -11,7 +11,7 @@ in once and capture the result; see pf_intercept.headless.harvest_session.
 What's left here:
     LoginResult / ServerEntry / LoginError   — resuming a harvested session
                                                 (pf_intercept.headless.__main__
-                                                reads data/headless_session.json
+                                                reads local/secrets/headless_session.json
                                                 straight into a LoginResult)
     measure_ping                             — /ping latency, used to order
                                                 the saved server list the same

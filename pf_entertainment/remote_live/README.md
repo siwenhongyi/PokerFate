@@ -5,7 +5,7 @@ VPS 只部署实时牌桌页面；本机通过 SSH 上传当前快照。没有�
 
 ## 本机配置
 
-配置位于项目 `data/remote_live.json`，已被 `.gitignore` 忽略，权限应为 `600`。路径根据代码位置计算，不依赖启动目录。
+配置位于项目 `local/secrets/remote_live.json`，已被 `.gitignore` 忽略，权限应为 `600`。路径根据代码位置计算，不依赖启动目录。
 SSH 私钥仍由 `~/.ssh/config` / ssh-agent 管理，不复制到仓库或 VPS 部署包。
 
 ```json
@@ -79,13 +79,13 @@ HTTP 80 端口用于 ACME 验证，HTTPS 443 用于观看，两者需要 VPS 网
 ```
 
 此模式用独立自签证书，浏览器首次访问需要用户确认信任，传输仍经 TLS 加密。
-部署命令通过已验证的 SSH 通道取回公钥证书，保存在 `data/remote_live_server.crt`，不会自动导入系统信任库。
+部署命令通过已验证的 SSH 通道取回公钥证书，保存在 `local/secrets/remote_live_server.crt`，不会自动导入系统信任库。
 证书/私钥仅在 VPS 的 `/etc/pokerfate-live/tls/`；证书有效期一年，重复部署保留现有证书，剩余不足 30 天时生成新证书（浏览器需要再次确认）。
 自签模式不依赖 ACME，不启用 Let's Encrypt 续期 timer。
-打开直播地址后用 `viewer` 登录。账号已预填，密码在本机 `data/remote_live.json` 的 `viewer_password`。macOS 可以在项目目录运行以下命令复制观看密码：
+打开直播地址后用 `viewer` 登录。账号已预填，密码在本机 `local/secrets/remote_live.json` 的 `viewer_password`。macOS 可以在项目目录运行以下命令复制观看密码：
 
 ```bash
-.venv/bin/python -c 'import json,sys; sys.stdout.write(json.load(open("data/remote_live.json"))["viewer_password"])' | pbcopy
+.venv/bin/python -c 'import json,sys; sys.stdout.write(json.load(open("local/secrets/remote_live.json"))["viewer_password"])' | pbcopy
 ```
 
 登录页默认勾选「在此设备上保持登录 90 天」。浏览器通过 HTTPS 保存登录 cookie，重新打开原地址即可观看。取消勾选时改用会话 cookie，最长 12 小时。点击「退出登录」会立即撤销本设备当前会话。重新部署沿用原密码时已登录设备继续有效，更换观看密码并重新部署后各设备需要重新登录。

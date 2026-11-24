@@ -8,7 +8,7 @@ Setup (one-time):
            127.0.0.1  <SERVER_HOST>
     4. python -m pf_intercept.proxy
        (Seat ID and blinds are auto-detected from game messages)
-       Bark: device key in data/bark_key.txt (first line)
+       Bark: device key in local/secrets/bark_key.txt (first line)
 
 Traffic flow:
     Game  ->  127.0.0.1:9012  (TLS, WSS MITM)  ->  Real Server :9012
@@ -59,7 +59,7 @@ from pokerfate.logger import archive_runtime_logs_on_startup
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _INTERCEPT_ROOT = _PROJECT_ROOT / "pf_intercept"
-_DEFAULT_BARK_KEY_FILE = _PROJECT_ROOT / "data" / "bark_key.txt"
+_DEFAULT_BARK_KEY_FILE = _PROJECT_ROOT / "local" / "secrets" / "bark_key.txt"
 
 
 def _wss_close_is_abnormal(code: int | None) -> bool:
@@ -68,8 +68,6 @@ def _wss_close_is_abnormal(code: int | None) -> bool:
 
 _LOGS_DIR = _INTERCEPT_ROOT / "logs"
 
-_DATA_DIR = _PROJECT_ROOT / "data"
-_DATA_DIR.mkdir(exist_ok=True)
 _WSS_GAP_WARN_SEC = float(os.environ.get("PF_WSS_GAP_WARN_SEC", "4.0"))
 _EVENT_LOOP_LAG_WARN_SEC = float(os.environ.get("PF_EVENT_LOOP_LAG_WARN_SEC", "1.0"))
 _BOT_INJECT_TTL_SEC = float(os.environ.get("PF_BOT_INJECT_TTL_SEC", "12.0"))

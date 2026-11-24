@@ -266,7 +266,7 @@ def test_match_fields_force_wait_for_blind_and_follow_the_search_stake():
     out = p.match_fields(base)
     assert (out["boot"], out["byin_chips"]) == (5000, 500_000)
     assert base["wait_blind"] is False                 # input untouched
-    p.state = SEATED                                   # e.g. room-escape re-match at the table's own stake
+    p.state = SEATED                                   # a re-match made while seated keeps its own stake
     assert p.match_fields(dict(base, boot=20000, byin_chips=7))["boot"] == 20000
 
 

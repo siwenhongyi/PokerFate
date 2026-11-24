@@ -111,7 +111,6 @@
       // table-switch buy-ins are all checked against it).
       $("bank-losscap").textContent = d.loss_cap_chips
         ? `-${Number(d.loss_cap_chips).toLocaleString()}${d.loss_stop ? "（已停止）" : ""}` : "-";
-      $("bank-escapes").textContent = Number(d.room_escape_count || 0).toLocaleString();
       $("bank-bb").textContent = d.big_blind ? Number(d.big_blind).toLocaleString() : "-";
       const handPoints = Array.isArray(d.hand_points) ? d.hand_points : [];
       const samples = Array.isArray(d.samples) ? d.samples : [];

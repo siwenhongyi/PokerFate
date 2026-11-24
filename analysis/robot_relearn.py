@@ -8,7 +8,7 @@
 
 ``calibrator`` looks at the online hero-equity calibrator the bot loads from opponents.json.
 Its window holds (predicted, actual) pairs only, but each pair was also written as a training
-row (data/runtime_calibration/*.rows.jsonl) with the opponent's uid, so every sample can be
+row (local/training/*.rows.jsonl) with the opponent's uid, so every sample can be
 traced back to a robot or a human.  It reports the share of robot samples and how the applied
 corrections change without them.  ``--out`` writes the robot-free state to a file;
 ``--apply`` swaps it into opponents.json (keeping a backup).  Without those nothing is modified.
@@ -18,7 +18,7 @@ What counts as polluted follows the table rule the strategy applies since 2026-1
 a row about a robot; any row from a hand at a table the bot would leave (no human, or fewer
 humans than robots); and, for the hero-equity calibrator only, any sample from a hand with a
 robot dealt in (the robot may still have been in the pot).  ``rows`` removes the first two
-kinds from data/runtime_calibration/*.rows.jsonl (``--apply`` rewrites the files and keeps the
+kinds from local/training/*.rows.jsonl (``--apply`` rewrites the files and keeps the
 originals as ``*.before-robot-clean-<time>``).  Run ``calibrator --apply`` before
 ``rows --apply``: it traces samples through those rows.  Both only while the bot is stopped.
 """
@@ -41,9 +41,9 @@ from pokerfate.strategy.range_v2.hero_eq_calibrator import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-ROWS = [ROOT / "data" / "runtime_calibration" / "train.rows.jsonl",
-        ROOT / "data" / "runtime_calibration" / "val.rows.jsonl"]
-OPPONENTS = ROOT / "pokerfate" / "data" / "local_models" / "opponents.json"
+ROWS = [ROOT / "local" / "training" / "train.rows.jsonl",
+        ROOT / "local" / "training" / "val.rows.jsonl"]
+OPPONENTS = ROOT / "local" / "models" / "opponents.json"
 LOGS = sorted((ROOT / "pokerfate" / "logs" / "archive").glob("*.pokerfate.bak.log")) + [
     ROOT / "pokerfate" / "logs" / "pokerfate.log"]
 _NEEDED = ("player_uid", "recorded_at", "hero_bucket", "street", "active_player_count",

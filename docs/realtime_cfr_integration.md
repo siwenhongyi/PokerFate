@@ -6,22 +6,21 @@
 `PF_POSTFLOP_PROFIT_EXPAND_V1=1`、`REALTIME_CFR_TIMEOUT_SEC=10`，headless 入口还会自动等价设置
 `PYTHONUNBUFFERED=1`。hero 胜率 ML、河牌相对 ML、运行时 gamma/theta 公式参数、CEC 校准、showdown 学习器等层已于 2026-11-11 删除，`PF_EQUITY_ML` / `PF_RIVER_RELATIVE_ML` / `PF_RUNTIME_RANGE_CALIBRATION` / `PF_BUCKET_CALIBRATION` 不再存在，见 docs/range_v2_bucket_ml.md）。
 
-- `local` 或非法值：PokerFate 纯本地决策。
-- `g5_all`：翻前、翻后都由 g5 接管，PokerFate 只做旁路对照。
-- `g5`：翻前 PokerFate 查表/本地，翻后 g5 接管；翻前仍同步 g5 shadow，保证翻后状态连续。
-- `cfr`：翻前 PokerFate 本地；翻牌由独立开关决定是否查离线 CFR 书；转牌、河牌实时求解；任意 miss/异常/超时都回退 PokerFate 本地。
+- `rule_engine`：只用规则引擎决策。
+- 未设置或其他值：按 `cfr`；未知的名字会在日志里记一条 `decision_engine_unknown`。
+- `cfr`：翻前走规则引擎；翻牌由独立开关决定是否查离线 CFR 书；转牌、河牌实时求解；任意 miss/异常/超时都回退规则引擎。
 
 `PF_CFR_FLOP_BOOK_ENABLED` 是启动时读取的独立开关，默认 `1`：
 
 - `DECISION_ENGINE=cfr PF_CFR_FLOP_BOOK_ENABLED=1`：翻牌优先查书。
-- `DECISION_ENGINE=cfr PF_CFR_FLOP_BOOK_ENABLED=0`：翻牌走本地，不加载翻牌书；转牌、河牌照常实时求解。
+- `DECISION_ENGINE=cfr PF_CFR_FLOP_BOOK_ENABLED=0`：翻牌走规则引擎，不加载翻牌书；转牌、河牌照常实时求解。
 
 关闭值可用 `0/false/no/off`，开启值可用 `1/true/yes/on`。API 调用方可通过
 `cfr_flop_book_enabled` 显式覆盖环境变量。启动日志 `session_config.env` 保留环境原值，
 `session_config.resolved.PF_CFR_FLOP_BOOK_ENABLED` 记录实际解析后的布尔值（未设环境变量时也记录）。
 `decision_engine_enabled.flop_book` 和状态接口的 `flop_book` 表示是否实际启用了书；
 `flop_book_requested` 表示开关值。运行时切换决策引擎会再次记录 `session_config`。
-顶层模式只支持 `local/g5/g5_all/cfr`，不提供旧模式的兼容别名。
+顶层模式只有 `rule_engine` 和 `cfr`，没有别名；其他名字一律按 `cfr`。
 
 ## 本次复制进项目的 solver
 
@@ -36,7 +35,7 @@ pokerfate/solver/pf_solver/
   src/lib.rs
 ```
 
-运行时不依赖 `/Users/zhangmingli/dev-tool/pf_offline_book`，也不从 venv 里的同名包隐式 import。Python 侧默认只从本项目的 `pokerfate/solver/pf_solver/target/release/` 加载 `libpf_solver.dylib` / `libpf_solver.so` / `pf_solver.pyd`；没有本地产物就直接 fallback 到 PokerFate 本地决策。
+运行时不依赖 `/Users/zhangmingli/dev-tool/pf_offline_book`，也不从 venv 里的同名包隐式 import。Python 侧默认只从本项目的 `pokerfate/solver/pf_solver/target/release/` 加载 `libpf_solver.dylib` / `libpf_solver.so` / `pf_solver.pyd`；没有本地产物就直接 fallback 到规则引擎决策。
 
 本地构建：
 
@@ -78,11 +77,10 @@ pokerfate/data/flop_book/v3/
 
 `PokerFateAPI.request_action()` 的顺序：
 
-1. `DECISION_ENGINE=cfr`、翻牌书开关开启且当前是 flop 时，先调用 `FlopBookDecisionEngine`；开关关闭则翻牌走本地。
+1. `DECISION_ENGINE=cfr`、翻牌书开关开启且当前是 flop 时，先调用 `FlopBookDecisionEngine`；开关关闭则翻牌走规则引擎。
 2. `DECISION_ENGINE=cfr` 且当前是 turn/river 时，调用 `RealtimeCFRDecisionEngine`。
-3. CFR 成功返回 `Action` 时，直接接入主决策结果，并把本地 bot 的已采纳动作记忆同步上。
-4. CFR 失败、超时、solver 缺失、非 heads-up、range 不可用、节点无法定位、翻牌书 miss 时，记录 fallback 原因并继续走 PokerFate 本地。
-5. g5 模式仍走原来的 g5 active/shadow 路径；`cfr` 不触发 g5 shadow。
+3. CFR 成功返回 `Action` 时，直接接入主决策结果，并把规则引擎的已采纳动作记忆同步上。
+4. CFR 失败、超时、solver 缺失、非 heads-up、range 不可用、节点无法定位、翻牌书 miss 时，记录 fallback 原因并继续走规则引擎。
 
 ## realtime CFR 输入
 
@@ -94,7 +92,7 @@ pokerfate/data/flop_book/v3/
 - 有效后手：按 OOP/IP 当前剩余栈加本街已投入计算。
 - 当前街真实动作前缀：从 `GameState.action_history` 提取 check/call/bet/raise，并把真实下注尺寸注入 solver menu。
 - 对手范围：使用 Range V2 的 1326 combo 权重，但取的是**本街发牌时的快照**（`api.deal_board` 后保存），不是对手本街行动之后的后验。对手本街的 bet/raise/call 已经在 solver 树的动作前缀里，再喂后验等于把同一个动作算两遍（回放实测会把对手范围压得过紧、hero 多弃牌）。去除 hero 手牌和公共牌 blockers 后转成 `postflop-solver` range 字符串。
-- Hero 范围：`v3/hero_range.combo_weights`。翻前基础范围按 hero 实际走过的线取（`describe_preflop_line`）：RFI/iso → 位置 RFI 表；3bet → 3bet 价值+诈唬池；4bet → 4bet 池；BB 跟开池 → 对应开池位置的 BB 防守表；非 BB 平跟 → 平跟防守表；跟 3bet → 位置 3bet-call 表；limp → limp-behind 池；BB 免费看牌 → 全范围。前街过滤优先用当时做决策的引擎输出：翻牌书 / realtime CFR 都会导出“当前节点所有 hero combo 选中所选动作的概率”（`last_hero_reach_update`），下一街直接乘上去；只有本地引擎做的决策才退回 bucket 频率表（含 call 的续牌频率）。hero 侧只用公共牌做 blocker，真实底牌只用于取当前 combo 的行动。
+- Hero 范围：`v3/hero_range.combo_weights`。翻前基础范围按 hero 实际走过的线取（`describe_preflop_line`）：RFI/iso → 位置 RFI 表；3bet → 3bet 价值+诈唬池；4bet → 4bet 池；BB 跟开池 → 对应开池位置的 BB 防守表；非 BB 平跟 → 平跟防守表；跟 3bet → 位置 3bet-call 表；limp → limp-behind 池；BB 免费看牌 → 全范围。前街过滤优先用当时做决策的引擎输出：翻牌书 / realtime CFR 都会导出“当前节点所有 hero combo 选中所选动作的概率”（`last_hero_reach_update`），下一街直接乘上去；只有规则引擎做的决策才退回 bucket 频率表（含 call 的续牌频率）。hero 侧只用公共牌做 blocker，真实底牌只用于取当前 combo 的行动。
 - 抽水：`core.config.RAKE_RATE=0.09`、不封顶，以 `rake_cap=10^9` 筹码传给 solver（postflop-solver 按 `min(rate×pot, cap)` 计费，cap=0 等于不抽水）。
 - 默认菜单：flop `33/100`；turn `33/75/150`；river `33/66/100/150`；转牌求解树内未来 river 粗化为 `66/150`；raise `2.2x/3.0x`。真实已发生尺寸会额外注入，保证能定位到当前节点。
 
@@ -135,7 +133,7 @@ realtime CFR 仍以均衡策略为锚点，不直接用画像替代 solver：
 
 数据不够时不再使用对手类型标签。CFR 决策层使用 `opponent_numeric_prior` 的数值先验：
 
-- 从本项目 `pokerfate/data/local_models/opponents.json` 读取统一玩家库，离线构造 pool baseline 和软 KNN 先验。
+- 从本项目 `local/models/opponents.json` 读取统一玩家库，离线构造 pool baseline 和软 KNN 先验。
 - 特征是连续数值：VPIP/PFR/gap、AF、WTSD/WMSD、street AFq、river bet/fold、fold to cbet、bluff win rate、3bet/fold to 3bet 等。
 - 每个特征按自己的机会样本做 shrink：`rate = player * reliability + (1 - reliability) * (KNN/pool)`；没有机会样本的字段不会被当成 0。
 - 最终输出不是玩家类型，而是 `fold_bias/sticky_bias/raise_bias` 以及 `sticky/fold_lean/underbluff/pressure` 连续分。
@@ -147,7 +145,7 @@ realtime CFR 仍以均衡策略为锚点，不直接用画像替代 solver：
 
 ## fallback 条件
 
-以下情况都会自动回退 PokerFate 本地：
+以下情况都会自动回退规则引擎：
 
 - realtime CFR 当前不是 turn/river。
 - `cfr` 的 flop spot 不在离线书覆盖范围：非 HU、非 SRP、位置组合缺失、底池/后手偏离过大、动作路径无法映射、hero combo 不在书范围。
@@ -204,31 +202,3 @@ realtime_cfr decision | Raise(90)@80% | expl=0.42% | t=1.8s | path=r:Bet(60)
 ```text
 flop_book decision | BTNvBB_srp100 | x@100% | path=r | t=1ms
 ```
-
-## G5 真实历史旁路
-
-`PF_G5_SHADOW_ENABLED=1` 默认开启，在 `DECISION_ENGINE=cfr` / `local` 下独立评估。
-设为 `0` 可关闭；更改后下次启动生效。它不改变主决策路由。
-
-每个真实决策点冻结手牌、牌面、此前的动作和本手开始时的 G5 对手模型，
-后台 worker 在新建的游戏状态中重放到该节点。实战历史来自服务器 ActionBRC，
-包括自己最终执行的动作；G5 建议不会被执行或写入下一节点的历史，建议弃牌后
-仍继续评估后续真实节点。直接调用 PokerFateAPI 时默认使用 API 已应用的动作；
-外部接入可设置 `g5_shadow_server_actions=True` 并调用 `record_g5_actual_action`。
-
-`session_config.resolved` 记录开关、`G5_SHADOW_ACTIVE`、`G5_SHADOW_MODE=real_history_v1`
-和历史来源。JSONL 日志中：
-
-- `decision.decision_id`：主决策对应的唯一节点 ID。
-- `g5_shadow_decision`：相同 ID 的主建议、local 对照（如果有）、G5 建议/EV、
-  原始手号、牌面/筹码、历史长度/哈希、耗时和成功/失败/跳过状态。
-- `g5_shadow_execution`：相同 ID 的服务器最终执行动作和实际金额。
-
-旁路异步完成，按 `decision_id` 关联，不能按日志相邻位置关联。
-队列满、缺少自己动作确认、重连丢失历史、非标准盲位/补盲或状态校验失败均显式记录；
-这些节点不能算作有效建议样本。G5 RPC 超时/退出后会停止启动新的 worker，
-后续节点保留错误记录，重启进程后恢复。旁路不接收本手最终输赢或未来牌面。
-
-这能支持同点建议、覆盖率和故障率对照；没有执行过的 G5 建议仍没有真实收益，
-不能把主引擎的实际输赢直接算作 G5 的反事实盈亏。原有 `g5` 主引擎模式的旧
-`G5_SHADOW_DECISIONS` 属于另一条历史逻辑，评估时只取 `real_history_v1`。

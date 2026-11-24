@@ -207,7 +207,7 @@ def main(argv=None):
         row = dict(key=h["key"], ip=ip, act=s["kind"], hcls=hcls, pot=s["pot_bb"], src=s["dec"].get("decision_source"),
                    eq=s["dec"].get("equity"), cfr=s["dec"].get("realtime_cfr"), frac=s.get("size_pot"),
                    sd=h["hero_at_showdown"], hand=h["hole"], board=b, shown=shown, delta=h["delta_bb"],
-                   local_shadow=s["dec"].get("local_shadow_action"), bucket=s["dec"].get("hero_bucket"))
+                   rule_engine_shadow=s["dec"].get("rule_engine_shadow_action"), bucket=s["dec"].get("hero_bucket"))
         if shown:
             hs_, vs_ = score(h["hole"], b), score(shown, b)
             row["ahead"] = 1 if hs_ > vs_ else (0 if hs_ < vs_ else 0.5)

@@ -351,7 +351,7 @@ def _build_player_preflop_counts(
     return counts
 
 
-DEFAULT_TRAIN_ROWS = ROOT / "data" / "runtime_calibration" / "train.rows.jsonl"
+DEFAULT_TRAIN_ROWS = ROOT / "local" / "training" / "train.rows.jsonl"
 DEFAULT_OPPONENTS = MODEL_DIR / "opponents.json"
 
 
@@ -482,7 +482,7 @@ def main() -> None:
                     help="only rows recorded before this UTC time (ISO 8601 or epoch); "
                          "use for temporal hold-out builds")
     ap.add_argument("--robot-registry", type=Path, default=None,
-                    help="robot registry file (default pokerfate/data/local_models/robots.json)")
+                    help="robot registry file (default local/models/robots.json)")
     args = ap.parse_args()
 
     summary = _build_model(

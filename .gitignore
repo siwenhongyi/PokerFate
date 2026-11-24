@@ -14,46 +14,23 @@ build/
 # Generated certs (sensitive — generate locally with gen_cert.py)
 pf_intercept/certs/
 
-# Dynamic server discovery (written at runtime by force_domain.py)
-data/discovered_server.json
-
 # Runtime logs and captures (may contain credentials / game data)
 *.log
 *.mitm
 pf_intercept/logs/
-# Runtime opponent model (accumulated during play, generate locally)
-opponents.json
-
-# Slumbot credentials (sensitive — create locally)
-pokerfate/slum/auth.json
 
 # IDE
 .idea/
 .vscode/
 .claude/
 *.swp
-win/
 logs/
-.tmp/
 docs/*
-!docs/g5-integration.md
 !docs/realtime_cfr_integration.md
-data/
-# 逆向产物里的 data 目录是游戏 lua 源码（PKData.lua 等），不应被上面的 data/ 命中
-!pf_reverse/output/lua/src/app/table/data/
-# Runtime calibration worker queue.  Jobs/results are local IPC files.
-data/runtime_calibration/live_spool/
-!pokerfate/data
-pokerfate/data/local_models/
 
-# Vendored G5 build outputs. Keep source/redist tracked; build artifacts stay local.
-pokerfate/g5/**/bin/
-pokerfate/g5/**/obj/
-pokerfate/g5/src/DecisionMaking/*.o
-
-# PokerFate reverse local workspace
-pf_reverse/local/
-pf_reverse/poker_chase/
+# 本机数据，不入库：凭证（secrets/）、运行状态（state/）、学出来的模型（models/）、训练样本（training/）。
+# 目录名叫 data 的一律入库，不要再加 data 相关的忽略规则。
+/local/
 
 # 热更新层：运行时从 CDN 同步（pf_reverse/hotupdate.py），不入库；入库的 output/ 只放安装包解出的文件
 pf_reverse/remote_res/

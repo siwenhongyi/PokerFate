@@ -4,7 +4,6 @@ import json
 from unittest.mock import Mock
 
 from pokerfate.api import PlayerInfo, PokerFateAPI
-from pokerfate.decision.g5_model import stable_player_name
 
 HERO, HUMAN_ID, ROBOT_ID = 10262053, 10700890, 10334071
 
@@ -13,7 +12,7 @@ def _api(tmp_path) -> PokerFateAPI:
     return PokerFateAPI(
         my_player_id=HERO, big_blind=10000, small_blind=5000, autosave_path=None,
         log_file=str(tmp_path / "pf.log"), enable_showdown_calibration=True,
-        decision_engine="local", g5_model_path=None,
+        decision_engine="rule_engine",
     )
 
 
@@ -99,11 +98,8 @@ def test_a_flagged_hero_is_never_treated_as_a_robot(tmp_path):
     assert HERO not in api._hand_robot_ids
 
 
-def test_player_statistics_and_g5_profiles_follow_the_table_rule(tmp_path):
+def test_player_statistics_follow_the_table_rule(tmp_path):
     api = _api(tmp_path)
-    profiled = []
-    api._g5_model_path = "unused"
-    api._g5_action_model = Mock(record_hand=lambda **kw: profiled.append(set(kw["skip_names"])) and False)
     stats = api._bot.opponent_model
 
     api.new_hand(_players(robots=2), dealer_id=HERO, hand_number=1)          # outnumbered: leave
@@ -111,17 +107,14 @@ def test_player_statistics_and_g5_profiles_follow_the_table_rule(tmp_path):
     stats.record_vpip(HUMAN_ID)
     stats.record_action(HUMAN_ID, "call", "flop")
     stats.record_showdown(HUMAN_ID, won=True)
-    api._record_g5_action_model_hand()
     human = stats.get(HUMAN_ID)
-    assert (human.hands_seen, human.vpip_count, human.showdown_count) == (0, 0, 0) and profiled == []
+    assert (human.hands_seen, human.vpip_count, human.showdown_count) == (0, 0, 0)
 
     api.new_hand(_players(), dealer_id=HERO, hand_number=2)                  # one human, one robot: stay
     assert not stats.frozen
     stats.record_vpip(HUMAN_ID)
-    api._record_g5_action_model_hand()
     human = stats.get(HUMAN_ID)
     assert (human.hands_seen, human.vpip_count) == (1, 1)
-    assert profiled == [{stable_player_name(ROBOT_ID)}]                      # the robot itself is not profiled
 
 
 def test_a_replayed_hand_flags_robots_like_a_live_one(tmp_path):

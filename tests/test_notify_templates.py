@@ -86,26 +86,6 @@ def test_bark_options_do_not_group_regular_events() -> None:
     assert format_bark_options("hand_swing", {}) == {}
     assert format_bark_options("profit_lock_trigger", {}) == {}
     assert format_bark_options("auto_rebuy", {}) == {}
-    assert format_bark_options("room_escape", {}) == {}
-
-
-def test_room_escape_message_describes_quickstart_reentry() -> None:
-    title, body, _ = format_bark_message(
-        "room_escape",
-        {
-            "bust_count": 2,
-            "bust_need": 2,
-            "byin_chips": 1_000_000,
-            "room_id": 20399138,
-            "big_blind": 10_000,
-            "rebuy_window_sec": 60,
-        },
-    )
-
-    assert title == "筹码清零 · 换桌"
-    assert "连续破产: 2/2 次" in body
-    assert "离桌后 QuickStart 换桌" in body
-    assert "预计买入: 1000000（100BB）" in body
 
 
 def test_bark_options_wss_uses_single_updatable_notice() -> None:

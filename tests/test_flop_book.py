@@ -128,7 +128,7 @@ def _btn_open_bb_call_api(monkeypatch, *, villain_start, hero_stack, open_to=35_
         decision_engine="cfr",
         equity_iterations=5,
     )
-    monkeypatch.setattr(api, "_local_shadow_decide", lambda *args, **kwargs: None)
+    monkeypatch.setattr(api, "_rule_engine_shadow_decide", lambda *args, **kwargs: None)
     players = [PlayerInfo(1, "BTN", villain_start, "BTN")]
     if third_player:
         players.append(PlayerInfo(2, "SB", villain_start, "SB"))
@@ -193,7 +193,7 @@ def test_cfr_decision_engine_uses_flop_book_and_picks_the_depth(monkeypatch, sta
     # Three players see the flop.
     (dict(villain_start=1_000_000, hero_stack=965_000, third_player=True), "requires_heads_up_active_players"),
 ])
-def test_cfr_flop_book_mismatch_falls_back_to_local(monkeypatch, kwargs, reason):
+def test_cfr_flop_book_mismatch_falls_back_to_rule_engine(monkeypatch, kwargs, reason):
     monkeypatch.setattr(
         "pokerfate.bot.poker_bot.PokerBot.decide",
         lambda self, gs, player_id, is_bb_option=False: Action(ActionType.CHECK, 0.0),
@@ -201,7 +201,7 @@ def test_cfr_flop_book_mismatch_falls_back_to_local(monkeypatch, kwargs, reason)
     api, decision = _btn_open_bb_call_api(monkeypatch, **kwargs)
 
     assert decision.action == "check"
-    assert api.last_decision_diagnostics()["decision_source"] == "pokerfate"
+    assert api.last_decision_diagnostics()["decision_source"] == "rule_engine"
     assert api._flop_book_error == reason
 
 

@@ -92,21 +92,22 @@ request_action()
 
 ### `pf_notify/` — 手机推送
 
-通过 [Bark](https://bark.day.app) 向 iPhone 推送关键事件。
+通过 [Bark](https://bark.day.app) 向 iPhone 推送。Bark App 里的设备 Key 写在 `local/secrets/bark_key.txt` 的第一行；没有这个文件就不推送。
 
-| 事件 | 触发时机 |
-|------|---------|
-| `auto_rebuy` | 筹码清零，自动续入时 |
-| `profit_lock_trigger` | 现金桌盈利锁仓触发（准备离桌时） |
-| `topup` | 桌上补码到账：补了多少、桌上筹码、本次启动盈亏 |
-| `loss_stop` | 净亏损到上限，放不下下一次买入：已停在大厅，重启后恢复 |
-| `table_leave` | 选桌让 bot 离开一张已经打过牌的桌子（没有真人了、真人少于人机等）；正文只有本次启动盈亏 |
-| `hand_swing` | 单手盈亏达到 20BB |
-| `wss_disconnected` | WebSocket 异常断开 |
-| `gamedata_no_history` | 本次进程首次遇到无历史数据玩家（code=-2），每次启动最多一次 |
-| `token_captured` | 模板支持；当前 `force_domain.py` 只写入 token 文件，不自动推送 |
+会推送的场景：
 
-设备 Key 存放在 `data/bark_key.txt`（第一行）。比赛房（SNG/MTT）里不发任何推送，包括 proxy 级别的 `wss_disconnected`；好友房跳过 BotBridge 产生的推送。
+- 筹码清零，自动续入
+- 桌上补码到账
+- 盈利锁仓触发，准备离桌
+- 净亏损到上限，停在大厅
+- 选桌让 bot 离开一张打过牌的桌子（没有真人、真人少于人机等）
+- 选桌在所有场次都找不到合格的牌桌，停在大厅
+- 单手盈亏达到 20BB
+- 第一次遇到没有历史数据的对手（每次启动最多一次）；对手历史数据接口鉴权失败
+- 校准队列积压：积压到提醒线、积压到暂停线（停止新对局）、恢复
+- 仅 proxy 模式：WebSocket 异常断开、恢复
+
+比赛房（SNG/MTT）和好友房里不发牌桌相关的提醒，比赛房连断线提醒也不发；校准队列提醒由独立的 worker 发，不看房间。
 
 ---
 
@@ -123,13 +124,16 @@ bash pf_intercept/tools/gen_pb2.sh
 
 ---
 
-### `data/` — 运行时数据
+### `local/` — 本机数据（不入库）
 
-| 文件 | 说明 |
+目录名叫 `data` 的都入库（如 `pokerfate/data/`：翻牌书、GTO 表、拟合出的模型）；只在本机才有的东西全部放在顶层 `local/`，由 `.gitignore` 的一条规则忽略。
+
+| 子目录 | 内容 |
 |------|------|
-| `bark_key.txt` | Bark 设备 Key（第一行） |
-| `auth_token.txt` | 游戏 REST API 鉴权 token（由 `force_domain.py` 登录时自动写入，无需手动填写） |
-| `ip_cache.json` | DNS 解析结果缓存（跨重启复用，加速连接） |
+| `local/secrets/` | 凭证和密钥：`bark_key.txt`（Bark 设备 Key，第一行）、`auth_token.txt`（游戏 REST API 鉴权 token，由 `force_domain.py` 登录时自动写入）、`headless_session.json`、`login_capture/`、`remote_live.json`（及它旁边的服务器证书和上传锁） |
+| `local/state/` | 不含凭证的小文件：`ip_cache.json`（DNS 解析结果缓存）、`discovered_server.json`、`selected_route.json`、`force_domain_original_response.json`、`hero_names.json` |
+| `local/models/` | bot 运行中学出来并不断改写的模型：`opponents.json`、`robots.json`、`range_v2_empirical_model.json` |
+| `local/training/` | 从对局里抽出的训练样本（`*.rows.jsonl`、`river_value_sizing.*.jsonl`）和它的工作队列 `live_spool/` |
 
 ---
 
@@ -146,7 +150,7 @@ bash pf_intercept/tools/gen_pb2.sh
 
 | 顺序 | 启动的东西 | 作用 |
 |------|-----------|------|
-| 1 | `mitmweb`（子进程，端口 `8080`） | HTTP 代理，挂载 `pf_reverse/force_domain.py`：从登录响应提取 `authorization` token 写入 `data/auth_token.txt`；过滤服务器列表，只保留证书覆盖范围内的域名服务器，首选域名记到 `data/discovered_server.json` |
+| 1 | `mitmweb`（子进程，端口 `8080`） | HTTP 代理，挂载 `pf_reverse/force_domain.py`：从登录响应提取 `authorization` token 写入 `local/secrets/auth_token.txt`；过滤服务器列表，只保留证书覆盖范围内的域名服务器，首选域名记到 `local/state/discovered_server.json` |
 | 2 | 伪 DNS `pf_intercept.dns_server`（子进程，端口 `53`） | 把游戏域名解析到本机，其余域名转发上游正常解析 |
 | 3 | proxy（launcher 进程本身） | WSS MITM（`9012`）、`443` / `80` 透传、bot 决策、牌局 Web（`9022`） |
 
@@ -248,7 +252,7 @@ mitmweb --listen-port 8080 --ignore-hosts "xiaomi.com|xiaomi.net|miui.com|aliyun
 
 ### 1. 首次获取凭证（新用户，或凭证过期后重做一次）
 
-凭证存在 `data/headless_session.json`，约 30 天过期；过期后 `pf_intercept.headless` 会报
+凭证存在 `local/secrets/headless_session.json`，约 30 天过期；过期后 `pf_intercept.headless` 会报
 `ResumeError`（提示"请重新薅凭证"），重复这一步即可。
 
 ```bash
@@ -269,7 +273,7 @@ mitmweb --listen-port 8080 --ignore-hosts "xiaomi.com|xiaomi.net|miui.com|aliyun
 2. 首次使用本机 mitmproxy 需要装根证书（手机浏览器访问 `mitm.it`）
 3. 手机上正常打开 PokerFate app，用真实账号登录一次
 
-脚本看到 `capture_login.py` 写出新的 `data/headless_session.json` 后会自动停掉 mitmdump 并退出；
+脚本看到 `capture_login.py` 写出新的 `local/secrets/headless_session.json` 后会自动停掉 mitmdump 并退出；
 之后不再需要这台手机。
 
 ### 2. 启动 headless

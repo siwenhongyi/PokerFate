@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONFIG = ROOT / "data" / "remote_live.json"
+DEFAULT_CONFIG = ROOT / "local" / "secrets" / "remote_live.json"
 SSH_HINT = "请提前配置 SSH 免密登录，并手动确认主机指纹（例如 ssh my-vps）；本次跳过远程直播，不影响 bot。"
 
 

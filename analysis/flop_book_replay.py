@@ -1,7 +1,7 @@
 """Replay logged flop decision points through a flop book (no solver, light CPU).
 
 Walks hands with the regular replay harness, but turn/river realtime CFR is switched off, so
-only the flop book lookup and the local engine run. For every hero flop decision it records
+only the flop book lookup and the rule engine run. For every hero flop decision it records
 whether the book answered, with which scenario/depth and action, or why it fell back.
 
     .venv/bin/python -m analysis.flop_book_replay --book pokerfate/data/flop_book/v3 \
@@ -56,7 +56,7 @@ def run(book_dir: str, logs: list, out: Path, opponents_model: str = "", seed: i
                 decision_seed=seed, decision_engine="cfr",
             )
             api._log._console = False
-            api._decide_with_realtime_cfr = lambda gs, street: None  # flop book + local only
+            api._decide_with_realtime_cfr = lambda gs, street: None  # flop book + rule engine only
             if opponents_model:
                 api._load_persisted_model(opponents_model)
             assert api._flop_book_engine is not None, f"flop book did not load from {book_dir}: {api._flop_book_error}"

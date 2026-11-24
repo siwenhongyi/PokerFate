@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--rows", type=Path, nargs="+", required=True,
                     help="full-mode rows, in the order they were played")
     ap.add_argument("--opponents", type=Path,
-                    default=ROOT / "pokerfate" / "data" / "local_models" / "opponents.json")
+                    default=ROOT / "local" / "models" / "opponents.json")
     ap.add_argument("--apply", action="store_true", help="replace the state in opponents.json (backup kept)")
     args = ap.parse_args(argv)
     rebuild_hero_eq(iter_rows(args.rows), args.opponents, args.apply)

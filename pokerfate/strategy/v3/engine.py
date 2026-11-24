@@ -45,7 +45,7 @@ _VOTE_LEVERAGE_DETERMINISTIC = os.environ.get("PF_V3_VOTE_LEVERAGE_DETERMINISTIC
 # (made-hand subtype, the opponent's line, texture), so an override that only
 # acts where the two disagree collects the formula's own errors. Facing a
 # bet the vote alone decides call or fold; all-in calls keep their price rule
-# in ``_decide_all_in``. Evidence: docs/candidates/local_engine_audit_2026-11-17.
+# in ``_decide_all_in``. Evidence: the rule engine audit of 2026-11-17.
 _EV_VETO_ENABLED = os.environ.get("PF_V3_EV_VETO", "1").lower() not in {
     "0", "false", "no", "off"
 }

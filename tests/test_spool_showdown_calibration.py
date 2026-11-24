@@ -3,7 +3,6 @@ import json
 import numpy as np
 
 from pokerfate.calibration.spool_showdown_calibration import (
-    FileSpoolRangeCompareCollector,
     FileSpoolShowdownCalibrator,
     _GB,
     _ensure_dirs,
@@ -75,65 +74,6 @@ def test_file_spool_worker_consumes_job_and_applies_updates(tmp_path):
     applied = cal.apply_pending_updates(HeroEquityCalibrator())
     assert applied >= 1
     assert list((spool_dir / "results").glob("*.pkl")) == []
-
-
-def test_range_compare_spool_worker_writes_hand_level_row(tmp_path):
-    runtime_root = tmp_path / "runtime_calibration"
-    spool_dir = runtime_root / "live_spool"
-    collector = FileSpoolRangeCompareCollector(
-        logger=None,
-        big_blind=10000,
-        spool_dir=spool_dir,
-        runtime_root=runtime_root,
-        start_worker=False,
-    )
-
-    collector.start_hand(
-        33,
-        players=[
-            {"player_id": 1, "name": "hero"},
-            {"player_id": 2, "name": "villain"},
-        ],
-        hero_id=1,
-    )
-    collector.record_decision_snapshot({
-        "decision_index": 1,
-        "street": "flop",
-        "opponents": [
-            {
-                "player_id": 2,
-                "name": "villain",
-                "pf_range_169": {"AKo": 0.7, "QQ": 0.3},
-                "g5_range_169": {"AKo": 0.2, "QQ": 0.8},
-            }
-        ],
-    })
-    collector.record_showdown(
-        shown_cards={2: ["Ac", "Kd"]},
-        final_board=["2c", "3d", "4h", "5s", "9c"],
-        hero_cards=["Qs", "Qh"],
-    )
-    collector.finalize_hand()
-
-    assert len(list((spool_dir / "pending").glob("*.pkl"))) == 1
-    assert run_spool_worker_once(
-        spool_dir=spool_dir,
-        runtime_root=runtime_root,
-        max_jobs=1,
-    ) == 1
-
-    row_files = list(runtime_root.glob("range_compare.*.jsonl"))
-    assert len(row_files) == 1
-    row = json.loads(row_files[0].read_text(encoding="utf-8").strip())
-    assert row["schema"] == "runtime_range_compare_169_v1"
-    assert row["hand_id"] == 33
-    assert len(row["snapshots"]) == 1
-    comparison = row["comparisons"][0]
-    assert comparison["actual_category"] == "AKo"
-    assert comparison["pf_prob"] == 0.7
-    assert comparison["g5_prob"] == 0.2
-    assert comparison["pf_rank"] == 1
-    assert comparison["g5_rank"] == 2
 
 
 def test_target_worker_count_uses_backlog_to_drain():

@@ -41,7 +41,6 @@ from pokerfate.strategy.range_v2.hero_eq_calibrator import (
 
 
 _SPOOL_SCHEMA = "showdown_calibration_spool_v1"
-_RANGE_COMPARE_SPOOL_SCHEMA = "range_compare_169_spool_v1"
 _UPDATE_SCHEMA = "showdown_calibration_updates_v1"
 _GB = 1024 ** 3
 _DEFAULT_MIN_WORKERS = 1
@@ -59,7 +58,7 @@ def _repo_root() -> Path:
 
 
 def _default_runtime_root() -> Path:
-    return _repo_root() / "data" / "runtime_calibration"
+    return _repo_root() / "local" / "training"
 
 
 def _default_spool_dir() -> Path:
@@ -555,158 +554,6 @@ class FileSpoolShowdownCalibrator:
         return snap
 
 
-class FileSpoolRangeCompareCollector:
-    """Hand-level PokerFate-vs-g5 range comparison collector.
-
-    The live path only appends small decision snapshots and writes a single
-    completed-hand job.  The shared spool worker computes comparison metrics
-    and appends JSONL rows off the WSS/BotAPI process.
-    """
-
-    def __init__(
-        self,
-        logger=None,
-        *,
-        big_blind: float = 0.0,
-        spool_dir: Optional[Path | str] = None,
-        runtime_root: Optional[Path | str] = None,
-        start_worker: bool = True,
-        poll_sec: float = 0.20,
-    ) -> None:
-        self._logger = logger
-        self._big_blind = float(big_blind or 0.0)
-        self._runtime_root = (
-            Path(runtime_root) if runtime_root is not None else _default_runtime_root()
-        )
-        self._spool_dir = Path(spool_dir) if spool_dir is not None else _default_spool_dir()
-        self._dirs = _ensure_dirs(self._spool_dir)
-        self._start_worker = bool(start_worker)
-        self._poll_sec = max(0.05, float(poll_sec or 0.20))
-        self._worker: Optional[subprocess.Popen] = None
-        self._session_id = f"{int(time.time())}-{os.getpid()}"
-
-        self._hand_id = 0
-        self._hero_id: Optional[int] = None
-        self._players: list[dict[str, Any]] = []
-        self._snapshots: list[dict[str, Any]] = []
-        self._shown_cards: dict[int, list[str]] = {}
-        self._hero_cards: list[str] = []
-        self._final_board: list[str] = []
-        self._submitted_hand = False
-
-        if self._start_worker:
-            self._ensure_worker()
-
-    def set_big_blind(self, big_blind: float) -> None:
-        self._big_blind = float(big_blind or 0.0)
-
-    def start_hand(
-        self,
-        hand_id: int,
-        *,
-        players: Optional[list[dict[str, Any]]] = None,
-        hero_id: Optional[int] = None,
-    ) -> None:
-        self._hand_id = int(hand_id)
-        self._hero_id = int(hero_id) if hero_id is not None else None
-        self._players = [dict(p) for p in (players or [])]
-        self._snapshots = []
-        self._shown_cards = {}
-        self._hero_cards = []
-        self._final_board = []
-        self._submitted_hand = False
-
-    def discard_hand(self) -> None:
-        self._snapshots = []
-        self._shown_cards = {}
-        self._hero_cards = []
-        self._final_board = []
-        self._submitted_hand = False
-
-    def record_decision_snapshot(self, snapshot: dict[str, Any]) -> None:
-        if self._submitted_hand:
-            return
-        opponents = snapshot.get("opponents") if isinstance(snapshot, dict) else None
-        if not opponents:
-            return
-        self._snapshots.append(_json_clone(snapshot))
-
-    def record_showdown(
-        self,
-        *,
-        shown_cards: dict[int, list[Any]],
-        final_board: list[Any],
-        hero_cards: Optional[list[Any]] = None,
-    ) -> None:
-        self._shown_cards = {
-            int(pid): [str(c) for c in list(cards or [])[:2]]
-            for pid, cards in (shown_cards or {}).items()
-            if cards
-        }
-        self._final_board = [str(c) for c in (final_board or [])]
-        self._hero_cards = [str(c) for c in (hero_cards or [])]
-
-    def finalize_hand(self) -> None:
-        if self._submitted_hand:
-            return
-        if not self._snapshots or not self._shown_cards:
-            return
-        shown_without_hero = {
-            pid: cards
-            for pid, cards in self._shown_cards.items()
-            if self._hero_id is None or int(pid) != int(self._hero_id)
-        }
-        if not shown_without_hero:
-            return
-        job = {
-            "schema": _RANGE_COMPARE_SPOOL_SCHEMA,
-            "created_at": time.time(),
-            "producer_pid": os.getpid(),
-            "session_id": self._session_id,
-            "hand_id": int(self._hand_id),
-            "big_blind": float(self._big_blind or 0.0),
-            "hero_id": self._hero_id,
-            "hero_cards": list(self._hero_cards),
-            "final_board": list(self._final_board),
-            "players": list(self._players),
-            "shown_cards": shown_without_hero,
-            "snapshots": list(self._snapshots),
-        }
-        name = f"range_compare_hand_{self._hand_id}_{os.getpid()}_{time.time_ns()}.pkl"
-        try:
-            _atomic_pickle(self._dirs["pending"] / name, job)
-            self._submitted_hand = True
-            self._ensure_worker()
-            _log_raw(self._logger, {
-                "event": "range_compare_spool_submitted",
-                "hand": int(self._hand_id),
-                "snapshots": len(self._snapshots),
-                "shown_players": len(shown_without_hero),
-            })
-        except Exception:
-            traceback.print_exc()
-
-    def close(self) -> None:
-        self._worker = None
-
-    def _ensure_worker(self) -> None:
-        if not self._start_worker:
-            return
-        if self._worker is not None and self._worker.poll() is None:
-            return
-        self._worker = ensure_spool_worker_process(
-            spool_dir=self._spool_dir,
-            runtime_root=self._runtime_root,
-            poll_sec=self._poll_sec,
-            parent_pid=os.getpid(),
-            logger=self._logger,
-        )
-
-
-def _json_clone(value: Any) -> Any:
-    return json.loads(json.dumps(value, ensure_ascii=False, default=str))
-
-
 def _updates_from_results(results: list[CalibrationResult]) -> list[dict[str, Any]]:
     updates: list[dict[str, Any]] = []
     for result in results:
@@ -729,160 +576,6 @@ def _updates_from_results(results: list[CalibrationResult]) -> list[dict[str, An
     return updates
 
 
-_RANK_TO_VALUE = {
-    "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7,
-    "8": 8, "9": 9, "T": 10, "J": 11, "Q": 12, "K": 13, "A": 14,
-}
-_VALUE_TO_RANK = {v: k for k, v in _RANK_TO_VALUE.items()}
-
-
-def _category_from_cards(cards: list[Any]) -> str:
-    if not cards or len(cards) < 2:
-        return ""
-    c1 = str(cards[0]).strip()
-    c2 = str(cards[1]).strip()
-    if len(c1) < 2 or len(c2) < 2:
-        return ""
-    r1 = _RANK_TO_VALUE.get(c1[0].upper())
-    r2 = _RANK_TO_VALUE.get(c2[0].upper())
-    if r1 is None or r2 is None:
-        return ""
-    hi, lo = max(r1, r2), min(r1, r2)
-    if hi == lo:
-        return f"{_VALUE_TO_RANK[hi]}{_VALUE_TO_RANK[lo]}"
-    suited = "s" if c1[1].lower() == c2[1].lower() else "o"
-    return f"{_VALUE_TO_RANK[hi]}{_VALUE_TO_RANK[lo]}{suited}"
-
-
-def _range_prob(range_map: Any, category: str) -> float:
-    if not isinstance(range_map, dict) or not category:
-        return 0.0
-    try:
-        return max(0.0, float(range_map.get(category, 0.0) or 0.0))
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _range_rank(range_map: Any, category: str) -> Optional[int]:
-    if not isinstance(range_map, dict) or not category:
-        return None
-    prob = _range_prob(range_map, category)
-    if prob <= 0.0:
-        return None
-    values = []
-    for value in range_map.values():
-        try:
-            values.append(float(value or 0.0))
-        except (TypeError, ValueError):
-            continue
-    return 1 + sum(1 for value in values if value > prob)
-
-
-def _top_categories(range_map: Any, limit: int) -> list[str]:
-    if not isinstance(range_map, dict):
-        return []
-    pairs = []
-    for key, value in range_map.items():
-        try:
-            pairs.append((str(key), float(value or 0.0)))
-        except (TypeError, ValueError):
-            continue
-    pairs.sort(key=lambda item: item[1], reverse=True)
-    return [key for key, value in pairs[:limit] if value > 0.0]
-
-
-def _range_compare_row_from_job(job: dict[str, Any]) -> dict[str, Any]:
-    hand_id = int(job.get("hand_id", 0) or 0)
-    hero_id = job.get("hero_id")
-    shown_players: dict[str, dict[str, Any]] = {}
-    for pid, cards in (job.get("shown_cards") or {}).items():
-        pid_s = str(pid)
-        cards_l = [str(c) for c in list(cards or [])[:2]]
-        shown_players[pid_s] = {
-            "player_id": pid_s,
-            "cards": cards_l,
-            "category": _category_from_cards(cards_l),
-        }
-
-    comparisons: list[dict[str, Any]] = []
-    for snapshot in list(job.get("snapshots") or []):
-        if not isinstance(snapshot, dict):
-            continue
-        decision_index = int(snapshot.get("decision_index", 0) or 0)
-        street = str(snapshot.get("street") or "")
-        for opponent in list(snapshot.get("opponents") or []):
-            if not isinstance(opponent, dict):
-                continue
-            pid_s = str(opponent.get("player_id"))
-            actual = shown_players.get(pid_s)
-            if not actual:
-                continue
-            category = str(actual.get("category") or "")
-            pf_range = opponent.get("pf_range_169") or {}
-            g5_range = opponent.get("g5_range_169") or {}
-            pf_prob = _range_prob(pf_range, category)
-            g5_prob = _range_prob(g5_range, category)
-            comparisons.append({
-                "decision_index": decision_index,
-                "street": street,
-                "player_id": pid_s,
-                "player_name": str(opponent.get("name") or ""),
-                "actual_cards": list(actual.get("cards") or []),
-                "actual_category": category,
-                "pf_prob": pf_prob,
-                "g5_prob": g5_prob,
-                "pf_logloss": -math.log(max(pf_prob, 1e-12)),
-                "g5_logloss": -math.log(max(g5_prob, 1e-12)),
-                "pf_rank": _range_rank(pf_range, category),
-                "g5_rank": _range_rank(g5_range, category),
-                "pf_top5_hit": category in set(_top_categories(pf_range, 5)),
-                "g5_top5_hit": category in set(_top_categories(g5_range, 5)),
-                "pf_top20_hit": category in set(_top_categories(pf_range, 20)),
-                "g5_top20_hit": category in set(_top_categories(g5_range, 20)),
-            })
-
-    return {
-        "hand_id": hand_id,
-        "created_at": float(job.get("created_at", 0.0) or 0.0),
-        "hero_id": str(hero_id) if hero_id is not None else "",
-        "hero_cards": [str(c) for c in (job.get("hero_cards") or [])],
-        "final_board": [str(c) for c in (job.get("final_board") or [])],
-        "players": list(job.get("players") or []),
-        "shown_players": list(shown_players.values()),
-        "snapshots": list(job.get("snapshots") or []),
-        "comparisons": comparisons,
-    }
-
-
-def _process_range_compare_job(
-    path: Path,
-    *,
-    runtime_root: Path,
-    job: dict[str, Any],
-    job_size: int,
-) -> dict[str, Any]:
-    hand_id = int(job.get("hand_id", 0) or 0)
-    row = _range_compare_row_from_job(job)
-    recorder = RuntimeCalibrationRecorder(
-        root=runtime_root,
-        session_id=str(job.get("session_id") or ""),
-    )
-    row_count = recorder.write_range_compare(
-        row,
-        big_blind=float(job.get("big_blind", 0.0) or 0.0),
-        hand_id=hand_id,
-        source="runtime",
-    )
-    path.unlink()
-    return {
-        "hand_id": hand_id,
-        "row_count": row_count,
-        "update_count": 0,
-        "prediction_count": len(job.get("snapshots") or []),
-        "shown_count": len(job.get("shown_cards") or {}),
-        "work_units": len(row.get("comparisons") or []),
-        "bytes": job_size,
-    }
 
 
 def _claim_next_job(dirs: dict[str, Path], *, worker_id: str = "") -> Optional[Path]:
@@ -929,13 +622,6 @@ def _process_job(path: Path, *, runtime_root: Path, dirs: dict[str, Path]) -> di
     job_size = int(path.stat().st_size)
     job = _read_pickle(path)
     schema = job.get("schema")
-    if schema == _RANGE_COMPARE_SPOOL_SCHEMA:
-        return _process_range_compare_job(
-            path,
-            runtime_root=runtime_root,
-            job=job,
-            job_size=job_size,
-        )
     if schema != _SPOOL_SCHEMA:
         raise ValueError(f"unsupported spool schema: {job.get('schema')!r}")
 
@@ -1414,7 +1100,7 @@ def worker_loop(
     max_workers = int(max_workers or _default_max_workers())
     max_workers = max(1, min(8, max_workers))
     min_workers = max(0, min(int(min_workers), max_workers))
-    key_path = Path(key_file) if key_file is not None else (_repo_root() / "data" / "bark_key.txt")
+    key_path = Path(key_file) if key_file is not None else (_repo_root() / "local" / "secrets" / "bark_key.txt")
 
     _reclaim_stale_processing(dirs, stale_sec=0.0)
     pid_path = dirs["root"] / _SUPERVISOR_PID_FILE
@@ -1643,7 +1329,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     worker.add_argument("--stop-gb", type=float, default=50.0)
     worker.add_argument(
         "--key-file",
-        default=str(_repo_root() / "data" / "bark_key.txt"),
+        default=str(_repo_root() / "local" / "secrets" / "bark_key.txt"),
     )
     return parser
 

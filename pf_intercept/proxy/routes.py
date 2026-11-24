@@ -19,11 +19,11 @@ from pf_intercept.config import (
 log = logging.getLogger("pf_proxy")
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_DATA_DIR = _PROJECT_ROOT / "data"
-_DATA_DIR.mkdir(exist_ok=True)
-_IP_CACHE_FILE = _DATA_DIR / "ip_cache.json"
-_ORIGINAL_RESPONSE_FILE = _DATA_DIR / "force_domain_original_response.json"
-_SELECTED_ROUTE_FILE = _DATA_DIR / "selected_route.json"
+_STATE_DIR = _PROJECT_ROOT / "local" / "state"
+_STATE_DIR.mkdir(parents=True, exist_ok=True)
+_IP_CACHE_FILE = _STATE_DIR / "ip_cache.json"
+_ORIGINAL_RESPONSE_FILE = _STATE_DIR / "force_domain_original_response.json"
+_SELECTED_ROUTE_FILE = _STATE_DIR / "selected_route.json"
 _ROUTE_HOST_FAST_MS = 100.0
 _ROUTE_CACHE_TTL_SEC = 120.0
 

@@ -363,7 +363,7 @@ class FlopBook:
 
 
 class FlopBookDecisionEngine:
-    """Heads-up SRP flop book with local fallback reasons."""
+    """Heads-up SRP flop book with rule engine fallback reasons."""
 
     def __init__(self, options: Optional[FlopBookOptions] = None, book: Optional[FlopBook] = None):
         self.options = options or FlopBookOptions()

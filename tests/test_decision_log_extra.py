@@ -39,9 +39,9 @@ def test_decision_record_has_source_purpose_and_calibration(tmp_path):
     decisions = [r for r in _rows(log_path) if r.get("event") == "decision"]
     assert len(decisions) == 2
     pre, flop = decisions
-    assert pre["decision_source"] == "pokerfate"
+    assert pre["decision_source"] == "rule_engine"
     assert pre.get("facing_action") == "open"
-    assert flop["decision_source"] == "pokerfate"
+    assert flop["decision_source"] == "rule_engine"
     assert flop.get("final_purpose")
     assert "equity_calibration" in flop
     assert set(flop["equity_calibration"]) >= {"raw", "final", "online_bias"}

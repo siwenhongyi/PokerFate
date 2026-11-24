@@ -36,17 +36,14 @@ BARK_EVENT_ICONS: dict[str, str] = {
     "wss_disconnected": f"{_FE}/Exploding%20Head/3D/exploding_head_3d.png",
     "wss_reconnected": f"{_FE}/Exploding%20Head/3D/exploding_head_3d.png",
     "auto_rebuy": f"{_FE}/Money%20with%20Wings/3D/money_with_wings_3d.png",
-    "room_escape": f"{_FE}/Money%20with%20Wings/3D/money_with_wings_3d.png",
     "profit_lock_trigger": f"{_FE}/Gem%20Stone/3D/gem_stone_3d.png",
     "table_leave": f"{_FE}/Robot/3D/robot_3d.png",
     "topup": f"{_FE}/Coin/3D/coin_3d.png",
     "loss_stop": f"{_FE}/Face%20Screaming%20in%20Fear/3D/face_screaming_in_fear_3d.png",
-    "chips_below_50bb": f"{_FE}/Face%20Screaming%20in%20Fear/3D/face_screaming_in_fear_3d.png",
     "hand_swing_up": f"{_FE}/Chart%20Increasing/3D/chart_increasing_3d.png",
     "hand_swing_down": f"{_FE}/Chart%20Decreasing/3D/chart_decreasing_3d.png",
     "gamedata_no_history": f"{_FE}/Ghost/3D/ghost_3d.png",
     "gamedata_auth_failed": f"{_FE}/Key/3D/key_3d.png",
-    "token_captured": f"{_FE}/Key/3D/key_3d.png",
 }
 
 _WSS_NOTICE_ID = "pokerfate-wss-disconnected"
@@ -131,23 +128,6 @@ def format_bark_message(event: str, fields: dict[str, Any]) -> tuple[str, str, s
         )
         return title, body, icon
 
-    if event == "room_escape":
-        balance_lines = ""
-        if "session_delta_chips" in fields:
-            balance_lines = (
-                f"\n本次启动盈亏: {_format_optional_chips(fields.get('session_delta_chips'))}（筹码）"
-            )
-        title = "筹码清零 · 换桌"
-        body = (
-            f"连续破产: {fields.get('bust_count')}/{fields.get('bust_need')} 次\n"
-            f"动作: 离桌后 QuickStart 换桌\n"
-            f"预计买入: {fields.get('byin_chips')}（100BB）\n"
-            f"房间 room_id={fields.get('room_id')}  BB={fields.get('big_blind')}\n"
-            f"rebuy 窗口: {fields.get('rebuy_window_sec')} 秒"
-            f"{balance_lines}"
-        )
-        return title, body, icon
-
     if event == "profit_lock_trigger":
         delta_str = _format_optional_chips(fields.get("session_delta_chips"))
         title = "盈利锁仓 · 已触发"
@@ -223,11 +203,6 @@ def format_bark_message(event: str, fields: dict[str, Any]) -> tuple[str, str, s
     if event == "gamedata_auth_failed":
         title = "对手历史查询 · 登录态失效"
         body = "HTTP 鉴权失败（code=-2），暂停查询对手历史统计。\n更新有效凭证后重试；游戏对局继续。"
-        return title, body, icon
-
-    if event == "token_captured":
-        title = "Token · 已自动捕获"
-        body = f"mitmproxy 拦截到登录响应\nauth_token.txt 已更新"
         return title, body, icon
 
     title = str(fields.get("title", event))

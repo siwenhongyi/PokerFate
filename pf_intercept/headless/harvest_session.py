@@ -1,4 +1,4 @@
-"""Standalone entry point: harvest/refresh ``data/headless_session.json``.
+"""Standalone entry point: harvest/refresh ``local/secrets/headless_session.json``.
 
 Run this once to get the headless (pure-API) client working for the first
 time, and again whenever it reports a stale/expired session (``ResumeError``
@@ -15,7 +15,7 @@ this script automates:
 
     1. start mitmdump with pf_reverse/capture_login.py mounted
     2. print the phone-side setup steps (proxy host:port, CA install)
-    3. wait for data/headless_session.json to be (re)written
+    3. wait for local/secrets/headless_session.json to be (re)written
     4. stop mitmdump and exit — from here on, headless play needs no device
 
 Usage (also runnable as-is from PyCharm, no package context needed):
@@ -36,7 +36,7 @@ import time
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_SESSION_FILE = _PROJECT_ROOT / "data" / "headless_session.json"
+_SESSION_FILE = _PROJECT_ROOT / "local" / "secrets" / "headless_session.json"
 _CAPTURE_ADDON = _PROJECT_ROOT / "pf_reverse" / "capture_login.py"
 
 # Real candidate login addresses, straight from the reversed client config —

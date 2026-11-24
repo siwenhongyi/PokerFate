@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 
-MODEL_DIR = Path(__file__).resolve().parents[1] / "data" / "local_models"
+MODEL_DIR = Path(__file__).resolve().parents[2] / "local" / "models"
 OPPONENT_MODEL_FILE = "opponents.json"
 
 FEATURES = (

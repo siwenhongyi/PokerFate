@@ -5,7 +5,7 @@
     .venv/bin/python scripts/analyze_range_ece.py --since 2026-11-13 # another window (date or epoch)
     .venv/bin/python scripts/analyze_range_ece.py --since 0          # everything, old models included
 
-Reads data/runtime_calibration/*.rows.jsonl; rows about house robots are always left out.
+Reads local/training/*.rows.jsonl; rows about house robots are always left out.
 """
 
 from __future__ import annotations

@@ -1,9 +1,9 @@
 """mitmproxy addon: capture the game login and auto-refresh headless creds.
 
 On every /login round-trip it:
-  1. saves the raw request/response to data/login_capture/ (git-ignored), and
+  1. saves the raw request/response to local/secrets/login_capture/ (git-ignored), and
   2. on a SUCCESS (code 0/-6, with uid/rdkey/server), writes the harvested
-     session straight into data/headless_session.json — the file the headless
+     session straight into local/secrets/headless_session.json — the file the headless
      client reads — so there is no manual "copy the credentials over" step.
 
 So the whole flow becomes: phone opens the game (logs in through this proxy) →
@@ -37,8 +37,8 @@ from pathlib import Path
 from mitmproxy import http
 
 _REPO_ROOT = Path(__file__).parent.parent
-_OUT_DIR = _REPO_ROOT / "data" / "login_capture"
-_SESSION_FILE = _REPO_ROOT / "data" / "headless_session.json"
+_OUT_DIR = _REPO_ROOT / "local" / "secrets" / "login_capture"
+_SESSION_FILE = _REPO_ROOT / "local" / "secrets" / "headless_session.json"
 _PATHS = ("/login", "/player/valid", "/captcha")
 _OK_CODES = {0, -6}  # LoginModel treats -6 (risk warning) as success too.
 
@@ -62,7 +62,7 @@ def _jwt_exp(token: str) -> int | None:
 
 
 def _write_session(request: dict, response: dict, version: str) -> str | None:
-    """Write data/headless_session.json from a successful /login; returns path or None."""
+    """Write local/secrets/headless_session.json from a successful /login; returns path or None."""
     if not isinstance(response, dict) or int(response.get("code", 0) or 0) not in _OK_CODES:
         return None
     uid = response.get("uid")

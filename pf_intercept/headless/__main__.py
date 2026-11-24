@@ -1,7 +1,7 @@
 """CLI: ``python -m pf_intercept.headless``.
 
 Headless (pure-API) play: connect to the game WSS with saved session
-credentials (``data/headless_session.json``: uid / rdkey / authorization,
+credentials (``local/secrets/headless_session.json``: uid / rdkey / authorization,
 harvested from one real device login), skipping /login and YiDun risk control
 entirely.  The live-table web is started by default so the game can be watched
 in a browser (bind 0.0.0.0 → reachable from a phone on the same Wi-Fi).
@@ -34,7 +34,7 @@ from pf_notify.config import load_bark_key_file, set_bark_key
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _LOGS_DIR = _PROJECT_ROOT / "pf_intercept" / "logs"
 _PID_FILE = _LOGS_DIR / "headless.pid"
-_DEFAULT_SESSION_FILE = _PROJECT_ROOT / "data" / "headless_session.json"
+_DEFAULT_SESSION_FILE = _PROJECT_ROOT / "local" / "secrets" / "headless_session.json"
 log = logging.getLogger("pf_headless")
 
 # 等价于启动命令里的 PYTHONUNBUFFERED=1：stdout/stderr 被 nohup 重定向到文件时仍即时落盘，
@@ -67,7 +67,7 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="PokerFate headless client (pure API, no game client, no device)")
     p.add_argument("--stop", action="store_true", help="通过 PID 文件校验并优雅停止本项目的 headless 实例（不登录游戏）")
     p.add_argument("--session-file", type=Path, default=None,
-                   help="会话凭证文件（默认 data/headless_session.json）")
+                   help="会话凭证文件（默认 local/secrets/headless_session.json）")
     p.add_argument("--bb", type=int, default=0, help="进桌：大厅现金桌大盲（如 10000）。不传则只登录+心跳")
     p.add_argument("--buyin-bb", type=int, default=100, help="买入多少个大盲，默认 100")
     p.add_argument("--max-auto-rebuy", type=int, default=1, metavar="N",
@@ -80,11 +80,11 @@ def _parse_args() -> argparse.Namespace:
                    help="选桌换场的偏好顺序，如 10000,5000,20000；默认从 --bb 起由近到远、同距离先高后低，范围 1000..20000。"
                         "选桌本身没有开关：桌上没有真人或真人少于人机就换桌，连续不合格则换场")
     p.add_argument("--hold", type=float, default=30.0, help="不进桌时登录后保持连接的秒数，默认 30")
-    p.add_argument("--no-notify", action="store_true", help="不发 Bark 通知（默认启用，读 data/bark_key.txt）")
+    p.add_argument("--no-notify", action="store_true", help="不发 Bark 通知（默认启用，读 local/secrets/bark_key.txt）")
     p.add_argument("--no-auto-rewards", action="store_true", help="关闭基金、每日/每周/挑战任务和活跃度奖励自动领取（默认开启）")
     p.add_argument("--no-auto-dispatch", action="store_true", help="只关闭协会经营（派遣）的自动派遣和领奖，其余奖励照常")
     p.add_argument("--no-web", action="store_true", help="不启动实时对局 Web（默认启动）")
-    p.add_argument("--no-remote-live", action="store_true", help="关闭远程直播上传（默认开启；读取 data/remote_live.json，失败自动跳过）")
+    p.add_argument("--no-remote-live", action="store_true", help="关闭远程直播上传（默认开启；读取 local/secrets/remote_live.json，失败自动跳过）")
     p.add_argument("--web-host", default="0.0.0.0", help="Web 绑定地址，默认 0.0.0.0（允许局域网/手机访问）")
     p.add_argument("--web-port", type=int, default=9022, help="Web 端口，默认 9022")
     p.add_argument("-v", "--verbose", action="store_true")
@@ -207,10 +207,10 @@ async def _run(args: argparse.Namespace, stop: asyncio.Event | None = None) -> i
     # Bark 通知：headless 进程不经过 proxy 的 bot_worker，必须自己加载 key。
     if not args.no_notify:
         try:
-            key = load_bark_key_file(_PROJECT_ROOT / "data" / "bark_key.txt")
+            key = load_bark_key_file(_PROJECT_ROOT / "local" / "secrets" / "bark_key.txt")
             set_bark_key(key)
             print("[headless] Bark 通知已启用" if key else
-                  "[headless] 未找到 data/bark_key.txt，通知关闭", file=sys.stderr)
+                  "[headless] 未找到 local/secrets/bark_key.txt，通知关闭", file=sys.stderr)
         except Exception as exc:
             print(f"[headless] Bark key 加载失败: {exc}", file=sys.stderr)
 

@@ -413,7 +413,7 @@ def test_headless_web_bankroll_tracks_wallet_hands_rebuy_and_leave(monkeypatch):
             final = await dashboard(table_chips=210, session_delta_chips=-190)
             assert [p["buyin_seq"] for p in final["hand_points"]] == [1, 1, 2]
             assert [p["hand_delta_chips"] for p in final["hand_points"]] == [30, -230, 10]
-            assert final["profit_lock_count"] == final["room_escape_count"] == 0
+            assert final["profit_lock_count"] == 0
 
             ws.push("pb.LeaveRoomRSP", {"code": 0})
             wallet(49_810)

@@ -253,7 +253,7 @@ def _finish(release, previous, ip, port):
         if old.is_dir() and old not in (release, previous):
             shutil.rmtree(old)
     suffix = "" if port == 443 else f":{port}"
-    print(f"部署成功：https://{ip}{suffix}/（账号 viewer；口令在本机 data/remote_live.json）", flush=True)
+    print(f"部署成功：https://{ip}{suffix}/（账号 viewer；口令在本机 local/secrets/remote_live.json）", flush=True)
 
 
 if __name__ == "__main__":

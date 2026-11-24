@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-HERO_NAMES_FILE = REPO_ROOT / "data" / "hero_names.json"
+HERO_NAMES_FILE = REPO_ROOT / "local" / "state" / "hero_names.json"
 
 
 @dataclass(frozen=True)
