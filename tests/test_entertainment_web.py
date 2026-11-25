@@ -1,64 +1,73 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 
-from pf_entertainment.web import EntertainmentWebServer, _HttpRequest
+import pytest
 
 
-def test_web_range_compare_api_runs_analysis(monkeypatch) -> None:
-    class Runtime:
-        def __init__(self) -> None:
-            self.log = logging.getLogger("test-web-runtime")
+@pytest.mark.parametrize("mode", ["proxy", "headless"])
+def test_web_owns_its_log_in_both_modes(tmp_path, monkeypatch, caplog, mode):
+    from pf_entertainment import logger as web_logging
+    from pf_entertainment.live_table import LiveTableObserver, start_live_web
+    from pf_entertainment.runtime import EntertainmentRuntime
 
-    async def fake_runner(self):
-        return {"ok": True, "summary": {"count": 1}, "conclusion": ["ok"]}
+    log_path = tmp_path / "web.log"
+    monkeypatch.setattr(web_logging, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(web_logging, "LOG_FILE", log_path)
+    logger = logging.getLogger("pf_web")
+    monkeypatch.setattr(logger, "handlers", [])
+    monkeypatch.setattr(logger, "level", logger.level)
+    monkeypatch.setattr(logger, "propagate", logger.propagate)
+    caplog.set_level(logging.INFO)
 
-    monkeypatch.setattr(
-        EntertainmentWebServer,
-        "_run_range_analysis_subprocess",
-        fake_runner,
-    )
+    async def request(server):
+        reader, writer = await asyncio.open_connection("127.0.0.1", server.port)
+        try:
+            writer.write(b"GET /api/status HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            await writer.drain()
+            return await asyncio.wait_for(reader.read(), timeout=3)
+        finally:
+            writer.close()
+            await writer.wait_closed()
 
-    async def run() -> tuple[int, dict, int, dict]:
-        server = EntertainmentWebServer(runtime=Runtime())
-        start_request = _HttpRequest(
-            method="POST",
-            target="/api/range/compare",
-            path="/api/range/compare",
-            query={},
-            headers={},
-            body=b"",
-        )
-        status, _headers, body = await server._route(start_request)
-        start_data = json.loads(body)
-        assert server._range_task is not None
-        await server._range_task
-        status2, _headers2, body2 = await server._route(
-            _HttpRequest(
-                method="GET",
-                target="/api/range/compare/status",
-                path="/api/range/compare/status",
-                query={},
-                headers={},
-                body=b"",
-            )
-        )
-        return status, start_data, status2, json.loads(body2)
+    async def run():
+        if mode == "proxy":
+            runtime = EntertainmentRuntime(web_host="127.0.0.1", web_port=0)
+            assert not log_path.exists()  # the host runtime does not configure logging
+            await runtime.start()
+            server = runtime._web
+        else:
+            server = await start_live_web(LiveTableObserver(), host="127.0.0.1", port=0)
+        try:
+            assert not hasattr(server.runtime, "log")
+            assert server.log is web_logging.get_logger()
+            assert len(logger.handlers) == 2  # one file and one console handler
+            await server.start()  # repeat startup adds neither handlers nor startup records
+            assert b"200 OK" in await request(server)
 
-    status, start_data, status2, final_data = asyncio.run(run())
+            def broken_status():
+                raise RuntimeError("test status failure")
 
-    assert status == 202
-    assert start_data["ok"] is True
-    assert start_data["job"]["status"] == "running"
-    assert status2 == 200
-    assert final_data["job"]["status"] == "done"
-    assert final_data["job"]["result"] == {
-        "ok": True,
-        "summary": {"count": 1},
-        "conclusion": ["ok"],
-    }
+            monkeypatch.setattr(server.runtime, "status_data", broken_status)
+            assert b"500 Internal Server Error" in await request(server)
+            text = log_path.read_text()
+            assert text.count("Web 已启动") == 1
+            assert text.count("Web 可访问地址") == 1
+            assert f"http://127.0.0.1:{server.port}" in text
+            assert text.count("Web 请求失败") == 1
+            assert "RuntimeError: test status failure" in text
+            assert not any(record.name == "pf_web" for record in caplog.records)
+            assert not (tmp_path / "entertainment.log").exists()
+        finally:
+            server._server.close()
+            await server._server.wait_closed()
+
+    try:
+        asyncio.run(run())
+    finally:
+        for handler in logger.handlers:
+            handler.close()
 
 
 def test_live_table_treats_missing_seatid_as_seat_zero():

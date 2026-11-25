@@ -720,9 +720,6 @@ async def main(
         f"[proxy] 心跳监控  wss_gap_warn={_WSS_GAP_WARN_SEC:.1f}s  "
         f"loop_lag_warn={_EVENT_LOOP_LAG_WARN_SEC:.1f}s"
     )
-    urls = _entertainment.status_data().get("web_urls", [])
-    print(f"[proxy] 牌局 Web {', '.join(urls) or '-'}")
-
     server_ssl = _make_server_ssl()
 
     await websockets.serve(

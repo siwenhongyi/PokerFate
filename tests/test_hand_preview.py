@@ -1,4 +1,4 @@
-from pf_entertainment.hand_preview import hand_list_payload, read_hands
+from pf_entertainment.hand_preview import _snap_stake, hand_detail_payload, hand_list_payload, read_hands
 
 
 def test_hand_preview_recognizes_multi_word_hero_vpip(tmp_path):
@@ -169,3 +169,55 @@ def test_hand_list_board_prefix_search_uses_rank_prefix(tmp_path):
     four_card = hand_list_payload(board="A 2 5 7", vpip="all", log_path=log_path)
     assert four_card["count"] == 1
     assert four_card["hands"][0]["hand_no"] == 2
+
+
+def test_hand_detail_reads_the_hand_street_by_street(tmp_path):
+    log_path = tmp_path / "pokerfate_console.log"
+    log_path.write_text("\n".join([
+        "[05:03:00] ",
+        "[05:03:00] ━━━━━━━━━━",
+        "[05:03:00]   第 222 手   雷人 出世 105bb [庄]   Royal Police 86bb [大盲]",
+        "[05:03:00]   底牌  A♦  Q♥",
+        "[05:03:00]   ── 翻牌前 ─────────────",
+        "[05:03:07]     雷人 出世          跟注  range 92%",
+        "[05:03:07]   ⚑ 对手模型  雷人 出世: fold_to_cbet_low=50% → bluff_ag×0.14",
+        "[05:03:20]   ► Royal Police  加注  180000      胜率 26%  SPR≈14.2  [preflop_mc]   底池 120000  20ms",
+        "[05:03:20]       💭 【GTOv2·翻前】 AQo BB iso",
+        "[05:03:20]       📊 [Greenline]  BB-ISO AQo → raise",
+        "[05:03:38]   ── 河牌  T♥  T♠  9♦  底池 440000 ───────────────────────────────",
+        "[05:04:08]   ► Royal Police  过牌              胜率 26%(vs随机48%)  SPR≈0.7  [range_v2]   底池 1537828  102ms",
+        "[05:04:08]       💭 realtime_cfr decision | Check@100%",
+        "[05:04:08]       ◇ 规则引擎旁路  过牌            【GTOv2·翻后】 控池",
+        "        │  分支=pot_control  │  候选: pot_control[80%]",
+        "[05:04:12]     雷人 出世          加注  69bb  (69bb 0.9x pot)  range 75% [坚果55%/强34%] [≥你89%/平0%/≤你10%]  需跟69bb 赔率32%",
+        "[05:04:14]   ► Royal Police  弃牌              胜率 9%  SPR≈0.4  [range_v2]   底池 2909737  55ms",
+        "[05:04:16]   ✔ 雷人 出世[一对] 赢得 1399424    本手 -728914  [我: 一对 T♥️ T♠️]  │  雷人 出世 2100000  Royal Police 1720000",
+    ]), encoding="utf-8")
+
+    payload = hand_detail_payload(1, log_path=log_path)
+    assert payload["hand"]["bb_chips"] == 20000 and payload["log_text"].splitlines()[0].endswith("[大盲]")
+    detail = payload["detail"]
+    assert detail["players"] == [{"name": "雷人 出世", "stack_bb": 105, "pos": "庄", "hero": False},
+                                 {"name": "Royal Police", "stack_bb": 86, "pos": "大盲", "hero": True}]
+    preflop, river = detail["streets"]
+    assert (preflop["key"], preflop["cards"], preflop["pot"]) == ("preflop", [], 0)
+    assert (river["key"], river["name"], river["cards"], river["pot_bb"]) == ("river", "河牌", ["T♥", "T♠", "9♦"], 22.0)
+    limp, note, open_raise = preflop["events"]
+    assert (limp["kind"], limp["who"], limp["pos"], limp["action"], limp["range_pct"], limp["amount_bb"]) == (
+        "action", "雷人 出世", "庄", "call", 92, None)
+    assert note == {"kind": "note", "text": "对手模型  雷人 出世: fold_to_cbet_low=50% → bluff_ag×0.14"}
+    assert {k: open_raise[k] for k in ("kind", "action", "amount", "amount_bb", "equity", "equity_random", "spr", "mode", "pot_bb", "ms")} == {
+        "kind": "hero", "action": "raise", "amount": 180000, "amount_bb": 9.0, "equity": 26, "equity_random": None,
+        "spr": 14.2, "mode": "preflop_mc", "pot_bb": 6.0, "ms": 20}
+    assert open_raise["why"] == ["【GTOv2·翻前】 AQo BB iso"] and open_raise["refs"] == ["[Greenline]  BB-ISO AQo → raise"]
+    check, bet, fold = river["events"]
+    assert check["equity_random"] == 48 and check["why"] == ["realtime_cfr decision | Check@100%"]
+    assert check["shadow"] == {"action_cn": "过牌", "text": ["【GTOv2·翻后】 控池", "│  分支=pot_control  │  候选: pot_control[80%]"]}
+    assert {k: bet[k] for k in ("action", "amount_bb", "pot_ratio", "range_pct", "range_mix", "versus", "to_call_bb", "odds_pct")} == {
+        "action": "raise", "amount_bb": 69, "pot_ratio": 0.9, "range_pct": 75, "range_mix": "坚果55%/强34%",
+        "versus": [89, 0, 10], "to_call_bb": 69, "odds_pct": 32}
+    assert (fold["kind"], fold["action"], fold["equity"], fold["shadow"]) == ("hero", "fold", 9, None)
+
+
+def test_snap_stake_picks_the_blind_behind_a_rough_estimate():
+    assert [_snap_stake(x) for x in (19500, 20400, 9800, 5100, 1042, 0)] == [20000, 20000, 10000, 5000, 1000, 0]

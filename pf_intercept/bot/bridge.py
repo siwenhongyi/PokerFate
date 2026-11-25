@@ -230,6 +230,33 @@ def _s2c_rsp_code(msg: dict, default_if_omitted: int = 0) -> int:
 
 # ── BotBridge ─────────────────────────────────────────────────────────────────
 
+def _live_decision(rec: dict, game_id: str) -> dict:
+    """The part of a strategy decision record the live page shows.
+
+    engine: flop_book / realtime_cfr / rule_engine; mode: how the equity was
+    computed; why: the first line of the engine's own reasoning.  Amounts stay in chips.
+    """
+    def num(key):
+        value = rec.get(key)
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+    return {
+        "game_id": game_id,
+        "street": str(rec.get("street") or ""),
+        "action": str(rec.get("action") or "").lower(),
+        "amount": num("amount") or 0.0,
+        "to_call": num("to_call") or 0.0,
+        "pot": num("pot") or 0.0,
+        "equity": num("equity"),
+        "equity_random": num("equity_random"),
+        "spr": num("spr"),
+        "engine": str(rec.get("decision_source") or ""),
+        "mode": str(rec.get("equity_mode") or ""),
+        "ms": num("elapsed_ms"),
+        "why": str(rec.get("reasoning") or "").split("\n", 1)[0].strip()[:240],
+    }
+
+
 class BotBridge:
     """
     Stateful bridge between the proxy event stream and PokerFateAPI.
@@ -317,6 +344,9 @@ class BotBridge:
         # 部分 S2C（如 WinnerRSP）wire 上 room_id 可能为 0，要用进房时或任意非 0 帧补全。
         self._table_room_id: int = 0
         self._current_gameid: str = ""
+        # This hand's decisions for the live page.  A tuple swapped whole, so the web can read
+        # it without the bridge lock while a decision is being made.
+        self.live_decisions: tuple[dict, ...] = ()
         self._hand_seq: int = 0
         self._pending_injects: list[WireInject] = []
         self._last_hero_action_notify_sig: tuple | None = None
@@ -2245,6 +2275,7 @@ class BotBridge:
                 False,
                 self._skip_runtime_collection_reason,
             )
+        self._api.logger.decision_listener = self._note_live_decision
         log.info("[BOT] PokerFateAPI ready — seat=%d  BB=%.1f  SB=%.1f",
                  self._my_seat, bb, sb)
 
@@ -2571,6 +2602,12 @@ class BotBridge:
             self._pending_injects = []
             return pending + [action_req]
         return action_req
+
+    def _note_live_decision(self, rec: dict) -> None:
+        """One decision of ours, as the strategy logged it, kept until the next hand's first."""
+        game = str(self._current_gameid or "")
+        kept = tuple(d for d in self.live_decisions if d["game_id"] == game)
+        self.live_decisions = kept + (_live_decision(rec, game),)
 
     def _should_skip_duplicate_hero_action_notify(self, notify_sig: tuple) -> bool:
         context = self._last_hero_action_context or self._pending_hero_wire_action

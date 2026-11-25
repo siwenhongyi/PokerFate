@@ -18,7 +18,8 @@ def bundle() -> bytes:
     paths = [ROOT / "pf_entertainment" / "__init__.py"]
     paths += sorted((ROOT / "pf_entertainment" / "remote_live").glob("*.py"))
     paths += [ROOT / "pf_entertainment" / "static" / name for name in
-              ("live.html", "live-login.html", "live-table.js", "live-remote.js", "styles.css")]
+              ("live.html", "live-login.html", "live-table.js", "live-money.js", "live-views.js",
+               "live-remote.js", "styles.css")]
     result = io.BytesIO()
     with tarfile.open(fileobj=result, mode="w:gz") as archive:
         for path in paths:

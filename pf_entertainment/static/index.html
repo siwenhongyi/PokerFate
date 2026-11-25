@@ -2,299 +2,77 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f211b">
   <title>PokerFate 控制台</title>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body>
-  <header>
-    <h1>PokerFate 控制台</h1>
-    <div class="status">
-      <span id="session-dot" class="dot"></span><span id="session-text">WSS -</span>
-      <span id="web-url"></span>
-    </div>
+<body class="has-tabs">
+  <header class="top">
+    <span class="brand">PokerFate</span>
+    <nav class="tabs" aria-label="页面">
+      <a class="tab" href="#table" data-tab="table">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="9.5" ry="6.2"/><path d="M9 12h6"/></svg>牌桌</a>
+      <a class="tab" href="#money" data-tab="money">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 16.5l5-6 4 3.2 8-9.2"/><path d="M3.5 20.5h17"/></svg>资金</a>
+      <a class="tab" href="#hands" data-tab="hands">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3.5" width="10.5" height="14.5" rx="2"/><path d="M9 21h8.5a2 2 0 0 0 2-2V8"/></svg>对局</a>
+    </nav>
+    <div class="top-status"><span id="app-status" class="wide-only"></span></div>
   </header>
+
   <main>
-    <div id="notice" class="notice"></div>
-    <div class="tabs" role="tablist">
-      <button class="tab-btn active" type="button" data-tab="live">实时对局</button>
-      <button class="tab-btn" type="button" data-tab="dashboard">资金看板</button>
-      <button class="tab-btn" type="button" data-tab="hands">对局列表</button>
-      <button class="tab-btn" type="button" data-tab="range">校准评估</button>
-    </div>
-
-    <div id="tab-live" class="tab-panel active">
-    <section>
-      <dl class="live-totals">
-        <dt title="钱包加桌上的筹码；钱包是服务器最近一次回报的余额">筹码总量</dt><dd id="live-chips">—</dd>
-        <dt title="本次启动以来，按已结算牌局累计">本次对局盈亏</dt><dd id="live-pnl">—</dd>
-        <dt title="每日、每周、挑战任务、活跃度宝箱、蓝湾漫游（落格及里程碑）和发展基金的已领筹码">本次活动奖励</dt><dd id="live-rewards">—</dd>
-      </dl>
-      <div class="live-head">
-        <span>房间 <b id="live-room">-</b></span>
-        <span>盲注 <b id="live-blinds">-</b></span>
-        <span>街 <b id="live-street">-</b></span>
-        <span>底池 <b id="live-pot">-</b></span>
-        <span>第 <b id="live-hand">-</b> 手</span>
-        <span>对手 <b id="live-mix">-</b></span>
-        <span id="live-conn" class="live-conn off">● 未连接</span>
-      </div>
-      <div class="live-wrap">
-        <div class="live-felt" id="live-felt">
-          <div class="live-center">
-            <div class="live-result" id="live-result"></div>
-            <div class="live-board" id="live-board"></div>
-            <div class="live-potc" id="live-potc">底池 0</div>
-          </div>
-          <div class="live-empty" id="live-empty">等待对局…（headless 开打后自动显示）</div>
-        </div>
-        <div class="live-settlement" id="live-settlement" aria-live="polite" hidden></div>
-        <aside class="live-feed">
-          <h3>关键动作</h3>
-          <ul id="live-feed"><li class="muted">暂无</li></ul>
-        </aside>
-      </div>
+    <section id="view-table" class="view">
+      <div id="live-root"></div>
     </section>
-    </div>
 
-    <div id="tab-dashboard" class="tab-panel">
-      <section>
-        <div class="metrics">
-          <div class="metric"><span>当前总筹码</span><b id="bank-total">-</b></div>
-          <div class="metric"><span>钱包余额</span><b id="bank-wallet">-</b></div>
-          <div class="metric"><span>桌上筹码</span><b id="bank-table">-</b></div>
-          <div class="metric"><span title="本次启动以来，服务端每手结算的累计；与钱包余额、活动奖励、小游戏无关">本次对局盈亏</span><b id="bank-delta">-</b></div>
-          <div class="metric"><span title="每日、每周、挑战任务、活跃度宝箱、蓝湾漫游和发展基金领到的筹码">本次领取奖励筹码</span><b id="bank-rewards">0</b></div>
-          <div class="metric"><span title="为做活动任务玩的染色、弹珠小游戏的净输赢">本次小游戏输赢</span><b id="bank-sidegame">0</b></div>
-          <div class="metric"><span>最近采样</span><b id="bank-last">-</b></div>
-        </div>
-      </section>
-      <div class="dashboard-grid">
-        <section>
-          <div class="hand-detail-title">
-            <h2>余额曲线</h2>
-            <div class="chart-toolbar">
-              <span id="bank-chart-meta" class="muted">等待余额采样</span>
+    <section id="view-money" class="view" hidden>
+      <div id="money-root"></div>
+    </section>
+
+    <section id="view-hands" class="view" hidden>
+      <div class="hands">
+        <div>
+          <form class="filters" id="hand-filters">
+            <select class="pick" name="vpip" aria-label="是否入池">
+              <option value="yes">入池的手牌</option>
+              <option value="all">全部手牌</option>
+              <option value="no">没入池的</option>
+            </select>
+            <select class="pick" name="result" aria-label="结果">
+              <option value="all">输赢不限</option>
+              <option value="profit">赢的</option>
+              <option value="loss">输的</option>
+              <option value="zero">持平</option>
+              <option value="incomplete">没打完</option>
+            </select>
+            <select class="pick" name="position" aria-label="位置">
+              <option value="all">位置不限</option>
+            </select>
+            <select class="pick" name="bb_k" aria-label="盲注">
+              <option value="all">盲注不限</option>
+            </select>
+            <input class="seek" name="board" type="search" inputmode="text" autocomplete="off"
+                   placeholder="按公共牌找，如 A 2 5" aria-label="公共牌开头">
+          </form>
+          <div class="hands-meta">
+            <span id="hands-count"></span>
+            <div class="pager">
+              <button type="button" id="hands-prev" aria-label="上一页">上一页</button>
+              <span id="hands-page" class="num"></span>
+              <button type="button" id="hands-next" aria-label="下一页">下一页</button>
             </div>
           </div>
-          <div class="chart-box" id="bank-chart"></div>
-        </section>
-        <section>
-          <div class="metrics" style="grid-template-columns: repeat(2, minmax(0, 1fr)); margin:0 0 12px;">
-            <div class="metric"><span>盈利锁仓</span><b id="bank-locks">0</b></div>
-            <div class="metric"><span>破产买入</span><b id="bank-rebuys">0</b></div>
-            <div class="metric"><span>净亏损上限</span><b id="bank-losscap">-</b></div>
-            <div class="metric"><span>BB</span><b id="bank-bb">-</b></div>
-          </div>
-          <div id="bank-samples" class="sample-list muted">暂无采样</div>
-        </section>
+          <div id="hand-list"><div class="hands-empty" aria-busy="true">正在读取对局记录</div></div>
+        </div>
+        <aside class="sheet" id="hand-sheet" aria-label="对局详情"><div class="sheet-empty">选一手牌，在这里逐街回看。</div></aside>
       </div>
-    </div>
-
-    <div id="tab-range" class="tab-panel">
-      <section>
-        <div class="hand-detail-title">
-          <h2>对手范围校准</h2>
-          <button id="range-run-btn" type="button">计算校准</button>
-        </div>
-        <div id="range-notice" class="notice"></div>
-        <div class="metrics">
-          <div class="metric"><span>计入行数</span><b id="range-count">0</b></div>
-          <div class="metric"><span>手牌数</span><b id="range-hands">0</b></div>
-          <div class="metric"><span title="翻后六个牌力档的预测概率与真实频率的平均差距，越小越好">牌力档 ECE</span><b id="range-ece">-</b></div>
-          <div class="metric"><span title="决策实际读取的量：对手范围里强牌与坚果合计的占比">强牌+坚果 预测 / 实际</span><b id="range-strong">-</b></div>
-          <div class="metric"><span title="起手范围的 NLL 减去逐街更新后的 NLL；正数表示更新让对手真实手牌更可能">逐街更新 ΔNLL</span><b id="range-delta">-</b></div>
-        </div>
-      </section>
-
-      <section>
-        <div class="hand-detail-title">
-          <h2>结论</h2>
-          <span id="range-meta" class="muted">点击“计算校准”读取最新采集</span>
-        </div>
-        <div id="range-conclusion" class="range-conclusion muted">暂无分析</div>
-      </section>
-
-      <div class="range-layout">
-        <section class="range-table">
-          <h2>强牌+坚果占比（街道 × 对手刚做的动作）</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>场景</th>
-                  <th>行数</th>
-                  <th>预测</th>
-                  <th>实际</th>
-                  <th>偏差（点）</th>
-                  <th title="偏差超过 3 个点且超过 2 个标准误才算偏离">判断</th>
-                </tr>
-              </thead>
-              <tbody id="range-cell-body">
-                <tr><td colspan="6" class="muted">暂无分析</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <section class="range-table">
-          <h2>各牌力档</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>牌力档</th>
-                  <th>点数</th>
-                  <th>平均预测</th>
-                  <th>真实频率</th>
-                  <th>偏差（点）</th>
-                  <th>ECE</th>
-                </tr>
-              </thead>
-              <tbody id="range-bucket-body">
-                <tr><td colspan="6" class="muted">暂无分析</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <section class="range-table">
-          <h2>可靠性曲线</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>预测概率</th>
-                  <th>点数</th>
-                  <th>平均预测</th>
-                  <th>真实频率</th>
-                  <th>偏差（点）</th>
-                </tr>
-              </thead>
-              <tbody id="range-bin-body">
-                <tr><td colspan="5" class="muted">暂无分析</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <section class="range-table">
-          <h2>逐街更新是否有效</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>街道</th>
-                  <th>样本</th>
-                  <th>更新后更准的比例</th>
-                  <th>真实手牌概率</th>
-                  <th>ΔNLL</th>
-                </tr>
-              </thead>
-              <tbody id="range-street-body">
-                <tr><td colspan="5" class="muted">暂无分析</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
-    </div>
-
-    <div id="tab-hands" class="tab-panel">
-      <section>
-        <div class="hand-filters">
-          <label>手数
-            <input id="hand-no" type="number" min="1" step="1" inputmode="numeric" placeholder="全部">
-          </label>
-          <label>公共牌前缀
-            <input id="hand-board" type="text" inputmode="text" placeholder="A 2 5">
-          </label>
-          <label>位置
-            <select id="hand-position">
-              <option value="all">全部</option>
-            </select>
-          </label>
-          <label>是否入池
-            <select id="hand-vpip">
-              <option value="all">全部</option>
-              <option value="yes" selected>入池</option>
-              <option value="no">未入池</option>
-            </select>
-          </label>
-          <label>是否盈利
-            <select id="hand-result">
-              <option value="all">全部</option>
-              <option value="profit">盈利</option>
-              <option value="loss">亏损</option>
-              <option value="zero">持平</option>
-              <option value="incomplete">未结束</option>
-            </select>
-          </label>
-          <label>BB(k)
-            <select id="hand-bb">
-              <option value="all">全部</option>
-            </select>
-          </label>
-          <button id="hands-refresh-btn" class="secondary" type="button">刷新对局</button>
-        </div>
-        <div class="metrics">
-          <div class="metric"><span>当前日志手数</span><b id="hands-total">0</b></div>
-          <div class="metric"><span>筛选结果</span><b id="hands-count">0</b></div>
-          <div class="metric"><span>当前日志</span><b id="hands-log">-</b></div>
-          <div class="metric"><span>已选手牌</span><b id="hands-selected">-</b></div>
-          <div class="metric"><span>详情行号</span><b id="hands-lines">-</b></div>
-        </div>
-        <div class="hand-pager">
-          <div class="hand-pager-controls">
-            <button id="hands-prev-btn" class="secondary" type="button">上一页</button>
-            <span id="hands-page-info" class="muted">第 1 / 1 页</span>
-            <button id="hands-next-btn" class="secondary" type="button">下一页</button>
-          </div>
-          <label class="hand-page-size">每页
-            <select id="hands-page-size">
-              <option value="20">20</option>
-              <option value="30" selected>30</option>
-              <option value="50">50</option>
-              <option value="100">100</option>
-            </select>
-          </label>
-        </div>
-      </section>
-
-      <div class="hand-grid">
-        <section>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>手数</th>
-                  <th>时间</th>
-                  <th>位置</th>
-                  <th>BB</th>
-                  <th>底牌</th>
-                  <th>排面</th>
-                  <th>入池</th>
-                  <th>结果</th>
-                  <th>最后动作</th>
-                  <th>赢家 / 我的牌型</th>
-                </tr>
-              </thead>
-              <tbody id="hands-body">
-                <tr><td colspan="10" class="muted">暂无对局</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="hand-detail-section">
-          <div class="hand-detail-title">
-            <h2 id="hand-detail-title">对局详情</h2>
-            <span id="hand-detail-meta" class="muted">选择一手查看完整日志</span>
-          </div>
-          <pre id="hand-detail" class="log-detail">暂无详情</pre>
-        </section>
-      </div>
-    </div>
+    </section>
   </main>
 
   <script src="/static/live-table.js"></script>
+  <script src="/static/live-money.js"></script>
+  <script src="/static/live-views.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

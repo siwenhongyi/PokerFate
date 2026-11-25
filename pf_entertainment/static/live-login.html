@@ -2,22 +2,24 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f211b">
   <title>登录 · PokerFate 实时对局</title>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <main class="viewer-login">
-    <section>
-      <h1>登录实时对局</h1>
+  <main class="signin">
+    <div class="signin-box">
+      <h1 class="brand">PokerFate</h1>
+      <p>登录后观看实时对局。</p>
+      <!-- login-error -->
       <form method="post" action="/login" autocomplete="on">
-        <label>观看账号<input name="username" value="viewer" autocomplete="username" autocapitalize="none" required></label>
-        <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
-        <label class="viewer-remember"><input type="checkbox" name="remember" value="yes" checked>在此设备上保持登录 90 天</label>
-        <!-- login-error -->
-        <button type="submit">进入直播</button>
+        <label class="field">观看账号<input name="username" value="viewer" autocomplete="username" autocapitalize="none" required></label>
+        <label class="field">密码<input name="password" type="password" autocomplete="current-password" required></label>
+        <label class="remember"><input type="checkbox" name="remember" value="yes" checked>在这台设备上保持登录 90 天</label>
+        <button type="submit" class="primary">登录</button>
       </form>
-    </section>
+    </div>
   </main>
 </body>
 </html>

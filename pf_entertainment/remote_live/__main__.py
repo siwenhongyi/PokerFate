@@ -14,12 +14,13 @@ from .config import DEFAULT_CONFIG
 
 
 async def _publish(args):
-    from .publisher import RemotePublisher, http_source
+    from .publisher import RemotePublisher, http_money_source, http_source
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
-    publisher = RemotePublisher(http_source(args.source_url), config_path=args.config).start()
+    publisher = RemotePublisher(http_source(args.source_url), money_source=http_money_source(args.source_url),
+                                config_path=args.config).start()
     try:
         while not stop.is_set() and not publisher.task.done():
             if args.owner_pid:

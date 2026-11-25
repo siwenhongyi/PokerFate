@@ -1,7 +1,17 @@
 # 独立实时对局 Web
 
-VPS 只部署实时牌桌页面；本机通过 SSH 上传当前快照。没有历史库、游戏登录、模型或 bot 操作接口。
-运行服务只依赖 Python 3.10+ 标准库，上传使用系统 OpenSSH。牌桌渲染与本机控制台共用 `static/live-table.js`。
+VPS 只部署实时牌桌和资金两个页面；本机通过 SSH 上传当前快照。没有对局记录（列表、单手详情、日志都只在本机控制台）、历史库、游戏登录、模型或 bot 操作接口。
+运行服务只依赖 Python 3.10+ 标准库，上传使用系统 OpenSSH。页面与本机控制台共用同一份代码：牌桌 `static/live-table.js`，资金 `static/live-money.js`，页面切换 `static/live-views.js`。
+
+## 资金页
+
+VPS 的资金页是本机控制台资金页的一份复制，数字、标签和走势图由同一份 `live-money.js` 画出。数据随牌桌快照走同一条 SSH 通道（`money.py`）：
+
+- 只上传资金页用到的内容：16 个数字（本次盈亏、钱包、桌上、奖励、锁仓和买入次数、净亏损上限等），以及每手 3 个数（结算时间、这一手的 BB 输赢、累计筹码）。买入记录、牌局号、每手的钱包明细都不上传。
+- 数字约每 2 秒读一次，有变化才上传；手数只上传新增的部分。新连接或 bot 换了会话时从头重传。
+- 浏览器经 `/api/money` 读取，带上自己已有的手数，只取回新增部分。这个接口只认登录 cookie，不接受 Basic 认证。
+- 资金数据与牌桌同生同灭：上传中断 15 秒或连接结束后一起清除。已经打开的页面保留最后的数字，并写明是几点收到的。
+- 运行中的 bot 早于这项功能时，牌桌照常显示，资金页写明“重启后显示资金”。
 
 ## 本机配置
 
@@ -47,7 +57,7 @@ nohup .venv/bin/python -u -m pf_entertainment.remote_live publish \
   >> pf_intercept/logs/remote_live.log 2>&1 &
 ```
 
-此进程只读本机 Web，原 bot PID 退出后自动结束。下次正常启动 bot 时由内置上传接管。
+此进程只读本机 Web（`/api/live`，以及同一地址下的 `/api/status` 取资金数字），原 bot PID 退出后自动结束。下次正常启动 bot 时由内置上传接管。
 每份配置都有排他文件锁，同一台机器不会重复上传。临时上传进程和 bot 都遵循此锁。
 本机 Web 必须已开启；独立进程只允许回环 HTTP 数据源。
 
@@ -58,7 +68,7 @@ nohup .venv/bin/python -u -m pf_entertainment.remote_live publish \
 ```
 
 该命令读取本机配置，经 SSH 标准输入传输白名单 tar.gz 包，不需要 push/pull 仓库。
-只传输 `pf_entertainment/__init__.py`、`remote_live/*.py` 及直播和登录页资源。
+只传输 `pf_entertainment/__init__.py`、`remote_live/*.py` 及直播和登录页资源（`live.html`、`live-login.html`、`live-table.js`、`live-money.js`、`live-views.js`、`live-remote.js`、`styles.css`）；控制台的 `index.html`、`app.js` 和对局记录代码不在其中。
 当前自动部署面向 Ubuntu/Debian、root SSH 用户，使用固定服务目录；不重启本机 bot。
 
 首次部署自动安装 nginx，创建低权限 `pf-live` 服务用户，按 `tls_mode` 配置 HTTPS 证书、观看口令与 systemd 开机启动。选择 `letsencrypt` 时另行安装独立 Certbot 环境并签发 IP 地址证书；选择 `self-signed` 时使用自签证书。
@@ -127,7 +137,7 @@ VPS 的 nginx 仍监听 `0.0.0.0:443` 和 `0.0.0.0:8443`，nginx 与直播服务
 
 登录页默认勾选「在此设备上保持登录 90 天」。浏览器通过 HTTPS 保存登录 cookie，重新打开原地址即可观看。取消勾选时改用会话 cookie，最长 12 小时。点击「退出登录」会立即撤销本设备当前会话。重新部署沿用原密码时已登录设备继续有效，更换观看密码并重新部署后各设备需要重新登录。
 
-VPS 在 `/etc/pokerfate-live/viewer.json` 保存带盐密码校验值，在 `/var/lib/pokerfate-live-sessions/` 保存会话摘要和有效期。直播进程通过 systemd 的 `StateDirectory` 获得该目录。`/api/live` 支持观看页的登录 cookie，也兼容脚本显式发送的 Basic 认证头。未认证时返回 401。
+VPS 在 `/etc/pokerfate-live/viewer.json` 保存带盐密码校验值，在 `/var/lib/pokerfate-live-sessions/` 保存会话摘要和有效期。直播进程通过 systemd 的 `StateDirectory` 获得该目录。`/api/live` 支持观看页的登录 cookie，也兼容脚本显式发送的 Basic 认证头；`/api/money` 只支持登录 cookie。未认证时返回 401。
 
 以下维护命令仍可从本机执行：
 

@@ -2,8 +2,8 @@
 
 It consumes decoded S2C messages (the same frames the bot bridge sees) and
 maintains a render-ready snapshot of the current table — seats, stacks, bets,
-board, pot, whose turn it is, the hero's hole cards and a short feed of key
-actions — so the web UI can draw a live poker table without the game client.
+board, pot, whose turn it is, the hero's hole cards and the last result — so the
+web UI can draw a live poker table without the game client.
 
 It never injects, never decides and never raises into the session: every
 handler is defensive, because this must not be able to break play.  Wire it in
@@ -16,7 +16,6 @@ import threading
 import time
 import copy
 import uuid
-from collections import deque
 from typing import Any, Callable
 
 # ── game wire decoding (mirrors pf_intercept.bot.bridge, kept dependency-light) ──
@@ -28,14 +27,13 @@ _RANK_TO_STR = {
 _SUIT_TO_STR = {1: "d", 2: "c", 3: "h", 4: "s", 0: "d"}
 _STAGE_TO_STREET = {1: "preflop", 2: "flop", 3: "turn", 4: "river"}
 
-# action_type (EnumConfig.POKER_ACTION) → short Chinese label for the feed.
+# action_type (EnumConfig.POKER_ACTION) → short Chinese label shown on the seat.
 _ACTION_LABEL = {
     1: "弃牌", 2: "过牌", 3: "跟注", 4: "加注", 7: "下注",
     8: "小盲", 9: "大盲", 10: "前注", 11: "大盲", 12: "弃牌",
     13: "过牌", 14: "跨注", 16: "弃牌", 17: "全下",
 }
 _FOLD_ACTIONS = {1, 12, 16}
-_BLIND_ACTIONS = {8, 9, 10, 11, 14}
 
 
 def _card_str(code: Any) -> str | None:
@@ -107,13 +105,16 @@ def seat_positions(seats, dealer: int, small_blind: int | None = None,
 class LiveTableObserver:
     """Maintains a thread-safe render snapshot of the live table."""
 
-    def __init__(self, *, my_uid: int | str | None = None, log_size: int = 14,
+    def __init__(self, *, my_uid: int | str | None = None,
                  reward_source: Callable[[], tuple[int, bool]] | None = None,
-                 chips_source: Callable[[], int | None] | None = None) -> None:
+                 chips_source: Callable[[], int | None] | None = None,
+                 decision_source: Callable[[], tuple] | None = None) -> None:
         self.my_uid = str(my_uid) if my_uid is not None else None
         self._reward_source = reward_source
         # The account's chips, wallet plus table; None until the server has told the wallet.
         self._chips_source = chips_source
+        # The bot's decisions, each tagged with the hand (game id) it was made in.
+        self._decision_source = decision_source
         self._session_pnl_chips = 0
         # The same result in big blinds, each hand at the blind it was played at (table selection
         # can change stakes).  None once a hand settled with no blind known: the page then reads
@@ -121,10 +122,8 @@ class LiveTableObserver:
         self._session_pnl_bb: float | None = 0.0
         self._settled_games: set[str] = set()
         self._lock = threading.Lock()
-        self._feed: deque[str] = deque(maxlen=log_size)
-        # The blind each feed line was played at: the page shows its amounts in big blinds, and
-        # table selection can change stakes between two lines.  Same for the last result.
-        self._feed_bb: deque[int] = deque(maxlen=log_size)
+        # The blind the last result was played at: the page shows its amounts in big blinds,
+        # and table selection can change stakes before the next one.
         self._result_bb = 0
         self._seats: dict[int, dict] = {}
         # The last result is independent of the live table. A profit-lock
@@ -307,7 +306,6 @@ class LiveTableObserver:
         self._room_id = 0
         self._sb = self._bb = 0
         self._result = "已离桌，当前在大厅"
-        self._say("已离桌，当前在大厅")
 
     def _h_location(self, msg: dict) -> None:
         if _chip(msg.get("roomid"), 0) == 0:
@@ -427,16 +425,6 @@ class LiveTableObserver:
             s["last"] = (f"{label} {chips}" if chips > 0 and at not in _FOLD_ACTIONS else label) or s["last"]
         if chips > 0:
             self._pot += chips
-        who = (s["name"] if s and s["name"] else (f"座位{seatid}" if seatid >= 0 else "?"))
-        if s and self._player_kind(s["uid"]) == "robot":
-            who += "〔人机〕"
-        if label and at not in _BLIND_ACTIONS:
-            amt = f" {chips}" if chips > 0 and at not in _FOLD_ACTIONS else ""
-            self._say(f"{who} {label}{amt}")
-
-    def _say(self, line: str) -> None:
-        self._feed.append(line)
-        self._feed_bb.append(int(self._bb or 0))
 
     def _h_action_notify(self, msg: dict) -> None:
         self._action_seat = _chip(msg.get("seatid"), 0)
@@ -507,7 +495,7 @@ class LiveTableObserver:
                 return -1
         return _chip(player.get("seatid"), 0)
 
-    def _save_settlement(self, winners: list) -> None:
+    def _save_settlement(self, winners: list, hero_delta: int | None) -> None:
         from pf_entertainment.showdown import hand_group
         merged: dict[str, dict] = {}
         for item in winners:
@@ -533,7 +521,8 @@ class LiveTableObserver:
             "ended_at": existing["ended_at"] if existing else time.time(),
             "reveal_seconds": 2.5, "board": list(self._board), "winners": list(merged.values()),
             "bb": int(self._bb or 0),
-            "hero": {"seatid": self._my_seat, "hole": list(self._my_hole),
+            # delta: our net for the hand as the server settled it, None when it named none.
+            "hero": {"seatid": self._my_seat, "hole": list(self._my_hole), "delta": hero_delta,
                      "folded": self._seats.get(self._my_seat, {}).get("folded", False),
                      "group": hand_group(self._my_hole, self._board)},
             "revealed": [{"seatid": i, "name": self._seats.get(i, {}).get("name") or f"座位{i}",
@@ -568,8 +557,9 @@ class LiveTableObserver:
         mine = next((p for p in (msg.get("profit") or [])
                      if isinstance(p, dict) and self.my_uid and str(p.get("uid")) == self.my_uid), None)
         tail = ""
+        hero_delta = None
         if mine is not None:
-            d = _chip(mine.get("chips"), 0)
+            d = hero_delta = _chip(mine.get("chips"), 0)
             # Replayed settlements (including after a room snapshot) count once.
             # Neither leaving the room nor buying in starts a new bot session.
             game = self._game_id or self._hand_token
@@ -581,15 +571,14 @@ class LiveTableObserver:
             tail = f"  本手 {'+' if d >= 0 else ''}{d}"
         self._result = ("  |  ".join(names) + tail).strip()
         self._result_bb = int(self._bb or 0)
-        if self._result:
-            self._say("▸ " + self._result)
         self._action_seat = None
-        self._save_settlement(winners)
+        self._save_settlement(winners, hero_delta)
 
     # ── snapshot for the web ─────────────────────────────────────────────────
     def snapshot(self) -> dict:
         rewards, uncertain = self._reward_source() if self._reward_source else (None, False)
         total_chips = self._chips_source() if self._chips_source else None
+        decisions = self._decision_source() if self._decision_source else ()
         with self._lock:
             seats = []
             for i in range(max(self._seat_num, (max(self._seats) + 1) if self._seats else 0)):
@@ -639,9 +628,10 @@ class LiveTableObserver:
                 "my_seat": self._my_seat,
                 "my_hole": list(self._my_hole),
                 "action_seat": self._action_seat,
+                # what the bot decided in the hand on the table, oldest first; never another hand's
+                "decisions": [{k: v for k, v in d.items() if k != "game_id"} for d in decisions
+                              if self._game_id and d.get("game_id") == self._game_id],
                 "seats": seats,
-                "feed": list(self._feed),
-                "feed_bb": list(self._feed_bb),
                 "result": self._result,
                 "result_bb": self._result_bb,
                 "settlement": copy.deepcopy(self._settlement),
@@ -652,8 +642,6 @@ class _HeadlessRuntime:
     """Expose headless bankroll data to the existing Web dashboard."""
 
     def __init__(self, bankroll_source: Callable[[], dict] | None = None) -> None:
-        import logging
-        self.log = logging.getLogger("pf_live_web")
         self._bankroll_source = bankroll_source
 
     def status_data(self) -> dict:

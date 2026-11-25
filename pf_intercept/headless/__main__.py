@@ -235,7 +235,8 @@ async def _run(args: argparse.Namespace, stop: asyncio.Event | None = None) -> i
         from pf_entertainment.live_table import LiveTableObserver, start_live_web
         # Initial login may switch lines and replace session before the first hand.
         observer = LiveTableObserver(my_uid=result.uid, reward_source=lambda: session.live_reward_totals(),
-                                     chips_source=lambda: session.live_total_chips())
+                                     chips_source=lambda: session.live_total_chips(),
+                                     decision_source=lambda: session.live_decisions())
 
     # Frame hook: feed the live observer and notice LeaveRoomRSP for graceful exit.
     leave_done = asyncio.Event()
@@ -265,8 +266,6 @@ async def _run(args: argparse.Namespace, stop: asyncio.Event | None = None) -> i
             # replaces it (and its bankroll baseline), so don't bind its method.
             bankroll_source=lambda: session.bankroll_dashboard(),
         )
-        shown = args.web_host if args.web_host not in ("0.0.0.0", "") else "<本机IP>"
-        print(f"[headless] 实时对局 Web: http://{shown}:{web_server.port}（手机同 WiFi 用本机局域网 IP 访问）")
     last_exc = None
     for idx in range(len(result.servers)):
         try:
@@ -300,6 +299,8 @@ async def _run(args: argparse.Namespace, stop: asyncio.Event | None = None) -> i
     # unusable config must never delay joining a table or stop the bot.
     from pf_entertainment.remote_live.publisher import start_remote_live
     remote_publisher = start_remote_live(observer.snapshot if observer else None,
+                                         # like the local Web: the session can be replaced, read the current one
+                                         money_source=lambda: session.bankroll_dashboard(),
                                          enabled=remote_live_enabled and not stop.is_set())
     ok = True
     try:

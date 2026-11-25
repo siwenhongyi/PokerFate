@@ -14,6 +14,7 @@ from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 from urllib.parse import parse_qs
 
+from . import money as money_frame
 from .viewer_auth import COOKIE, REMEMBER_SECONDS, ViewerAuth
 
 MAX_FRAME = 128 * 1024
@@ -26,7 +27,11 @@ def encode(value: dict) -> bytes:
 
 
 class LatestTable:
-    """A single in-memory snapshot; an active SSH connection owns its lease."""
+    """A single in-memory snapshot; an active SSH connection owns its lease.
+
+    The money view's figures live and die with the table: same lease, same expiry.  Their hands
+    arrive as tails (money.py); ``money_epoch`` names the list a reader's position refers to.
+    """
 
     def __init__(self, ttl: float = 15, clock=time.monotonic):
         self.ttl, self.clock = ttl, clock
@@ -35,12 +40,21 @@ class LatestTable:
         self.sequence = -1
         self.live = None
         self.received = 0.0
+        self.money_facts = None
+        self.money_points = []
+        self.money_epoch = ""
+
+    def _clear(self) -> None:
+        self.live = None
+        self.money_facts = None
+        self.money_points = []
+        self.money_epoch = uuid.uuid4().hex[:12]
 
     def begin(self) -> str:
         with self.lock:
             self.lease = uuid.uuid4().hex
             self.sequence = -1
-            self.live = None
+            self._clear()
             return self.lease
 
     def update(self, lease: str, frame: dict) -> None:
@@ -51,16 +65,28 @@ class LatestTable:
             raise ValueError("invalid live snapshot")
         if any(not isinstance(seat, dict) for seat in live["seats"]):
             raise ValueError("invalid seat")
-        if not isinstance(live.get("board", []), list) or not isinstance(live.get("feed", []), list):
-            raise ValueError("invalid cards or action feed")
+        if not isinstance(live.get("board", []), list):
+            raise ValueError("invalid cards")
         # JSON NaN/Infinity are accepted by Python's decoder but not browsers.
         if len(encode(live)) > MAX_FRAME:
             raise ValueError("snapshot too large")
+        money = None
+        if frame.get("money") is not None:      # a bot from before the money view sends the table only
+            money = money_frame.checked(frame["money"])
+            encode(frame["money"])
         with self.lock:
             if lease != self.lease:
                 raise ValueError("publisher superseded")
             if frame["sequence"] <= self.sequence:
                 raise ValueError("out-of-order snapshot")
+            if money:
+                facts, start, points = money
+                kept = self.money_points if start else []
+                if start != len(kept) or len(kept) + len(points) > money_frame.MAX_POINTS:
+                    raise ValueError("money hands out of step")
+                if kept is not self.money_points and self.money_points:
+                    self.money_epoch = uuid.uuid4().hex[:12]      # hands were dropped: readers start over
+                self.money_facts, self.money_points = facts, kept + points
             self.sequence = frame["sequence"]
             self.live = live
             self.received = self.clock()
@@ -68,17 +94,33 @@ class LatestTable:
     def end(self, lease: str) -> None:
         with self.lock:
             if lease == self.lease:
-                self.live = None
+                self._clear()
+
+    def _age(self) -> float:
+        age = max(0, self.clock() - self.received)
+        if age >= self.ttl and self.live is not None:
+            self._clear()
+        return age
 
     def snapshot(self) -> dict:
         with self.lock:
-            age = max(0, self.clock() - self.received)
-            if age >= self.ttl:
-                self.live = None
+            age = self._age()
             return {"ok": True, "available": True, "live": self.live or {},
                     "stale": self.live is None, "age_sec": round(age, 2) if self.live else None,
                     "expires_in_sec": max(0, self.ttl - age) if self.live else 0,
                     "ttl_sec": self.ttl}
+
+    def money(self, epoch: str = "", start: int = 0) -> dict:
+        """The money figures and the hands a reader lacks: it holds ``start`` hands of ``epoch``."""
+        with self.lock:
+            self._age()
+            if self.money_facts is None:
+                return {"ok": True, "stale": self.live is None, "money": None}
+            if epoch != self.money_epoch or not 0 <= start <= len(self.money_points):
+                start = 0
+            return {"ok": True, "stale": False,
+                    "money": {"facts": self.money_facts, "epoch": self.money_epoch,
+                              "from": start, "points": self.money_points[start:]}}
 
 
 class _IngestHandler(socketserver.StreamRequestHandler):
@@ -176,10 +218,13 @@ class _ReadHandler(BaseHTTPRequestHandler):
         self._redirect("/", cookie=cookie)
 
     def do_GET(self):
-        path = self.path.split("?", 1)[0]
+        path, _, query = self.path.partition("?")
+        script = "text/javascript; charset=utf-8"
         files = {"/": ("live.html", "text/html; charset=utf-8"),
-                 "/static/live-table.js": ("live-table.js", "text/javascript; charset=utf-8"),
-                 "/static/live-remote.js": ("live-remote.js", "text/javascript; charset=utf-8"),
+                 "/static/live-table.js": ("live-table.js", script),
+                 "/static/live-money.js": ("live-money.js", script),
+                 "/static/live-views.js": ("live-views.js", script),
+                 "/static/live-remote.js": ("live-remote.js", script),
                  "/static/styles.css": ("styles.css", "text/css; charset=utf-8")}
         if path == "/healthz":
             return self._send(200, encode({"ok": True, "protocol": 1}), "application/json")
@@ -187,15 +232,21 @@ class _ReadHandler(BaseHTTPRequestHandler):
             if self.server.auth.valid(self._token()):
                 return self._redirect("/")
             return self._login_page()
-        if path not in files and path != "/api/live":
+        if path not in files and path not in ("/api/live", "/api/money"):
             return self._send(404)
         if path != "/static/styles.css" and not self.server.auth.valid(self._token()):
             if path == "/":
                 return self._redirect("/login")
+            # Only the table accepts a script's Basic credentials; everything else needs the sign-in.
             if path != "/api/live" or not self.server.auth.api_credentials_valid(self.headers.get("Authorization", "")):
                 return self._send(401, encode({"error": "login_required"}), "application/json")
         if path == "/api/live":
             return self._send(200, encode(self.server.store.snapshot()), "application/json")
+        if path == "/api/money":
+            asked = parse_qs(query)
+            held = asked.get("from", ["0"])[0]
+            answer = self.server.store.money(asked.get("epoch", [""])[0], int(held) if held.isdecimal() and len(held) < 10 else 0)
+            return self._send(200, encode(answer), "application/json")
         name, content_type = files[path]
         self._send(200, (STATIC / name).read_bytes(), content_type)
 

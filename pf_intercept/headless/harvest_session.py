@@ -79,7 +79,7 @@ def _local_lan_ips() -> list[str]:
     """Best-effort LAN IPv4 candidates for the phone-side setup instructions,
     best guess first.
 
-    Same approach as pf_entertainment.runtime._local_lan_ipv4_addresses:
+    Same approach as pf_entertainment.web._local_lan_ipv4_addresses:
     the "UDP-connect and read getsockname" trick picks the OS's chosen route,
     which can be a VPN/TUN virtual adapter rather than the Wi-Fi NIC the phone
     needs — so results are filtered down to real RFC1918 ranges before use.

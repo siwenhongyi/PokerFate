@@ -177,12 +177,13 @@ WantedBy=multi-user.target
                     raise
                 time.sleep(0.25)
         # Check the actual access boundary before replacing the old nginx gate.
-        try:
-            with opener.open("http://127.0.0.1:9023/api/live", timeout=2):
-                raise RuntimeError("viewer API accepted an anonymous request")
-        except HTTPError as exc:
-            if exc.code != 401:
-                raise
+        for api in ("/api/live", "/api/money"):
+            try:
+                with opener.open("http://127.0.0.1:9023" + api, timeout=2):
+                    raise RuntimeError("viewer API accepted an anonymous request")
+            except HTTPError as exc:
+                if exc.code != 401:
+                    raise
     except Exception:
         if previous:
             link.symlink_to(previous)

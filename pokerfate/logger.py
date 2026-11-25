@@ -242,6 +242,9 @@ class PokerLogger:
         self._hand_num = hand_number_ref if hand_number_ref is not None else [0]
         self._color = not _no_color()
         self._bot_name = "PokerFate"
+        # Called with each decision record (the structured one, plus "reasoning"); the live
+        # page shows what the bot just did and why.  Must not raise into a decision.
+        self.decision_listener = None
 
         # Plain-text mirror of console output (no ANSI codes)
         self._text_log = None
@@ -471,6 +474,11 @@ class PokerLogger:
         if street_relative:
             rec["street_relative"] = street_relative
         self._file(rec)
+        if self.decision_listener is not None:
+            try:
+                self.decision_listener({**rec, "reasoning": reasoning})
+            except Exception:
+                pass
         if not self._console:
             return
 

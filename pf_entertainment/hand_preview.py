@@ -28,6 +28,24 @@ THOUGHT_PREFLOP_POS_RE = re.compile(
 )
 GREENLINE_POS_RE = re.compile(r"\b(BTN|SB|BB|UTG(?:\+\d+)?|CO|HJ|MP)(?:-| )")
 
+# The bot's own decision, as pokerfate/logger.py writes it:
+#   ► name  加注  180000      胜率 49%(vs随机60%)  SPR≈3.5  [range_v2]   底池 440000  49ms
+HERO_LINE_RE = re.compile(
+    r"►\s*(?P<name>.+?)\s{2,}(?P<action>弃牌|过牌|跟注|加注|下注|全下)(?:\s+(?P<amount>[\d,]+))?"
+    r"\s+胜率\s*(?P<eq>\d+)%(?:\(vs随机(?P<eqr>\d+)%\))?(?:\s+SPR≈(?P<spr>[\d.]+))?"
+    r"(?:\s+\[(?P<mode>[^\]]+)\])?\s+底池\s*(?P<pot>[\d,]+)(?:\s+(?P<ms>\d+)ms)?"
+)
+# Somebody else's action:
+#   name   加注  69bb  (69bb 0.9x pot)  range 75% [坚果55%/强34%] [≥你89%/平0%/≤你10%]  需跟69bb 赔率32%
+OPPONENT_LINE_RE = re.compile(
+    r"^(?P<name>[^\s►💭📊◇⚑✔│─━].*?)\s{2,}(?P<action>弃牌|过牌|跟注|加注|下注|全下)(?P<rest>$|\s.*$)")
+OPP_AMOUNT_RE = re.compile(r"^\s+(\d+)bb\b")
+OPP_SIZING_RE = re.compile(r"\(\d+bb ([\d.]+)x pot\)")
+OPP_RANGE_RE = re.compile(r"range (\d+)%(?: \[([^\]≥]+)\])?")
+OPP_VERSUS_RE = re.compile(r"\[≥你(\d+)%/平(\d+)%/≤你(\d+)%\]")
+OPP_PRICE_RE = re.compile(r"需跟(\d+)bb 赔率(\d+)%")
+ACTION_MAP = {"弃牌": "fold", "过牌": "check", "跟注": "call", "加注": "raise", "下注": "bet", "全下": "jam"}
+
 STREET_MAP = {
     "翻牌前": "preflop",
     "翻牌": "flop",
@@ -134,6 +152,16 @@ def _num(text: str) -> int:
         return int(str(text).replace(",", ""))
     except Exception:
         return 0
+
+
+def _snap_stake(estimate: float) -> int:
+    """The big blind behind a rough estimate.  The header gives stacks in whole big blinds, so
+    stack / header gives the blind only roughly (19,500 for a 20,000 table); blinds themselves
+    come in 1 / 2 / 5 steps."""
+    if estimate <= 0:
+        return 0
+    power = 10 ** max(0, len(str(int(estimate))) - 1)
+    return int(min((m * power for m in (1, 2, 5, 10)), key=lambda stake: abs(stake - estimate)))
 
 
 def _action_hero(lines: list[str]) -> str:
@@ -271,9 +299,9 @@ def _parse_hand(seq: int, start_line: int, raw_lines: list[str], hero: str) -> P
                 if bb and bb > 0:
                     est = stack / bb
                     if est > 0:
-                        estimates.append(max(1, int(round(est / 1000.0)) * 1000))
+                        estimates.append(est)
             if estimates:
-                h.bb_chips = int(median(estimates))
+                h.bb_chips = _snap_stake(median(estimates))
     return h
 
 
@@ -476,11 +504,107 @@ def hand_list_payload(
     }
 
 
+def _detail(h: PreviewHand) -> dict[str, Any]:
+    """The hand as a record to read: who sat where, then street by street who did what.
+
+    Our own decisions carry what the log says about them (equity, engine, the reasoning lines,
+    what the rule engine would have done); an opponent's action carries the range read made
+    of it.  Chip amounts come with their value in big blinds.
+    """
+    bb = h.bb_chips or 10000
+
+    def in_bb(chips: int) -> float:
+        return round(chips / bb, 2)
+
+    players = [{"name": name, "stack_bb": stack, "pos": h.header_positions.get(name, ""),
+                "hero": name == h.hero} for name, stack in h.header_stacks_bb.items()]
+    streets: list[dict[str, Any]] = []
+    board: list[str] = []
+    hero_event: dict[str, Any] | None = None   # the decision the following reasoning lines belong to
+    tail: list[str] | None = None              # the list a "│ ..." continuation line extends
+
+    for raw in h.raw_lines:
+        _ts, text = _strip_ts(raw)
+        stripped = text.strip()
+        ms = STREET_RE.search(text)
+        if ms:
+            cards = _extract_cards(ms.group(2) or "")
+            board = board + cards
+            pot = _num(ms.group(3) or "0")
+            streets.append({"key": STREET_MAP.get(ms.group(1), ""), "name": ms.group(1), "cards": cards,
+                            "board": list(board), "pot": pot, "pot_bb": in_bb(pot), "events": []})
+            hero_event = tail = None
+            continue
+        if not streets or not stripped:
+            continue
+        events = streets[-1]["events"]
+
+        mh = HERO_LINE_RE.search(text)
+        if mh and mh.group("name").strip() == h.hero:
+            amount, pot = _num(mh.group("amount") or "0"), _num(mh.group("pot"))
+            hero_event = {
+                "kind": "hero", "action": ACTION_MAP[mh.group("action")], "action_cn": mh.group("action"),
+                "amount": amount, "amount_bb": in_bb(amount), "equity": int(mh.group("eq")),
+                "equity_random": int(mh.group("eqr")) if mh.group("eqr") else None,
+                "spr": float(mh.group("spr")) if mh.group("spr") else None,
+                "mode": mh.group("mode") or "", "pot": pot, "pot_bb": in_bb(pot),
+                "ms": int(mh.group("ms")) if mh.group("ms") else None,
+                "why": [], "refs": [], "shadow": None,
+            }
+            events.append(hero_event)
+            tail = None
+            continue
+        if hero_event is not None and stripped.startswith("💭"):
+            hero_event["why"].append(stripped[1:].strip())
+            tail = hero_event["why"]
+            continue
+        if hero_event is not None and stripped.startswith("📊"):
+            hero_event["refs"].append(stripped[1:].strip())
+            tail = None
+            continue
+        if hero_event is not None and stripped.startswith("◇"):
+            body = stripped[1:].strip()
+            shadow: dict[str, Any] = {"action_cn": "", "text": [body]}
+            m = re.match(r"规则引擎旁路\s+(弃牌|过牌|跟注|加注|下注|全下)(?:\s+[\d,]+)?\s*(.*)$", body)
+            if m:
+                shadow = {"action_cn": m.group(1), "text": [m.group(2).strip()] if m.group(2).strip() else []}
+            hero_event["shadow"] = shadow
+            tail = shadow["text"]
+            continue
+        if stripped.startswith("│") and tail is not None:
+            tail.append(stripped)
+            continue
+        if stripped.startswith("⚑"):
+            events.append({"kind": "note", "text": stripped[1:].strip()})
+            hero_event = tail = None
+            continue
+        mo = OPPONENT_LINE_RE.match(stripped)
+        if mo:
+            rest = mo.group("rest")
+            amount, sizing = OPP_AMOUNT_RE.match(rest), OPP_SIZING_RE.search(rest)
+            read, versus, price = OPP_RANGE_RE.search(rest), OPP_VERSUS_RE.search(rest), OPP_PRICE_RE.search(rest)
+            name = mo.group("name").strip()
+            events.append({
+                "kind": "action", "who": name, "pos": h.header_positions.get(name, ""),
+                "action": ACTION_MAP[mo.group("action")], "action_cn": mo.group("action"),
+                "amount_bb": int(amount.group(1)) if amount else None,
+                "pot_ratio": float(sizing.group(1)) if sizing else None,
+                "range_pct": int(read.group(1)) if read else None,
+                "range_mix": (read.group(2) or "") if read else "",
+                "versus": [int(x) for x in versus.groups()] if versus else None,
+                "to_call_bb": int(price.group(1)) if price else None,
+                "odds_pct": int(price.group(2)) if price else None,
+            })
+            hero_event = tail = None
+    return {"players": players, "streets": streets}
+
+
 def hand_detail_payload(hand_id: int, log_path: Path = CONSOLE_LOG) -> dict[str, Any]:
     for hand in read_hands(log_path):
         if hand.seq == hand_id:
             return {
                 "hand": _summary(hand),
+                "detail": _detail(hand),
                 "log_text": "\n".join(hand.raw_lines),
             }
     raise KeyError(f"hand not found: {hand_id}")

@@ -166,6 +166,10 @@ class HeadlessSession:
         the chips on the table. None until the first wallet answer."""
         return self._bankroll_snapshot.get("current_total_chips")
 
+    def live_decisions(self) -> tuple:
+        """What the bot decided in the hand being played, for the live view (no bridge lock)."""
+        return tuple(getattr(self.bridge, "live_decisions", ()) or ())
+
     def bankroll_dashboard(self) -> dict:
         """Read the last completed bridge snapshot without waiting for the bot.
 

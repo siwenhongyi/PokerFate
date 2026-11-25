@@ -47,7 +47,7 @@ def test_session_result_in_big_blinds_counts_each_hand_at_its_own_blind():
     assert obs.snapshot()["session_pnl_bb"] is None and obs.snapshot()["session_pnl_chips"] == -750
 
 
-def test_feed_lines_result_and_settlement_carry_the_blind_they_were_played_at():
+def test_result_and_settlement_carry_the_blind_they_were_played_at_and_our_net():
     obs = LiveTableObserver(my_uid=42)
     enter = lambda bb: obs.observe("pb.EnterRoomRSP", {"roomid": 7, "room_info": {"bb": str(bb), "sb": str(bb // 2)}})
     enter(20000)
@@ -59,12 +59,8 @@ def test_feed_lines_result_and_settlement_carry_the_blind_they_were_played_at():
     obs.observe("pb.DealerInfoRSP", {"gameid": "b"})
     obs.observe("pb.ActionBRC", {"seatid": 1, "action_type": 3, "chips": "45000", "hand_chips": "455000"})
     snap = obs.snapshot()
-    assert len(snap["feed"]) == len(snap["feed_bb"])
-    by_line = dict(zip(snap["feed"], snap["feed_bb"]))
-    assert by_line[next(t for t in snap["feed"] if t.endswith(" 70000"))] == 20000
-    assert by_line[next(t for t in snap["feed"] if t.startswith("▸"))] == 20000
-    assert by_line[next(t for t in snap["feed"] if t.endswith(" 45000"))] == 5000
     assert snap["settlement"]["bb"] == 20000 and snap["result_bb"] == 20000
+    assert snap["settlement"]["hero"]["delta"] == -10000
 
 
 def test_hero_leave_clears_table_and_reenter_replaces_snapshot(observer):
@@ -327,9 +323,6 @@ def test_snapshot_tells_robots_from_humans_and_counts_them(observer):
     kinds = {s["seatid"]: s["kind"] for s in snap["seats"] if not s["empty"]}
     assert kinds == {0: "", 1: "robot", 2: "", 3: "human", 4: ""}
     assert (snap["humans"], snap["robots"]) == (3, 1)
-    observer.observe("pb.ActionBRC", {"seatid": 1, "action_type": 4, "chips": "300", "hand_chips": "700"})
-    observer.observe("pb.ActionBRC", {"seatid": 3, "action_type": 3, "chips": "300", "hand_chips": "700"})
-    assert observer.snapshot()["feed"][-2:] == ["p505〔人机〕 加注 300", "p42 跟注 300"]
 
 
 def _codes(cards):
@@ -352,3 +345,15 @@ def test_round_start_without_all_board_leaves_the_board_alone(observer):
     observer.observe("pb.RoundStartBRC", {"stage": 2, "board": _codes(["Ah", "Kd", "Ks"]), "all_board": _codes(["Ah", "Kd", "Ks"])})
     observer.observe("pb.RoundStartBRC", {"stage": 3, "board": _codes(["2c"])})
     assert observer.snapshot()["board"] == ["Ah", "Kd", "Ks"]
+
+
+def test_snapshot_carries_the_decisions_of_the_hand_on_the_table_only():
+    made = [{"game_id": "a", "street": "preflop", "action": "raise"},
+            {"game_id": "b", "street": "flop", "action": "call"}]
+    obs = LiveTableObserver(my_uid=42, decision_source=lambda: tuple(made))
+    assert obs.snapshot()["decisions"] == []                      # no hand yet
+    obs.observe("pb.DealerInfoRSP", {"gameid": "b"})
+    assert obs.snapshot()["decisions"] == [{"street": "flop", "action": "call"}]
+    obs.observe("pb.DealerInfoRSP", {"gameid": "c"})
+    assert obs.snapshot()["decisions"] == []
+    assert "decisions" in LiveTableObserver(my_uid=42).snapshot()

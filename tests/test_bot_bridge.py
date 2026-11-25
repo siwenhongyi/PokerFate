@@ -1989,3 +1989,21 @@ def test_round_start_without_all_board_does_not_guess_the_board(caplog):
         b._on_round_start({"stage": 3, "board": _wire(["9h"])})
     assert b._api.calls == []
     assert sum("没有 all_board" in r.getMessage() for r in caplog.records) == 1  # reported once
+
+
+def test_live_decisions_keep_this_hands_decisions_in_the_shape_the_page_reads() -> None:
+    b = BotBridge()
+    b._current_gameid = "g1"
+    b._note_live_decision({"street": "flop", "action": "RAISE", "amount": 242915.0, "to_call": 0, "pot": 440000,
+                           "equity": 0.49, "equity_random": 0.6, "spr": 3.5, "decision_source": "realtime_cfr",
+                           "equity_mode": "range_v2", "elapsed_ms": 49.0, "reasoning": "first line\n│ second"})
+    b._note_live_decision({"street": "turn", "action": "check", "amount": 0, "equity": 0.36, "pot": 925828})
+    assert [d["street"] for d in b.live_decisions] == ["flop", "turn"]
+    assert b.live_decisions[0] == {
+        "game_id": "g1", "street": "flop", "action": "raise", "amount": 242915.0, "to_call": 0.0, "pot": 440000.0,
+        "equity": 0.49, "equity_random": 0.6, "spr": 3.5, "engine": "realtime_cfr", "mode": "range_v2", "ms": 49.0,
+        "why": "first line"}
+    assert (b.live_decisions[1]["engine"], b.live_decisions[1]["spr"], b.live_decisions[1]["why"]) == ("", None, "")
+    b._current_gameid = "g2"
+    b._note_live_decision({"street": "preflop", "action": "fold"})
+    assert [(d["game_id"], d["street"]) for d in b.live_decisions] == [("g2", "preflop")]

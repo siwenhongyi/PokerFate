@@ -2,20 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import sys
-import time
-import uuid
+import socket
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from pf_entertainment.hand_preview import hand_detail_payload, hand_list_payload
+from pf_entertainment.logger import get_logger
 
-
-ROOT = Path(__file__).resolve().parents[1]
-RANGE_ANALYSIS_TIMEOUT_SEC = 180.0
 
 # Front-end is served as plain static files (see pf_entertainment/static/).
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -28,6 +23,53 @@ _STATIC_MIME = {
     ".svg": "image/svg+xml",
     ".ico": "image/x-icon",
 }
+
+
+def web_access_urls(host: str | None, port: int | None) -> list[str]:
+    """Addresses to display for a local Web listener, shared by both entry points."""
+    if host is None or port is None:
+        return []
+    hosts = [*_local_lan_ipv4_addresses(), "127.0.0.1"] if host in ("0.0.0.0", "::", "") else [host]
+    return [f"http://{'[' + h + ']' if ':' in h else h}:{port}" for h in dict.fromkeys(hosts)]
+
+
+def _local_lan_ipv4_addresses() -> list[str]:
+    ips: set[str] = set()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("223.5.5.5", 80))
+            ips.add(sock.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        ips.update(socket.gethostbyname_ex(socket.gethostname())[2])
+    except OSError:
+        pass
+    return sorted((ip for ip in ips if _is_lan_ipv4(ip)), key=_ipv4_display_sort_key)
+
+
+def _ipv4_display_sort_key(ip: str) -> tuple[int, str]:
+    if ip.startswith("192.168."):
+        group = 0
+    elif ip.startswith("10."):
+        group = 1
+    else:
+        group = 2
+    return (group, ip)
+
+
+def _is_lan_ipv4(ip: str) -> bool:
+    try:
+        parts = [int(part) for part in ip.split(".")]
+    except ValueError:
+        return False
+    if len(parts) != 4 or any(part < 0 or part > 255 for part in parts):
+        return False
+    return (
+        parts[0] == 10
+        or (parts[0] == 192 and parts[1] == 168)
+        or (parts[0] == 172 and 16 <= parts[1] <= 31)
+    )
 
 
 @dataclass
@@ -55,10 +97,8 @@ class EntertainmentWebServer:
         # Optional callable returning the live-table snapshot dict for /api/live
         # (set in headless play so the web can draw the table without the client).
         self.live_source = live_source
-        self.log = runtime.log
+        self.log = get_logger()
         self._server: asyncio.AbstractServer | None = None
-        self._range_task: asyncio.Task | None = None
-        self._range_job: dict[str, Any] | None = None
 
     async def start(self) -> None:
         if self._server is not None:
@@ -71,6 +111,7 @@ class EntertainmentWebServer:
         if self.port == 0 and self._server.sockets:
             self.port = int(self._server.sockets[0].getsockname()[1])
         self.log.info("[牌局 Web] Web 已启动 http://%s:%d", self.host, self.port)
+        self.log.info("[牌局 Web] Web 可访问地址: %s", ", ".join(web_access_urls(self.host, self.port)))
 
     async def _handle_client(
         self,
@@ -173,113 +214,7 @@ class EntertainmentWebServer:
                 return self._json_response({"ok": True, **hand_detail_payload(hand_id)})
             except KeyError as exc:
                 return self._json_response({"ok": False, "error": str(exc)}, status=404)
-        if request.method == "POST" and request.path == "/api/range/compare":
-            return self._start_range_analysis()
-        if request.method == "GET" and request.path == "/api/range/compare/status":
-            return self._json_response({"ok": True, "job": self._range_job_payload()})
         return self._json_response({"ok": False, "error": "not found"}, status=404)
-
-    def _start_range_analysis(self) -> tuple[int, dict[str, str], bytes]:
-        if self._range_task is not None and not self._range_task.done():
-            return self._json_response({"ok": True, "job": self._range_job_payload()}, status=202)
-
-        job_id = f"range-{int(time.time())}-{uuid.uuid4().hex[:8]}"
-        self._range_job = {
-            "id": job_id,
-            "status": "running",
-            "started_at": time.time(),
-            "finished_at": None,
-            "elapsed_ms": None,
-            "result": None,
-            "error": "",
-        }
-        self._range_task = asyncio.create_task(self._run_range_analysis_job(job_id))
-        return self._json_response({"ok": True, "job": self._range_job_payload()}, status=202)
-
-    async def _run_range_analysis_job(self, job_id: str) -> None:
-        started = time.perf_counter()
-        try:
-            result = await self._run_range_analysis_subprocess()
-            self._finish_range_job(
-                job_id,
-                status="done",
-                elapsed_ms=(time.perf_counter() - started) * 1000.0,
-                result=result,
-            )
-        except Exception as exc:
-            self.log.exception("[牌局 Web] 校准分析任务失败")
-            self._finish_range_job(
-                job_id,
-                status="error",
-                elapsed_ms=(time.perf_counter() - started) * 1000.0,
-                error=str(exc),
-            )
-
-    async def _run_range_analysis_subprocess(self) -> dict[str, Any]:
-        script = ROOT / "scripts" / "analyze_range_ece.py"
-        env = dict(os.environ)
-        env.setdefault("PYTHONUNBUFFERED", "1")
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            str(script),
-            "--json",
-            cwd=str(ROOT),
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=RANGE_ANALYSIS_TIMEOUT_SEC,
-            )
-        except asyncio.TimeoutError as exc:
-            proc.kill()
-            await proc.communicate()
-            raise TimeoutError(
-                f"range analysis timed out after {RANGE_ANALYSIS_TIMEOUT_SEC:.0f}s"
-            ) from exc
-
-        stderr_text = stderr.decode("utf-8", errors="replace").strip()
-        if proc.returncode != 0:
-            detail = stderr_text[-1200:] if stderr_text else "no stderr"
-            raise RuntimeError(f"range analysis subprocess failed: {detail}")
-        try:
-            return json.loads(stdout.decode("utf-8"))
-        except Exception as exc:
-            detail = stderr_text[-1200:] if stderr_text else "no stderr"
-            raise RuntimeError(f"range analysis returned invalid JSON: {detail}") from exc
-
-    def _finish_range_job(
-        self,
-        job_id: str,
-        *,
-        status: str,
-        elapsed_ms: float,
-        result: dict[str, Any] | None = None,
-        error: str = "",
-    ) -> None:
-        if not self._range_job or self._range_job.get("id") != job_id:
-            return
-        self._range_job.update(
-            {
-                "status": status,
-                "finished_at": time.time(),
-                "elapsed_ms": elapsed_ms,
-                "result": result,
-                "error": error,
-            }
-        )
-
-    def _range_job_payload(self) -> dict[str, Any]:
-        if not self._range_job:
-            return {"running": False, "status": "idle"}
-        running = self._range_task is not None and not self._range_task.done()
-        out = dict(self._range_job)
-        out["running"] = running
-        if out.get("elapsed_ms") is not None:
-            out["elapsed_ms"] = round(float(out["elapsed_ms"]), 1)
-        return out
 
     def _int_query(self, request: _HttpRequest, name: str, default: int) -> int:
         values = request.query.get(name)
@@ -329,7 +264,6 @@ class EntertainmentWebServer:
     ) -> bytes:
         reason = {
             200: "OK",
-            202: "Accepted",
             400: "Bad Request",
             404: "Not Found",
             409: "Conflict",

@@ -7,20 +7,31 @@ import json
 import logging
 import os
 import shlex
+import time
 from pathlib import Path
 from urllib.request import ProxyHandler, Request, build_opener
 
+from . import money as money_frame
 from .config import DEFAULT_CONFIG, PublishConfig, SSH_HINT, ssh_args
 from .server import MAX_FRAME, encode
 
 log = logging.getLogger("pf_remote_live")
+MONEY_EVERY = 2.0     # seconds between reads of the money figures: the console's own page polls at this rate
 
 
 class RemotePublisher:
-    """Latest snapshot only. Never awaits network operations on the game path."""
+    """Latest snapshot only. Never awaits network operations on the game path.
 
-    def __init__(self, source, *, config_path: Path = DEFAULT_CONFIG):
-        self.source, self.config_path = source, Path(config_path)
+    ``money_source`` returns the console's bankroll dashboard; its figures ride along with the
+    table (money.py) and a failure to read them never holds the table back.
+    """
+
+    def __init__(self, source, *, money_source=None, config_path: Path = DEFAULT_CONFIG):
+        self.source, self.money_source, self.config_path = source, money_source, Path(config_path)
+        self.money_sent = 0          # hands the server acknowledged on this connection
+        self.money_facts = None      # figures it acknowledged
+        self.money_due = 0.0
+        self.money_failed = False
         self.task = None
         self.process = None
         self.stderr_task = None
@@ -65,6 +76,7 @@ class RemotePublisher:
         ready = await self._ack()
         if not ready.get("ready") or ready.get("protocol") != 1:
             raise ConnectionError("远端直播服务协议不兼容")
+        self.money_sent, self.money_facts, self.money_due = 0, None, 0.0     # a new connection starts empty
 
     async def _disconnect(self):
         process, self.process = self.process, None
@@ -95,8 +107,9 @@ class RemotePublisher:
             live = await live
         if not isinstance(live, dict):
             raise ValueError("本机实时对局快照不可用")
+        money = await self._money()
         self.sequence += 1
-        frame = encode({"sequence": self.sequence, "live": live})
+        frame = encode({"sequence": self.sequence, "live": live, **({"money": money} if money else {})})
         if len(frame) > MAX_FRAME:
             raise ValueError("牌桌快照超过上传上限")
         self.process.stdin.write(frame)
@@ -104,6 +117,30 @@ class RemotePublisher:
         ack = await self._ack()
         if ack.get("sequence") != self.sequence:
             raise ConnectionError("上传确认序号不匹配")
+        if money:
+            self.money_sent, self.money_facts = money["from"] + len(money["points"]), money["facts"]
+
+    async def _money(self):
+        """The money part of this frame: the figures when they changed, and the hands not yet sent."""
+        if self.money_source is None or time.monotonic() < self.money_due:
+            return None
+        self.money_due = time.monotonic() + MONEY_EVERY
+        try:
+            dashboard = self.money_source()
+            if inspect.isawaitable(dashboard):
+                dashboard = await dashboard
+            part = money_frame.next_part(dashboard, self.money_sent, self.money_facts)
+            if part and len(part["points"]) == money_frame.CHUNK:
+                self.money_due = 0.0          # a long session goes up in consecutive frames
+            if self.money_failed:
+                log.info("[REMOTE-LIVE] 资金数据已恢复上传")
+            self.money_failed = False
+            return part
+        except Exception as exc:
+            if not self.money_failed:
+                log.warning("[REMOTE-LIVE] 读不到资金数据，牌桌照常上传：%s: %s", type(exc).__name__, exc)
+            self.money_failed = True
+            return None
 
     async def run(self):
         try:
@@ -150,19 +187,23 @@ class RemotePublisher:
                 self.lock_file = None
 
 
-def start_remote_live(source, *, enabled=True, config_path: Path = DEFAULT_CONFIG):
+def start_remote_live(source, *, money_source=None, enabled=True, config_path: Path = DEFAULT_CONFIG):
     if not enabled:
         return None
-    return RemotePublisher(source, config_path=config_path).start()
+    return RemotePublisher(source, money_source=money_source, config_path=config_path).start()
 
 
-def http_source(url: str):
+def _loopback(url: str):
     # Standalone sidecar: read only the existing loopback Web API. Never proxy it.
     from urllib.parse import urlsplit
     parsed = urlsplit(url)
     if parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
         raise ValueError("source-url 必须是本机回环 HTTP 地址")
-    opener = build_opener(ProxyHandler({}))
+    return parsed, build_opener(ProxyHandler({}))
+
+
+def http_source(url: str):
+    _, opener = _loopback(url)
 
     def read():
         with opener.open(Request(url, headers={"Cache-Control": "no-cache"}), timeout=2) as response:
@@ -173,6 +214,21 @@ def http_source(url: str):
         if not data.get("ok") or not data.get("available") or not isinstance(data.get("live"), dict):
             raise ValueError("本机 Web 没有可用的实时对局数据")
         return data["live"]
+
+    async def source():
+        return await asyncio.to_thread(read)
+    return source
+
+
+def http_money_source(url: str):
+    """The sidecar's money figures: the console's /api/status beside the given /api/live."""
+    parsed, opener = _loopback(url)
+    status = parsed._replace(path="/api/status", query="", fragment="").geturl()
+
+    def read():
+        with opener.open(Request(status, headers={"Cache-Control": "no-cache"}), timeout=2) as response:
+            data = json.load(response)
+        return (data.get("runtime") or {}).get("bot_dashboard")
 
     async def source():
         return await asyncio.to_thread(read)

@@ -43,6 +43,8 @@ REALTIME_CFR_TIMEOUT_SEC=10`（桶 ML 为 2026-11-11 重建版，见 docs/range_
 **不要在 bot 运行时删除它**。此功能只管理更新代码后启动的实例，旧版进程仍需用原停止方式。
 
 程序本身追加写入 `pf_intercept/logs/headless.log`。
+本地 Web 自行追加写入 `pf_entertainment/logs/web.log`，记录启动成功、可访问地址和请求处理异常，
+同时输出到控制台；proxy 和纯 API 模式使用同一配置，不再单独写 `entertainment.log`，也不重复写入主程序日志。
 `pf_intercept/logs/headless_stdout.log` 只有使用 shell 重定向时才会写入，包含控制台输出；
 PyCharm 不依赖该重定向，仍然会生成程序日志及 PID 文件。
 

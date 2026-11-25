@@ -6,12 +6,13 @@ from pathlib import Path
 
 
 LOG_DIR = Path(__file__).resolve().parent / "logs"
-LOG_FILE = LOG_DIR / "entertainment.log"
+LOG_FILE = LOG_DIR / "web.log"
 
 
 def get_logger() -> logging.Logger:
+    """The local Web service's log, independent of its proxy/headless host."""
     LOG_DIR.mkdir(exist_ok=True)
-    logger = logging.getLogger("pf_entertainment")
+    logger = logging.getLogger("pf_web")
     if logger.handlers:
         return logger
 
